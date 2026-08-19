@@ -1,0 +1,8 @@
+# Runtime dependencies. Build tooling (PyInstaller) is installed by the
+# platform-specific packaging scripts so normal development installs stay lean.
+customtkinter==6.0.0
+dearpygui==2.3.1
+Pillow>=10.0,<13.0
+networkx>=3.0,<4.0
+graphviz>=0.20,<1.0
+openai>=2.0,<3.0

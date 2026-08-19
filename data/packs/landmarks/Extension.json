@@ -1,0 +1,44 @@
+[
+  {
+    "name": "卡门线（太空边缘高度）",
+    "size": 100000.0,
+    "dimension": "vertical",
+    "frequency": "common",
+    "horizontal_type": null
+  },
+  {
+    "name": "地球平均直径",
+    "size": 12742000.0,
+    "dimension": "horizontal",
+    "frequency": "unique",
+    "horizontal_type": "width"
+  },
+  {
+    "name": "木星平均直径",
+    "size": 139820000.0,
+    "dimension": "horizontal",
+    "frequency": "unique",
+    "horizontal_type": "width"
+  },
+  {
+    "name": "地月平均距离",
+    "size": 384400000.0,
+    "dimension": "horizontal",
+    "frequency": "unique",
+    "horizontal_type": "length"
+  },
+  {
+    "name": "太阳平均直径",
+    "size": 1392700000.0,
+    "dimension": "horizontal",
+    "frequency": "unique",
+    "horizontal_type": "width"
+  },
+  {
+    "name": "天文单位（日地平均距离）",
+    "size": 149597870700.0,
+    "dimension": "horizontal",
+    "frequency": "unique",
+    "horizontal_type": "length"
+  }
+]

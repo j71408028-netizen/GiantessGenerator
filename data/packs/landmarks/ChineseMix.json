@@ -1,0 +1,317 @@
+[
+  {
+    "name": "交通护栏",
+    "size": 1.2,
+    "dimension": "vertical",
+    "frequency": "common",
+    "horizontal_type": null
+  },
+  {
+    "name": "公园长椅",
+    "size": 1.5,
+    "dimension": "horizontal",
+    "frequency": "common",
+    "horizontal_type": "length"
+  },
+  {
+    "name": "SUV",
+    "size": 1.8,
+    "dimension": "vertical",
+    "frequency": "common",
+    "horizontal_type": null
+  },
+  {
+    "name": "篮球框",
+    "size": 3.05,
+    "dimension": "vertical",
+    "frequency": "unique",
+    "horizontal_type": null
+  },
+  {
+    "name": "农村自建房",
+    "size": 8.0,
+    "dimension": "vertical",
+    "frequency": "common",
+    "horizontal_type": null
+  },
+  {
+    "name": "城市行道树",
+    "size": 10.0,
+    "dimension": "vertical",
+    "frequency": "common",
+    "horizontal_type": null
+  },
+  {
+    "name": "单节公交车",
+    "size": 12.0,
+    "dimension": "horizontal",
+    "frequency": "common",
+    "horizontal_type": "length"
+  },
+  {
+    "name": "六层砖混住宅",
+    "size": 18.0,
+    "dimension": "vertical",
+    "frequency": "common",
+    "horizontal_type": null
+  },
+  {
+    "name": "大型榕树树冠",
+    "size": 22.0,
+    "dimension": "horizontal",
+    "frequency": "common",
+    "horizontal_type": "width"
+  },
+  {
+    "name": "解放碑",
+    "size": 27.5,
+    "dimension": "vertical",
+    "frequency": "unique",
+    "horizontal_type": null
+  },
+  {
+    "name": "双向六车道高速",
+    "size": 34.0,
+    "dimension": "horizontal",
+    "frequency": "common",
+    "horizontal_type": "width"
+  },
+  {
+    "name": "黄鹤楼",
+    "size": 51.4,
+    "dimension": "vertical",
+    "frequency": "unique",
+    "horizontal_type": null
+  },
+  {
+    "name": "大雁塔",
+    "size": 64.0,
+    "dimension": "vertical",
+    "frequency": "unique",
+    "horizontal_type": null
+  },
+  {
+    "name": "波音747-8",
+    "size": 76.3,
+    "dimension": "horizontal",
+    "frequency": "unique",
+    "horizontal_type": "length"
+  },
+  {
+    "name": "高层公寓",
+    "size": 95.0,
+    "dimension": "vertical",
+    "frequency": "common",
+    "horizontal_type": null
+  },
+  {
+    "name": "标准足球场",
+    "size": 105.0,
+    "dimension": "horizontal",
+    "frequency": "unique",
+    "horizontal_type": "length"
+  },
+  {
+    "name": "6节B型地铁列车",
+    "size": 120.0,
+    "dimension": "horizontal",
+    "frequency": "unique",
+    "horizontal_type": "length"
+  },
+  {
+    "name": "南昌之星摩天轮",
+    "size": 160.0,
+    "dimension": "vertical",
+    "frequency": "unique",
+    "horizontal_type": null
+  },
+  {
+    "name": "国家大剧院",
+    "size": 212.0,
+    "dimension": "horizontal",
+    "frequency": "unique",
+    "horizontal_type": "length"
+  },
+  {
+    "name": "万达广场",
+    "size": 220.0,
+    "dimension": "horizontal",
+    "frequency": "common",
+    "horizontal_type": "length"
+  },
+  {
+    "name": "辽宁舰",
+    "size": 306.0,
+    "dimension": "horizontal",
+    "frequency": "unique",
+    "horizontal_type": "length"
+  },
+  {
+    "name": "重庆来福士广场",
+    "size": 354.0,
+    "dimension": "vertical",
+    "frequency": "unique",
+    "horizontal_type": null
+  },
+  {
+    "name": "县级火车站站台",
+    "size": 450.0,
+    "dimension": "horizontal",
+    "frequency": "common",
+    "horizontal_type": "length"
+  },
+  {
+    "name": "东方明珠",
+    "size": 468.0,
+    "dimension": "vertical",
+    "frequency": "unique",
+    "horizontal_type": null
+  },
+  {
+    "name": "广州塔",
+    "size": 600.0,
+    "dimension": "vertical",
+    "frequency": "unique",
+    "horizontal_type": null
+  },
+  {
+    "name": "山区峡谷",
+    "size": 1000.0,
+    "dimension": "vertical",
+    "frequency": "common",
+    "horizontal_type": null
+  },
+  {
+    "name": "大兴机场航站楼",
+    "size": 1100.0,
+    "dimension": "horizontal",
+    "frequency": "unique",
+    "horizontal_type": "width"
+  },
+  {
+    "name": "国际会展中心（上海）",
+    "size": 1470.0,
+    "dimension": "horizontal",
+    "frequency": "unique",
+    "horizontal_type": "width"
+  },
+  {
+    "name": "物流园集群",
+    "size": 1800.0,
+    "dimension": "horizontal",
+    "frequency": "common",
+    "horizontal_type": "length"
+  },
+  {
+    "name": "低云",
+    "size": 2000.0,
+    "dimension": "vertical",
+    "frequency": "common",
+    "horizontal_type": null
+  },
+  {
+    "name": "三峡大坝",
+    "size": 2335.0,
+    "dimension": "horizontal",
+    "frequency": "unique",
+    "horizontal_type": "length"
+  },
+  {
+    "name": "超大型小区",
+    "size": 2500.0,
+    "dimension": "horizontal",
+    "frequency": "common",
+    "horizontal_type": "length"
+  },
+  {
+    "name": "峨眉山金顶",
+    "size": 3079.0,
+    "dimension": "vertical",
+    "frequency": "unique",
+    "horizontal_type": null
+  },
+  {
+    "name": "在泰安市区，完全占据泰山极顶视野",
+    "size": 9000.0,
+    "dimension": "vertical",
+    "frequency": "common",
+    "horizontal_type": null
+  },
+  {
+    "name": "民航飞行",
+    "size": 9500.0,
+    "dimension": "vertical",
+    "frequency": "common",
+    "horizontal_type": null
+  },
+  {
+    "name": "对流层顶",
+    "size": 12000.0,
+    "dimension": "vertical",
+    "frequency": "common",
+    "horizontal_type": null
+  },
+  {
+    "name": "省会主城区",
+    "size": 18000.0,
+    "dimension": "horizontal",
+    "frequency": "common",
+    "horizontal_type": "width"
+  },
+  {
+    "name": "航空器极限高度下，广角俯拍视野",
+    "size": 24000.0,
+    "dimension": "horizontal",
+    "frequency": "common",
+    "horizontal_type": "width"
+  },
+  {
+    "name": "在通州副中心，完全占据天安门视野",
+    "size": 26000.0,
+    "dimension": "vertical",
+    "frequency": "common",
+    "horizontal_type": null
+  },
+  {
+    "name": "杭州湾跨海大桥",
+    "size": 36000.0,
+    "dimension": "horizontal",
+    "frequency": "unique",
+    "horizontal_type": "length"
+  },
+  {
+    "name": "港珠澳大桥",
+    "size": 45000.0,
+    "dimension": "horizontal",
+    "frequency": "unique",
+    "horizontal_type": "length"
+  },
+  {
+    "name": "太湖平均直径",
+    "size": 68000.0,
+    "dimension": "horizontal",
+    "frequency": "common",
+    "horizontal_type": "length"
+  },
+  {
+    "name": "珠三角核心城市群连片",
+    "size": 80000.0,
+    "dimension": "horizontal",
+    "frequency": "common",
+    "horizontal_type": "width"
+  },
+  {
+    "name": "在苏州市中心，完全占据上海人民广场视野",
+    "size": 96000.0,
+    "dimension": "vertical",
+    "frequency": "common",
+    "horizontal_type": null
+  },
+  {
+    "name": "秦岭平均南北",
+    "size": 100000.0,
+    "dimension": "horizontal",
+    "frequency": "common",
+    "horizontal_type": "width"
+  }
+]

@@ -1,0 +1,74 @@
+{
+  "initial_prompt": "",
+  "view_mode": "game",
+  "entry_action_cost": 0,
+  "section_prompts": {
+    "background": "",
+    "branch": "",
+    "dialog": "",
+    "interaction": "",
+    "action": ""
+  },
+  "section_steps": {
+    "background": 0.02,
+    "branch": 0.05,
+    "dialog": 0.1,
+    "interaction": 0.2,
+    "action": 0.3
+  },
+  "transition_matrix": {
+    "background": {
+      "background": 0.4,
+      "branch": 0.3,
+      "dialog": 0.2,
+      "interaction": 0.1,
+      "action": 0.0
+    },
+    "branch": {
+      "background": 0.2,
+      "branch": 0.3,
+      "dialog": 0.3,
+      "interaction": 0.2,
+      "action": 0.0
+    },
+    "dialog": {
+      "background": 0.1,
+      "branch": 0.2,
+      "dialog": 0.3,
+      "interaction": 0.3,
+      "action": 0.1
+    },
+    "interaction": {
+      "background": 0.1,
+      "branch": 0.1,
+      "dialog": 0.2,
+      "interaction": 0.4,
+      "action": 0.2
+    },
+    "action": {
+      "background": 0.2,
+      "branch": 0.1,
+      "dialog": 0.1,
+      "interaction": 0.2,
+      "action": 0.4
+    }
+  },
+  "triggers": [],
+  "evolution_attrs": [
+    {
+      "type": "intrusion",
+      "name": "介入度",
+      "display_state": "show"
+    },
+    {
+      "type": "destruction",
+      "name": "破坏性",
+      "display_state": "show"
+    },
+    {
+      "type": "casualty",
+      "name": "总伤亡",
+      "display_state": "collapse"
+    }
+  ]
+}

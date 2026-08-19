@@ -1,0 +1,53 @@
+{
+  "comparison_count": 4,
+  "comparison_order": "size_asc",
+  "world_setting": "appear",
+  "seed": 987512595,
+  "selected_styles": [
+    "ChineseMix"
+  ],
+  "selected_quip_styles": [
+    "Events"
+  ],
+  "theme_mode": "Light",
+  "color_theme": "blue",
+  "ai_provider": "openai",
+  "enable_obfuscation": true,
+  "show_all_details": false,
+  "report_font": "仿宋",
+  "desc_font": "宋体",
+  "dungeon_font": "微软雅黑",
+  "enable_confusion": true,
+  "selected_parts": [
+    "身高",
+    "步长",
+    "腿长",
+    "臂长",
+    "胸宽",
+    "脚长",
+    "脚踝高度",
+    "膝盖高度",
+    "大腿直径",
+    "小臂直径",
+    "手掌长度",
+    "食指长度",
+    "食指直径",
+    "指缝宽度",
+    "指纹宽度"
+  ],
+  "reverse_details_order": false,
+  "quip_rate_factor": 1.0,
+  "challenge_secret_key": "",
+  "challenge_storage_dir": "",
+  "show_casualties": true,
+  "auto_save_report": false,
+  "save_low_resolution_image": false,
+  "ai_configs": {},
+  "auto_save_replay": false,
+  "info_update_rate": 0.5,
+  "name_table": "default",
+  "news_table": "default",
+  "personality_table": "default",
+  "preset_table": "default",
+  "use_preview_image_as_avatar": false
+}
