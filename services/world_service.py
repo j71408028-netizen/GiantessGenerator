@@ -22,6 +22,7 @@ from persistence.world_pack import (
     WorldState,
     installed_dir,
     load_manifest_file,
+    resolve_behavior_source,
     save_manifest_file,
     validate_archive,
     worlds_dir,
@@ -378,6 +379,16 @@ class WorldManager:
                 os.path.join(dst_dir, f"{dst}.csv"))
             if dst != table:
                 manifest.settings["news_table"] = dst
+        # 行为包是静态资源目录，目录名冲突时整体改名。
+        for behavior in manifest.resources.get("behaviors", []):
+            src = resolve_behavior_source(
+                os.path.join(installed, "behaviors"), behavior)
+            if src is None:
+                continue
+            dst_dir = os.path.join(static_root, "behaviors")
+            os.makedirs(dst_dir, exist_ok=True)
+            dst = self._target_name(dst_dir, behavior, "", manifest)
+            self._copy_behavior_pack(src, os.path.join(dst_dir, dst))
 
     # ---------- 从当前世界创建 ----------
 
@@ -507,21 +518,30 @@ class WorldManager:
                 shutil.copy2(news_service.resolve(table),
                              os.path.join(target, "news", f"{table}.csv"))
             resources["news"] = tables
-        # 行为包：当前处于激活世界包时，把其行为包一并携带到新包
-        if self.world_state.active and self.world_state.owns("behaviors"):
-            src_manifest = self.world_state.manifest
-            behavior_names = src_manifest.resources.get("behaviors") or []
-            src_root = os.path.join(self.world_state.pack_root(), "behaviors")
-            collected_behaviors = []
-            if os.path.isdir(src_root):
-                for name in behavior_names:
-                    src = os.path.join(src_root, f"{name}.py")
-                    if os.path.isfile(src):
-                        os.makedirs(os.path.join(target, "behaviors"),
-                                    exist_ok=True)
-                        shutil.copy2(
-                            src, os.path.join(target, "behaviors", f"{name}.py"))
-                        collected_behaviors.append(name)
-            if collected_behaviors:
-                resources["behaviors"] = collected_behaviors
+        # 行为包只能单选：优先静态目录，其次当前激活世界包内的同名目录。
+        behavior_names = selected.get("behaviors", [])[:1]
+        if behavior_names:
+            name = behavior_names[0]
+            src = resolve_behavior_source(
+                os.path.join(self.data_dir, "static", "behaviors"), name)
+            if src is None and self.world_state.active:
+                pack_root = self.world_state.pack_root()
+                if pack_root:
+                    src = resolve_behavior_source(
+                        os.path.join(pack_root, "behaviors"), name)
+            if src is not None:
+                os.makedirs(os.path.join(target, "behaviors"), exist_ok=True)
+                self._copy_behavior_pack(
+                    src, os.path.join(target, "behaviors", name))
+                resources["behaviors"] = [name]
         manifest.resources = resources
+
+    @staticmethod
+    def _copy_behavior_pack(src: str, dst: str) -> None:
+        """把行为包复制为目录。旧版单文件 ``.py`` 会包进同名文件夹。"""
+        ignore = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
+        if os.path.isdir(src):
+            shutil.copytree(src, dst, ignore=ignore)
+            return
+        os.makedirs(dst, exist_ok=True)
+        shutil.copy2(src, os.path.join(dst, os.path.basename(src)))

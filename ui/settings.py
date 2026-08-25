@@ -1,3 +1,4 @@
+import os
 import random
 import uuid
 import tkinter as tk
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
 from logic import ALL_PART_NAMES
 from persistence import PresetRepo, PersonalityRepo
 from persistence.name_repo import NameRepo, DEFAULT_NAME_TABLE
+from persistence.world_pack import list_behavior_packs
 from services.challenge_service import ChallengeService
 from services.news_service import DEFAULT_NEWS_TABLE, NewsService
 from ui.common.widgets import CollapsibleBlock, StyleListBox, CTkScrollableDropdownFrame
@@ -570,6 +572,16 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         news_service = getattr(getattr(self.gui_ref, "context", None), "news_service", None)
         if news_service is not None:
             resources["news"] = list(news_service.get_tables())
+        if self.world_manager is not None:
+            behaviors = list_behavior_packs(self.world_manager.data_dir)
+            if (self.world_state is not None and self.world_state.active
+                    and self.world_state.owns("behaviors")):
+                for name in self.world_state.manifest.resources.get("behaviors") or []:
+                    if name not in behaviors:
+                        behaviors.append(name)
+                behaviors.sort()
+            if behaviors:
+                resources["behaviors"] = behaviors
         return {k: v for k, v in resources.items() if v}
 
     def _set_world_controls_locked(self):

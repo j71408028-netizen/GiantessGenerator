@@ -20,15 +20,24 @@
 
 ## 目录与清单声明
 
-行为包放在世界包部署目录的 `behaviors/` 目录下，模块名在 `world.json` 的
-`resources.behaviors` 列表中声明：
+行为包以**文件夹**为存储单位。开发时放在静态目录 `data/static/behaviors/<pack>/`，
+配置世界包时可单选其中一个；解散世界包时也会把包内行为包转存到该目录。
+行为包**不能单独启用**，仍只能随世界包激活。
+
+世界包内部对应路径为 `behaviors/<pack>/`，包名在 `world.json` 的
+`resources.behaviors` 中以单元素列表声明：
 
 ```
+data/static/behaviors/my_pack/     # 静态开发副本（文件夹）
+├── height_rules.py
+└── state_tuning.py
+
 data/worlds/<world_id>/
 ├── world.json
 └── behaviors/
-    ├── height_rules.py        # 一个行为模块
-    └── state_tuning.py
+    └── my_pack/                   # 随世界包启用的副本
+        ├── height_rules.py
+        └── state_tuning.py
 ```
 
 `world.json` 示例：
@@ -40,20 +49,21 @@ data/worlds/<world_id>/
   "name": "我的世界",
   "version": "1.0",
   "resources": {
-    "behaviors": ["height_rules", "state_tuning"]
+    "behaviors": ["my_pack"]
   }
 }
 ```
 
-模块名只能由字母开头，后跟字母、数字或下划线（与 Python 模块名规范一致）。
+行为包名只能由字母开头，后跟字母、数字或下划线。一个世界包最多附带一个行为包；
+目录内每个 `.py` 模块都会在激活时加载。
 
 ## 行为模块的写法
 
-每个行为模块需要定义 `register(runtime)` 入口函数。程序激活世界包时，会依次加载清单中
-声明的行为模块，并把全局行为运行时作为参数传入：
+每个行为模块需要定义 `register(runtime)` 入口函数。程序激活世界包时，会加载该行为包
+目录内的全部模块，并把全局行为运行时作为参数传入：
 
 ```python
-# behaviors/height_rules.py
+# behaviors/my_pack/height_rules.py
 from services.creation_service import CreationService
 
 
@@ -125,7 +135,7 @@ def register(runtime):
 下面的行为包把身高结果固定为 7.5 米、让行动点数消耗减半、追加一个自定义标签：
 
 ```python
-# behaviors/world_rules.py
+# behaviors/my_pack/world_rules.py
 from services.creation_service import CreationService
 from services.state_service import StateService
 import logic
@@ -157,7 +167,7 @@ def register(runtime):
 只需覆盖它即可统一更换长度单位；同时覆盖 `length_unit_label` 让面板输入标签一致：
 
 ```python
-# behaviors/imperial_units.py
+# behaviors/my_pack/imperial_units.py
 import logic
 
 M_TO_FT = 3.28084
@@ -184,12 +194,12 @@ def register(runtime):
 
 ## 打包与分发
 
-1. 在 `data/worlds/<world_id>/behaviors/` 下编写行为模块；
-2. 在 `world.json` 的 `resources.behaviors` 中声明模块名；
-3. 直接使用「设置 → 世界包」的导出功能，或手动把整个 `<world_id>` 目录打包为
-   `<world_id>.world.zip`（目录内其它资源文件同样保留）。
+1. 在 `data/static/behaviors/<pack>/` 下编写行为模块（每个文件需有 `register`）；
+2. 创建世界包时在资源页单选该行为包，清单会写入 `resources.behaviors: ["<pack>"]`；
+3. 也可直接使用「设置 → 世界包」的导出功能，或手动把整个 `<world_id>` 目录打包为
+   `<world_id>.world.zip`。
 
-从“当前世界创建世界包”时，若当前激活的世界包带有行为包，行为模块会被一并复制到新包。
+解散世界包时，行为包会转存到 `data/static/behaviors/`（目录名冲突则追加世界包名与版本号）。
 
 ## 注意事项
 

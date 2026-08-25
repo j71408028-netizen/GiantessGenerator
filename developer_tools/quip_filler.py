@@ -134,14 +134,23 @@ SYSTEM_TEMPLATE = """你是一位"巨女"（巨型少女）题材的事件描述
 # ---------------------------------------------------------------------------
 
 def load_settings():
+    settings = {}
     settings_path = os.path.join(_BASE_DIR, "data", "user", "settings.json")
     if os.path.exists(settings_path):
         try:
             with open(settings_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                settings = json.load(f)
         except Exception:
             pass
-    return {}
+    # Read ai_configs from api_keys.json
+    keys_path = os.path.join(_BASE_DIR, "data", "user", "api_keys.json")
+    if os.path.exists(keys_path):
+        try:
+            with open(keys_path, "r", encoding="utf-8") as f:
+                settings["ai_configs"] = json.load(f)
+        except Exception:
+            pass
+    return settings
 
 
 def get_ai_client():

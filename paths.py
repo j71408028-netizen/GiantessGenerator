@@ -64,6 +64,11 @@ def personalities_dir() -> str:
     return os.path.join(data_dir(), "static", "personalities")
 
 
+def behaviors_dir() -> str:
+    """返回静态行为包目录（默认为 <数据目录>/static/behaviors）。"""
+    return os.path.join(data_dir(), "static", "behaviors")
+
+
 def worlds_dir() -> str:
     """返回世界包目录（默认为 <数据目录>/worlds）。"""
     return os.path.join(data_dir(), "worlds")

@@ -1,12 +1,12 @@
 """行为包运行时：在世界包激活期间接管服务静态方法 / 逻辑函数的实现。
 
-行为包位于世界包部署目录的 ``behaviors/`` 下，模块名由 world.json 的
-``resources.behaviors`` 列表声明。每个行为模块需定义 ``register(runtime)``
+行为包位于世界包部署目录的 ``behaviors/<pack>/`` 下，包名由 world.json 的
+``resources.behaviors`` 单元素列表声明。目录内每个 Python 模块需定义 ``register(runtime)``
 入口，在函数内通过 ``runtime.override(target, impl)`` 注册对可覆盖目标
 （``CreationService`` / ``StateService`` / ``logic`` / ``ExplorationContext``）
-的实现覆盖。
+的实现覆盖。静态开发副本存放在 ``data/static/behaviors/<pack>/``，只能通过世界包启用。
 
-行为模块示例（behaviors/height_rules.py）：:
+行为模块示例（behaviors/my_pack/height_rules.py）：:
 
     from services.creation_service import CreationService
 
@@ -26,6 +26,8 @@ import functools
 import importlib.util
 import os
 from typing import Any, Callable, Dict, Optional
+
+from persistence.world_pack import resolve_behavior_source
 
 _DEFAULTS: Dict[str, Callable] = {}
 
@@ -85,27 +87,42 @@ class BehaviorRuntime:
     def load_pack(self, manifest, installed: str) -> None:
         """清空现有覆盖，并按清单声明加载行为包模块。"""
         self.reset()
-        names = manifest.resources.get("behaviors") or []
-        if not names:
+        packs = manifest.resources.get("behaviors") or []
+        if not packs:
             return
-        root = os.path.join(installed, "behaviors")
+        pack_name = packs[0]
+        source = resolve_behavior_source(
+            os.path.join(installed, "behaviors"), pack_name)
         world_id = manifest.world_id or "unknown"
-        for name in names:
-            path = os.path.join(root, f"{name}.py")
-            if not os.path.isfile(path):
-                print(f"[BehaviorPack] 行为包模块缺失: {path}")
-                continue
-            module = _load_module(f"_world_behavior_{world_id}_{name}", path)
+        if source is None:
+            print(f"[BehaviorPack] 行为包缺失: {os.path.join(installed, 'behaviors', pack_name)}")
+            return
+        paths = _python_files(source) if os.path.isdir(source) else [source]
+        for path in paths:
+            name = os.path.splitext(os.path.basename(path))[0]
+            module = _load_module(
+                f"_world_behavior_{world_id}_{pack_name}_{name}", path)
             if module is None:
                 continue
             register = getattr(module, "register", None)
             if not callable(register):
-                print(f"[BehaviorPack] 行为包 '{name}' 未定义 register(runtime) 入口")
+                print(f"[BehaviorPack] 行为模块 '{path}' 未定义 register(runtime) 入口")
                 continue
             try:
                 register(self)
             except Exception as e:
-                print(f"[BehaviorPack] 行为包 '{name}' 注册失败: {e}")
+                print(f"[BehaviorPack] 行为模块 '{path}' 注册失败: {e}")
+
+
+def _python_files(root: str):
+    """返回行为包目录内的 Python 模块，忽略缓存目录。"""
+    files = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        for filename in filenames:
+            if filename.endswith(".py"):
+                files.append(os.path.join(dirpath, filename))
+    return sorted(files)
 
 
 def _load_module(module_name: str, path: str):

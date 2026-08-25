@@ -11,7 +11,7 @@
     challenges/<name>.chal      # 附带挑战包（keys.json 记录附带包秘钥）
     names/<table>.csv           # 姓名表
     news/<table>.csv            # 新闻表
-    behaviors/<module>.py       # 行为包（覆盖 creation/state 服务静态方法）
+    behaviors/<pack>/*.py       # 行为包目录（覆盖 creation/state 服务静态方法）
 
 包内 settings 只允许“世界块”设置键：世界设定、种子、姓名表、新闻表、身材表、性格表。
 """
@@ -50,12 +50,51 @@ LIST_RESOURCE_TYPES = ("landmarks", "quips", "dungeons", "challenges",
 BOOL_RESOURCE_TYPES = ()
 
 _WORLD_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-_BEHAVIOR_MODULE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_BEHAVIOR_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def worlds_dir(data_dir: str = "data") -> str:
     """返回世界包根目录（默认为 <数据目录>/worlds）。"""
     return os.path.join(data_dir, "worlds")
+
+
+def behaviors_dir(data_dir: str = "data") -> str:
+    """返回静态行为包目录（默认为 <数据目录>/static/behaviors）。"""
+    return os.path.join(data_dir, "static", "behaviors")
+
+
+def is_behavior_pack_name(name: str) -> bool:
+    """行为包目录名是否合法（字母开头，仅含字母数字下划线）。"""
+    return bool(name) and bool(_BEHAVIOR_NAME_RE.match(name))
+
+
+def list_behavior_packs(data_dir: str = "data") -> List[str]:
+    """列出静态行为包目录下的可用包名（子文件夹名，忽略缓存目录）。"""
+    root = behaviors_dir(data_dir)
+    if not os.path.isdir(root):
+        return []
+    names = []
+    for name in os.listdir(root):
+        if name.startswith(".") or name == "__pycache__":
+            continue
+        if not is_behavior_pack_name(name):
+            continue
+        if os.path.isdir(os.path.join(root, name)):
+            names.append(name)
+    return sorted(names)
+
+
+def resolve_behavior_source(root: str, name: str) -> Optional[str]:
+    """在 root 下解析行为包路径：优先目录，其次兼容旧版单文件 ``<name>.py``。"""
+    if not name or not root:
+        return None
+    directory = os.path.join(root, name)
+    if os.path.isdir(directory):
+        return directory
+    legacy = os.path.join(root, f"{name}.py")
+    if os.path.isfile(legacy):
+        return legacy
+    return None
 
 
 def installed_dir(data_dir: str, world_id: str) -> str:
@@ -162,10 +201,12 @@ class WorldPackManifest:
                     errors.append(
                         f"resources.{rtype} 必须为非空字符串列表（实际: {value!r}）")
                 if rtype == "behaviors":
+                    if len(value) > 1:
+                        errors.append("resources.behaviors 只能选择一个行为包")
                     for item in value:
-                        if not _BEHAVIOR_MODULE_RE.match(item):
+                        if not _BEHAVIOR_NAME_RE.match(item):
                             errors.append(
-                                f"resources.behaviors 含非法模块名 {item!r}"
+                                f"resources.behaviors 含非法行为包名 {item!r}"
                                 f"（仅允许字母开头、字母数字下划线组成）")
         return errors
 
@@ -226,7 +267,13 @@ def _missing_members(manifest: WorldPackManifest, members: Set[str]) -> List[str
             elif rtype in ("landmarks", "quips"):
                 member = f"{rel}/{item}.json"
             elif rtype == "behaviors":
-                member = f"{rel}/{item}.py"
+                prefix = f"{rel}/{item}/"
+                legacy = f"{rel}/{item}.py"
+                if (legacy not in members
+                        and not any(m.startswith(prefix) and m.endswith(".py")
+                                    for m in members)):
+                    missing.append(f"{prefix}*.py")
+                continue
             else:
                 member = f"{rel}/{item}.csv"
             if member not in members:

@@ -45,7 +45,7 @@ class AIConfigDialog(BaseDialog):
         # 新建配置时显示模板选择
         if is_new:
             template_frame = ctk.CTkFrame(body, fg_color="transparent")
-            template_frame.pack(fill='x', pady=(0, 8))
+            template_frame.pack(fill='x', pady=(0, 16))
             ctk.CTkLabel(
                 template_frame, text="快速模板：", anchor='w',
                 font=self.UI_FONT, text_color=TEXT
@@ -71,7 +71,7 @@ class AIConfigDialog(BaseDialog):
                     border_width=1, border_color=INPUT_BORDER,
                     corner_radius=8, font=ui_fonts.ui_font(11)
                 )
-                btn.pack(side='left', padx=(0, 8))
+                btn.pack(side='right', padx=(12, 0))
 
         fields = [
             ("配置名称", self.name_var, False),
@@ -193,8 +193,9 @@ class WorldPackCreateDialog(BaseDialog):
     """创建世界包的配置对话框（风格参考 AI 配置对话框）。
 
     两级页面：基础信息 → 资源打包（可回退）。
-    资源打包页用 StyleListBox 多选要打包的地标/描述风格、身材/性格/姓名/新闻表、
-    副本方案与挑战包；各列表标题实时显示选中数量，底部汇总标签同步更新。
+    资源打包页用 StyleListBox 多选要打包的地标/描述风格、副本方案与挑战包，
+    用下拉框单选身材/性格/姓名/新闻表与行为包；各列表标题实时显示选中数量，
+    底部汇总标签同步更新。
     """
 
     _WORLD_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -209,11 +210,12 @@ class WorldPackCreateDialog(BaseDialog):
         ("challenges", "挑战包"),
         ("names", "姓名表"),
         ("news", "新闻表"),
+        ("behaviors", "行为包"),
     ]
 
     # 风格/副本/挑战包：StyleListBox 多选；静态表：下拉单选（第一项为空）
     _MULTI_TYPES = ("landmarks", "quips", "dungeons", "challenges")
-    _SINGLE_TYPES = ("presets", "personalities", "names", "news")
+    _SINGLE_TYPES = ("presets", "personalities", "names", "news", "behaviors")
 
     def __init__(self, parent, available_resources=None):
         super().__init__(parent)
@@ -353,8 +355,9 @@ class WorldPackCreateDialog(BaseDialog):
 
         single_types = [("names", "姓名"),
                         ("news", "新闻"),
-                        ("personalities", "性格预设"),
-                        ("presets", "身材预设")
+                        ("personalities", "性格"),
+                        ("presets", "身材"),
+                        ("behaviors", "行为包")
                         ]
 
         self._single_vars = {}
@@ -363,7 +366,7 @@ class WorldPackCreateDialog(BaseDialog):
             if not items:
                 continue
             row = ctk.CTkFrame(left_frame, fg_color="transparent")
-            row.pack(fill='x', pady=4)
+            row.pack(fill='x', pady=2)
             ctk.CTkLabel(
                 row, text=label, width=60, anchor='w',
                 font=self.UI_FONT, text_color=TEXT
@@ -371,7 +374,7 @@ class WorldPackCreateDialog(BaseDialog):
             var = tk.StringVar(value="<不配置>")
             combo = ctk.CTkComboBox(
                 row, values=["<不配置>"] + items, variable=var,
-                width=100, height=26,
+                width=100, height=24,
                 font=self.UI_FONT,
                 command=self._refresh_resource_label
             )
@@ -387,7 +390,7 @@ class WorldPackCreateDialog(BaseDialog):
 
         # 标题栏（显示当前类型 + 切换按钮）
         header_frame = ctk.CTkFrame(right_frame, fg_color="transparent")
-        header_frame.pack(fill='x', pady=(0, 4))
+        header_frame.pack(fill='x', pady=(0, 10))
 
         self._multi_label = ctk.CTkLabel(
             header_frame, text="配置资源包", anchor='w',
@@ -521,7 +524,7 @@ class WorldPackCreateDialog(BaseDialog):
         # 静态表
         for rtype, var in self._single_vars.items():
             val = var.get().strip()
-            if val:
+            if val and val != "<不配置>":
                 state[rtype] = [val]
         # 多选类型：先保存当前显示的类型（从 listbox 获取）
         if self._current_listbox:

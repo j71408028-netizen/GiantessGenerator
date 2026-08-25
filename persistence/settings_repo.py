@@ -7,6 +7,7 @@ class SettingsRepo:
         self._data_dir = data_dir
         self.world_state = world_state
         self._file = os.path.join(self._data_dir, "user", "settings.json")
+        self._ai_keys_repo = AiKeysRepo(data_dir)
 
     @property
     def _defaults(self) -> dict:
@@ -43,6 +44,8 @@ class SettingsRepo:
             for k, v in self._defaults.items():
                 if k not in data:
                     data[k] = v
+            # Load ai_configs from api_keys.json
+            data["ai_configs"] = self._ai_keys_repo.load() or self._defaults.get("ai_configs", {})
             return data
         except Exception:
             return dict(self._defaults)
@@ -65,6 +68,31 @@ class SettingsRepo:
                         data[key] = base[key]
                     else:
                         data.pop(key, None)
+
+        # Save ai_configs to api_keys.json
+        ai_configs = data.pop("ai_configs", {})
+        self._ai_keys_repo.save(ai_configs)
+
         os.makedirs(os.path.dirname(self._file), exist_ok=True)
         with open(self._file, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+class AiKeysRepo:
+    def __init__(self, data_dir: str = "data"):
+        self._data_dir = data_dir
+        self._file = os.path.join(self._data_dir, "user", "api_keys.json")
+
+    def load(self) -> dict:
+        if not os.path.exists(self._file):
+            return {}
+        try:
+            with open(self._file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def save(self, configs: dict):
+        os.makedirs(os.path.dirname(self._file), exist_ok=True)
+        with open(self._file, 'w', encoding='utf-8') as f:
+            json.dump(configs, f, indent=2, ensure_ascii=False)

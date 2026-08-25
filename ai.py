@@ -95,12 +95,22 @@ def get_ai_client(settings: Optional[dict] = None):
     if settings is None:
         import json
         import os
+        settings = {}
+        # Read ai_configs from api_keys.json
+        keys_path = os.path.join(data_dir(), "user", "api_keys.json")
+        try:
+            with open(keys_path, "r", encoding="utf-8") as f:
+                settings["ai_configs"] = json.load(f)
+        except Exception:
+            settings["ai_configs"] = {}
+        # Also try to read ai_provider from settings.json
         path = os.path.join(data_dir(), "user", "settings.json")
         try:
             with open(path, "r", encoding="utf-8") as f:
-                settings = json.load(f)
+                saved = json.load(f)
+                settings["ai_provider"] = saved.get("ai_provider", "")
         except Exception:
-            settings = {}
+            pass
     cfg = resolve_ai_config(settings or {})
     if not cfg["api_key"]:
         return None, None
