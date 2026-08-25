@@ -585,7 +585,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         return {k: v for k, v in resources.items() if v}
 
     def _set_world_controls_locked(self):
-        """按包锁定的设置键禁用对应控件（世界块）。"""
+        """按包锁定的设置键禁用对应控件（世界块）；未配置的静态表仍可下拉选择。"""
         locked = self.world_state.locked_keys() if self.world_state is not None else set()
         self.world_setting_menu.configure(
             state="disabled" if "world_setting" in locked else "normal")
