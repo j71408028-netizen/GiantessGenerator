@@ -36,6 +36,7 @@ class SelectCharacterPanel(ctk.CTkFrame):
         self._characters = []
         self._characters_signature = None
         self._card_widgets = []
+        self._empty_label = None
         self._img_cache = {}
         self._current_id = None
 
@@ -229,11 +230,16 @@ text_color=SOFT
         self._card_widgets.clear()
         self._current_id = None
         self._hide_detail()
+        if self._empty_label is not None:
+            self._empty_label.destroy()
+            self._empty_label = None
 
         if not self._characters:
-            ctk.CTkLabel(self._scroll, text="没有已保存的角色",
-text_color=PLACEHOLDER,
-                         font=ui_fonts.ui_font(13)).pack(pady=30)
+            self._empty_label = ctk.CTkLabel(
+                self._scroll, text="没有已保存的角色",
+                text_color=PLACEHOLDER,
+                font=ui_fonts.ui_font(13))
+            self._empty_label.pack(pady=30)
             return
 
         for item in self._characters:

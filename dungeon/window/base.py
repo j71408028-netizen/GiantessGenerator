@@ -134,6 +134,7 @@ class DungeonWindowBase:
             self.locked_coords = {(4, 4)}
             self.noticed_parts = set()
             self.prompted_parts = set()
+            self.keyword_match_given = set()
             self.quips_working = dict(merged_quips) if merged_quips else {}
             self.used_quips = set()
 

@@ -178,8 +178,6 @@ class ExplorationContext:
                 state.action_points = min(100, state.action_points + refund)
                 print(f"✨ 解锁了{refund // 3}个部位尺寸描述，返还{refund}行动点数。")
 
-        if isinstance(source, CharacterSnapshot) and consume_points:
-            state = source
             state.total_casualties += report_data["total_casualties"]
             cumul = state.total_casualties
             state.casualties_evolution.append(cumul)
@@ -514,8 +512,13 @@ class ExplorationContext:
         return set(self.settings.get("selected_parts", ALL_PART_NAMES.copy()))
 
     def _init_size_unlocks_from_report(self, report: ReportData, body_parts: dict) -> Dict[str, str]:
-        """从报告创建角色时初始化尺寸解锁信息。"""
+        """从报告创建角色时初始化尺寸解锁信息。
+
+        未提及的选中部位仅在"测量所有尺寸"开启时标记为 MEASURED；
+        关闭时报告不展示未解锁的尺寸，保持锁定（""）。
+        """
         selected = self._detail_selected_parts()
+        measure_all = self.settings.get("show_all_details", False)
         mentioned = {}
         for qr in (report.quip_results or []):
             part = qr.get("part", "")
@@ -527,17 +530,22 @@ class ExplorationContext:
                 continue
             if part in mentioned:
                 unlocks[part] = mentioned[part]
-            elif part in selected:
+            elif part in selected and measure_all:
                 unlocks[part] = "MEASURED"
             else:
                 unlocks[part] = ""
         return unlocks
 
     def _apply_size_unlocks_from_report(self, state: CharacterSnapshot, report_data: dict) -> int:
-        """根据报告正文/详细信息更新角色的尺寸解锁信息，返回应返还的行动点数。"""
+        """根据报告正文/详细信息更新角色的尺寸解锁信息，返回应返还的行动点数。
+
+        未提及的选中部位仅在"测量所有尺寸"开启时标记为 MEASURED；
+        关闭时报告不展示未解锁的尺寸，保持锁定（""）。
+        """
         unlocks = dict(state.size_unlocks or {})
         refund = 0
         selected = self._detail_selected_parts()
+        measure_all = self.settings.get("show_all_details", False)
         mentioned = {}
         for qr in (report_data.get("quip_results", []) or []):
             part = qr.get("part", "")
@@ -552,7 +560,7 @@ class ExplorationContext:
             if part in mentioned:
                 if old == "":
                     refund += 3
-            elif part in selected:
+            elif part in selected and measure_all:
                 if old == "":
                     unlocks[part] = "MEASURED"
         updates = {part: desc for part, desc in mentioned.items() if part in body_parts}

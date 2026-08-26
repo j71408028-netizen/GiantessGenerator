@@ -45,12 +45,17 @@ class DungeonStoryEngine:
         self._generating = True
 
         def task():
+            delayed_insert_pending = False
+            success = False
             try:
                 if getattr(self, "ai_client", None) is None:
                     _dispatch.enqueue(self._show_ai_error)
                     return
                 next_type = self.dungeon_logic.get_next_text_type(self.current_text_type)
                 user_prompt = self.prompt_builder.build_user_prompt(next_type)
+                # 本段是延迟插入的衔接段：生成成功后插入段晋升为下一段
+                delayed_insert_pending = bool(self.pending_insertions
+                                              and self.pending_insertions[0].get("delayed"))
                 self.messages.append({"role": "user", "content": user_prompt})
 
                 prefix = self._type_prefix(next_type)
@@ -91,38 +96,38 @@ class DungeonStoryEngine:
                 if len(self.messages) > 21:
                     self.messages = [self.messages[0]] + self.messages[-20:]
 
-                self.dungeon_state.total_steps += 1
-                self.dungeon_state.steps_since_trigger += 1
+                before_state = self.dungeon_state
+                self.dungeon_state = self.dungeon_logic.evolve_attributes(
+                    before_state, next_type, direction, self.personality,
+                    is_interaction_chosen=False, custom_attrs_def=self.evolution_attrs,
+                    custom_directions=custom_directions,
+                    sensitivity_mods=self._apply_sensitivity_mods()
+                )
                 self.step_num = self.dungeon_state.total_steps
 
                 step_info = {
                     "step": self.step_num,
                     "type": next_type.value,
                     "text": ai_text,
-                    "intrusion_before": self.dungeon_state.intrusion,
-                    "destruction_before": self.dungeon_state.destruction,
-                    "custom_before": self.dungeon_state.custom_attrs.copy(),
+                    "intrusion_before": before_state.intrusion,
+                    "destruction_before": before_state.destruction,
+                    "custom_before": before_state.custom_attrs.copy(),
                     "direction": direction,
                     "custom_directions": custom_directions
                 }
 
-                self.dungeon_state = self.dungeon_logic.evolve_attributes(
-                    self.dungeon_state, next_type, direction, self.personality,
-                    is_interaction_chosen=False, custom_attrs_def=self.evolution_attrs,
-                    custom_directions=custom_directions,
-                    sensitivity_mods=self._apply_sensitivity_mods()
-                )
-
                 self._apply_prompted_unlocks(ai_text)
                 self._finish_step(next_type, ai_text, step_info, check_unlock=True)
+                success = True
 
             except Exception as e:
                 print(f"流式任务执行异常: {e}")
             finally:
                 self._generating = False
-                # 延迟插入：AI 段已生成并衔接完毕，插入段晋升为下一段
-                if self.pending_insertions and self.pending_insertions[0].get("delayed"):
-                    self.pending_insertions[0]["delayed"] = False
+                # 延迟插入：本段为其衔接段，生成成功后插入段晋升为下一段
+                if success and delayed_insert_pending:
+                    if self.pending_insertions and self.pending_insertions[0].get("delayed"):
+                        self.pending_insertions[0]["delayed"] = False
 
         threading.Thread(target=task, daemon=True).start()
 
@@ -148,11 +153,7 @@ class DungeonStoryEngine:
             char.size_unlocks, {part: text for part in parts}, info_update_rate)
 
     def _finish_step(self, text_type, text, step_info, check_unlock: bool = False):
-        """步进收尾：还原步数计数、结算敏感衰减与伤亡、写入回放，并检查解锁与触发器。"""
-        total_steps = self.dungeon_state.total_steps
-        steps_since = self.dungeon_state.steps_since_trigger
-        self.dungeon_state.total_steps = total_steps
-        self.dungeon_state.steps_since_trigger = steps_since
+        """步进收尾：结算敏感衰减与伤亡、写入回放，并检查解锁与触发器。"""
         self._decay_sensitivity_effects()
         casualty_increase = self._record_casualties(text_type, text)
 

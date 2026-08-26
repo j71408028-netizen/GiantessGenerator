@@ -246,8 +246,13 @@ class TriggerHandler:
         if len(self.messages) > 21:
             self.messages = [self.messages[0]] + self.messages[-20:]
 
-        self.dungeon_state.total_steps += 1
-        self.dungeon_state.steps_since_trigger += 1
+        before_state = self.dungeon_state
+        self.dungeon_state = self.dungeon_logic.evolve_attributes(
+            before_state, text_type, 0, self.personality,
+            is_interaction_chosen=False, custom_attrs_def=self.evolution_attrs,
+            custom_directions={},
+            sensitivity_mods=self._apply_sensitivity_mods()
+        )
         self.step_num = self.dungeon_state.total_steps
 
         step_info = {
@@ -255,18 +260,11 @@ class TriggerHandler:
             "type": text_type.value,
             "text": item["text"],
             "highlight": highlight,
-            "intrusion_before": self.dungeon_state.intrusion,
-            "destruction_before": self.dungeon_state.destruction,
-            "custom_before": self.dungeon_state.custom_attrs.copy(),
+            "intrusion_before": before_state.intrusion,
+            "destruction_before": before_state.destruction,
+            "custom_before": before_state.custom_attrs.copy(),
             "direction": 0,
             "custom_directions": {},
         }
-
-        self.dungeon_state = self.dungeon_logic.evolve_attributes(
-            self.dungeon_state, text_type, 0, self.personality,
-            is_interaction_chosen=False, custom_attrs_def=self.evolution_attrs,
-            custom_directions={},
-            sensitivity_mods=self._apply_sensitivity_mods()
-        )
 
         self._finish_step(text_type, item["text"], step_info)

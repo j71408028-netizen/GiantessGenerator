@@ -51,7 +51,7 @@ class SettingsRepo:
             return dict(self._defaults)
 
     def save(self, settings: dict):
-        data = settings
+        data = dict(settings)
         if self.world_state is not None:
             locked = self.world_state.locked_keys()
             if locked:
@@ -62,7 +62,6 @@ class SettingsRepo:
                             base = json.load(f)
                     except Exception:
                         base = {}
-                data = dict(settings)
                 for key in locked:
                     if key in base:
                         data[key] = base[key]

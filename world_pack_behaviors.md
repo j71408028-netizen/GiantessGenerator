@@ -132,50 +132,65 @@ def register(runtime):
 
 ## 完整示例
 
-程序在 `data/static/behaviors/imperial_units/` 提供了一个现成示例，把显示单位从
-米 / 千米改为英尺 / 英里。
-创建世界包时在资源页选择 `imperial_units` 即可附带。
+下面的行为包把身高结果固定为 7.5 米、让行动点数消耗减半、追加一个自定义标签：
 
 ```python
-# data/static/behaviors/imperial_units/imperial_units.py
-M_TO_FT = 3.28084
-FT_PER_MILE = 5280.0
-MILE_THRESHOLD_M = 5000.0
+# behaviors/my_pack/world_rules.py
+from services.creation_service import CreationService
+from services.state_service import StateService
+import logic
 
 
-def format_size(size, base_size=None):
-    ref = base_size if base_size is not None else size
-    if ref >= MILE_THRESHOLD_M:
-        miles_ref = ref * M_TO_FT / FT_PER_MILE
-        if miles_ref >= 100:
-            decimals = 1
-        elif miles_ref >= 10:
-            decimals = 2
-        else:
-            decimals = 3
-        display = size * M_TO_FT / FT_PER_MILE
-        unit = "英里"
-    else:
-        feet_ref = ref * M_TO_FT
-        if feet_ref >= 1000:
-            decimals = 0
-        elif feet_ref >= 100:
-            decimals = 1
-        else:
-            decimals = 2
-        display = size * M_TO_FT
-        unit = "英尺"
-    return f"{display:.{decimals}f} {unit}"
+def my_calculate_height(option, custom_val, min_slide, max_slide,
+                        use_will, greed, rng, personality=None):
+    return 7.5, "within"
 
 
-def length_unit_label():
-    return "英尺"
+def my_consume_action_points(state, cost):
+    return StateService.consume_action_points(state, max(1, cost // 2))
+
+
+def my_tags():
+    return logic.PREDEFINED_TAGS + ["自定义行为标签"]
 
 
 def register(runtime):
-    runtime.override("logic.format_size", format_size)
-    runtime.override("logic.length_unit_label", length_unit_label)
+    runtime.override(CreationService.calculate_height, my_calculate_height)
+    runtime.override(StateService.consume_action_points, my_consume_action_points)
+    # 常量的覆盖目标用字符串键注册，传列表或返回列表的可调用对象均可
+    runtime.override("logic.PREDEFINED_TAGS", my_tags)
 ```
+
+### 覆盖长度单位（英尺示例）
+
+`format_size` 被报告、对比、角色状态、创建参数面板的身高范围与预览全流程共用，
+只需覆盖它即可统一更换长度单位；同时覆盖 `length_unit_label` 让面板输入标签一致：
+
+```python
+# behaviors/my_pack/imperial_units.py
+import logic
+
+M_TO_FT = 3.28084
+
+
+def my_format_size(size, base_size=None):
+    ref = base_size if base_size is not None else size
+    if ref * M_TO_FT >= 1000:
+        decimals = 1
+    elif ref * M_TO_FT >= 100:
+        decimals = 2
+    else:
+        decimals = 3
+    return f"{size * M_TO_FT:.{decimals}f} 英尺"
+
+
+def register(runtime):
+    runtime.override("logic.format_size", my_format_size)
+    runtime.override("logic.length_unit_label", lambda: "英尺")
+```
+
+> 注意：`calculate_height` / `core_from_params` 等仍以“米”为数值单位计算，行为包只需
+> 负责**显示层**的单位改写，无需改动内部数值模型。
 
 ## 打包与分发
 

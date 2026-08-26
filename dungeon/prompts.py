@@ -109,7 +109,11 @@ class DungeonPromptBuilder:
         reference = ""
         if context_parts:
             reference = "\n以下信息可作为你叙事的参考，但不代表目前情境：\n" + "\n".join(context_parts)
-        history = "".join(f"[{step['type']}] {step['text'][:100]}...\n" for step in session.replay_data[-3:])
+        history = "".join(
+            f"[{step['type']}] {step['text'][:100]}...\n"
+            for step in session.replay_data[-3:]
+            if "type" in step and step.get("text")
+        )
         if history:
             history = f"最近的故事片段：\n{history}\n"
         result = f"{history}继续叙述后续情节或描写{instructions.get(text_type, '生成一段合适的叙述。')}\n请严格按系统提示的 JSON 格式输出，不要添加额外解释。{reference}"

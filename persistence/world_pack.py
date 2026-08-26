@@ -31,12 +31,6 @@ WORLD_FORMAT_VERSION = 1
 WORLD_SETTING_KEYS = ("world_setting", "seed", "name_table", "news_table",
                       "preset_table", "personality_table")
 WORLD_SETTING_VALUES = {"appear", "abs_giant", "rel_giant"}
-TABLE_SETTING_KEYS = {
-    "name_table": "names",
-    "news_table": "news",
-    "preset_table": "presets",
-    "personality_table": "personalities",
-}
 
 PACK_RESOURCE_PATHS = {
     "landmarks": "landmarks",
@@ -232,20 +226,8 @@ class WorldPackManifest:
         return {t for t in PACK_RESOURCE_PATHS if self.owns(t)}
 
     def locked_keys(self) -> Set[str]:
-        """返回包锁定的设置键。
-
-        世界设定 / 种子：出现在 settings 中即锁定。
-        静态表（姓名 / 新闻 / 身材 / 性格）：仅当包实际配置了对应资源类型时锁定。
-        """
-        keys = set()
-        for key in WORLD_SETTING_KEYS:
-            rtype = TABLE_SETTING_KEYS.get(key)
-            if rtype is not None:
-                if self.owns(rtype):
-                    keys.add(key)
-            elif key in self.settings:
-                keys.add(key)
-        return keys
+        """返回包锁定的设置键（仅世界块键，由 settings 中实际出现的键决定）。"""
+        return set(self.settings.keys()) & set(WORLD_SETTING_KEYS)
 
 
 def load_manifest_file(path: str) -> WorldPackManifest:
@@ -332,8 +314,8 @@ class WorldState:
     """世界包激活状态：决定各 repo 从包目录还是自由目录读取资源。
 
     - owns(rtype)：包是否拥有该资源类型（决定管理器禁用与路径接管）
-    - locked_keys()：包锁定的设置键（世界设定/种子以 settings 为准；静态表以 owns 为准）
-    - effective_settings()：仅叠加锁定键
+    - locked_keys()：包锁定的设置键（仅世界块键）
+    - effective_settings()：自由设置与包设置的内存叠加
     - pack_path()/resolve()：包内资源的读取路径
     """
 
@@ -403,12 +385,11 @@ class WorldState:
         return self._manifest.locked_keys()
 
     def effective_settings(self, settings: Dict[str, Any]) -> Dict[str, Any]:
-        """返回叠加包设置后的设置字典（不修改原字典）。仅叠加锁定键。"""
+        """返回叠加包设置后的设置字典（不修改原字典）。"""
         if not self._manifest:
             return settings
         result = dict(settings)
-        pack_settings = self._manifest.settings
-        for key in self.locked_keys():
-            if key in pack_settings:
-                result[key] = pack_settings[key]
+        for key in WORLD_SETTING_KEYS:
+            if key in self._manifest.settings:
+                result[key] = self._manifest.settings[key]
         return result
