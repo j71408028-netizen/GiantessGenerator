@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 from persistence.world_pack import (
     WORLD_MANIFEST_NAME,
     WORLD_PACK_EXT,
-    WORLD_SETTING_KEYS,
+    TABLE_SETTING_KEYS,
     BOOL_RESOURCE_TYPES,
     WorldPackManifest,
     WorldState,
@@ -244,13 +244,13 @@ class WorldManager:
         if settings_repo is not None:
             free = settings_repo.load()
             free.update({k: v for k, v in manifest.settings.items()
-                         if k in WORLD_SETTING_KEYS})
+                         if k in manifest.locked_keys()})
             settings.clear()
             settings.update(free)
             settings_repo.save(free)
         else:
             settings.update({k: v for k, v in manifest.settings.items()
-                             if k in WORLD_SETTING_KEYS})
+                             if k in manifest.locked_keys()})
         if remove_pack:
             shutil.rmtree(installed, ignore_errors=True)
         return manifest
@@ -413,9 +413,6 @@ class WorldManager:
         manifest = WorldPackManifest(
             world_id=world_id, name=name, version=version,
             author=author, description=description)
-        for key in WORLD_SETTING_KEYS:
-            if key in settings and settings.get(key) is not None:
-                manifest.settings[key] = settings[key]
         os.makedirs(target, exist_ok=True)
         try:
             self._collect_resources(manifest, target, settings,
@@ -424,6 +421,16 @@ class WorldManager:
                                     name_repo, news_service,
                                     challenge_mgr,
                                     selected_resources)
+            for key in ("world_setting", "seed"):
+                if key in settings and settings.get(key) is not None:
+                    manifest.settings[key] = settings[key]
+            for setting_key, rtype in TABLE_SETTING_KEYS.items():
+                if not manifest.owns(rtype):
+                    continue
+                tables = list(manifest.resources.get(rtype) or [])
+                current = settings.get(setting_key)
+                manifest.settings[setting_key] = (
+                    current if current in tables else tables[0])
             save_manifest_file(os.path.join(target, WORLD_MANIFEST_NAME), manifest)
         except Exception:
             shutil.rmtree(target, ignore_errors=True)
