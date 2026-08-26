@@ -95,7 +95,6 @@ data/
 ```
 
 世界包可在激活期间接管各数据源，并可通过**行为包**覆盖角色创建与状态服务的静态方法实现。
-程序内置示例包 `data/static/behaviors/imperial_units/` 可将显示长度单位改为英制。
 行为包开发文档见 [world_pack_behaviors.md](world_pack_behaviors.md)。
 
 
