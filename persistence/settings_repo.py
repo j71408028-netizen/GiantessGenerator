@@ -32,7 +32,8 @@ class SettingsRepo:
             "auto_save_report": False,
             "auto_save_replay": False,
             "save_low_resolution_image": False,
-            "use_preview_image_as_avatar": False
+            "use_preview_image_as_avatar": False,
+            "blocked_words": []
         }
 
     def load(self) -> dict:

@@ -5,6 +5,7 @@ from typing import List, Optional
 
 from models import BodyPreset
 from paths import presets_dir
+from persistence.static_table import format_float_parameter, parse_float_parameter
 
 DEFAULT_PRESET_TABLE = "default"
 
@@ -17,6 +18,7 @@ PRESET_COLUMNS = [
     "index_finger_diameter_ratio", "fingerprint_width_ratio", "finger_gap_ratio",
     "knee_height_ratio", "ankle_height_ratio", "stride_ratio",
 ]
+PRESET_COLUMNS_WITH_WEIGHT = ["weight", *PRESET_COLUMNS]
 
 
 class PresetRepo:
@@ -100,32 +102,43 @@ class PresetRepo:
         if not name:
             return None
         values = {}
+        ranges = {}
         for column in PRESET_COLUMNS:
             if column == "name":
                 continue
             raw = (row.get(column) or "").strip()
             if raw == "":
                 return None
-            try:
-                values[column] = float(raw)
-            except ValueError:
+            parsed = parse_float_parameter(raw)
+            if parsed is None:
                 return None
-        defaults = asdict(BodyPreset(name=name))
+            values[column], ranges[column] = parsed
+        defaults = {"name": name}
+        defaults.update({column: getattr(BodyPreset(name=name), column)
+                         for column in PRESET_COLUMNS if column != "name"})
         for column, value in values.items():
             defaults[column] = cls._clamp_ratio(value, defaults.get(column, 0.1))
-        return BodyPreset(**defaults)
+        weight = parse_float_parameter(row.get("weight", row.get("权重", "1")))
+        if weight is None or weight[0] < 0:
+            weight_value = 1.0
+        else:
+            weight_value = weight[0]
+        return BodyPreset(**defaults, weight=weight_value, parameter_ranges=ranges)
 
     @staticmethod
     def _to_row(item: BodyPreset) -> dict:
         data = asdict(item)
-        return {column: data[column] for column in PRESET_COLUMNS}
+        ranges = data["parameter_ranges"]
+        return {"weight": data["weight"],
+                **{column: format_float_parameter(data[column], ranges.get(column, 0.0))
+                   for column in PRESET_COLUMNS}}
 
     @classmethod
     def write_csv(cls, path: str, items: List[BodyPreset]) -> None:
         """把身材列表写为 CSV 表（utf-8-sig，便于 Excel 直接编辑）。"""
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8-sig", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=PRESET_COLUMNS)
+            writer = csv.DictWriter(f, fieldnames=PRESET_COLUMNS_WITH_WEIGHT)
             writer.writeheader()
             for item in items:
                 writer.writerow(cls._to_row(item))

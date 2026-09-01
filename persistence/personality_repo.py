@@ -4,6 +4,7 @@ from typing import List, Optional
 
 from models import Personality
 from paths import personalities_dir
+from persistence.static_table import format_float_parameter, parse_float_parameter
 
 DEFAULT_PERSONALITY_TABLE = "default"
 
@@ -15,6 +16,7 @@ PERSONALITY_COLUMNS = [
     "sensitivity", "skip_base_prob",
     "description",
 ]
+PERSONALITY_COLUMNS_WITH_WEIGHT = ["weight", *PERSONALITY_COLUMNS]
 
 
 class PersonalityRepo:
@@ -114,28 +116,42 @@ class PersonalityRepo:
             "skip_base_prob": (0.0, 5.0, 3.0),
         }
         values = {}
+        ranges = {}
         for field, (lo, hi, default) in fields.items():
             text = (raw.get(field) or "").strip()
             if text == "":
                 return None
-            try:
-                values[field] = cls._clamp(float(text), lo, hi, default)
-            except ValueError:
+            parsed = parse_float_parameter(text)
+            if parsed is None:
                 return None
+            value, spread = parsed
+            values[field] = cls._clamp(value, lo, hi, default)
+            ranges[field] = spread
+        weight = parse_float_parameter(row.get("weight", row.get("权重", "1")))
+        weight_value = 1.0 if weight is None or weight[0] < 0 else weight[0]
         item = Personality(name=name, **values,
-                           description=(row.get("description") or "").strip())
+                           description=(row.get("description") or "").strip(),
+                           weight=weight_value, parameter_ranges=ranges)
         return item
 
     @staticmethod
     def _to_row(item: Personality) -> dict:
+        ranges = item.parameter_ranges
         return {
+            "weight": item.weight,
             "name": item.name,
-            "init_intrusion": item.init_intrusion,
-            "step_intrusion": item.step_intrusion,
-            "init_destruction": item.init_destruction,
-            "step_destruction": item.step_destruction,
-            "sensitivity": item.sensitivity,
-            "skip_base_prob": item.skip_base_prob,
+            "init_intrusion": format_float_parameter(
+                item.init_intrusion, ranges.get("init_intrusion", 0.0)),
+            "step_intrusion": format_float_parameter(
+                item.step_intrusion, ranges.get("step_intrusion", 0.0)),
+            "init_destruction": format_float_parameter(
+                item.init_destruction, ranges.get("init_destruction", 0.0)),
+            "step_destruction": format_float_parameter(
+                item.step_destruction, ranges.get("step_destruction", 0.0)),
+            "sensitivity": format_float_parameter(
+                item.sensitivity, ranges.get("sensitivity", 0.0)),
+            "skip_base_prob": format_float_parameter(
+                item.skip_base_prob, ranges.get("skip_base_prob", 0.0)),
             "description": item.description,
         }
 
@@ -144,7 +160,7 @@ class PersonalityRepo:
         """把性格列表写为 CSV 表（utf-8-sig，便于 Excel 直接编辑）。"""
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8-sig", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=PERSONALITY_COLUMNS)
+            writer = csv.DictWriter(f, fieldnames=PERSONALITY_COLUMNS_WITH_WEIGHT)
             writer.writeheader()
             for item in items:
                 writer.writerow(cls._to_row(item))

@@ -1,7 +1,7 @@
 import math
 import random
 import re
-from typing import List, Dict, Optional, Set, Tuple
+from typing import List, Dict, Optional, Set, Tuple, Iterable, Union
 
 from models import Landmark
 from behavior_runtime import behavior_hook, get_runtime
@@ -37,6 +37,25 @@ SIZE_DISPLAY = {
     "colossal": "10~150km",
 }
 
+
+def normalize_blocked_words(words: Union[str, Iterable[str], None]) -> List[str]:
+    """将屏蔽词输入规范为非空字符串列表。字符串按逗号/顿号/分号/换行拆分。"""
+    if not words:
+        return []
+    if isinstance(words, str):
+        parts = re.split(r"[,，;；、\n]+", words)
+        return [p.strip() for p in parts if p.strip()]
+    return [str(w).strip() for w in words if str(w).strip()]
+
+
+@behavior_hook("logic", "contains_blocked_word")
+def contains_blocked_word(text: str, blocked_words: Union[str, Iterable[str], None]) -> bool:
+    """判断文本是否包含任一屏蔽词（大小写不敏感的子串匹配）。"""
+    words = normalize_blocked_words(blocked_words)
+    if not text or not words:
+        return False
+    lowered = text.lower()
+    return any(w.lower() in lowered for w in words)
 
 
 @behavior_hook("logic", "apply_size_unlock_updates")
@@ -262,8 +281,12 @@ def get_comparisons(
     selected_tags: List[str] = None,
     skip_base_prob: float = 0.0,
     selected_parts: Optional[List[str]] = None,
+    blocked_words: Optional[List[str]] = None,
 ) -> List[Dict]:
-    """寻找最接近的地标对比，支持根据标签概率跳过特定姿势或身体部位的候选。"""
+    """寻找最接近的地标对比，支持根据标签概率跳过特定姿势或身体部位的候选。
+
+    名称含屏蔽词的地标会被跳过。
+    """
     if selected_parts is None:
         selected_parts = list(body_parts.keys())
 
@@ -302,6 +325,8 @@ def get_comparisons(
             continue
         allowed = dim_map.get(part, ["vertical", "horizontal"])
         for landmark in landmarks:
+            if contains_blocked_word(landmark.name, blocked_words):
+                continue
             if landmark.dimension in allowed:
                 ratio = size / landmark.size
                 if ratio < 0.1 or ratio > 50:
@@ -397,6 +422,7 @@ def select_quip_with_budget(
         selected_tags: Optional[List[str]] = None,
         skip_base_prob: float = 0.0,
         posture_list: Optional[List[int]] = None,
+        blocked_words: Optional[List[str]] = None,
 ) -> Tuple[Optional[str], Optional[str], Optional[Tuple[int, int]], float, float, float]:
     matrix = quips_working.get(size_cat, {})
     if not matrix:
@@ -410,20 +436,25 @@ def select_quip_with_budget(
             and len(nearest_list) > 15
     )
 
+    def _is_usable_quip(q) -> bool:
+        if not isinstance(q, dict):
+            return False
+        return not contains_blocked_word(q.get("text", ""), blocked_words)
+
     candidates = []
     if use_only_nearest:
         dist = math.hypot(nearest_coord[0] - intrusion_val, nearest_coord[1] - destruction_val)
         for q in nearest_list:
-            if isinstance(q, dict):
+            if _is_usable_quip(q):
                 candidates.append((nearest_coord, q, dist))
-    else:
+    if not use_only_nearest or not candidates:
         for (i, d), quip_list in matrix.items():
             if (i, d) in locked_coords:
                 continue
             dist = math.hypot(i - intrusion_val, d - destruction_val)
             if dist <= 2.0:
                 for q in quip_list:
-                    if isinstance(q, dict):
+                    if _is_usable_quip(q):
                         candidates.append(((i, d), q, dist))
 
     if not candidates:

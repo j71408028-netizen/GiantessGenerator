@@ -1,5 +1,5 @@
 from typing import List, Dict, Optional
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 import datetime
 
 @dataclass
@@ -38,6 +38,19 @@ class BodyPreset:
 
     # 只与水平地标对比的部位
     stride_ratio: float = 0.8  # 步长
+    weight: float = field(default=1.0, compare=False, repr=False)
+    parameter_ranges: Dict[str, float] = field(default_factory=dict, compare=False,
+                                                repr=False)
+
+    def randomized(self, rng) -> "BodyPreset":
+        bounds = {attr: (0.0000001, 1.9999999) for attr in self.parameter_ranges}
+        values = {
+            attr: max(bounds[attr][0], min(bounds[attr][1], rng.uniform(
+                value - self.parameter_ranges[attr], value + self.parameter_ranges[attr])))
+            for attr, value in self.__dict__.items()
+            if attr in self.parameter_ranges
+        }
+        return replace(self, **values, parameter_ranges={})
 
 
 @dataclass
@@ -50,6 +63,26 @@ class Personality:
     sensitivity: float         # 敏感值 (影响地标切换时的额外变化)
     description: str = ""
     skip_base_prob: float = 3.0  # 个性强度，推荐 2~4
+    weight: float = field(default=1.0, compare=False, repr=False)
+    parameter_ranges: Dict[str, float] = field(default_factory=dict, compare=False,
+                                                repr=False)
+
+    def randomized(self, rng) -> "Personality":
+        bounds = {
+            "init_intrusion": (0.0, 4.0),
+            "step_intrusion": (-5.0, 5.0),
+            "init_destruction": (0.0, 4.0),
+            "step_destruction": (-5.0, 5.0),
+            "sensitivity": (-5.0, 5.0),
+            "skip_base_prob": (0.0, 5.0),
+        }
+        values = {
+            attr: max(bounds[attr][0], min(bounds[attr][1], rng.uniform(
+                value - self.parameter_ranges[attr], value + self.parameter_ranges[attr])))
+            for attr, value in self.__dict__.items()
+            if attr in self.parameter_ranges
+        }
+        return replace(self, **values, parameter_ranges={})
 
     @classmethod
     def from_dict(cls, data: dict) -> "Personality":

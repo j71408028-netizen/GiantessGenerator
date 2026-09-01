@@ -568,3 +568,16 @@ class MainWindowManager:
             ui.common.dialogs.showinfo("成功", f"角色卡已导出到：{file_path}")
         except Exception as e:
             ui.common.dialogs.showerror("错误", f"保存失败：{e}")
+
+    def export_character_card_from_state(self, state, file_path: str):
+        try:
+            data = self.context.build_export_card_from_state(state)
+        except ValueError as e:
+            ui.common.dialogs.showerror("错误", str(e))
+            return
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            ui.common.dialogs.showinfo("成功", f"角色卡已导出到：{file_path}")
+        except Exception as e:
+            ui.common.dialogs.showerror("错误", f"保存失败：{e}")

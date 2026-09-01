@@ -372,21 +372,43 @@ class GiantessStatePanel(ctk.CTkFrame):
         if not self.gui_ref:
             ui.common.dialogs.showerror("错误", "未绑定主界面实例")
             return
+        state = self.gui_ref.generator_panel.current_state
+        if state is None:
+            ui.common.dialogs.showerror("错误", "未绑定角色数据")
+            return
         file_path = filedialog.asksaveasfilename(
             title="导出角色卡或档案",
-            defaultextension=".chara.json",
+            initialfile=state.name or "角色",
+            defaultextension=".html",
             filetypes=[
-                ("角色卡", "*.chara.json"),
-                ("HTML档案", "*.html"),
+                ("角色档案", "*.html"),
+                ("角色卡", "*.json"),
                 ("所有文件", "*.*")
             ]
         )
         if not file_path:
             return
-        if file_path.endswith(".html"):
-            ui.common.dialogs.showinfo("提示", "导出HTML档案功能暂未实现")
+        lower = file_path.lower()
+        if lower.endswith((".mhtml", ".mht", ".htm")):
+            file_path = file_path.rsplit(".", 1)[0] + ".html"
+            lower = file_path.lower()
+        if lower.endswith(".html"):
+            from services.archive_export import export_character_mhtml
+            try:
+                export_character_mhtml(state, file_path,
+                                       show_casualties=self._show_casualties())
+            except Exception as e:
+                ui.common.dialogs.showerror("错误", f"导出角色档案失败：{e}")
+                return
+            ui.common.dialogs.showinfo("成功", f"角色档案已导出到：{file_path}")
+            return
+        if lower.endswith(".chara.json"):
+            card_path = file_path
+        elif lower.endswith(".json"):
+            card_path = file_path[:-5] + ".chara.json"
         else:
-            self.gui_ref.export_character_card_to_path(file_path)
+            card_path = file_path + ".chara.json"
+        self.gui_ref.export_character_card_from_state(state, card_path)
 
     def _delete_character(self):
         if not self.gui_ref or not self.gui_ref.generator_panel.current_state:

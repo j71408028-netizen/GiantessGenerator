@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from persistence.landmark_repo import LandmarkRepo
     from persistence.quip_repo import QuipRepo
 
-from logic import ALL_PART_NAMES
+from logic import ALL_PART_NAMES, normalize_blocked_words
 from persistence import PresetRepo, PersonalityRepo
 from persistence.name_repo import NameRepo, DEFAULT_NAME_TABLE
 from persistence.world_pack import list_behavior_packs
@@ -101,6 +101,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.enable_confusion = self.settings.get("enable_confusion", False)
         self.quip_rate_factor = self.settings.get("quip_rate_factor", 1.0)
         self.info_update_rate = self.settings.get("info_update_rate", 0.5)
+        self.blocked_words = normalize_blocked_words(self.settings.get("blocked_words", []))
 
         self._create_widgets()
         self._sync_all_states()
@@ -270,9 +271,10 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         menu._profile_dropdown = dropdown
         return menu
 
-    def _make_entry(self, parent, variable, width=120, show=None):
+    def _make_entry(self, parent, variable, width=120, show=None, placeholder_text=None):
         return ctk.CTkEntry(
             parent, textvariable=variable, width=width, height=28, show=show,
+            placeholder_text=placeholder_text or "",
             border_width=1, border_color=INPUT_BORDER,
             fg_color=INPUT_BG, corner_radius=8, font=_FONT
         )
@@ -803,6 +805,15 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.confusion_var = tk.BooleanVar(value=self.enable_confusion)
         self.confusion_switch = self._make_switch(ctrl, self.confusion_var)
 
+        _, ctrl = self._make_row(self.gen_body, row, "屏蔽词")
+        row += 1
+        self.blocked_words_var = tk.StringVar(value=", ".join(self.blocked_words))
+        self.blocked_words_entry = self._make_entry(
+            ctrl, self.blocked_words_var, width=180,
+            placeholder_text="用逗号分隔"
+        )
+        self.blocked_words_entry.pack(side='left')
+
         self._section_label(self.gen_body, row, "报告详情栏")
         row += 1
 
@@ -1192,6 +1203,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             "selected_quip_styles": self.selected_quip_styles,
             "show_all_details": self.show_all_details_var.get(),
             "enable_confusion": self.confusion_var.get(),
+            "blocked_words": normalize_blocked_words(self.blocked_words_var.get()),
             "ai_provider": self.ai_provider,
             "ai_configs": {pid: dict(cfg) for pid, cfg in self.ai_configs.items()},
             "report_font": report_font,

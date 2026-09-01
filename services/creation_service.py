@@ -5,6 +5,7 @@ from typing import Optional, Dict, Tuple
 from models import Personality, BodyPreset
 from persistence.name_repo import NameRepo, DEFAULT_NAME_TABLE
 from behavior_runtime import behavior_hook
+from persistence.static_table import weighted_choice
 
 
 class CreationService:
@@ -132,25 +133,49 @@ class CreationService:
         log_h = center + half_range * scale
         return 10 ** log_h, status
 
+    _PART_RATIO_ATTRS = (
+        ("腿长", "leg_ratio"),
+        ("脚长", "foot_length_ratio"),
+        ("臂长", "arm_span_ratio"),
+        ("食指长度", "index_finger_ratio"),
+        ("手掌长度", "palm_length_ratio"),
+        ("胸宽", "chest_width_ratio"),
+        ("大腿直径", "thigh_diameter_ratio"),
+        ("小臂直径", "forearm_diameter_ratio"),
+        ("膝盖高度", "knee_height_ratio"),
+        ("脚踝高度", "ankle_height_ratio"),
+        ("指缝宽度", "finger_gap_ratio"),
+        ("步长", "stride_ratio"),
+        ("食指直径", "index_finger_diameter_ratio"),
+        ("指纹宽度", "fingerprint_width_ratio"),
+    )
+
     @staticmethod
     def get_body_parts(height: float, preset: BodyPreset) -> Dict[str, float]:
-        return {
-            "身高": height,
-            "腿长": height * preset.leg_ratio,
-            "脚长": height * preset.foot_length_ratio,
-            "臂长": height * preset.arm_span_ratio,
-            "食指长度": height * preset.index_finger_ratio,
-            "手掌长度": height * preset.palm_length_ratio,
-            "胸宽": height * preset.chest_width_ratio,
-            "大腿直径": height * preset.thigh_diameter_ratio,
-            "小臂直径": height * preset.forearm_diameter_ratio,
-            "膝盖高度": height * preset.knee_height_ratio,
-            "脚踝高度": height * preset.ankle_height_ratio,
-            "指缝宽度": height * preset.finger_gap_ratio,
-            "步长": height * preset.stride_ratio,
-            "食指直径": height * preset.index_finger_diameter_ratio,
-            "指纹宽度": height * preset.fingerprint_width_ratio,
-        }
+        parts = {"身高": height}
+        for part, attr in CreationService._PART_RATIO_ATTRS:
+            parts[part] = height * getattr(preset, attr)
+        return parts
+
+    @staticmethod
+    def preset_from_body_parts(body_parts: dict, height: float,
+                               name: str = "还原身材") -> Optional[BodyPreset]:
+        """由当前部位尺寸反推 BodyPreset（get_body_parts 的逆运算）。"""
+        try:
+            base = float(height)
+        except (TypeError, ValueError):
+            base = 0.0
+        if not body_parts or base <= 0:
+            return None
+        kwargs = {"name": name or "还原身材", "height_ratio": 1.0}
+        for part, attr in CreationService._PART_RATIO_ATTRS:
+            val = body_parts.get(part)
+            if val:
+                try:
+                    kwargs[attr] = float(val) / base
+                except (TypeError, ValueError):
+                    pass
+        return BodyPreset(**kwargs)
 
     @staticmethod
     def core_from_params(params: dict, settings: dict,
@@ -164,10 +189,14 @@ class CreationService:
 
         if personality_obj is None:
             personalities = personality_repo.load()
-            personality_obj = rng.choice(personalities) if personalities else None
+            personality_obj = weighted_choice(personalities, rng)
+            if personality_obj is not None:
+                personality_obj = personality_obj.randomized(rng)
         if preset_obj is None:
             presets = preset_repo.load()
-            preset_obj = rng.choice(presets) if presets else None
+            preset_obj = weighted_choice(presets, rng)
+            if preset_obj is not None:
+                preset_obj = preset_obj.randomized(rng)
 
         height_option = params["height_option"]
         custom_height = params["custom_height"]

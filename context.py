@@ -235,6 +235,7 @@ class ExplorationContext:
         comparison_count = self.settings.get("comparison_count", 5)
         selected_parts = self.settings.get("selected_parts", ALL_PART_NAMES.copy())
 
+        blocked_words = self.settings.get("blocked_words", [])
         comparisons = get_comparisons(
             self.merged_landmarks,
             body_parts,
@@ -242,7 +243,8 @@ class ExplorationContext:
             limit=comparison_count,
             selected_tags=selected_tags,
             skip_base_prob=personality_obj.skip_base_prob,
-            selected_parts=selected_parts
+            selected_parts=selected_parts,
+            blocked_words=blocked_words,
         )
 
         quips_working = copy.deepcopy(self.quips)
@@ -297,7 +299,8 @@ class ExplorationContext:
                     step_index=idx,
                     selected_tags=selected_tags,
                     skip_base_prob=personality_obj.skip_base_prob,
-                    posture_list=comp["posture"]
+                    posture_list=comp["posture"],
+                    blocked_words=blocked_words,
                 )
                 if quip_text is None:
                     quip_text = "尺寸通过远程测量取得，尚未收集到事件记录。"
@@ -728,6 +731,32 @@ class ExplorationContext:
             "birthday": birthday,
             "image_b64": image_b64
         }
+
+    def build_export_card_from_state(self, state: CharacterSnapshot) -> dict:
+        """从已加载角色还原性格/身材并构建角色卡数据。"""
+        from services.creation_service import CreationService
+        if state is None or state.personality is None:
+            raise ValueError("角色没有性格数据，无法导出角色卡")
+        height = state.height or state.original_height or 0
+        preset_obj = CreationService.preset_from_body_parts(
+            state.body_parts, height,
+            name=f"{state.name}的身材" if state.name else "还原身材")
+        if preset_obj is None:
+            raise ValueError("角色没有身材数据，无法导出角色卡")
+        avatar = self.character_repo.get_avatar_abspath(
+            state.giantess_id, state.avatar_path) or ""
+        return self.build_export_card_data(
+            name=state.name,
+            nick=state.nick,
+            original_height=state.original_height,
+            personality_obj=state.personality,
+            preset_obj=preset_obj,
+            intro_hidden=state.intro_hidden or "",
+            intro_visible=state.intro_visible or "",
+            selected_tags=state.selected_tags or [],
+            birthday=state.birthday or "",
+            uploaded_image_path=avatar,
+        )
 
     # ==================== 统计数据查询 ====================
 

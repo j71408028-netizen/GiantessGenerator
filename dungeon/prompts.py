@@ -3,7 +3,7 @@ import random
 import re
 
 from logic import ALL_PART_NAMES, format_size, get_comparisons, replace_quip_tags, \
-    should_skip_by_part_tags
+    should_skip_by_part_tags, contains_blocked_word
 from .models import DungeonTextType
 
 
@@ -153,7 +153,10 @@ class DungeonPromptBuilder:
         session = self.context
         if not session.body_parts or "身高" not in session.body_parts:
             return ""
-        comparisons = get_comparisons(session.merged_landmarks, {"身高": session.body_parts["身高"]}, order="match", limit=1, selected_tags=[], skip_base_prob=0.0)
+        comparisons = get_comparisons(
+            session.merged_landmarks, {"身高": session.body_parts["身高"]},
+            order="match", limit=1, selected_tags=[], skip_base_prob=0.0,
+            blocked_words=self._blocked_words())
         if not comparisons:
             return ""
         comp = comparisons[0]
@@ -224,7 +227,10 @@ class DungeonPromptBuilder:
         session = self.context
         if not part or part not in session.body_parts:
             return ""
-        comparisons = get_comparisons(session.merged_landmarks, {part: session.body_parts[part]}, order="match", limit=1, selected_tags=[], skip_base_prob=0.0)
+        comparisons = get_comparisons(
+            session.merged_landmarks, {part: session.body_parts[part]},
+            order="match", limit=1, selected_tags=[], skip_base_prob=0.0,
+            blocked_words=self._blocked_words())
         if not comparisons:
             return ""
         comp = comparisons[0]
@@ -235,20 +241,30 @@ class DungeonPromptBuilder:
             return f"她的{part} {size}，约等于{landmark.name}{suffix}度的{comp['ratio']:.2f}倍。"
         return f"她的{part} {size}，相当于{landmark.name}的{suffix}度。"
 
+    def _blocked_words(self):
+        return (getattr(self.context, "settings", None) or {}).get("blocked_words", [])
+
     def _get_nearest_quip_no_consume(self):
         session = self.context
         if not session.selected_quip_styles:
             return ""
         matrix = session.quips_working.get(session.size_cat, {})
-        available = [(i, d) for (i, d), quips in matrix.items() if (i, d) not in session.locked_coords and quips]
-        if not available:
+        blocked_words = self._blocked_words()
+        usable = {}
+        for (i, d), quips in matrix.items():
+            if (i, d) in session.locked_coords:
+                continue
+            kept = [q for q in quips if not contains_blocked_word(q.get("text", ""), blocked_words)]
+            if kept:
+                usable[(i, d)] = kept
+        if not usable:
             return ""
         intrusion = session.dungeon_state.intrusion
         destruction = session.dungeon_state.destruction
-        distance = min(math.hypot(i - intrusion, d - destruction) for i, d in available)
-        nearest = [(i, d) for i, d in available if abs(math.hypot(i - intrusion, d - destruction) - distance) < 1e-9]
+        distance = min(math.hypot(i - intrusion, d - destruction) for i, d in usable)
+        nearest = [(i, d) for i, d in usable if abs(math.hypot(i - intrusion, d - destruction) - distance) < 1e-9]
         selected = random.choice(nearest)
-        quip_dict = random.choice(matrix[selected])
+        quip_dict = random.choice(usable[selected])
         text = quip_dict["text"].replace("{name}", session.name).replace("{nick}", session.nick)
         text = replace_quip_tags(text, quip_dict["style"], session.size_cat, session.detail_pools)
         return text.replace("{name}", session.name).replace("{nick}", session.nick)
