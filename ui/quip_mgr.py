@@ -13,7 +13,9 @@ from services import get_challenge_packs, import_quip_challenge_pack
 from ui.common.managers import TreeviewManager, CardManager
 from ui.common.widgets import ClickableCard, CTkScrollableDropdownFrame
 from ui.common.dialogs import BaseDialog
+from ui.common.address_dlg import AddressTextDialog
 from ui.quip_dlg import QuipDialog, _TargetSelectDialog
+from address_model import format_addr_verbose
 from ui.common.theme import (
     BASE, HOVER, BORDER_ALT, TEXT, SOFT,
     PNL_BG, HOVER_ALT, MENU_HOVER, LINK_BLUE,
@@ -101,6 +103,32 @@ class QuipCardManager(CardManager):
                      "border_color": ERR_STRONG}
         ctk.CTkButton(parent, text="删除", width=80, command=self.delete_style,
                        **_btn_spec, **_del_spec).pack(side='left', padx=2)
+        # 描述风格注册地址：世界观 + 该风格注册的若干上级级
+        ctk.CTkButton(parent, text="📍地址", width=62, command=self._edit_style_address,
+                       **_btn_spec, **_btn_muted).pack(side='left', padx=2)
+
+    def _edit_style_address(self):
+        style = self._get_current_style()
+        if not style:
+            return
+        current = self.quip_repo.load_style_address(style)
+        dlg = AddressTextDialog(
+            self, "描述风格注册地址",
+            description=(
+                "注册该描述风格所在的地址（仅注册最上面的若干级，世界观必填）。\n"
+                "报告生成时，该风格只能用于同一 / 包含它的地标地址之后的描述。\n"
+                "当前风格：" + style
+            ),
+            initial=current)
+        if dlg.result is not None:
+            self.quip_repo.save_style_address(style, dlg.result)
+            if dlg.result:
+                ui.common.dialogs.showinfo(
+                    "已保存",
+                    f"已保存风格注册地址：{format_addr_verbose(dlg.result)}。")
+            else:
+                ui.common.dialogs.showinfo(
+                    "已保存", "已清除风格注册地址（该风格可接任意地标后的描述）。")
 
     def _get_challenge_packs_with_keys(self):
         packs = get_challenge_packs(self._settings_repo)

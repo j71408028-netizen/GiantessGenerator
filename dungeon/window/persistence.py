@@ -8,6 +8,7 @@ import ui.common.dialogs
 from paths import data_dir
 from logic import compute_casualty
 from models import CharacterSnapshot
+from services.state_service import StateService
 
 
 class DungeonPersistence:
@@ -116,14 +117,18 @@ class DungeonPersistence:
 
         char = self.character
         if char is not None:
-            char.intrusion = max(0.0, min(5.0, char.intrusion + intr_d))
-            char.destruction = max(0.0, min(5.0, char.destruction + dest_d))
-            char.total_casualties += cas_d
-            char.action_points = max(0, min(100, char.action_points + refund))
-            char.intrusion_evolution.append(char.intrusion)
-            char.destruction_evolution.append(char.destruction)
-            if char.casualties_evolution:
-                char.casualties_evolution.append(char.total_casualties)
+            StateService.refund_action_points(char, refund)
+            # 结局结算记为一行完整演化：步进取结局配置的伤亡步进；
+            # 角色坐标增量经统一方法平移并夹取到 0.5~4.5 边界
+            intr_after, dest_after = StateService.shift_coordinates(
+                char.intrusion, char.destruction, intr_d, dest_d)
+            char.record_change(
+                step=casualty_step,
+                intrusion=intr_after,
+                destruction=dest_after,
+                casualties=char.total_casualties + cas_d,
+                source="_apply_ending_effects",
+            )
             if self.character_repo is not None:
                 try:
                     self.character_repo.save(char)
@@ -158,15 +163,24 @@ class DungeonPersistence:
             original_height=self.original_height or 1.6,
             height=self.height or self.original_height or 1.6,
             body_parts=self.body_parts or {},
-            intrusion=getattr(self.dungeon_state, "intrusion", 0.0),
-            destruction=getattr(self.dungeon_state, "destruction", 0.0),
             personality=self.personality,
             greed=self.greed,
             action_points=50,
             selected_tags=list(self.tags or []),
             intro_hidden=self.intro_hidden or "",
             intro_visible=self.intro_visible or "",
-            total_casualties=getattr(self.dungeon_state, "total_casualties", 0.0),
+        )
+        # 初始演化行：记录副本结束时的介入度/破坏性/累计伤亡
+        # （副本会话内坐标为 0~5，写入角色时统一夹取到角色的 0.5~4.5 边界）
+        session_intr, session_dest = StateService.clamp_coordinates(
+            getattr(self.dungeon_state, "intrusion", 0.0),
+            getattr(self.dungeon_state, "destruction", 0.0))
+        char.record_change(
+            step=0.0,
+            intrusion=session_intr,
+            destruction=session_dest,
+            casualties=getattr(self.dungeon_state, "total_casualties", 0.0),
+            source="_create_character_from_session",
         )
         return char
 

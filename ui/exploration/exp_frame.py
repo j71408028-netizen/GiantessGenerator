@@ -1,5 +1,6 @@
 # ui/exploration/exp_frame.py
 import json
+import math
 from tkinter import filedialog
 
 import ui.common.dialogs
@@ -19,11 +20,12 @@ from ui.common.theme import (
     BASE, BORDER, SOFT, TEXT_MUTED, TEXT_DISABLED,
     BORDER_ALT, HOVER_ALT,
     STATUS_OK, OK_HOVER, REPORT, REPORT_HOVER, DUNGEON, DUNGEON_HOVER,
-    GOLD_STRONG_BORDER,
+    GOLD_STRONG_BORDER, ERR_STRONG, ERR_HOVER,
 )
 from ui.common import fonts as ui_fonts
 from models import CharacterSnapshot
 from context import ExplorationContext
+from address_model import world_of, distance_m, format_addr_verbose
 
 
 class ExplorationPanel(ctk.CTkFrame):
@@ -366,6 +368,14 @@ class ExplorationPanel(ctk.CTkFrame):
             self._create_character()
 
     # ---------- 核心功能 ----------
+    def _resolve_stuck_choice(self, state, stuck, ctx):
+        """地址系统“无路可走”时的决策入口（切换地址 / 世界观，或放弃负向演化）。"""
+        options = ctx.stuck_options(state, stuck)
+        dialog = _StuckRelocateDialog(self, state, stuck, options, ctx.state_service)
+        if dialog.result is None:
+            self._report_aborted_stuck = True
+        return dialog.result
+
     def _generate_giantess(self):
         if self.current_state:
             consume = self.current_state.report_generated
@@ -374,7 +384,8 @@ class ExplorationPanel(ctk.CTkFrame):
                 self.context.selected_styles,
                 self.context.selected_quip_styles,
                 consume_points=consume,
-                state_service=self.context.state_service
+                state_service=self.context.state_service,
+                resolve_stuck=self._resolve_stuck_choice,
             )
             if report:
                 self.current_state.report_generated = True
@@ -395,6 +406,9 @@ class ExplorationPanel(ctk.CTkFrame):
                 consume_points=False
             )
         if report is None:
+            if getattr(self, "_report_aborted_stuck", False):
+                self._report_aborted_stuck = False
+                return
             ui.common.dialogs.showerror("点数不足", "行动点数不足以生成报告。")
             return
         self.report_panel.render_report(report)
@@ -651,3 +665,163 @@ class ExplorationPanel(ctk.CTkFrame):
         self.intro_panel.refresh_display()
         self.intro_panel.refresh_image_display()
         self._update_report_cost_label()
+
+
+class _StuckRelocateDialog(BaseDialog):
+    """无路可走（地址系统）时的切换决策对话框。
+
+    提供三种选择：前往同世界观内的另一个已注册地标地址（消耗
+    0.05×距离/身高 行动点数）、切换世界观（消耗 125 行动点数，
+    落到该世界观第一个可用地标地址）、或放弃并进入负向演化。
+    """
+
+    def __init__(self, host, state, stuck, options, state_service):
+        super().__init__(host)
+        self.title("角色无法行动")
+        self.state = state
+        self.stuck = stuck
+        self.options = options
+        self.state_service = state_service
+        self.result = None
+        top = host.winfo_toplevel()
+        self.transient(top)
+        self.grab_set()
+        self._create_widgets()
+        self.geometry("560x430")
+        self._center_dialog(host)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.wait_window()
+
+    # ---------- UI ----------
+    def _create_widgets(self):
+        reason = self.stuck.get("reason", "")
+        reason_text = {
+            "world_mismatch": "当前选用的地标世界观已切换：角色的位置（世界观 "
+                              f"{self.stuck.get('current_world') or '未知'}）没有可去的地址，"
+                              "需要接入当前世界观或前往其它地标。",
+            "no_reachable": "角色当前位置（10×身高可达范围）内没有可对比的已注册地标地址。",
+            "all_damaged": "角色所在范围（50×身高×个性强度）内的独特建筑耐久均已低于 0.5。",
+        }.get(reason, "角色目前没有可去的地标地址。")
+        ctk.CTkLabel(self, text=f"📡 {reason_text}", font=ui_fonts.ui_font(12),
+                     text_color=SOFT, justify='left', wraplength=520).pack(
+            anchor='w', padx=18, pady=(16, 6))
+
+        addresses = self.options.get("addresses", [])
+        self._entries = {}
+        labels = []
+        for it in addresses:
+            label = self._entry_label(it)
+            self._entries[label] = it
+            labels.append(label)
+        if labels:
+            ctk.CTkLabel(self, text="可切换的地标地址：", font=ui_fonts.ui_font(12, "bold"),
+                         text_color=TEXT_MUTED).pack(anchor='w', padx=18, pady=(14, 2))
+            self.combo = ctk.CTkComboBox(self, values=labels, state="readonly", width=520,
+                                         height=30, font=ui_fonts.ui_font(11))
+            self.combo.set(labels[0])
+            self.combo.pack(padx=18, pady=2)
+        else:
+            self.combo = None
+            ctk.CTkLabel(self, text="（当前选中风格内没有已注册地标的可切换地址）",
+                         font=ui_fonts.ui_font(11), text_color=SOFT).pack(
+                anchor='w', padx=18, pady=(14, 2))
+
+        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        btn_frame.pack(fill='x', padx=18, pady=(16, 4))
+        if self.combo is not None:
+            ctk.CTkButton(btn_frame, text="🚶 前往该地址", width=130,
+                          font=ui_fonts.ui_font(12), command=self._apply_move,
+                          fg_color="transparent", border_width=1, border_color=STATUS_OK,
+                          text_color=STATUS_OK, hover_color=OK_HOVER).pack(side='left', padx=(0, 8))
+        if self.options.get("worlds"):
+            ctk.CTkButton(btn_frame, text="🌍 切换世界观（125 AP）", width=200,
+                          font=ui_fonts.ui_font(12), command=self._apply_world_switch,
+                          fg_color="transparent", border_width=1,
+                          border_color=DUNGEON, text_color=DUNGEON,
+                          hover_color=DUNGEON_HOVER).pack(side='left', padx=(0, 8))
+        ctk.CTkButton(btn_frame, text="💤 放弃（负向演化）", width=170,
+                      font=ui_fonts.ui_font(12), command=self._decline,
+                      fg_color="transparent", border_width=1, border_color=ERR_STRONG,
+                      text_color=ERR_STRONG, hover_color=ERR_HOVER).pack(side='left')
+
+        ctk.CTkLabel(self,
+                     text="切换地址消耗 = 0.05 × 距离 ÷ 身高 的行动点数；不切换则进入负向演化。",
+                     font=ui_fonts.ui_font(10), text_color=TEXT_DISABLED).pack(
+            anchor='w', padx=18, pady=(10, 0))
+
+    def _entry_label(self, it) -> str:
+        """构造地址下拉项：地标名 + 位置 + 所需行动点数。"""
+        addr = it["address"]
+        name = it.get("name", "")
+        verbose = format_addr_verbose(addr)
+        base = f"{name}　{verbose}"
+        if self.state.position:
+            d = distance_m(self.state.position, addr)
+            if d is None:
+                return f"{base}　（跨世界观，请用「切换世界观」）"
+            cost = self._move_cost(d)
+            dist_text = f"{d / 1000:.1f} 千米" if d >= 10000 else f"{d:.0f} 米"
+            return f"{base}　距离 {dist_text}　-{cost} AP"
+        return f"{base}　（锚定位置，0 AP）"
+
+    def _move_cost(self, distance_meters: float) -> int:
+        return max(1, int(math.ceil(0.05 * distance_meters / max(0.01, self.state.height))))
+
+    def _apply_move(self):
+        if not self.combo or not self._entries:
+            ui.common.dialogs.showwarning("提示", "没有可前往的地址。")
+            return
+        it = self._entries.get(self.combo.get())
+        if it is None:
+            return
+        d = distance_m(self.state.position, it["address"]) if self.state.position else None
+        if d is None:
+            ui.common.dialogs.showerror("无法直接前往", "该地址与角色位置不在同一世界观，请使用「切换世界观」。")
+            return
+        cost = self._move_cost(d)
+        if not self.state_service.consume_action_points(self.state, cost):
+            ui.common.dialogs.showerror(
+                "行动点数不足",
+                f"前往该地址需要 {cost} 行动点数，当前仅剩 {self.state.action_points}。\n"
+                "无法切换时将进入负向演化。")
+            self._close_with(None)
+            return
+        self._close_with({"kind": "address", "address": it["address"]})
+
+    def _apply_world_switch(self):
+        worlds = self.options.get("worlds") or []
+        if not worlds:
+            ui.common.dialogs.showwarning("提示", "当前没有其它世界观可供切换。")
+            return
+        target_world = worlds[0]
+        anchor = None
+        for it in self.options.get("addresses", []):
+            if world_of(it["address"]) == target_world:
+                anchor = it["address"]
+                break
+        if anchor is None:
+            ui.common.dialogs.showerror("无法切换世界观", "目标世界观内没有已注册地标可作为落脚点。")
+            return
+        if not self.state_service.consume_action_points(self.state, 125):
+            ui.common.dialogs.showerror(
+                "行动点数不足",
+                f"切换世界观需要 125 行动点数，当前仅剩 {self.state.action_points}。\n"
+                "无法切换时将进入负向演化。")
+            self._close_with(None)
+            return
+        self._close_with({"kind": "world", "address": anchor})
+
+    def _decline(self):
+        self._close_with(None)
+
+    def _close_with(self, result):
+        self.result = result
+        self._on_close()
+
+    def _on_close(self):
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        self.withdraw()
+        self.destroy()

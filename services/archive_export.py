@@ -2,15 +2,16 @@
 
 图片以内嵌 data URI 封装，脚本与样式均写在同一文件内，可被任意浏览器
 直接打开；亮/暗双主题可平滑切换，并支持在尺寸 / 报告 / 回放中搜索定位。
-视觉要点：可自动折叠的加高顶栏（滚动进度条 + 滚动高亮）、磨砂质感背景、
-低对比卡片、按修改时间排序的形象图墙与灯箱、双栏报告阅读器（左侧时间
-索引、右侧正文）、按类型着色的回放时间轴。
+视觉要点：固定高度顶栏（滚动进度条 + 滚动高亮）、磨砂质感背景、低对比卡片、
+按身高对数分级的概览/分析色组、wiki 式紧凑尺寸表、按修改时间排序的形象图墙与
+灯箱、双栏报告阅读器（左侧时间索引、右侧正文）、按类型着色的回放时间轴。
 """
 
 import base64
 import datetime
 import html
 import json
+import math
 import os
 
 from logic import ALL_PART_NAMES, format_size
@@ -288,13 +289,11 @@ def _esc(v) -> str:
 
 def _build_infobox(state: CharacterSnapshot, img_srcs: list, latest_date: str) -> str:
     rows = []
+    if state.nick:
+        rows.append(("昵称", _esc(state.nick)))
+    rows.append(("身高", _esc(format_size(state.height))))
     if state.birthday:
         rows.append(("生日", _esc(state.birthday)))
-    rows.append(("身高", _esc(format_size(state.height))))
-    if state.will:
-        rows.append(("意愿", "已觉醒" + (_esc(f"：{state.will_status}") if state.will_status else "")))
-    if state.action_points:
-        rows.append(("行动点数", f"{state.action_points:.0f}%"))
     rows.append(("创建时间", _esc(str(state.created_at)[:19].replace("T", " "))))
     rows.append(("更新时间", _esc(str(state.updated_at)[:19].replace("T", " "))))
 
@@ -310,7 +309,7 @@ def _build_infobox(state: CharacterSnapshot, img_srcs: list, latest_date: str) -
     tags_html = f"<div class='infobox-tags'>{tags}</div>" if tags else ""
     return (
         f"{avatar_html}"
-        f"<div class='infobox-caption'>{_esc(state.name)}{_esc(f'（{state.nick}）') if state.nick else ''}</div>"
+        f"<div class='infobox-caption'>{_esc(state.name)}</div>"
         f"{tags_html}"
         f"<table class='infobox-table'>{rows_html}</table>"
     )
@@ -366,13 +365,155 @@ def _build_analysis_section(state: CharacterSnapshot) -> str:
         f"{char_html}"
         f"<div class='ana-stats'>{bar('介入度', state.intrusion)}"
         f"{bar('破坏性', state.destruction)}{casualty_html}</div>"
+        f"{_build_evolution_chart(state)}"
     )
 
 
+def _fmt_compact_num(v) -> str:
+    """把数值压缩为中文数量级文本（如 1万 / 350万 / 2.5亿），用于坐标轴刻度。"""
+    v = float(v)
+    if v >= 1e8:
+        return f"{v / 1e8:g}亿"
+    if v >= 1e4:
+        return f"{v / 1e4:g}万"
+    return f"{v:g}"
+
+
+def _collect_evolution_series(state: CharacterSnapshot) -> list:
+    """把演化表汇总为统计图数据点：时间、累计伤亡、累计|步进|与更改标签。
+
+    步进按需求取绝对值后累加；伤亡直接采用行内记录的累计值。
+    """
+    points = []
+    cum_step = 0.0
+    for row in (state.evolution or []):
+        try:
+            t = datetime.datetime.fromisoformat(str(row.changed_at))
+            cas = max(0.0, float(row.casualties or 0.0))
+            step = abs(float(row.step or 0.0))
+        except (TypeError, ValueError):
+            continue
+        cum_step += step
+        points.append({"t": t, "cas": cas, "step": cum_step,
+                       "source": (getattr(row, "source", "") or "")})
+    return points
+
+
+def _build_evolution_chart(state: CharacterSnapshot) -> str:
+    """分析卡片内的演化统计图（内联 SVG）。
+
+    横轴为时间，左轴（对数刻度）为累计伤亡，右轴为累计步进（取绝对值）。
+    加载时恢复（recover_evolution）一行的增长绘制为自上一行起的线性爬升，
+    即增长被摊入加载之前的离线区间，而不是集中在加载当天。
+    """
+    points = _collect_evolution_series(state)
+    if not points:
+        return "<p class='empty-hint'>暂无演化数据。</p>"
+
+    w, h = 720.0, 260.0
+    m_left, m_right, m_top, m_bottom = 62.0, 56.0, 30.0, 26.0
+    plot_w = w - m_left - m_right
+    plot_h = h - m_top - m_bottom
+    base_y = m_top + plot_h
+
+    t0, t1 = points[0]["t"], points[-1]["t"]
+    if t1 <= t0:
+        t0 = t0.replace(hour=0, minute=0, second=0, microsecond=0)
+        t1 = t0 + datetime.timedelta(days=1)
+    span = (t1 - t0).total_seconds()
+
+    def x_of(t):
+        return m_left + (t - t0).total_seconds() / span * plot_w
+
+    cas_max = max(p["cas"] for p in points)
+    cas_hi = max(1, math.ceil(math.log10(cas_max))) if cas_max >= 1 else 1
+
+    def y_cas(cas):
+        return m_top + plot_h * (1.0 - math.log10(max(1.0, cas)) / cas_hi)
+
+    step_max = max(p["step"] for p in points)
+    step_hi = step_max * 1.08 if step_max > 0 else 1.0
+
+    def y_step(step):
+        return m_top + plot_h * (1.0 - step / step_hi)
+
+    # 纵向网格与左轴刻度（伤亡，按数量级取整刻度，过多时隔一取一）
+    decades = list(range(0, cas_hi + 1))
+    if len(decades) > 7:
+        kept = [d for d in decades if d % 2 == 0]
+        if kept[-1] != decades[-1]:
+            kept.append(decades[-1])
+        decades = kept
+    grid = "".join(
+        f"<line x1='{m_left:g}' y1='{y_cas(10.0 ** d):.1f}' x2='{w - m_right:g}' "
+        f"y2='{y_cas(10.0 ** d):.1f}' stroke='var(--border-soft)' stroke-width='1'/>"
+        f"<text x='{m_left - 6:g}' y='{y_cas(10.0 ** d) + 3:.1f}' text-anchor='end' "
+        f"font-size='10' fill='var(--muted)'>{_esc(_fmt_compact_num(10.0 ** d))}</text>"
+        for d in decades)
+
+    # 右轴刻度（累计步进，线性）与横轴时间刻度
+    right_axis = "".join(
+        f"<text x='{w - m_right + 6:g}' y='{y_step(step_hi * k / 3) + 3:.1f}' "
+        f"font-size='10' fill='var(--muted)'>{step_hi * k / 3:.2f}</text>"
+        for k in range(4))
+    date_fmt = "%Y-%m-%d" if span > 320 * 86400 else "%m-%d"
+    x_labels = "".join(
+        f"<text x='{x_of(t0 + datetime.timedelta(seconds=span * i / 4)):.1f}' "
+        f"y='{h - 8:g}' text-anchor='middle' font-size='10' fill='var(--muted)'"
+        f">{(t0 + datetime.timedelta(seconds=span * i / 4)).strftime(date_fmt)}</text>"
+        for i in range(5))
+    axis_lines = (
+        f"<line x1='{m_left:g}' y1='{m_top:g}' x2='{m_left:g}' y2='{base_y:g}' "
+        f"stroke='var(--border)' stroke-width='1'/>"
+        f"<line x1='{m_left:g}' y1='{base_y:g}' x2='{w - m_right:g}' y2='{base_y:g}' "
+        f"stroke='var(--border)' stroke-width='1'/>"
+        f"<line x1='{w - m_right:g}' y1='{m_top:g}' x2='{w - m_right:g}' y2='{base_y:g}' "
+        f"stroke='var(--border)' stroke-width='1'/>")
+
+    series = ""
+    if len(points) >= 2:
+        cas_pts = " ".join(f"{x_of(p['t']):.1f},{y_cas(p['cas']):.1f}" for p in points)
+        step_pts = " ".join(f"{x_of(p['t']):.1f},{y_step(p['step']):.1f}" for p in points)
+        area_d = (f"M{x_of(points[0]['t']):.1f},{base_y:.1f} "
+                  + " ".join(f"L{x_of(p['t']):.1f},{y_cas(p['cas']):.1f}" for p in points)
+                  + f" L{x_of(points[-1]['t']):.1f},{base_y:.1f} Z")
+        series = (
+            f"<path d='{area_d}' fill='var(--casualty)' fill-opacity='0.08'/>"
+            f"<polyline points='{cas_pts}' fill='none' stroke='var(--casualty)' "
+            f"stroke-width='2' stroke-linejoin='round'/>"
+            f"<polyline points='{step_pts}' fill='none' stroke='var(--stat-blue)' "
+            f"stroke-width='1.6' stroke-linejoin='round' stroke-dasharray='4 3'/>")
+
+    dots = []
+    for p in points:
+        title = (f"{p['t']:%Y/%m/%d %H:%M}\n累计伤亡 {p['cas']:,.0f}"
+                 f"\n累计步进 {p['step']:.2f}")
+        if p["source"]:
+            title += f"\n来源 {p['source']}"
+        dots.append(
+            f"<circle cx='{x_of(p['t']):.1f}' cy='{y_cas(p['cas']):.1f}' r='3' "
+            f"fill='var(--casualty)'><title>{_esc(title)}</title></circle>"
+            f"<circle cx='{x_of(p['t']):.1f}' cy='{y_step(p['step']):.1f}' r='2.4' "
+            f"fill='var(--stat-blue)'><title>{_esc(title)}</title></circle>")
+
+    legend = (
+        "<div class='evo-chart-legend'>"
+        "<span><span class='legend-swatch' style='background:var(--casualty)'></span>"
+        "累计伤亡（左轴，对数）</span>"
+        "<span><span class='legend-swatch' style='background:var(--stat-blue)'></span>"
+        "累计步进（右轴，取绝对值）</span></div>")
+    caption = ("<p class='chart-caption'>离线恢复（加载时结算）的增长按线性摊入"
+               "加载之前的离线区间，而非集中在加载当天；悬停数据点可查看来源。</p>")
+
+    svg = (f"<svg viewBox='0 0 {w:g} {h:g}' role='img' aria-label='伤亡与步进演化统计图'>"
+           f"{grid}{right_axis}{x_labels}{axis_lines}{series}{''.join(dots)}</svg>")
+    return f"<div class='evo-chart'>{legend}{svg}{caption}</div>"
+
+
 def _build_sizes_section(state: CharacterSnapshot) -> str:
-    """仅展示已解锁部位（身高恒显示）；MEASURED 无徽章，情报文本可展开。"""
+    """wiki 式紧凑表格：部位与尺寸一一对应；有解锁情报的部位以链接样式展开。"""
     unlocks = state.size_unlocks or {}
-    cards = []
+    pairs = []
     for part in ALL_PART_NAMES:
         if part not in state.body_parts:
             continue
@@ -381,19 +522,25 @@ def _build_sizes_section(state: CharacterSnapshot) -> str:
         val = state.body_parts.get(part)
         size_str = format_size(val, base_size=state.height)
         info = unlocks.get(part, "")
-        note = ""
-        if info and info != "MEASURED":
-            note = f"<div class='unlock-note'>{_esc(info)}</div>"
-        cards.append(
-            f"<details class='size-card'><summary>"
-            f"<span class='size-name'>{_esc(part)}</span>"
-            f"<span class='size-leader'></span>"
-            f"<span class='size-value'>{_esc(size_str)}</span>"
-            f"</summary>{note}</details>"
-        )
-    if not cards:
+        note = info if info and info != "MEASURED" else ""
+        pairs.append((part, size_str, note))
+    if not pairs:
         return "<p class='empty-hint'>暂无已解锁的身体尺寸。</p>"
-    return f"<div class='size-grid'>{''.join(cards)}</div>"
+    cells = []
+    for part, size_str, note in pairs:
+        if note:
+            name_html = (f"<details class='size-item'><summary>{_esc(part)}</summary>"
+                         f"<div class='unlock-note'>{_esc(note)}</div></details>")
+        else:
+            name_html = f"<span class='sz-plain'>{_esc(part)}</span>"
+        cells.append(f"<td class='sz-name'>{name_html}</td>"
+                     f"<td class='sz-val'>{_esc(size_str)}</td>")
+    rows = []
+    for i in range(0, len(cells), 4):
+        row = cells[i:i + 4]
+        row += ["<td></td><td></td>"] * ((4 - len(row)) // 2)
+        rows.append("<tr>" + "".join(row) + "</tr>")
+    return f"<table class='size-table'>{''.join(rows)}</table>"
 
 
 def _file_caption(path: str) -> tuple:
@@ -499,15 +646,16 @@ def _build_endings_section(state: CharacterSnapshot) -> str:
 
 _CSS = """
 :root{
-  --bg1:#F2EDE6; --bg2:#EAE2DA; --card:#FAF6EF; --card2:#F5F0E8;
-  --border:#DCD3CA; --border-soft:#E7E0D8;
-  --text:#3A392B; --muted:#A08D81; --soft:#8B7A60;
+  --bg1:#FAFAFA; --bg2:#E9E7E3; --card:#F8F7F4; --card2:#F1F0EC;
+  --border:#D5D2CC; --border-soft:#E2E0DB;
+  --text:#3A392B; --muted:#918C84; --soft:#7D776C;
   --title:#6B5F47; --gold:#5D4037; --gold-line:#B8860B; --gold-hi:#E8C56A;
-  --topbar-bg:rgba(88,80,60,.96); --topbar-text:#F9F3F2; --chip-bg:#F1EBE1;
+  --topbar-bg:rgba(80,78,72,.96); --topbar-text:#F9F3F2; --chip-bg:#EFEEE9;
   --stat-blue:#1976D2; --casualty:#C62828;
   --shadow:rgba(90,82,64,.07); --shadow-hi:rgba(90,82,64,.12);
   --shadow-deep:rgba(58,57,43,.10); --edge-hi:rgba(255,255,255,.5);
   --row-alt:rgba(139,122,96,.05);
+  --rank-tint:rgba(184,134,11,.05);
   --hero-veil:rgba(247,241,233,.8);
   --hero-grad1:#5D4037; --hero-grad2:#B8860B;
   --ln-quip-bg:rgba(106,27,182,.06); --ln-casualty-bg:rgba(183,28,28,.05);
@@ -518,15 +666,16 @@ _CSS = """
   --grain:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/><feComponentTransfer><feFuncA type='linear' slope='0.05' intercept='0'/></feComponentTransfer></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
 }
 html[data-theme="dark"]{
-  --bg1:#16181E; --bg2:#1D1F26; --card:#1B2028; --card2:#212730;
-  --border:#333944; --border-soft:#2A2F38;
-  --text:#E0E0E0; --muted:#9E9E9E; --soft:#BCAAA4;
+  --bg1:#1E1E22; --bg2:#202024; --card:#1D2024; --card2:#23262B;
+  --border:#37393E; --border-soft:#2C2E33;
+  --text:#E0E0E0; --muted:#9E9E9E; --soft:#B5B0A8;
   --title:#BCAAA4; --gold:#FFD54F; --gold-line:#8D6E63; --gold-hi:#FFD54F;
-  --topbar-bg:rgba(27,31,39,.94); --topbar-text:#F9F3F2; --chip-bg:#252A33;
+  --topbar-bg:rgba(28,29,32,.94); --topbar-text:#F9F3F2; --chip-bg:#26282D;
   --stat-blue:#42A5F5; --casualty:#EF5350;
   --shadow:rgba(0,0,0,.26); --shadow-hi:rgba(0,0,0,.38);
   --shadow-deep:rgba(0,0,0,.42); --edge-hi:rgba(255,255,255,.04);
   --row-alt:rgba(255,255,255,.03);
+  --rank-tint:rgba(255,213,79,.08);
   --hero-veil:rgba(22,24,30,.74);
   --hero-grad1:#FFD54F; --hero-grad2:#FFB74D;
   --ln-quip-bg:rgba(206,147,216,.10); --ln-casualty-bg:rgba(255,82,82,.08);
@@ -538,6 +687,17 @@ html[data-theme="dark"]{
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
+/* 概览/分析卡片的色组随身高对数分级（data-rank 由导出时按 log10(身高米) 计算） */
+html[data-rank="0"]{--hero-grad1:#01579B;--hero-grad2:#29B6F6;--rank-tint:rgba(2,119,189,.055)}
+html[data-rank="1"]{--hero-grad1:#1B5E20;--hero-grad2:#8BC34A;--rank-tint:rgba(27,94,32,.05)}
+html[data-rank="3"]{--hero-grad1:#BF360C;--hero-grad2:#FF9800;--rank-tint:rgba(191,54,12,.05)}
+html[data-rank="4"]{--hero-grad1:#7F0000;--hero-grad2:#E53935;--rank-tint:rgba(127,0,0,.05)}
+html[data-rank="5"]{--hero-grad1:#311B92;--hero-grad2:#AB47BC;--rank-tint:rgba(49,27,146,.055)}
+html[data-theme="dark"][data-rank="0"]{--hero-grad1:#4FC3F7;--hero-grad2:#B3E5FC;--rank-tint:rgba(79,195,247,.08)}
+html[data-theme="dark"][data-rank="1"]{--hero-grad1:#81C784;--hero-grad2:#C5E1A5;--rank-tint:rgba(129,199,132,.08)}
+html[data-theme="dark"][data-rank="3"]{--hero-grad1:#FF8A65;--hero-grad2:#FFCC80;--rank-tint:rgba(255,138,101,.08)}
+html[data-theme="dark"][data-rank="4"]{--hero-grad1:#EF5350;--hero-grad2:#FF8A80;--rank-tint:rgba(239,83,80,.09)}
+html[data-theme="dark"][data-rank="5"]{--hero-grad1:#B39DDB;--hero-grad2:#F48FB1;--rank-tint:rgba(179,157,219,.09)}
 body{margin:0;color:var(--text);
   font-family:"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;line-height:1.7;
   background:
@@ -564,14 +724,14 @@ html.theme-anim *,html.theme-anim *::before,html.theme-anim *::after{
   background:var(--topbar-bg);
   backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
   box-shadow:0 2px 14px var(--shadow-deep)}
-.topbar-inner{max-width:1440px;margin:0 auto;display:flex;align-items:center;gap:18px;
-  padding:15px 28px;flex-wrap:wrap;
-  transition:padding .28s ease}
-.logo{font-weight:700;font-size:17px;letter-spacing:1.5px;white-space:nowrap;
-  text-shadow:0 1px 2px rgba(0,0,0,.25);transition:font-size .28s ease}
+.topbar-inner{width:80%;max-width:none;margin:0 auto;display:flex;align-items:center;gap:18px;
+  height:46px;padding:0 28px;flex-wrap:wrap}
+.logo{font-weight:700;font-size:17px;letter-spacing:1px;white-space:nowrap;
+  text-shadow:0 1px 2px rgba(0,0,0,.25)}
 .topnav{display:flex;gap:2px;flex-wrap:wrap;flex:1}
 .topnav a{color:var(--topbar-text);opacity:.78;font-size:13.5px;padding:5px 13px;
-  border-radius:8px;transition:all .15s;position:relative}
+  border-radius:8px;position:relative;
+  transition:background .15s,transform .15s}
 .topnav a:hover{opacity:1;background:rgba(255,255,255,.13);transform:translateY(-1px)}
 .topnav a.active{opacity:1;background:rgba(255,255,255,.18);
   box-shadow:inset 0 -2px 0 var(--gold-hi)}
@@ -579,7 +739,8 @@ html.theme-anim *,html.theme-anim *::before,html.theme-anim *::after{
 .search-box input[type="search"]{flex:1;min-width:0;height:30px;
   background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.32);
   color:var(--topbar-text);border-radius:8px;padding:0 11px;font-size:13px;
-  outline:none;font-family:inherit;transition:background .15s,border-color .15s,height .28s ease}
+  outline:none;font-family:inherit;
+  transition:background .15s,border-color .15s}
 .search-box input[type="search"]::placeholder{color:rgba(249,243,242,.5)}
 .search-box input[type="search"]:focus{background:rgba(255,255,255,.18);
   border-color:rgba(255,255,255,.55)}
@@ -587,54 +748,44 @@ html.theme-anim *,html.theme-anim *::before,html.theme-anim *::after{
   font-variant-numeric:tabular-nums}
 .search-box button{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.35);
   color:var(--topbar-text);border-radius:6px;width:26px;height:26px;padding:0;cursor:pointer;
-  font-size:10px;line-height:1;transition:all .15s}
+  font-size:10px;line-height:1;
+  transition:background .15s}
 .search-box button:hover:not(:disabled){background:rgba(255,255,255,.18)}
 .search-box button:disabled{opacity:.35;cursor:default}
 #themeBtn{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.35);
   color:var(--topbar-text);border-radius:8px;padding:3px 11px;cursor:pointer;
-  font-size:13px;transition:all .15s}
+  font-size:13px;
+  transition:background .15s}
 #themeBtn:hover{background:rgba(255,255,255,.18)}
 .progress{position:absolute;left:0;bottom:-2px;height:2px;width:0;
   background:linear-gradient(90deg,var(--gold-line),var(--gold-hi));
   box-shadow:0 0 8px rgba(232,197,106,.65)}
 
-/* 顶栏自动折叠：向下滚动收窄，向上滚动或回到顶部恢复 */
-.topbar.collapsed .topbar-inner{padding:7px 28px}
-.topbar.collapsed .logo{font-size:13.5px}
-.topbar.collapsed .topnav a{font-size:12.5px;padding:3px 10px}
-.topbar.collapsed .search-box input[type="search"]{height:24px;font-size:12px}
-.topbar.collapsed #themeBtn{padding:1px 9px;font-size:12px}
-.topbar.collapsed .search-box button{width:22px;height:22px}
-
 /* ---------- 布局 ---------- */
-.layout{max-width:1440px;margin:26px auto 60px;padding:0 28px;display:grid;
-  grid-template-columns:360px minmax(0,1fr);gap:26px;align-items:start}
+.layout{width:80%;max-width:none;margin:26px auto 60px;padding:0 28px;display:grid;
+  grid-template-columns:280px minmax(0,1fr);gap:26px;align-items:start}
 @media(max-width:980px){.layout{grid-template-columns:1fr}
   .sidebar{position:static;max-width:440px;width:100%;margin:0 auto 6px}}
-.sidebar{position:sticky;top:96px}
+.sidebar{position:sticky;top:60px}
 main{min-width:0}
 
 /* ---------- 通用卡片 ---------- */
 .section,.infobox{background:var(--card);border:1px solid var(--border);
-  border-radius:16px;box-shadow:0 1px 2px var(--shadow)}
-.section{position:relative;padding:16px 24px;margin-bottom:14px;scroll-margin-top:88px}
-/* 各章节以背景色微调区分（阴影已弱化） */
-#analysis{background:linear-gradient(0deg,rgba(184,134,11,.05),rgba(184,134,11,.05)),var(--card)}
-#gallery{background:linear-gradient(0deg,rgba(96,125,139,.055),rgba(96,125,139,.055)),var(--card)}
-#sizes{background:linear-gradient(0deg,rgba(0,105,92,.045),rgba(0,105,92,.045)),var(--card)}
-#reports{background:linear-gradient(0deg,rgba(184,134,11,.065),rgba(184,134,11,.065)),var(--card)}
-#replays{background:linear-gradient(0deg,rgba(121,85,72,.055),rgba(121,85,72,.055)),var(--card)}
-#endings{background:linear-gradient(0deg,rgba(183,28,28,.04),rgba(183,28,28,.04)),var(--card)}
+  border-radius:6px;box-shadow:0 1px 2px var(--shadow)}
+.section{position:relative;padding:16px 24px;margin-bottom:14px;scroll-margin-top:60px}
+/* 各章节统一底色；仅分析卡片以身高对应的色组着色 */
+#analysis{background:linear-gradient(0deg,var(--rank-tint),var(--rank-tint)),var(--card)}
+#analysis h2::before{background:linear-gradient(180deg,var(--hero-grad2),var(--hero-grad1))}
 .section::before,.section::after{content:'';position:absolute;width:16px;height:16px;
   pointer-events:none;opacity:.45;border:0 solid var(--gold-line)}
 .section::before{top:9px;left:9px;border-top-width:2px;border-left-width:2px;
-  border-top-left-radius:9px}
+  border-top-left-radius:4px}
 .section::after{bottom:9px;right:9px;border-bottom-width:2px;border-right-width:2px;
-  border-bottom-right-radius:9px}
+  border-bottom-right-radius:4px}
 .section h2{margin:0 0 4px;font-size:16px;color:var(--title);display:flex;
   align-items:center;gap:9px;padding-bottom:7px;border-bottom:1px solid transparent;
   border-image:linear-gradient(90deg,var(--gold-line),rgba(184,134,11,0)) 1;
-  letter-spacing:1px}
+  letter-spacing:.5px}
 .section h2::before{content:'';flex:none;width:3px;height:15px;border-radius:2px;
   background:linear-gradient(180deg,var(--gold-line),var(--gold))}
 .h2-ico{font-size:14px;transform:translateY(1px)}
@@ -655,14 +806,14 @@ main{min-width:0}
 /* ---------- 侧栏信息框 ---------- */
 .infobox{padding:16px 16px 14px;overflow:hidden}
 .infobox-image{position:relative}
-.infobox-image img{width:100%;border-radius:11px;display:block;
+.infobox-image img{width:100%;border-radius:4px;display:block;
   box-shadow:0 1px 4px var(--shadow)}
-.infobox-image::after{content:'';position:absolute;inset:0;border-radius:11px;
+.infobox-image::after{content:'';position:absolute;inset:0;border-radius:4px;
   box-shadow:inset 0 0 0 1px rgba(255,255,255,.22);pointer-events:none}
 .infobox-image-date{text-align:center;font-size:11px;color:var(--muted);
   font-family:Consolas,monospace;margin-top:7px;letter-spacing:.5px}
 .infobox-caption{text-align:center;font-weight:700;font-size:17px;color:var(--title);
-  margin:10px 0 4px;letter-spacing:1px;position:relative;padding-bottom:9px}
+  margin:10px 0 4px;letter-spacing:.5px;position:relative;padding-bottom:9px}
 .infobox-caption::after{content:'';position:absolute;left:50%;bottom:0;transform:translateX(-50%);
   width:46px;height:2px;border-radius:1px;
   background:linear-gradient(90deg,transparent,var(--gold-line),transparent)}
@@ -688,19 +839,19 @@ html[data-theme="dark"] .hero-bg{opacity:.2}
 .hero-content{position:relative;padding:24px 30px 0;display:flex;
   align-items:center;gap:20px}
 .hero-avatar{flex:none;width:78px;height:78px;border-radius:50%;padding:3px;
-  background:linear-gradient(135deg,var(--gold-line),var(--hero-grad2) 75%);
+  background:linear-gradient(135deg,var(--hero-grad1),var(--hero-grad2));
   box-shadow:0 2px 8px var(--shadow-hi)}
 .hero-avatar img{width:100%;height:100%;object-fit:cover;border-radius:50%;
   display:block;border:2px solid var(--card)}
 .hero-id{min-width:0}
 .hero-content h2{font-size:26px;margin:0;border:none;padding:0;
-  letter-spacing:3px;line-height:1.25;
+  letter-spacing:1px;line-height:1.25;
   background:linear-gradient(115deg,var(--hero-grad1) 20%,var(--hero-grad2));
   -webkit-background-clip:text;background-clip:text;color:transparent}
 .hero-content h2::before{display:none}
 .hero-nick{color:var(--muted);font-size:13px;margin-top:4px}
-.hero-nick::before{content:'✦ ';color:var(--gold-line)}
-.hero-nick::after{content:' ✦';color:var(--gold-line)}
+.hero-nick::before{content:'✦ ';color:var(--hero-grad2)}
+.hero-nick::after{content:' ✦';color:var(--hero-grad2)}
 .hero-tags{margin-top:8px}
 /* 简介位于头像与名称右侧，不再单独占行 */
 .hero-intro{flex:1;min-width:240px;align-self:center;padding-left:20px;
@@ -711,8 +862,8 @@ html[data-theme="dark"] .hero-bg{opacity:.2}
 .hero-body{position:relative;padding:12px 30px 18px}
 
 /* ---------- 分析 ---------- */
-.ana-badge{display:inline-block;font-size:11px;font-weight:700;color:var(--gold);
-  border:1px solid var(--gold-line);border-radius:999px;padding:1px 10px;
+.ana-badge{display:inline-block;font-size:11px;font-weight:700;color:var(--hero-grad1);
+  border:1px solid var(--hero-grad2);border-radius:999px;padding:1px 10px;
   letter-spacing:2px;margin-right:10px;vertical-align:2px}
 .ana-char-name{font-size:16.5px;font-weight:700;color:var(--title)}
 .ana-desc{font-size:13.5px;color:var(--soft);margin-top:8px;max-width:72em}
@@ -736,14 +887,23 @@ html[data-theme="dark"] .stat-fill{filter:brightness(1.12)}
   text-shadow:0 1px 0 var(--edge-hi)}
 .stat-item.casualty .stat-name{color:var(--casualty)}
 
+/* ---------- 演化统计图 ---------- */
+.evo-chart{margin-top:14px;padding-top:14px;border-top:1px dashed var(--border-soft)}
+.evo-chart-legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;
+  color:var(--text);margin-bottom:6px}
+.legend-swatch{display:inline-block;width:10px;height:10px;border-radius:2px;
+  margin-right:5px;vertical-align:-1px}
+.evo-chart svg{width:100%;height:auto;display:block}
+.evo-chart .chart-caption{font-size:11px;color:var(--muted);margin:6px 0 0}
+
 /* ---------- 形象图 ---------- */
 .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
 .gallery figure{margin:0;background:var(--card2);border:1px solid var(--border-soft);
-  border-radius:12px;padding:9px;text-align:center;overflow:hidden;
+  border-radius:5px;padding:9px;text-align:center;overflow:hidden;
   transition:transform .18s,box-shadow .18s,border-color .18s}
 .gallery figure:hover{transform:translateY(-3px);border-color:var(--gold-line);
   box-shadow:0 3px 8px var(--shadow)}
-.img-wrap{position:relative;border-radius:8px;overflow:hidden}
+.img-wrap{position:relative;border-radius:3px;overflow:hidden}
 .img-wrap img{display:block;width:100%;transition:transform .35s ease;cursor:zoom-in}
 .gallery figure:hover .img-wrap img{transform:scale(1.045)}
 .img-wrap::after{content:'⤢';position:absolute;right:8px;bottom:8px;width:26px;height:26px;
@@ -761,7 +921,7 @@ html[data-theme="dark"] .stat-fill{filter:brightness(1.12)}
 .lightbox.open{opacity:1;pointer-events:auto}
 .lightbox figure{margin:0;max-width:min(92vw,1100px);display:flex;
   flex-direction:column;align-items:center;gap:12px}
-.lightbox img{max-width:100%;max-height:80vh;border-radius:10px;
+.lightbox img{max-width:100%;max-height:80vh;border-radius:5px;
   box-shadow:0 18px 60px rgba(0,0,0,.55);cursor:default}
 .lightbox figcaption{color:rgba(255,255,255,.85);font-size:13px;letter-spacing:.5px}
 .lb-btn{position:fixed;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.3);
@@ -773,35 +933,39 @@ html[data-theme="dark"] .stat-fill{filter:brightness(1.12)}
 .lb-prev{left:22px;top:50%;margin-top:-21px}
 .lb-next{right:22px;top:50%;margin-top:-21px}
 
-/* ---------- 身体尺寸 ---------- */
-.size-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
-.size-card{background:var(--card2);border:1px solid var(--border-soft);border-radius:12px;
-  padding:11px 18px;transition:border-color .15s,box-shadow .15s}
-.size-card:hover{border-color:var(--gold-line)}
-.size-card[open],.size-card.has-hit{border-color:var(--gold-line)}
-.size-card.has-hit{box-shadow:0 0 0 1px var(--gold-line),0 2px 6px var(--shadow)}
+/* ---------- 身体尺寸：wiki 式紧凑表格 ---------- */
+.size-table{width:100%;border-collapse:collapse;font-size:12px;line-height:1.5}
+.size-table tr:nth-child(even){background:var(--row-alt)}
+.size-table td{padding:2.5px 8px;border-bottom:1px solid var(--border-soft);
+  vertical-align:top}
+.size-table tr:last-child td{border-bottom:none}
+.size-table .sz-val{width:1%;white-space:nowrap;text-align:right;
+  font-family:Consolas,monospace;font-variant-numeric:tabular-nums}
+.size-item{display:inline}
+.size-item summary{display:inline;list-style:none;cursor:pointer;
+  color:var(--stat-blue);text-decoration:underline dotted rgba(25,118,210,.45);
+  text-underline-offset:2px}
+html[data-theme="dark"] .size-item summary{
+  text-decoration-color:rgba(66,165,245,.5)}
+.size-item summary::-webkit-details-marker{display:none}
+.size-item summary::marker{content:""}
+.size-item summary:hover{text-decoration:underline}
+.size-item[open] summary{font-weight:600}
+.size-item.has-hit{background:rgba(255,213,79,.30);border-radius:2px;
+  box-shadow:0 0 0 1px rgba(184,134,11,.35)}
+.unlock-note{display:block;font-size:11.5px;color:var(--muted);padding:3px 2px 1px;
+  white-space:pre-wrap}
 mark.search-hit{background:rgba(255,213,79,.55);color:inherit;border-radius:2px;
-  padding:0 1px;box-shadow:0 0 0 1px rgba(184,134,11,.35);scroll-margin-top:88px}
+  padding:0 1px;box-shadow:0 0 0 1px rgba(184,134,11,.35);scroll-margin-top:60px}
 mark.search-hit.current{background:#FFD54F;color:#3A392B;box-shadow:0 0 0 2px #B8860B}
-.size-card summary{cursor:pointer;list-style:none;display:flex;align-items:baseline;
-  gap:10px;font-size:14px}
-.size-card summary::-webkit-details-marker{display:none}
-.size-card summary::after{content:'▸';color:var(--muted);font-size:11px;
-  margin-left:2px;transition:transform .2s}
-.size-card[open] summary::after{transform:rotate(90deg)}
-.size-name{color:var(--soft);letter-spacing:1px}
-.size-leader{flex:1;min-width:14px;border-bottom:1px dotted var(--border)}
-.size-value{font-family:Consolas,monospace;font-weight:600;font-size:14.5px;
-  font-variant-numeric:tabular-nums}
-.unlock-note{font-size:12.5px;color:var(--muted);padding:8px 2px 4px;
-  border-top:1px dashed var(--border-soft);margin-top:9px;white-space:pre-wrap}
 
 /* ---------- 报告双栏阅读器 ---------- */
 .report-split{display:grid;grid-template-columns:200px minmax(0,1fr);gap:14px;
-  align-items:start}
-.report-rail{display:flex;flex-direction:column;gap:6px;position:sticky;top:96px}
+  height:clamp(420px,68vh,760px);align-items:stretch}
+.report-rail{display:flex;flex-direction:column;gap:6px;overflow-y:auto;
+  min-height:0;padding-right:2px}
 .report-entry{appearance:none;text-align:left;font-family:inherit;color:var(--text);
-  background:var(--chip-bg);border:1px solid var(--border-soft);border-radius:10px;
+  background:var(--chip-bg);border:1px solid var(--border-soft);border-radius:5px;
   padding:7px 12px;cursor:pointer;position:relative;
   transition:border-color .15s,background .15s,transform .15s}
 .report-entry:hover{border-color:var(--gold-line);transform:translateX(2px)}
@@ -814,36 +978,36 @@ mark.search-hit.current{background:#FFD54F;color:#3A392B;box-shadow:0 0 0 2px #B
 .report-entry.has-hit::after{content:'';position:absolute;top:9px;right:9px;width:7px;
   height:7px;border-radius:50%;background:var(--gold-hi);
   box-shadow:0 0 0 2px rgba(255,213,79,.35)}
-.report-panes{min-width:0}
+.report-panes{min-width:0;overflow-y:auto;min-height:0;padding-right:4px}
 .report-pane{display:none}
 .report-pane.active{display:block;animation:paneIn .25s ease}
 @keyframes paneIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
 .report-pane.has-hit{outline:1px dashed var(--gold-line);outline-offset:6px;border-radius:8px}
 
-/* 报告正文：背景近乎透明、排版紧凑 */
-.report-text{padding:6px 4px;white-space:pre-wrap;
-  font-family:"FangSong","STFangsong","FangSong_GB2312","SimSun",serif;font-size:14px;
-  line-height:1.85}
+/* 报告正文：排版紧凑 */
+.report-text{padding:4px 2px;white-space:pre-wrap;
+  font-family:"FangSong","STFangsong","FangSong_GB2312","SimSun",serif;font-size:12.5px;
+  line-height:1.55}
 .report-text span{display:inline}
 .report-text .ln-blank{display:inline}
-.ln-title{display:block;color:var(--ln-title);font-weight:700;font-size:17px;
-  text-align:center;letter-spacing:2px;padding:2px 0 4px}
-.ln-sep{display:block;color:var(--ln-sep);font-size:14px;text-align:center;
+.ln-title{display:block;color:var(--ln-title);font-weight:700;font-size:15px;
+  text-align:center;letter-spacing:2px;padding:2px 0 3px}
+.ln-sep{display:block;color:var(--ln-sep);font-size:12.5px;text-align:center;
   letter-spacing:2px;opacity:.85;overflow:hidden}
-.ln-intro{color:var(--ln-intro);font-size:14px}
-.ln-will{color:var(--ln-will);font-weight:700;font-size:14px}
-.ln-measure{color:var(--ln-measure);font-weight:700;font-size:14px}
-.ln-compare{color:var(--ln-compare);font-size:14px}
+.ln-intro{color:var(--ln-intro);font-size:12.5px}
+.ln-will{color:var(--ln-will);font-weight:700;font-size:12.5px}
+.ln-measure{color:var(--ln-measure);font-weight:700;font-size:12.5px}
+.ln-compare{color:var(--ln-compare);font-size:12.5px}
 .ln-quip{display:block;color:var(--ln-quip);font-style:italic;
-  font-family:Consolas,monospace;font-size:13.5px;background:var(--ln-quip-bg);
-  border-radius:8px;padding:2px 11px;margin:3px 0}
-.ln-casualty-sep{display:block;color:var(--muted);font-size:13.5px;overflow:hidden}
-.ln-casualty{display:block;color:var(--ln-casualty);font-weight:700;font-size:14px;
-  background:var(--ln-casualty-bg);border-radius:8px;padding:2px 11px;margin:3px 0}
-.ln-body{color:var(--ln-body);font-size:14px}
+  font-family:Consolas,monospace;font-size:12px;background:var(--ln-quip-bg);
+  border-radius:4px;padding:1px 8px;margin:2px 0}
+.ln-casualty-sep{display:block;color:var(--muted);font-size:12px;overflow:hidden}
+.ln-casualty{display:block;color:var(--ln-casualty);font-weight:700;font-size:12.5px;
+  border-radius:4px;padding:1px 8px;margin:2px 0}
+.ln-body{color:var(--ln-body);font-size:12.5px}
 
 /* ---------- 回放卡片 ---------- */
-.record-card{background:var(--card2);border:1px solid var(--border-soft);border-radius:12px;
+.record-card{background:var(--card2);border:1px solid var(--border-soft);border-radius:5px;
   margin-bottom:10px;overflow:hidden;transition:box-shadow .18s,border-color .18s}
 .record-card:hover{box-shadow:0 2px 5px var(--shadow)}
 .record-card>summary{cursor:pointer;padding:10px 16px;font-weight:600;font-size:13.5px;
@@ -897,7 +1061,7 @@ mark.search-hit.current{background:#FFD54F;color:#3A392B;box-shadow:0 0 0 2px #B
   font-family:Consolas,monospace;font-variant-numeric:tabular-nums}
 .rp-chip.chip-casualty{color:var(--casualty);border-color:var(--casualty)}
 .rp-trigger{border-left:3px solid var(--gold-line);background:var(--chip-bg);
-  border-radius:0 10px 10px 0;padding:10px 15px;box-shadow:0 1px 2px var(--shadow)}
+  border-radius:0 5px 5px 0;padding:10px 15px;box-shadow:0 1px 2px var(--shadow)}
 .rp-trigger-head{font-size:13px;font-weight:700;color:var(--gold)}
 .rp-trigger-tag{font-size:10.5px;font-weight:400;border:1px solid var(--gold-line);
   border-radius:999px;padding:0 8px;margin-left:8px;color:var(--gold)}
@@ -909,7 +1073,7 @@ mark.search-hit.current{background:#FFD54F;color:#3A392B;box-shadow:0 0 0 2px #B
 
 /* ---------- 结局 ---------- */
 .ending-card{position:relative;border:1px solid var(--border-soft);background:var(--card2);
-  border-radius:12px;padding:11px 16px 10px;margin-bottom:10px;overflow:hidden;
+  border-radius:5px;padding:11px 16px 10px;margin-bottom:10px;overflow:hidden;
   transition:transform .15s,box-shadow .15s,border-color .15s}
 .ending-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;
   background:linear-gradient(90deg,var(--gold-line),rgba(184,134,11,.12))}
@@ -928,7 +1092,7 @@ mark.search-hit.current{background:#FFD54F;color:#3A392B;box-shadow:0 0 0 2px #B
 #backTop.show{opacity:1;pointer-events:auto;transform:none}
 #backTop:hover{background:var(--gold-line);color:var(--card)}
 
-.footer{max-width:1440px;margin:0 auto 32px;padding:0 28px;font-size:11.5px;
+.footer{width:80%;max-width:none;margin:0 auto 32px;padding:0 28px;font-size:11.5px;
   color:var(--muted);text-align:center;letter-spacing:.5px}
 
 @media(prefers-reduced-motion:reduce){
@@ -939,6 +1103,8 @@ mark.search-hit.current{background:#FFD54F;color:#3A392B;box-shadow:0 0 0 2px #B
 @media print{
   .topbar,#backTop,.lightbox,.img-wrap::after,.report-rail{display:none!important}
   .report-pane{display:block!important}
+  .report-split{height:auto}
+  .report-panes{overflow:visible;height:auto}
   .layout{display:block;max-width:none}
   .section,.infobox{box-shadow:none;break-inside:avoid}
   .js main .section{opacity:1;transform:none}
@@ -984,12 +1150,11 @@ _JS = """
     sections.forEach(function(s){s.classList.add('in');});
   }
 
-  /* 滚动：进度条 / 顶栏折叠 / 目录高亮 / 返回顶部 */
+  /* 滚动：进度条 / 目录高亮 / 返回顶部 */
   var navLinks=[].slice.call(document.querySelectorAll('.topnav a'));
   var prog=document.getElementById('scrollProgress');
   var backTop=document.getElementById('backTop');
-  var topbar=document.querySelector('.topbar');
-  var ticking=false,lastY=-1;
+  var ticking=false;
   function onScroll(){
     if(ticking) return; ticking=true;
     requestAnimationFrame(function(){
@@ -998,14 +1163,9 @@ _JS = """
       var dh=document.documentElement.scrollHeight-window.innerHeight;
       if(prog) prog.style.width=(dh>0?(st/dh*100):0)+'%';
       if(backTop) backTop.classList.toggle('show',st>560);
-      if(topbar){
-        if(st>140&&st>lastY+4) topbar.classList.add('collapsed');
-        else if(st<lastY-4||st<80) topbar.classList.remove('collapsed');
-      }
-      lastY=st;
       var cur='';
       for(var i=0;i<sections.length;i++){
-        if(sections[i].getBoundingClientRect().top<=110) cur=sections[i].id;
+        if(sections[i].getBoundingClientRect().top<=80) cur=sections[i].id;
       }
       navLinks.forEach(function(a){
         a.classList.toggle('active',a.getAttribute('href')==='#'+cur);
@@ -1080,7 +1240,7 @@ _JS = """
   var nextBtn=document.getElementById('searchNext');
   if(!input) return;
   var hits=[],idx=-1,lastQ='',composing=false,timer=null;
-  var SCOPE='#sizes .size-card, #reports .report-text span, #replays .rp-item';
+  var SCOPE='#sizes .size-item, #reports .report-text span, #replays .rp-item';
 
   function clearHits(){
     document.querySelectorAll('mark.search-hit').forEach(function(m){
@@ -1151,7 +1311,7 @@ _JS = """
     document.querySelectorAll(SCOPE).forEach(function(el){
       if(el.textContent.toLowerCase().indexOf(qLow)===-1) return;
       wrapMatches(el,q);
-      var card=el.closest('.size-card,.record-card,.report-pane');
+      var card=el.closest('.size-item,.record-card,.report-pane');
       if(card) card.classList.add('has-hit');
     });
     hits=Array.prototype.slice.call(document.querySelectorAll('mark.search-hit'));
@@ -1192,6 +1352,17 @@ _JS = """
   });
 })();
 """
+
+
+def _rank_tier(height) -> int:
+    """按身高(米)的对数分级：0:<10m，1:<100m … 5:≥100km；用于概览/分析色组。"""
+    try:
+        h = float(height)
+    except (TypeError, ValueError):
+        return 2
+    if h <= 0:
+        return 0
+    return min(5, max(0, int(math.log10(h))))
 
 
 def export_character_mhtml(state: CharacterSnapshot, file_path: str,
@@ -1248,14 +1419,12 @@ def export_character_mhtml(state: CharacterSnapshot, file_path: str,
     nick_html = f"<div class='hero-nick'>{_esc(state.nick)}</div>" if state.nick else ""
 
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    nav_items = [("overview", "概览"), ("analysis", "分析"), ("gallery", "形象图"),
-                 ("sizes", "身体尺寸")]
+    nav_items = [("overview", "概览"), ("analysis", "分析"), ("endings", "重要结局"),
+                 ("sizes", "身体尺寸"), ("gallery", "形象图")]
     if report_files:
         nav_items.append(("reports", f"报告（{len(report_files)}）"))
     if replay_files:
         nav_items.append(("replays", f"副本回放（{len(replay_files)}）"))
-    if state.achieved_endings:
-        nav_items.append(("endings", "重要结局"))
     nav_html = "".join(f"<a href='#{anchor}'>{label}</a>" for anchor, label in nav_items)
 
     tags_hero = " ".join(f"<span class='tag'>{_esc(t)}</span>"
@@ -1263,7 +1432,7 @@ def export_character_mhtml(state: CharacterSnapshot, file_path: str,
     tags_html = f"<div class='hero-tags'>{tags_hero}</div>" if tags_hero else ""
 
     doc = f"""<!DOCTYPE html>
-<html lang="zh-CN" data-theme="light">
+<html lang="zh-CN" data-theme="light" data-rank="{_rank_tier(state.height)}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1305,19 +1474,24 @@ def export_character_mhtml(state: CharacterSnapshot, file_path: str,
     <div class="section-sub">性格倾向与探索态势</div>
     {_build_analysis_section(state)}
   </section>
-  <section class="section" id="gallery">
-    <h2><span class="h2-ico">🖼️</span>形象图</h2>
-    <div class="section-sub">共 {len(avatar_files)} 张 · 最新在前 · 点击图片可放大浏览</div>
-    <div class="gallery">{gallery_html}</div>
+  <section class="section" id="endings">
+    <h2><span class="h2-ico">🏁</span>重要结局</h2>
+    <div class="section-sub">角色达成过的重要结局索引</div>
+    {_build_endings_section(state)}
   </section>
   <section class="section" id="sizes">
     <h2><span class="h2-ico">📏</span>身体尺寸</h2>
-    <div class="section-sub">基准身高 {_esc(format_size(state.height))} · 点击条目查看解锁情报</div>
+    <div class="section-sub">基准身高 {_esc(format_size(state.height))} · 蓝色部位名可展开解锁情报</div>
     {_build_sizes_section(state)}
+  </section>
+  <section class="section" id="gallery">
+    <h2><span class="h2-ico">🖼️</span>形象图</h2>
+    <div class="section-sub">共 {len(avatar_files)} 张</div>
+    <div class="gallery">{gallery_html}</div>
   </section>
   <section class="section" id="reports">
     <h2><span class="h2-ico">📜</span>报告</h2>
-    <div class="section-sub">共 {len(report_files)} 份 · 左侧按时间切换阅读</div>
+    <div class="section-sub">共 {len(report_files)} 份</div>
     {_build_reports_section(report_files, show_casualties)}
   </section>
   <section class="section" id="replays">
@@ -1325,15 +1499,10 @@ def export_character_mhtml(state: CharacterSnapshot, file_path: str,
     <div class="section-sub">以文本形式回顾副本探索全程</div>
     {_build_replays_section(replay_files)}
   </section>
-  <section class="section" id="endings">
-    <h2><span class="h2-ico">🏁</span>重要结局</h2>
-    <div class="section-sub">角色达成过的重要结局索引</div>
-    {_build_endings_section(state)}
-  </section>
 </main>
 </div>
 <button type="button" id="backTop" title="回到顶部">↑</button>
-<footer class="footer">由 GiantessGenerator 导出于 {now_str} · 单文件档案，可直接分享</footer>
+<footer class="footer">由 GiantessWiki 导出于 {now_str}。可能含有未公开信息。</footer>
 <script>{_JS}</script>
 </body>
 </html>"""

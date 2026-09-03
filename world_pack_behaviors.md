@@ -103,13 +103,24 @@ def register(runtime):
 
 ### `StateService`
 
-| 方法 | 签名 | 说明 |
-|------|------|------|
-| `apply_negative_evolution` | `(state) -> None` | 行动点数不足时应用介入度 / 破坏性的负向演化。 |
-| `consume_action_points` | `(state, cost) -> bool` | 消耗行动点数；点数不足返回 `False`。 |
-| `calculate_recovery_increment` | `(state) -> int` | 计算每次恢复的行动点数增量。 |
-| `apply_step_decay` | `(state, fraction=0.1) -> None` | 对介入度 / 破坏性应用逐步回落。 |
-| `recover_action_points` | `(state) -> None` | 恢复行动点数（内部调用 `calculate_recovery_increment`，覆盖后者会自动生效）。 |
+角色状态（坐标 = 介入度/破坏性、行动点数）操作的统一入口。坐标方法分两层：
+纯数值运算（接受任意状态来源的数值，报告生成等字典流程可直接使用），
+以及快照级操作（传入 `CharacterSnapshot`，有变化时向演化表追加一行）。
+
+| 方法                         | 签名 | 说明                                                      |
+|----------------------------|------|---------------------------------------------------------|
+| `clamp_coordinates`        | `(intrusion, destruction) -> (float, float)` | 把介入度/破坏性夹取到统一的 0.5~4.5 大边界。以下的坐标操作方法都应用此大边界。            |
+| `shift_coordinates`        | `(intrusion, destruction, intrusion_delta, destruction_delta) -> (float, float)` | 按原始坐标增量平移坐标（副本结局增量等场景）。                                 |
+| `advance_coordinates`      | `(personality, intrusion, destruction, step) -> (float, float)` | 按故事步进推进坐标（坐标 += 步进 × 性格步长）；报告事件与负向演化共用。                 |
+| `apply_landmark_switch`    | `(personality, intrusion, destruction, to_frequency) -> (float, float)` | 地标切换（含首次匹配）时的敏感值调整：切换到 common 介入度 + 敏感值，切换到 unique 介入度 - 敏感值；破坏性达到 3 以上时，切换到 unique 破坏性 + 敏感值，切换到 common 破坏性 - 敏感值。 |
+| `decayed_coordinates`      | `(personality, intrusion, destruction, fraction) -> (float, float)` | 步进衰减的纯计算：仅当坐标越过性格边界（初始值 - 0.5 × 性格步长）时向边界回落 fraction 个步长。 |
+| `apply_negative_evolution` | `(state) -> None` | 行动点数不足（<50）时应用负向演化：步进取 -1 - 0.5 × 性格敏感值；有变化时向演化表追加一行（步进取本次负向步进）。 |
+| `apply_step_decay`         | `(state, fraction=0.1) -> None` | 步进衰减（角色面板逗留每分钟 fraction=0.1），有变化时向演化表追加一行。              |
+| `recover_evolution`        | `(state, now=None) -> None` | 离线恢复：行动点按分钟恢复、坐标按分钟衰减，宽限后按日间步进结算伤亡；有变化时追加演化表一行。         |
+| `consume_action_points`    | `(state, cost) -> bool` | 消耗行动点数；点数不足返回 `False`。                                  |
+| `receive_action_points`    | `(state, amount) -> int` | 自然回复行动点数（离线恢复、角色面板在线恢复），夹取到 0~100，返回实际变化量。 |
+| `refund_action_points`     | `(state, amount) -> int` | 返还行动点数（副本结算、报告解锁返还等），不设 100 上限，返回实际变化量。 |
+| `recover_action_points`    | `(state) -> None` | 在角色面板逗留时，根据性格恢复行动点数（内部调用 `receive_action_points`，覆盖前者会自动生效）。 |
 
 ### `logic`（模块函数与常量）
 

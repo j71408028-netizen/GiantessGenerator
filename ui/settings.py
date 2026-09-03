@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from persistence.quip_repo import QuipRepo
 
 from logic import ALL_PART_NAMES, normalize_blocked_words
+from address_model import world_of
 from persistence import PresetRepo, PersonalityRepo
 from persistence.name_repo import NameRepo, DEFAULT_NAME_TABLE
 from persistence.world_pack import list_behavior_packs
@@ -1105,20 +1106,29 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         for part, var in self.parts_checkboxes.items():
             var.set(part in selected)
 
-    def _sync_landmark_styles(self):
+    def _sync_landmark_styles(self, filter_world=None):
         styles = self.landmark_repo.get_styles()
         display_items = []
+        kept = []
         for style in styles:
+            reg_world = world_of(self.landmark_repo.load_style_address(style))
+            if filter_world and reg_world and reg_world != filter_world:
+                continue  # 同一世界观自动筛选：隐藏其它世界观的地标风格
             landmarks = self.landmark_repo.load(style)
             display_items.append(f"{style} ({len(landmarks)})")
-        selected_indices = [i for i, s in enumerate(styles) if s in self.selected_styles]
+            kept.append(style)
+        selected_indices = [i for i, s in enumerate(kept) if s in self.selected_styles]
         self.landmark_selector.sync_items(display_items, selected_indices)
 
-    def _sync_quip_styles(self):
+    def _sync_quip_styles(self, filter_world=None):
         styles = self.quip_repo.get_styles()
         size_order = ["small", "medium", "large", "huge", "colossal"]
         display_items = []
+        kept = []
         for style in styles:
+            reg_world = world_of(self.quip_repo.load_style_address(style))
+            if filter_world and reg_world and reg_world != filter_world:
+                continue  # 同一世界观自动筛选：隐藏其它世界观的描述风格
             quips = self.quip_repo.load(style)
             counts = []
             for size in size_order:
@@ -1126,18 +1136,77 @@ class SettingsPanel(ctk.CTkScrollableFrame):
                 total = sum(len(qlist) for qlist in matrix.values())
                 counts.append(str(total))
             display_items.append(f"{style} ({', '.join(counts)})")
-        selected_indices = [i for i, s in enumerate(styles) if s in self.selected_quip_styles]
+            kept.append(style)
+        selected_indices = [i for i, s in enumerate(kept) if s in self.selected_quip_styles]
         self.quip_selector.sync_items(display_items, selected_indices)
 
-    def _on_landmark_selection_changed(self):
-        self.selected_styles = self.landmark_selector.get_selected_raw_names()
+    def _lock_world_from_selection(self) -> Optional[str]:
+        """当前选中风格共同锁定的世界观（先地标风格后描述风格）；未注册返回 None。"""
+        for s in self.selected_styles:
+            w = world_of(self.landmark_repo.load_style_address(s))
+            if w:
+                return w
+        for s in self.selected_quip_styles:
+            w = world_of(self.quip_repo.load_style_address(s))
+            if w:
+                return w
+        return None
+
+    def _apply_world_lock(self, forced: Optional[str] = None):
+        """同一世界观互斥：把两栏风格列表自动筛选到同一个世界观，剔除混选。
+
+        forced：用户本次新点选的风格带世界观时，以该世界观为准切换（自动筛选）。
+        """
+        lock = forced if forced is not None else self._lock_world_from_selection()
+        # 剔除与锁定世界观不一致的已选风格（未注册风格不限制）
+        def _filter_for_world(names, repo):
+            out = []
+            for s in names:
+                w = world_of(repo.load_style_address(s))
+                if not w or (lock is not None and w == lock):
+                    out.append(s)
+            return out
+
+        self.selected_styles = _filter_for_world(self.selected_styles, self.landmark_repo)
+        self.selected_quip_styles = _filter_for_world(self.selected_quip_styles, self.quip_repo)
         if not self.selected_styles:
             self.selected_styles = ["ChineseMix"]
+        self._sync_landmark_styles(lock)
+        self._sync_quip_styles(lock)
+        # 同步后以实际可见的选中项为准
+        self.selected_styles = self.landmark_selector.get_selected_raw_names() or self.selected_styles
+        self.selected_quip_styles = self.quip_selector.get_selected_raw_names() or self.selected_quip_styles
         self.on_styles_changed()
 
+    def _on_landmark_selection_changed(self):
+        prev = list(self.selected_styles)
+        names = self.landmark_selector.get_selected_raw_names()
+        if not names:
+            names = ["ChineseMix"]
+        forced = None
+        for n in names:
+            if n in prev:
+                continue
+            w = world_of(self.landmark_repo.load_style_address(n))
+            if w:
+                forced = w
+                break
+        self.selected_styles = names
+        self._apply_world_lock(forced)
+
     def _on_quip_selection_changed(self):
-        self.selected_quip_styles = self.quip_selector.get_selected_raw_names()
-        self.on_styles_changed()
+        prev = list(self.selected_quip_styles)
+        names = self.quip_selector.get_selected_raw_names()
+        forced = None
+        for n in names:
+            if n in prev:
+                continue
+            w = world_of(self.quip_repo.load_style_address(n))
+            if w:
+                forced = w
+                break
+        self.selected_quip_styles = names
+        self._apply_world_lock(forced)
 
     # ───────────────── 保存与返回 ─────────────────────
     def _save_and_return(self):

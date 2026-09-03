@@ -11,6 +11,8 @@ from services import get_challenge_packs, import_landmark_challenge_pack
 from ui.common.dialogs import BaseDialog
 from ui.common.managers import CardManager
 from ui.common.widgets import ClickableCard, CTkScrollableDropdownFrame
+from ui.common.address_dlg import AddressTextDialog
+from address_model import format_addr_verbose
 from ui.common.theme import (
     BASE, HOVER, BORDER_ALT, TEXT, SOFT,
     PNL_BG, HOVER_ALT, MENU_HOVER, LINK_BLUE,
@@ -98,6 +100,31 @@ class LandmarkCardManager(CardManager):
                      "border_color": ERR_STRONG}
         ctk.CTkButton(parent, text="删除", width=80, command=self.delete_style,
                        **_btn_spec, **_del_spec).pack(side='left', padx=2)
+        # 风格注册地址：世界观 + 该风格注册的若干上级级
+        ctk.CTkButton(parent, text="📍地址", width=62, command=self._edit_style_address,
+                       **_btn_spec, **_btn_muted).pack(side='left', padx=2)
+
+    def _edit_style_address(self):
+        style = self._get_current_style()
+        if not style:
+            return
+        current = self.landmark_repo.load_style_address(style)
+        dlg = AddressTextDialog(
+            self, "地标风格注册地址",
+            description=(
+                "注册该地标风格所在的地址（仅注册最上面的若干级，世界观必填）。\n"
+                "当前风格：" + style
+            ),
+            initial=current)
+        if dlg.result is not None:
+            self.landmark_repo.save_style_address(style, dlg.result)
+            if dlg.result:
+                ui.common.dialogs.showinfo(
+                    "已保存",
+                    f"已保存风格注册地址：{format_addr_verbose(dlg.result)}。")
+            else:
+                ui.common.dialogs.showinfo(
+                    "已保存", "已清除风格注册地址（该风格地标不参与地址规则）。")
 
     def _get_challenge_packs_with_keys(self):
         packs = get_challenge_packs(self._settings_repo)
@@ -357,7 +384,8 @@ class LandmarkCardManager(CardManager):
                 size=dlg.result["size"],
                 dimension=dlg.result["dimension"],
                 frequency=dlg.result["frequency"],
-                horizontal_type=dlg.result.get("horizontal_type")
+                horizontal_type=dlg.result.get("horizontal_type"),
+                address=dlg.result.get("address", ""),
             )
             self.all_items.append(new_item)
             self.save_items(self.all_items)
@@ -374,6 +402,7 @@ class LandmarkCardManager(CardManager):
             item.dimension = dlg.result["dimension"]
             item.frequency = dlg.result["frequency"]
             item.horizontal_type = dlg.result.get("horizontal_type")
+            item.address = dlg.result.get("address", "")
             self.save_items(self.all_items)
             if self.current_view == "second":
                 self.show_second_view(self.current_category)
@@ -414,7 +443,7 @@ class LandmarkDialog(BaseDialog):
         self.grab_set()
 
         self._create_widgets()
-        self.geometry("368x207")
+        self.geometry("368x330")
         self._center_dialog(parent)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -466,9 +495,21 @@ class LandmarkDialog(BaseDialog):
         ctk.CTkRadioButton(freq_frame, text="均值", variable=self.frequency_var, value="common",
                            font=self.UI_FONT).pack(side='left', padx=5)
 
+        # 独特地标注册地址（补在风格注册级别之下的剩余级别，可选）
+        self.address_var = tk.StringVar(value=self.landmark.address if self.landmark else "")
+        addr_hint = "地址(可选):"
+        ctk.CTkLabel(self, text=addr_hint, font=self.UI_FONT).grid(
+            row=4, column=0, sticky='w', pady=(4, 6), padx=(20, 5))
+        addr_entry = ctk.CTkEntry(self, textvariable=self.address_var, width=210, height=28,
+                                  font=self.UI_FONT)
+        addr_entry.grid(row=4, column=1, pady=(4, 6), padx=5)
+        ctk.CTkLabel(self, text="风格已注册时填剩余级（如 12-0），未注册时填完整地址（含世界观）",
+                     font=ui_fonts.ui_font(9), text_color=SOFT).grid(
+            row=5, column=1, sticky='w', pady=(0, 4), padx=5)
+
         # 确定/取消按钮
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.grid(row=4, column=0, columnspan=2, pady=15)
+        btn_frame.grid(row=6, column=0, columnspan=2, pady=(12, 15))
         ctk.CTkButton(btn_frame, text="确定", command=self.ok, width=80,
                       height=28, font=self.UI_FONT).pack(side='left', padx=(0,7))
         ctk.CTkButton(btn_frame, text="取消", command=self._on_close, width=80,
@@ -509,7 +550,8 @@ class LandmarkDialog(BaseDialog):
             "size": float(self.size_var.get()),
             "dimension": dimension,
             "frequency": self.frequency_var.get(),
-            "horizontal_type": horizontal_type
+            "horizontal_type": horizontal_type,
+            "address": self.address_var.get().strip(),
         }
         self._on_close()
 

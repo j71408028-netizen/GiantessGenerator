@@ -4,7 +4,9 @@
 
     world.json                  # 清单（唯一必需文件）
     landmarks/<style>.json      # 地标风格
+    landmarks/<style>.addr.json # （可选）地标风格注册地址（世界观 + 风格注册的若干级）
     quips/<style>.json          # 描述风格
+    quips/<style>.addr.json     # （可选）描述风格注册地址
     presets/<table>.csv         # 身材表
     personalities/<table>.csv   # 性格表
     dungeons/<id>/config.json   # 副本方案

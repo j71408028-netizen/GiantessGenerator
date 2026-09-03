@@ -6,6 +6,8 @@ from models import Landmark
 
 
 DEFAULT_LANDMARK_STYLE = "ChineseMix"
+# 风格“注册地址”companion 文件后缀（记录世界观及风格注册的若干级）
+ADDR_SUFFIX = ".addr.json"
 
 
 class LandmarkRepo:
@@ -33,7 +35,7 @@ class LandmarkRepo:
         read_dir = self._read_dir()
         if os.path.exists(read_dir):
             for f in os.listdir(read_dir):
-                if f.endswith(".json"):
+                if f.endswith(".json") and not f.endswith(ADDR_SUFFIX):
                     styles.append(f[:-5])
         if not styles and read_dir == self._free_dir:
             self._create_defaults()
@@ -61,6 +63,31 @@ class LandmarkRepo:
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump([asdict(l) for l in landmarks], f, ensure_ascii=False, indent=2)
 
+    # ---------- 风格注册地址（companion 文件） ----------
+    def addr_path(self, style_name: str) -> str:
+        return os.path.join(self._free_dir, f"{style_name}{ADDR_SUFFIX}")
+
+    def load_style_address(self, style_name: str) -> str:
+        """读取风格注册地址文本（世界观 + 该风格注册的若干上级级）。空 = 未注册。"""
+        read_dir = self._read_dir()
+        path = os.path.join(read_dir, f"{style_name}{ADDR_SUFFIX}")
+        if not os.path.exists(path):
+            return ""
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception:
+            return ""
+        return data.get("address", "") if isinstance(data, dict) else ""
+
+    def save_style_address(self, style_name: str, address_text: str):
+        with open(self.addr_path(style_name), 'w', encoding='utf-8') as f:
+            json.dump({"address": address_text or ""}, f, ensure_ascii=False, indent=2)
+
+    def load_style_registers(self, style_names: list) -> dict:
+        """{风格名: 注册地址文本}。"""
+        return {s: self.load_style_address(s) for s in (style_names or [])}
+
     def create_style(self, style_name: str, copy_from: str = None):
         if style_name in self.get_styles():
             raise ValueError(f"风格 '{style_name}' 已存在")
@@ -73,6 +100,9 @@ class LandmarkRepo:
                     json.dump(data, df, ensure_ascii=False, indent=2)
             else:
                 self.save(style_name, [])
+            src_addr = self.load_style_address(copy_from)
+            if src_addr:
+                self.save_style_address(style_name, src_addr)
         else:
             self.save(style_name, [])
 
@@ -80,6 +110,9 @@ class LandmarkRepo:
         filepath = self._free_filepath(style_name)
         if os.path.exists(filepath):
             os.remove(filepath)
+        addr = self.addr_path(style_name)
+        if os.path.exists(addr):
+            os.remove(addr)
 
     def rename_style(self, old_name: str, new_name: str):
         if new_name in self.get_styles():
@@ -88,6 +121,9 @@ class LandmarkRepo:
         new_path = self._free_filepath(new_name)
         if os.path.exists(old_path):
             os.rename(old_path, new_path)
+        old_addr = self.addr_path(old_name)
+        if os.path.exists(old_addr):
+            os.rename(old_addr, self.addr_path(new_name))
 
     def _filepath(self, style_name: str) -> str:
         return os.path.join(self._read_dir(), f"{style_name}.json")

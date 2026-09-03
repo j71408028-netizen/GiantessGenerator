@@ -23,6 +23,10 @@ from services import build_detail_pools
 from services.creation_service import CreationService
 from services.news_service import DEFAULT_NEWS_TABLE, NewsService
 from services.state_service import StateService
+from address_model import (
+    resolve_full_address, world_of, depth_of, distance_m, touches,
+    cell_width_m, split_address, compose,
+)
 
 
 class ExplorationContext:
@@ -62,7 +66,12 @@ class ExplorationContext:
         )
 
         # ---------- 2. 加载合并数据 ----------
-        self.merged_landmarks = landmark_repo.load_merged(self.selected_styles)
+        self.merged_landmarks = []
+        self._landmark_styles = {}
+        for _style in self.selected_styles:
+            for _lm in landmark_repo.load(_style):
+                self.merged_landmarks.append(_lm)
+                self._landmark_styles[id(_lm)] = _style
         self.quips = quip_repo.load_merged(self.selected_quip_styles)
         self.detail_pools = build_detail_pools(self.quips)
 
@@ -93,7 +102,12 @@ class ExplorationContext:
         return filtered if filtered else [default]
 
     def reload_merged_data(self):
-        self.merged_landmarks = self.landmark_repo.load_merged(self.selected_styles)
+        self.merged_landmarks = []
+        self._landmark_styles = {}
+        for _style in self.selected_styles:
+            for _lm in self.landmark_repo.load(_style):
+                self.merged_landmarks.append(_lm)
+                self._landmark_styles[id(_lm)] = _style
         self.quips = self.quip_repo.load_merged(self.selected_quip_styles)
         self.detail_pools = build_detail_pools(self.quips)
 
@@ -126,7 +140,16 @@ class ExplorationContext:
                                       selected_styles: List[str],
                                       selected_quip_styles: List[str],
                                       consume_points: bool = False,
-                                      state_service=None) -> Optional[ReportData]:
+                                      state_service=None,
+                                      resolve_stuck=None) -> Optional[ReportData]:
+        """生成报告。
+
+        resolve_stuck：地址系统“无路可走”（no_reachable / all_damaged /
+        world_mismatch）时的决策回调。回调签名 (state, stuck, ctx) -> dict 或 None：
+          - 返回 {"kind": "address", "address": 完整地址}：角色移动到该地址；
+          - 返回 {"kind": "world", "address": 完整地址}：角色切换到该世界观地址；
+          - 返回 None：角色拒绝切换 → 进入负向演化并取消本次报告。
+        """
         if isinstance(source, CharacterSnapshot):
             state = source
             personality = state.personality
@@ -157,36 +180,62 @@ class ExplorationContext:
                 "birthday": state.birthday,
                 "uploaded_image": self.character_repo.get_avatar_abspath(state.giantess_id, state.avatar_path) or None,
                 "multiplier": state.height / state.original_height if state.original_height > 0 else 1.0,
+                "landmark_durability": state.landmark_durability.copy(),
+                "position": state.position or "",
             }
             if consume_points:
                 self.character_repo.save(state)
+
+            report_data = None
+            for _attempt in range(5):
+                report_data = self._generate_report_data(core, selected_quip_styles)
+                if report_data is None or not report_data.get("stuck"):
+                    break
+                stuck = report_data.get("stuck")
+                decision = resolve_stuck(state, stuck, self) if resolve_stuck else None
+                if decision is None:
+                    # 拒绝切换 → 负向演化并取消报告
+                    svc.apply_negative_evolution(state)
+                    self.character_repo.save(state)
+                    return None
+                core["position"] = decision.get("address") or core.get("position", "")
+            if report_data is None or report_data.get("stuck"):
+                return None
         else:
             core = source.copy()
             if "base_intrusion" not in core:
                 core["base_intrusion"] = core["personality_obj"].init_intrusion
             if "base_destruction" not in core:
                 core["base_destruction"] = core["personality_obj"].init_destruction
-
-        report_data = self._generate_report_data(core, selected_quip_styles)
-        if report_data is None:
-            return None
+            if "position" not in core:
+                core["position"] = ""
+            report_data = self._generate_report_data(core, selected_quip_styles)
+            if report_data is None or report_data.get("stuck"):
+                return None
 
         if isinstance(source, CharacterSnapshot):
             state = source
             refund = self._apply_size_unlocks_from_report(state, report_data)
             if consume_points and refund > 0:
-                state.action_points = min(100, state.action_points + refund)
+                self.state_service.refund_action_points(state, refund)
                 print(f"✨ 解锁了{refund // 3}个部位尺寸描述，返还{refund}行动点数。")
 
-            state.total_casualties += report_data["total_casualties"]
-            cumul = state.total_casualties
-            state.casualties_evolution.append(cumul)
+            intrusion_after = state.intrusion
             if personality.init_intrusion != 0:
-                state.intrusion = report_data["curr_intrusion"]
+                intrusion_after = report_data["curr_intrusion"]
+            destruction_after = state.destruction
             if personality.init_destruction != 0:
-                state.destruction = report_data["curr_destruction"]
-            state.intrusion_evolution.append(state.intrusion)
-            state.destruction_evolution.append(state.destruction)
+                destruction_after = report_data["curr_destruction"]
+            # 本次报告记为一行完整演化：步进取报告内各事件步进之和
+            step = sum(qr.get("step", 0.0) for qr in report_data.get("quip_results", []) or [])
+            state.record_change(step=step, intrusion=intrusion_after,
+                                destruction=destruction_after,
+                                casualties=state.total_casualties + report_data["total_casualties"],
+                                source="report_from_core_or_character")
+            state.landmark_durability = report_data.get("landmark_durability", {})
+            new_position = report_data.get("position") or ""
+            if new_position and new_position != (state.position or ""):
+                state.position = new_position
             self.character_repo.save(state)
 
         return ReportData(
@@ -216,7 +265,194 @@ class ExplorationContext:
             casualty_breakdown=report_data["quip_results"],
             curr_intrusion=report_data["curr_intrusion"],
             curr_destruction=report_data["curr_destruction"],
+            position=report_data.get("position", ""),
         )
+
+    def stuck_options(self, state: CharacterSnapshot, stuck: dict) -> dict:
+        """无路可走时可供角色选择的目标：同一世界观内的地标地址，以及可选世界观。"""
+        registers = self.landmark_repo.load_style_registers(self.selected_styles)
+        durability = state.landmark_durability or {}
+        seen = {}
+        for lm in self.merged_landmarks:
+            if lm.frequency != "unique":
+                continue
+            # 耐久低于 0.5 的独特地标已不适合作落脚点
+            if durability.get(lm.name, 1.0) < 0.5:
+                continue
+            addr = self._landmark_full_address(lm, registers)
+            if addr and addr not in seen:
+                seen[addr] = lm.name
+        reg_worlds = sorted({world_of(r) for r in registers.values() if world_of(r)})
+        worlds = stuck.get("worlds") or reg_worlds
+        return {
+            "stuck": stuck,
+            "addresses": [{"address": a, "name": n} for a, n in seen.items()],
+            "worlds": worlds,
+        }
+
+    # ==================== 注册地址系统：规划与筛选 ====================
+
+    def _landmark_full_address(self, landmark, registers=None) -> str:
+        """组合风格注册地址与地标地址为完整地址。无注册返回 ''。"""
+        style = self._landmark_styles.get(id(landmark), "")
+        reg = ""
+        if style:
+            reg = (registers or {}).get(style, "")
+            if reg is None:
+                reg = self.landmark_repo.load_style_address(style)
+        return resolve_full_address(reg, getattr(landmark, "address", "") or "")
+
+    @staticmethod
+    def _durable_ok(cand, durability, engaged: bool) -> bool:
+        lm = cand["landmark"]
+        if lm.frequency != "unique":
+            return True
+        value = durability.get(lm.name, 1.0)
+        return value >= (0.5 if engaged else 0.0)
+
+    def _quip_allowed_styles(self, landmark_addr_text: str, quip_registers: dict):
+        """某条地标对比可衔接的描述风格：地址为空（未注册）的风格，或与其距离为 0 的风格。
+
+        返回 None 表示不限（地标本身无地址 / 旧内容兼容）。
+        """
+        if not landmark_addr_text:
+            return None
+        allowed = []
+        for style, reg in quip_registers.items():
+            reg = (reg or "").strip()
+            if not reg or touches(reg, landmark_addr_text):
+                allowed.append(style)
+        return allowed
+
+    @staticmethod
+    def _prune_quips_by_styles(quips_working: dict, allowed) -> None:
+        """把描述池中不属于 allowed 风格的事件就地移除（allowed=None 不限制）。"""
+        if allowed is None:
+            return
+        allowed_set = set(allowed)
+        for size_cat, matrix in quips_working.items():
+            for coord, quip_list in list(matrix.items()):
+                kept = [q for q in quip_list
+                        if isinstance(q, dict) and q.get("style", "") in allowed_set]
+                if kept:
+                    matrix[coord] = kept
+                else:
+                    matrix.pop(coord, None)
+
+    def _shift_position_cell(self, position_text: str, reach: float) -> str:
+        """按“身高10倍/地址规模”概率被触发后：把位置末位更新到同详细程度的其它单元。"""
+        parts = split_address(position_text)
+        if len(parts) <= 1 or not parts[-1].isdigit():
+            return position_text
+        last = parts[-1]
+        exponent = int(last[-1])
+        idx = int(last[:-1]) if len(last) > 1 else 0
+        cell = max(1.0, cell_width_m(position_text))
+        spread = max(1, int(reach / cell) if reach else 1)
+        new_idx = max(0, idx + random.randint(-spread, spread))
+        new_last = (str(new_idx) if new_idx else "") + str(exponent)
+        parts[-1] = new_last
+        return compose(parts[0], *parts[1:])
+
+    def _plan_address_comparisons(self, candidates, position, height, skip_base_prob,
+                                  durability):
+        """地址规则规划：返回 dict(engaged, stuck, position, comparisons)。
+
+        首地标锚定（无位置时不受距离限制），随后只取与角色位置距离
+        < 10×身高 的地标地址。全部地标都够不着 / 范围内独特地标耐久
+        均 <0.5 时给出 stuck 原因，由调用方决定切换地址 / 世界观或放弃。
+        未注册地址的内容（含旧数据）保持原行为。
+        """
+        registers = self.landmark_repo.load_style_registers(self.selected_styles)
+
+        def cand_addr(cand) -> str:
+            lm = cand["landmark"]
+            if lm.frequency != "unique":
+                return ""
+            return self._landmark_full_address(lm, registers)
+
+        # engaged：当前选中风格中确有可锚定（带完整地址）的独特地标候选
+        addressable = [c for c in candidates if cand_addr(c)]
+        engaged = bool(addressable)
+        limit = int(self.settings.get("comparison_count", 5) or 5)
+        if not engaged:
+            chosen = [c for c in candidates
+                      if self._durable_ok(c, durability, engaged=False)][:limit]
+            return {"engaged": False, "stuck": None, "position": position or "",
+                    "comparisons": chosen}
+
+        reg_worlds = sorted({world_of(r) for r in registers.values() if world_of(r)})
+        pos_world = world_of(position)
+        if position and pos_world and reg_worlds and pos_world not in reg_worlds:
+            stuck = {"reason": "world_mismatch", "current_world": pos_world,
+                     "worlds": reg_worlds}
+            return {"engaged": True, "stuck": stuck, "position": position,
+                    "comparisons": []}
+
+        # 可用（耐久满足）候选
+        usable = [c for c in candidates if self._durable_ok(c, durability, engaged=True)]
+        usable_addrs = [c for c in usable if cand_addr(c)]
+
+        reach = 10.0 * height
+        scan_radius = 50.0 * max(0.0, skip_base_prob or 0.0) * height
+
+        if position and pos_world and (not reg_worlds or pos_world in reg_worlds):
+            pos_now = position
+            pick_order = usable
+        else:
+            # 新角色尚无位置：首个地标不限地址，取排序中第一个可用“带地址”地标锚定
+            if not usable_addrs:
+                # 独特地标都未注册或全部耐久不足：退回旧行为
+                chosen = [c for c in candidates
+                          if self._durable_ok(c, durability, engaged=False)][:limit]
+                return {"engaged": False, "stuck": None, "position": position or "",
+                        "comparisons": chosen}
+            anchor = usable_addrs[0]
+            pos_now = cand_addr(anchor)
+            pick_order = [anchor] + [c for c in usable if c is not anchor]
+
+        chosen = []
+        for cand in pick_order:
+            if len(chosen) >= limit:
+                break
+            addr = cand_addr(cand)
+            if addr and pos_now:
+                d = distance_m(pos_now, addr)
+                if d is None or d >= reach:
+                    continue
+            chosen.append(cand)
+            # 抵达/路过地标后更新角色位置：
+            # - 地标地址比当前位置更细或同级 → 立即把位置更新到该地标地址；
+            # - 地标地址比当前位置更粗（只注册到上级区域）→ 以“身高10倍/地址规模”
+            #   概率把位置末位更新到同一详细程度的其它可用单元（下次选取前生效）。
+            if engaged and addr and pos_now:
+                if depth_of(addr) >= depth_of(pos_now):
+                    pos_now = addr
+                elif touches(pos_now, addr) and \
+                        random.random() < min(1.0, reach / max(1.0, cell_width_m(pos_now))):
+                    pos_now = self._shift_position_cell(pos_now, reach)
+
+        stuck = None
+        if not chosen:
+            stuck = {"reason": "no_reachable", "position": pos_now}
+        elif engaged and pos_now and scan_radius > 0:
+            near = []
+            for cand in candidates:
+                lm = cand["landmark"]
+                if lm.frequency != "unique":
+                    continue
+                addr = cand_addr(cand)
+                if not addr:
+                    continue
+                d = distance_m(pos_now, addr)
+                if d is not None and d < scan_radius:
+                    near.append(cand)
+            if near and all(durability.get(c["landmark"].name, 1.0) < 0.5
+                            for c in near):
+                stuck = {"reason": "all_damaged", "position": pos_now}
+
+        return {"engaged": engaged, "stuck": stuck, "position": pos_now,
+                "comparisons": chosen}
 
     def _generate_report_data(self, core_state: dict, selected_quip_styles: List[str]) -> dict:
         curr_intrusion = core_state["base_intrusion"]
@@ -236,20 +472,47 @@ class ExplorationContext:
         selected_parts = self.settings.get("selected_parts", ALL_PART_NAMES.copy())
 
         blocked_words = self.settings.get("blocked_words", [])
-        comparisons = get_comparisons(
+        candidates = get_comparisons(
             self.merged_landmarks,
             body_parts,
             order=comparison_order,
-            limit=comparison_count,
+            limit=max(comparison_count * 8, 100),
             selected_tags=selected_tags,
             skip_base_prob=personality_obj.skip_base_prob,
             selected_parts=selected_parts,
             blocked_words=blocked_words,
         )
 
+        landmark_durability = core_state.get("landmark_durability", {})
+        # 地址规划：锚定、10 倍身高可达筛选、无路可走判定
+        plan = self._plan_address_comparisons(
+            candidates,
+            core_state.get("position") or "",
+            height,
+            personality_obj.skip_base_prob,
+            landmark_durability,
+        )
+        position_now = plan["position"] or core_state.get("position") or ""
+        stuck = plan["stuck"]
+        if stuck is not None:
+            return {
+                **core_state,
+                "comparisons": [],
+                "quip_results": [],
+                "total_casualties": 0.0,
+                "curr_intrusion": curr_intrusion,
+                "curr_destruction": curr_destruction,
+                "size_cat": get_size_category(height),
+                "position": position_now,
+                "engaged": plan["engaged"],
+                "stuck": stuck,
+            }
+        comparisons = plan["comparisons"]
+
         quips_working = copy.deepcopy(self.quips)
         locked_coords = {(4, 4)}
         breakthrough_attempts = 0
+        previous_frequency = None   # 上一次匹配地标的风貌（unique/common）；首次匹配视为切换
 
         size_cat = get_size_category(height)
         enable_confusion = self.settings.get("enable_confusion", False)
@@ -260,10 +523,13 @@ class ExplorationContext:
         style_meta_cache = {}
         for st in selected_quip_styles:
             style_meta_cache[st] = self.quip_repo.load_meta(st)
+        quip_registers = self.quip_repo.load_style_registers(selected_quip_styles)
+        _quip_pruned_styles = None  # 记录上次剪枝的允许集，避免重复无谓剪枝
 
         quip_results = []
         total_casualties = 0.0
         has_quips = bool(self.quips)
+        landmark_registers = self.landmark_repo.load_style_registers(self.selected_styles)
 
         for idx, comp in enumerate(comparisons):
             if curr_intrusion == 0:
@@ -271,13 +537,27 @@ class ExplorationContext:
             if curr_destruction == 0:
                 curr_destruction = random.randint(1, 4)
 
+            # 地标风貌切换（首次匹配视为切换到该风貌）时按性格敏感值调整坐标
+            frequency = comp["landmark"].frequency
+            if frequency != previous_frequency:
+                curr_intrusion, curr_destruction = self.state_service.apply_landmark_switch(
+                    personality_obj, curr_intrusion, curr_destruction, frequency)
+                previous_frequency = frequency
+
             part = comp["part"]
             size_str = format_size(comp['size'], base_size=height)
             ratio = comp["ratio"]
             suffix = "高" if comp["landmark"].dimension == "vertical" else (
                 "长" if comp["landmark"].horizontal_type == "length" else "宽")
             if comp["landmark"].frequency == "unique":
-                compare_text = f"    └─ 约等于{comp['landmark'].name}{suffix}度的{ratio:.2f}倍"
+                lm_name = comp["landmark"].name
+                durability = landmark_durability.get(lm_name, 1.0)
+                height_ratio = height / comp["landmark"].size
+                damage = ratio * (height_ratio ** 2) * curr_destruction * 0.1
+                durability -= damage
+                landmark_durability[lm_name] = durability
+                durability_suffix = "（残破的）" if durability < 0.5 else ""
+                compare_text = f"    └─ 约等于{comp['landmark'].name}{durability_suffix}{suffix}度的{ratio:.2f}倍"
             else:
                 if ratio < 0.5:
                     compare_text = f"    └─ 尚不足{comp['landmark'].name}的{suffix}度"
@@ -292,6 +572,15 @@ class ExplorationContext:
             actual_step = 0
 
             if has_quips:
+                # 地址规则：地标对比后只接“地址为空或距离为0”的描述风格
+                lm_addr = ""
+                if comp["landmark"].frequency == "unique":
+                    lm_addr = self._landmark_full_address(comp["landmark"], landmark_registers)
+                allowed_styles = self._quip_allowed_styles(lm_addr, quip_registers)
+                if allowed_styles != _quip_pruned_styles:
+                    self._prune_quips_by_styles(quips_working, allowed_styles)
+                    _quip_pruned_styles = allowed_styles
+
                 quip_text, quip_style, coord, actual_step, cumulative_actual, cumulative_base = select_quip_with_budget(
                     size_cat, curr_intrusion, curr_destruction,
                     quips_working, locked_coords,
@@ -325,10 +614,8 @@ class ExplorationContext:
                     quip_text = re.sub(r'\s*\[summary:.*?\]', '', quip_text)
 
             if quip_text is not None:
-                curr_intrusion += personality_obj.step_intrusion * actual_step
-                curr_destruction += personality_obj.step_destruction * actual_step
-                curr_intrusion = max(0.5, min(4.5, curr_intrusion))
-                curr_destruction = max(0.5, min(4.5, curr_destruction))
+                curr_intrusion, curr_destruction = self.state_service.advance_coordinates(
+                    personality_obj, curr_intrusion, curr_destruction, actual_step)
 
                 if (4, 4) in locked_coords and curr_intrusion >= 4.0 and curr_destruction >= 4.0:
                     if "涩涩" in selected_tags:
@@ -356,6 +643,7 @@ class ExplorationContext:
                 "destruction": curr_destruction,
                 "coord": coord,
                 "environment_factor": env_factor,
+                "step": effective_step,
                 "casualty_increase": casualty_increase
             })
 
@@ -368,6 +656,10 @@ class ExplorationContext:
             "total_casualties": total_casualties,
             "size_cat": size_cat,
             "style_meta_cache": style_meta_cache,
+            "landmark_durability": landmark_durability,
+            "position": position_now,
+            "engaged": plan["engaged"],
+            "stuck": None,
         }
 
     def _build_report_text(self, data: dict) -> str:
@@ -453,18 +745,13 @@ class ExplorationContext:
                 "birthday": source.birthday,
                 "uploaded_image": source.uploaded_image_path,
                 "total_casualties": source.total_casualties,
+                "position": source.position or "",
             }
         else:
             core = source
 
         giantess_id = f"{core['name']}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
         total_casualties = core.get('total_casualties', 0.0)
-        casualties_evolution = []
-        if isinstance(source, ReportData):
-            cumulative = 0.0
-            for qr in source.casualty_breakdown:
-                cumulative += qr.get('casualty_increase', 0.0)
-                casualties_evolution.append(cumulative)
         from_report = isinstance(source, ReportData)
         state = CharacterSnapshot(
             giantess_id=giantess_id,
@@ -481,18 +768,19 @@ class ExplorationContext:
             intro_visible=core.get('intro_visible', ''),
             birthday=core.get('birthday', ''),
             body_parts=core['body_parts'],
-            intrusion=core['base_intrusion'],
-            destruction=core['base_destruction'],
-            intrusion_evolution=[],
-            destruction_evolution=[],
             action_points=50,
             report_generated=from_report,
-            negative_triggered=False,
-            negative_reduction_intrusion=0.0,
-            negative_reduction_destruction=0.0,
-            total_casualties=total_casualties,
-            casualties_evolution=casualties_evolution,
+            position=core.get('position', '') or '',
         )
+        # 初始演化行：记录创建时的介入度/破坏性/累计伤亡；
+        # 来自报告时，步进取报告内各事件步进之和
+        step = 0.0
+        if from_report:
+            step = sum(qr.get("step", 0.0) for qr in (source.casualty_breakdown or []))
+        state.record_change(step=step, intrusion=core['base_intrusion'],
+                            destruction=core['base_destruction'],
+                            casualties=total_casualties,
+                            source="character_from_core_or_report")
 
         uploaded_image = core.get('uploaded_image')
 
@@ -675,23 +963,17 @@ class ExplorationContext:
     # ==================== 状态管理 ====================
 
     def load_character_state(self, giantess_id: str) -> Optional[CharacterSnapshot]:
-        """加载角色状态，更新行动点并应用衰退。返回 None 表示无效。"""
+        """加载角色状态，按离线时长恢复行动点/属性并应用负面演化。返回 None 表示无效。"""
         state = self.character_repo.load(giantess_id)
         if not state:
             return None
-
-        now = datetime.datetime.now()
-        updated = datetime.datetime.fromisoformat(state.updated_at)
-        delta_minutes = (now - updated).total_seconds() / 60.0
-        add_points = int(delta_minutes * 0.5)
-        state.action_points = min(100, state.action_points + add_points)
-
         if state.personality is None:
             return None
 
         saved_at = state.updated_at  # 本次加载前的保存时间（用于新闻七天判断）
+        # 时间恢复：每分钟恢复行动点并回落属性，超1小时按日间步进结算离线伤亡
+        self.state_service.recover_evolution(state)
         self.state_service.apply_negative_evolution(state)
-        self.state_service.apply_step_decay(state, 0.1)
         self.ensure_avatar_for_state(state)
         self.character_repo.save(state)
         state._news_saved_at = saved_at

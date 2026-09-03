@@ -291,6 +291,9 @@ class WorldManager:
             shutil.copy2(
                 os.path.join(installed, "landmarks", f"{style}.json"),
                 os.path.join(dst_dir, f"{dst}.json"))
+            src_addr = os.path.join(installed, "landmarks", f"{style}.addr.json")
+            if os.path.isfile(src_addr):
+                shutil.copy2(src_addr, os.path.join(dst_dir, f"{dst}.addr.json"))
         for style in manifest.resources.get("quips", []):
             dst_dir = os.path.join(packs_root, "quips")
             os.makedirs(dst_dir, exist_ok=True)
@@ -298,6 +301,9 @@ class WorldManager:
             shutil.copy2(
                 os.path.join(installed, "quips", f"{style}.json"),
                 os.path.join(dst_dir, f"{dst}.json"))
+            src_addr = os.path.join(installed, "quips", f"{style}.addr.json")
+            if os.path.isfile(src_addr):
+                shutil.copy2(src_addr, os.path.join(dst_dir, f"{dst}.addr.json"))
         if manifest.owns("presets"):
             for table in manifest.resources.get("presets", []):
                 dst_dir = os.path.join(static_root, "presets")
@@ -453,6 +459,10 @@ class WorldManager:
             for style in styles:
                 _save_json(os.path.join(target, "landmarks", f"{style}.json"),
                            [asdict(lm) for lm in landmark_repo.load(style)])
+                style_addr = landmark_repo.load_style_address(style)
+                if style_addr:
+                    _save_json(os.path.join(target, "landmarks", f"{style}.addr.json"),
+                               {"address": style_addr})
             resources["landmarks"] = styles
         styles = [s for s in selected.get("quips", [])
                   if quip_repo is not None and s in quip_repo.get_styles()]
@@ -466,6 +476,10 @@ class WorldManager:
                         serializable[size_cat][f"{i}_{d}"] = quip_list
                 _save_json(os.path.join(target, "quips", f"{style}.json"),
                            serializable)
+                style_addr = quip_repo.load_style_address(style)
+                if style_addr:
+                    _save_json(os.path.join(target, "quips", f"{style}.addr.json"),
+                               {"address": style_addr})
             resources["quips"] = styles
         tables = [t for t in selected.get("presets", [])
                   if preset_repo is not None and t in preset_repo.get_tables()]

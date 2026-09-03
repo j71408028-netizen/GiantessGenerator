@@ -8,6 +8,7 @@ import customtkinter as ctk
 from ai import resolve_ai_config
 from services.challenge_service import ChallengeService
 from models import Personality, BodyPreset
+from address_model import world_of
 from ui.common.widgets import ClickableCard, CollapsibleBlock, StyleListBox, CTkScrollableDropdownFrame
 from ui.common.theme import (
     TEXT, HARD_TITLE, SOFT, TEXT_MUTED, PLACEHOLDER,
@@ -126,7 +127,8 @@ class ChallengeModePanel(ctk.CTkFrame):
         center_col = ctk.CTkFrame(three_col, fg_color="transparent")
         center_col.grid(row=0, column=1, sticky='nsew', padx=10)
 
-        self.landmark_selector = StyleListBox(center_col, "地标风格组", height=2)
+        self.landmark_selector = StyleListBox(center_col, "地标风格组", height=2,
+                                              on_change=self._on_landmark_selection_changed)
         self.landmark_selector.pack(fill='x', pady=2)
         self.landmark_selector.add_button("默认", self.landmark_selector.set_default, padx=0)
         self.landmark_selector.add_button("全选", self.landmark_selector.select_all, padx=10)
@@ -135,7 +137,8 @@ class ChallengeModePanel(ctk.CTkFrame):
         right_col = ctk.CTkFrame(three_col, fg_color="transparent")
         right_col.grid(row=0, column=2, sticky='nsew', padx=(10, 0))
 
-        self.quip_selector = StyleListBox(right_col, "描述风格组", height=2)
+        self.quip_selector = StyleListBox(right_col, "描述风格组", height=2,
+                                          on_change=self._on_quip_selection_changed)
         self.quip_selector.pack(fill='x', pady=2)
         self.quip_selector.add_button("清空", self.quip_selector.clear_selection, padx=0)
         self.quip_selector.add_button("全选", self.quip_selector.select_all, padx=10)
@@ -168,6 +171,10 @@ class ChallengeModePanel(ctk.CTkFrame):
         self.card_frame = ctk.CTkScrollableFrame(self, fg_color="transparent")
         self.card_frame.pack(fill='both', expand=True, padx=22, pady=5)
         self._pack_cards = {}
+
+        # 挑战风格选择：按世界观互斥的已选集合
+        self._sel_lm = []
+        self._sel_qp = []
 
         self._init_char_data()
         self._sync_landmark_styles()
@@ -212,20 +219,34 @@ class ChallengeModePanel(ctk.CTkFrame):
             pname = p.get('name', '无') if isinstance(p, dict) else getattr(p, 'name', '无')
             self.char_info_label.configure(text=f"身高: {h:.1f}m | 个性: {pname}")
 
-    def _sync_landmark_styles(self):
+    def _sync_landmark_styles(self, filter_world=None):
         styles = self.gui._landmark_repo.get_styles()
         display_items = []
+        kept = []
         for style in styles:
+            reg_world = world_of(self.gui._landmark_repo.load_style_address(style))
+            if filter_world and reg_world and reg_world != filter_world:
+                continue  # 同一世界观自动筛选：隐藏其它世界观的地标风格
             landmarks = self.gui._landmark_repo.load(style)
             display_items.append(f"{style} ({len(landmarks)})")
-        default_idx = styles.index(self.gui._landmark_repo.default_style) if self.gui._landmark_repo.default_style in styles else 0
-        self.landmark_selector.sync_items(display_items, [default_idx])
+            kept.append(style)
+        selected = [s for s in getattr(self, "_sel_lm", []) if s in kept]
+        if not selected and kept:
+            default = self.gui._landmark_repo.default_style
+            selected = [default] if default in kept else [kept[0]]
+        idx = [i for i, s in enumerate(kept) if s in selected]
+        self.landmark_selector.sync_items(display_items, idx or None)
+        self._sel_lm = self.landmark_selector.get_selected_raw_names() or (selected if kept else [])
 
-    def _sync_quip_styles(self):
+    def _sync_quip_styles(self, filter_world=None):
         styles = self.gui._quip_repo.get_styles()
         size_order = ["small", "medium", "large", "huge", "colossal"]
         display_items = []
+        kept = []
         for style in styles:
+            reg_world = world_of(self.gui._quip_repo.load_style_address(style))
+            if filter_world and reg_world and reg_world != filter_world:
+                continue  # 同一世界观自动筛选：隐藏其它世界观的描述风格
             quips = self.gui._quip_repo.load(style)
             counts = []
             for size in size_order:
@@ -233,7 +254,70 @@ class ChallengeModePanel(ctk.CTkFrame):
                 total = sum(len(qlist) for qlist in matrix.values())
                 counts.append(str(total))
             display_items.append(f"{style} ({', '.join(counts)})")
-        self.quip_selector.sync_items(display_items)
+            kept.append(style)
+        selected = [s for s in getattr(self, "_sel_qp", []) if s in kept]
+        idx = [i for i, s in enumerate(kept) if s in selected]
+        self.quip_selector.sync_items(display_items, idx or None)
+        self._sel_qp = self.quip_selector.get_selected_raw_names()
+
+    def _lock_world_from_selection(self):
+        """当前已选风格共同锁定的世界观；未注册返回 None。"""
+        for s in getattr(self, "_sel_lm", []):
+            w = world_of(self.gui._landmark_repo.load_style_address(s))
+            if w:
+                return w
+        for s in getattr(self, "_sel_qp", []):
+            w = world_of(self.gui._quip_repo.load_style_address(s))
+            if w:
+                return w
+        return None
+
+    def _apply_world_lock(self, forced=None):
+        """同一世界观互斥：两栏风格按世界观自动筛选，剔除混选。"""
+        lock = forced if forced is not None else self._lock_world_from_selection()
+
+        def _filter_for_world(names, repo):
+            out = []
+            for s in names:
+                w = world_of(repo.load_style_address(s))
+                if not w or (lock is not None and w == lock):
+                    out.append(s)
+            return out
+
+        self._sel_lm = _filter_for_world(self._sel_lm, self.gui._landmark_repo)
+        self._sel_qp = _filter_for_world(self._sel_qp, self.gui._quip_repo)
+        self._sync_landmark_styles(lock)
+        self._sync_quip_styles(lock)
+        self._sel_lm = self.landmark_selector.get_selected_raw_names() or self._sel_lm
+        self._sel_qp = self.quip_selector.get_selected_raw_names() or self._sel_qp
+
+    def _on_landmark_selection_changed(self):
+        prev = list(getattr(self, "_sel_lm", []))
+        names = self.landmark_selector.get_selected_raw_names()
+        forced = None
+        for n in names:
+            if n in prev:
+                continue
+            w = world_of(self.gui._landmark_repo.load_style_address(n))
+            if w:
+                forced = w
+                break
+        self._sel_lm = names
+        self._apply_world_lock(forced)
+
+    def _on_quip_selection_changed(self):
+        prev = list(getattr(self, "_sel_qp", []))
+        names = self.quip_selector.get_selected_raw_names()
+        forced = None
+        for n in names:
+            if n in prev:
+                continue
+            w = world_of(self.gui._quip_repo.load_style_address(n))
+            if w:
+                forced = w
+                break
+        self._sel_qp = names
+        self._apply_world_lock(forced)
 
     def _update_info_bar(self, count: int):
         self.info_label.configure(text=f"挑战包: {count} 个")

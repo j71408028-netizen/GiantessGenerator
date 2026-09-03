@@ -8,8 +8,8 @@ import customtkinter as ctk
 from context import ExplorationContext
 from models import CharacterSnapshot
 from persistence.character_repo import CharacterRepo
-from services.state_service import StateService
 from logic import format_size
+from address_model import format_addr_verbose
 from ui.common.theme import (
     BASE, BORDER, TEXT, SOFT, TEXT_MUTED, TITLE,
     PLACEHOLDER, TEXT_DISABLED,
@@ -135,6 +135,10 @@ class GiantessStatePanel(ctk.CTkFrame):
             profile_frame, text="", font=ui_fonts.ui_font(10),
             text_color=PLACEHOLDER, justify='left', wraplength=250
         )
+        self.position_label = ctk.CTkLabel(
+            profile_frame, text="", font=ui_fonts.ui_font(10),
+            text_color=SOFT, justify='left', wraplength=250
+        )
 
         # ---- 右侧状态指标（固定宽度列） ----
         self.progress_frame = ctk.CTkFrame(content_frame, fg_color="transparent", width=320)
@@ -244,6 +248,7 @@ class GiantessStatePanel(ctk.CTkFrame):
                 "total_casualties": state_data.total_casualties,
                 "body_parts": state_data.body_parts,
                 "size_unlocks": state_data.size_unlocks,
+                "position": state_data.position or "",
             }
         else:
             data = state_data
@@ -264,6 +269,14 @@ class GiantessStatePanel(ctk.CTkFrame):
         self._size_unlocks = data.get("size_unlocks", {}) or {}
         self.random_size_label.pack_forget()
         self.random_size_info_label.pack_forget()
+
+        # 注册地址系统：显示角色当前位置（若有）
+        position = data.get("position") or ""
+        if position:
+            self.position_label.configure(text=f"📍 位置  {format_addr_verbose(position)}")
+            self.position_label.pack(anchor='w', pady=(2, 0))
+        else:
+            self.position_label.pack_forget()
 
         # ---- 介入度（上限 4.5） ----
         intrusion_val = min(4.5, max(0, intrusion))
@@ -446,10 +459,11 @@ class GiantessStatePanel(ctk.CTkFrame):
             return
         if self.gui_ref and self.gui_ref.generator_panel.current_state:
             state = self.gui_ref.generator_panel.current_state
+            svc = self.context.state_service
             if state.action_points < 100:
-                StateService.recover_action_points(state)
+                svc.recover_action_points(state)
             # 在线时每分钟反向演化0.1步
-            StateService.apply_step_decay(state, 0.1)
+            svc.apply_step_decay(state, 0.1)
             self.character_repo.save(state)
             self.update_state(state)
         self._schedule_recovery()

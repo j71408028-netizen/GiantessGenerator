@@ -11,6 +11,7 @@ import customtkinter
 import customtkinter as ctk
 from logic import get_predefined_tags
 from services.image_service import ImageService
+from services.state_service import StateService
 from ui.common.widgets import CTkScrollableDropdownFrame
 from ui.common.theme import (
     TEXT, SOFT, BORDER_ALT,
@@ -536,11 +537,10 @@ fg_color=FB_BTN, text_color="white",
 
         if self._is_state_mode():
             state = self.generator_panel.current_state
-            if state.action_points < 75:
+            if not StateService.consume_action_points(state, 75):
                 ui.common.dialogs.showerror("点数不足",
                     f"保存角色信息需要75行动点数，当前仅剩{state.action_points}点。")
                 return
-            state.action_points -= 75
             state.intro_hidden = hidden
             state.intro_visible = visible
             state.selected_tags = tags

@@ -5,7 +5,7 @@ import shutil
 from dataclasses import asdict
 from typing import Optional
 
-from models import CharacterSnapshot, Personality
+from models import CharacterSnapshot
 
 from services.image_service import ImageService
 
@@ -38,9 +38,7 @@ class CharacterRepo:
             return None
         with open(path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        if "personality" in data and isinstance(data["personality"], dict):
-            data["personality"] = Personality.from_dict(data["personality"])
-        return CharacterSnapshot(**data)
+        return CharacterSnapshot.from_dict(data)
 
     def save_avatar(self, giantess_id: str, source_path: str, low_resolution: bool = False) -> str:
         char_dir = self._character_path(giantess_id)
