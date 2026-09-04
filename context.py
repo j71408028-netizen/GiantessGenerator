@@ -25,7 +25,7 @@ from services.news_service import DEFAULT_NEWS_TABLE, NewsService
 from services.state_service import StateService
 from address_model import (
     resolve_full_address, world_of, depth_of, distance_m, touches,
-    cell_width_m, split_address, compose,
+    cell_width_m, can_pair, jitter_address_cell,
 )
 
 
@@ -311,7 +311,8 @@ class ExplorationContext:
         return value >= (0.5 if engaged else 0.0)
 
     def _quip_allowed_styles(self, landmark_addr_text: str, quip_registers: dict):
-        """某条地标对比可衔接的描述风格：地址为空（未注册）的风格，或与其距离为 0 的风格。
+        """某条地标对比可衔接的描述风格：地址为空（未注册）的风格，或与其
+        地域同址/包含且规模组/私有名约束互相满足的风格。
 
         返回 None 表示不限（地标本身无地址 / 旧内容兼容）。
         """
@@ -320,7 +321,7 @@ class ExplorationContext:
         allowed = []
         for style, reg in quip_registers.items():
             reg = (reg or "").strip()
-            if not reg or touches(reg, landmark_addr_text):
+            if not reg or can_pair(reg, landmark_addr_text):
                 allowed.append(style)
         return allowed
 
@@ -340,19 +341,11 @@ class ExplorationContext:
                     matrix.pop(coord, None)
 
     def _shift_position_cell(self, position_text: str, reach: float) -> str:
-        """按“身高10倍/地址规模”概率被触发后：把位置末位更新到同详细程度的其它单元。"""
-        parts = split_address(position_text)
-        if len(parts) <= 1 or not parts[-1].isdigit():
-            return position_text
-        last = parts[-1]
-        exponent = int(last[-1])
-        idx = int(last[:-1]) if len(last) > 1 else 0
-        cell = max(1.0, cell_width_m(position_text))
-        spread = max(1, int(reach / cell) if reach else 1)
-        new_idx = max(0, idx + random.randint(-spread, spread))
-        new_last = (str(new_idx) if new_idx else "") + str(exponent)
-        parts[-1] = new_last
-        return compose(parts[0], *parts[1:])
+        """按“身高10倍/地址规模”概率被触发后：把位置末位更新到同详细程度的其它单元。
+
+        保留地址上的绝对规模/约束段前缀。
+        """
+        return jitter_address_cell(position_text, reach)
 
     def _plan_address_comparisons(self, candidates, position, height, skip_base_prob,
                                   durability):

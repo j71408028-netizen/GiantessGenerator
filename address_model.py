@@ -1,132 +1,307 @@
 """地标风格 / 独特地标 / 描述风格的注册地址系统。
 
-本模块是“注册地址系统”的纯逻辑部分（不依赖 UI / 数据仓库），负责：
+地址格式（新分离写法）：:
 
-- 解析并规范化地址字符串；
-- 组合「风格注册地址」与「地标注册地址」成完整地标地址；
-- 计算两个地址是否“同一地址 / 互相包含”（距离为 0）；
-- 在同一世界观内按层级边长估算地址间距离（米），供可达性判定使用。
+    <绝对规模>@[<私有名或*>!]<世界观>-<一级地域>-<二级地域>-<三级地域>
 
-地址格式（四段，用“-”连接）：:
-    <世界观>-<一级地域>-<二级地域>-<三级地域>
-
-- 世界观：编号或字母组成的记号，世界观不同视为不可互相到达。
-- 一级地域 / 二级地域 / 三级地域：十进制数字串。每一段数字的**末位**兼任
-  缩放指数 e 与 id 的一部分：该段除去末位后的数字是本级“单元编号”，
-  2^e 是该级相对相邻更小一级的放大倍数。
-- 三级地域的最后一位还决定基础规模：三级地域基础边长 = 10 × 2^e（米）。
+- 绝对规模：以 ``_`` 分隔的 3 个数字，按 一级/二级/三级 给出边长（米），
+  例如 ``1e5_5e3_1e2`` = 一级地域 100 km、二级地域 5 km、三级地域 100 m。
+  绝对规模**必须提供**（除非地址仅包含世界观，不包含任何地域段）。
+- ``@`` 之后、``!`` 之前是“约束段”（可有可无；空或 ``*`` 表示不指定私有名）：
+  - 完全没有 ``@...!`` 段 → 不可与任何带约束的地址匹配（仅用于无约束地址）；
+  - ``@!`` / ``@*!`` → 只能与**相同规模组**的地址匹配；
+  - ``@abc!`` → 只能与规模组相同、且私有名恰为 ``abc`` 的地址匹配。
+  注：``*`` 与空等价（都只要求规模组相同）。
+- ``-`` 连接世界观与地域 id。地域 id 为任意字母/数字/下划线，不再兼任缩放指数。
+- 世界观为字母/数字/下划线，长度 1~48。
 
 距离规则
 --------
-- 两个地址相同、或一个完全包含另一个 → 距离为 0。
-- 其余情况（同一世界观内）：以“最深共同前缀之后、编号第一次出现不同的那一级”
-  的边长作为两地址的距离（同级不同编号按本级边长处理）。
-  例如 a-b-c 与 a-d / a-d-e 在世界观 a 之后的一级地域不同（b ≠ d），距离按
-  一级地域边长计算。
-- 世界观不同 → 距离未知（视为不可达）。
+- 两地址相同、或一个完全包含另一个 → 距离 0。
+- 其余情况（同一世界观）：以“共同前缀之后编号首次不同”的那一级边长作为
+  距离（同级不同编号按本级边长处理）。边长由绝对规模提供。
+- 世界观不同、或任一方带 ``@...!`` 约束而双方规模组 / 私有名不匹配 →
+  距离未知（不可达）。
 
-风格可以注册最上面的若干级；其独特地标注册余下的若干级。完整地标地址
-= 风格注册地址 + 地标剩余级（由 :func:`resolve_full_address` 组合）。
+风格注册地址通常包含绝对规模和前几级地域；地标注册地址仅含剩余级（可省略规模，
+继承风格的规模）。组合时风格规模优先级高于地标的规模。
 """
 
 import re
+from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-# 各级名称（世界级 index 0）
 LEVEL_NAMES = ("world", "large", "medium", "small")
 LEVEL_LABELS = {"world": "世界观", "large": "一级地域", "medium": "二级地域", "small": "三级地域"}
 REGION_LABELS = ("一级地域", "二级地域", "三级地域")
 
-# 三级地域基础规模：10 × 2^末位（米）
-SMALL_BASE_MULTIPLIER = 10.0
-
-# 世界级最多三级地区，加上世界观共四段
 MAX_PARTS = 4
 
-# 兼容世界名：数字或字母（允许下划线），不包含分隔符与空白
 _WORLD_RE = re.compile(r"^[A-Za-z0-9_]{1,48}$")
-_REGION_RE = re.compile(r"^\d{1,12}$")
+_REGION_RE = re.compile(r"^[A-Za-z0-9_]{1,16}$")          # 地域id，字母数字下划线
+_CHUNK_RE = re.compile(r"^[A-Za-z0-9_]{0,64}$")          # 私有名允许空
+_SCALE_ITEM_RE = re.compile(r"^\d+(\.\d+)?([eE][+-]?\d+)?$")
+
+
+@dataclass
+class Addr:
+    """解析后的完整地址。"""
+    world: str
+    regions: Tuple[str, str, str]   # (一级, 二级, 三级)，缺省为 ""
+    scale: Tuple[float, float, float]   # (一级,二级,三级) 边长（米），必须存在（除非纯世界观）
+    scale_raw: str                  # 原始规模字符串，如 "1e5_5e3_1e2"
+    chunk: str                      # 约束段私有名，"" 或 "*" 表示不指定；其他为具体名
+    has_mark: bool                  # 是否带有 @...! 段（带则要求规模组/私有名匹配）
+
+    @property
+    def depth(self) -> int:
+        if not self.world:
+            return 0
+        return 1 + sum(1 for r in self.regions if r)
+
+    @property
+    def has_regions(self) -> bool:
+        return any(self.regions)
+
+    def ids_text(self) -> str:
+        return "-".join(p for p in (self.world,) + self.regions if p)
+
+    def prefix_text(self) -> str:
+        """重建地址中的“规模/约束段”前缀。"""
+        if not self.has_mark and not self.scale_raw:
+            return ""
+        return f"{self.scale_raw}@{self.chunk}!"
+
+
+def _parse_scale(text: str) -> Optional[Tuple[float, float, float]]:
+    if not text:
+        return None
+    items = [t.strip() for t in text.split("_") if t.strip()]
+    if len(items) != 3:
+        return None
+    values = []
+    for it in items:
+        if not _SCALE_ITEM_RE.match(it):
+            return None
+        try:
+            values.append(float(it))
+        except ValueError:
+            return None
+    return (values[0], values[1], values[2])
+
+
+def parse_full(text: str) -> Optional[Addr]:
+    """解析地址；非法/空返回 None。
+
+    强制要求：
+    - 纯世界观（如 "world"）允许没有 @...! 段，且无地域；
+    - 包含地域（至少一级）必须提供绝对规模（即必须有 @ 且 scale_raw 非空）。
+    """
+    s = (text or "").strip()
+    if not s:
+        return None
+
+    scale_raw = ""
+    chunk = ""
+    has_mark = False
+    at = s.find("@")
+    if at < 0:
+        # 没有 @，必须是纯世界观（无 '-'）
+        if "-" in s:
+            return None   # 有地域但缺少规模，非法
+        # 纯世界观
+        if not _WORLD_RE.match(s):
+            return None
+        return Addr(world=s, regions=("", "", ""), scale=(0.0, 0.0, 0.0),
+                    scale_raw="", chunk="", has_mark=False)
+    else:
+        # 有 @，解析前缀和剩余
+        has_mark = True
+        pre = s[:at].strip()
+        rest = s[at+1:].strip()
+        if not pre:
+            return None   # 必须有绝对规模
+        scale_raw = pre
+        scale = _parse_scale(scale_raw)
+        if scale is None:
+            return None
+
+        # 分离 ! 后与 ! 前
+        bang = rest.find("!")
+        if bang < 0:
+            chunk = ""
+            ids_text = rest
+        else:
+            chunk = rest[:bang]
+            ids_text = rest[bang+1:]
+
+        # 校验私有名
+        if chunk not in ("", "*") and not _CHUNK_RE.match(chunk):
+            return None
+
+        # 解析地域段
+        raw_parts = [p.strip() for p in ids_text.split("-") if p.strip()]
+        if not raw_parts or len(raw_parts) > MAX_PARTS:
+            return None
+        if not _WORLD_RE.match(raw_parts[0]):
+            return None
+        world = raw_parts[0]
+        regions = ["", "", ""]
+        for i in range(1, len(raw_parts)):
+            seg = raw_parts[i]
+            if not _REGION_RE.match(seg):
+                return None
+            regions[i-1] = seg
+
+        return Addr(world=world,
+                    regions=(regions[0], regions[1], regions[2]),
+                    scale=scale,
+                    scale_raw=scale_raw,
+                    chunk=chunk,
+                    has_mark=has_mark)
 
 
 def split_address(text: str) -> List[str]:
-    """把地址字符串拆成段，剔除空段。"""
-    if not text:
+    """返回地址的地域 id 段列表（不含前缀）。"""
+    addr = parse_full(text)
+    if addr is None:
         return []
-    return [p.strip() for p in str(text).strip().strip("-").split("-") if p.strip()]
+    return [p for p in (addr.world,) + addr.regions if p]
 
 
 def parse_parts(text: str) -> Optional[Tuple[str, str, str, str]]:
-    """把地址文本解析为 (world, large, medium, small) 元组。
-
-    不合法返回 None。允许少于四段（越靠后越粗）。
-    """
-    parts = split_address(text)
-    if not parts or len(parts) > MAX_PARTS:
+    """返回 (world, large, medium, small) 元组（仅地域 id）。"""
+    addr = parse_full(text)
+    if addr is None:
         return None
-    world = parts[0]
-    if not _WORLD_RE.match(world):
-        return None
-    result: List[Optional[str]] = [world, None, None, None]
-    for i in range(1, len(parts)):
-        seg = parts[i]
-        if not _REGION_RE.match(seg):
-            return None
-        result[i] = seg
-    return (result[0], result[1], result[2], result[3])
+    return (addr.world, addr.regions[0], addr.regions[1], addr.regions[2])
 
 
 def world_of(text: str) -> str:
-    """返回地址文本的世界观段；空 / 非法返回 ''。"""
-    parts = split_address(text)
-    return parts[0] if parts else ""
+    addr = parse_full(text)
+    return addr.world if addr else ""
 
 
 def depth_of(text: str) -> int:
-    """地址的有效级数（含世界观 1~4）。空返回 0。"""
-    return len(split_address(text))
+    addr = parse_full(text)
+    return addr.depth if addr else 0
 
 
-def segment_exponent(seg: Optional[str]) -> Optional[int]:
-    """返回一个地区数字段的缩放指数（末位数字）。段为空返回 None。"""
-    if not seg:
-        return None
-    return int(seg[-1])
+def addr_widths(addr: Addr) -> Tuple[float, float, float]:
+    """返回 (一级,二级,三级) 边长（米）。要求地址必须已有 scale。"""
+    if addr.scale is None:
+        raise ValueError(f"地址 {addr.ids_text()} 缺少绝对规模")
+    return addr.scale
 
 
-def segment_index(seg: Optional[str]) -> int:
-    """返回地区数字段的“单元编号”（去掉末位指数后的整数值）。"""
-    if not seg:
-        return 0
-    return int(seg[:-1]) if len(seg) > 1 else 0
+def cell_width_m(full_addr_text: str) -> float:
+    """返回完整地址所在“最小单元”的边长（米）。"""
+    addr = parse_full(full_addr_text)
+    if addr is None:
+        return 0.0
+    if addr.regions[2]:
+        return addr_widths(addr)[2]
+    if addr.regions[1]:
+        return addr_widths(addr)[1]
+    if addr.regions[0]:
+        return addr_widths(addr)[0]
+    return 0.0   # 纯世界观，无单元
 
 
-def is_region_equal(a: Optional[str], b: Optional[str]) -> bool:
-    """两个地区段是否完全相同（字符串比较）。"""
-    if not a or not b:
+def _scale_requirement_ok(this: Addr, other: Addr) -> bool:
+    """检查 this 对 other 的规模/私有名要求是否满足。"""
+    if not this.has_mark:
+        return True
+    # 必须双方都有规模且相等
+    if this.scale is None or other.scale is None or this.scale != other.scale:
         return False
-    return a == b
+    if this.chunk not in ("", "*"):
+        if other.chunk != this.chunk:
+            return False
+    return True
 
 
-def level_width_m(address_parts: Tuple[str, str, str, str]) -> Tuple[Optional[float], Optional[float], Optional[float]]:
-    """按地址各级末位给出 (一级地域, 二级地域, 三级地域) 边长（米）。
+def scale_compatible(a_text: str, b_text: str) -> bool:
+    """检查双方带约束时的规模组/私有名是否互相满足。"""
+    a = parse_full(a_text)
+    b = parse_full(b_text)
+    if a is None or b is None:
+        return False
+    return _scale_requirement_ok(a, b) and _scale_requirement_ok(b, a)
 
-    任一必需指数缺失（如未注册三级地域导致基础规模缺失）时，相应上级
-    边长按缺失段的指数为 0 推导（基础规模取 10 米）。返回值与段一一对应，
-    若世界观本身不参与缩放。
-    """
-    world, large, medium, small = address_parts
-    e_small = segment_exponent(small)
-    e_med = segment_exponent(medium)
-    e_large = segment_exponent(large)
-    base = SMALL_BASE_MULTIPLIER * (2 ** (e_small if e_small is not None else 0))
-    width_small = base
-    width_medium = width_small * (2 ** (e_med if e_med is not None else 0))
-    width_large = width_medium * (2 ** (e_large if e_large is not None else 0))
-    return width_large, width_medium, width_small
 
+def touches(a_text: str, b_text: str) -> bool:
+    """两个地址在地域 id 上是否同一或互相包含（不校验约束）。"""
+    a = parse_full(a_text)
+    b = parse_full(b_text)
+    if a is None or b is None:
+        return False
+    if not a.world or a.world != b.world:
+        return False
+    for level in range(3):
+        sa, sb = a.regions[level], b.regions[level]
+        if sa and sb:
+            if sa == sb:
+                continue
+            return False
+        if not sa and not sb:
+            continue
+        return True   # 一方更粗，包含
+    return True
+
+
+def can_pair(a_text: str, b_text: str) -> bool:
+    """两个地址能否配对：地域包含/相同，且约束满足。"""
+    if not touches(a_text, b_text):
+        return False
+    return scale_compatible(a_text, b_text)
+
+
+def distance_m(a_text: str, b_text: str) -> Optional[float]:
+    """返回两地址的距离（米）；若不可达返回 None。"""
+    a = parse_full(a_text)
+    b = parse_full(b_text)
+    if a is None or b is None:
+        return None
+    if not a.world or a.world != b.world:
+        return None
+    if not _scale_requirement_ok(a, b) or not _scale_requirement_ok(b, a):
+        return None
+
+    # 获取 a 的边长（若 a 无规模则无法计算）
+    try:
+        widths = addr_widths(a)
+    except ValueError:
+        return None
+
+    for level in range(3):
+        sa, sb = a.regions[level], b.regions[level]
+        if sa and sb:
+            if sa == sb:
+                continue
+            return widths[level]
+        if not sa and not sb:
+            continue
+        return 0.0   # 包含
+    return 0.0
+
+
+def reachable(position_text: str, landmark_full_text: str, height: float) -> bool:
+    """地标是否在角色 10 倍身高可达范围内。"""
+    if not landmark_full_text:
+        return True
+    if not position_text:
+        return True
+    d = distance_m(position_text, landmark_full_text)
+    if d is None:
+        return False
+    return d < 10.0 * height
+
+
+# ==================== 组合与重建 ====================
 
 def compose(world: str, large: str = "", medium: str = "", small: str = "") -> str:
-    """按段拼成地址文本（自动跳过空的地区段，但世界观必填）。"""
+    """仅拼接地域 id 段（不带前缀）。"""
     if not world:
         return ""
     parts = [world]
@@ -137,165 +312,171 @@ def compose(world: str, large: str = "", medium: str = "", small: str = "") -> s
     return "-".join(parts)
 
 
-def validate_segment(seg: str, level: str) -> Optional[str]:
-    """校验单个地区段输入。合法返回 None，否则返回中文错误提示。"""
-    seg = (seg or "").strip()
-    if not seg:
-        return None
-    if not _REGION_RE.match(seg):
-        return f"{LEVEL_LABELS[level]}应为纯数字（末位为 2 的指数，其余为编号）"
-    return None
-
-
-def validate_address_text(text: str) -> Optional[str]:
-    """校验完整地址文本（可为风格注册 / 地标注册的段组合）。"""
-    parts = split_address(text)
-    if not parts:
-        return None  # 空地址合法（表示未注册 / 到处可用）
-    if len(parts) > MAX_PARTS:
-        return "地址最多 4 段（世界观-一级地域-二级地域-三级地域）"
-    if not _WORLD_RE.match(parts[0]):
-        return "世界观段应为数字或字母"
-    for seg in parts[1:]:
-        if not _REGION_RE.match(seg):
-            return "大/中/三级地域段应为纯数字，末位为缩放指数"
-    return None
+def _join_addr_text(addr: Addr) -> str:
+    prefix = addr.prefix_text()
+    ids = addr.ids_text()
+    return f"{prefix}{ids}" if prefix else ids
 
 
 def resolve_full_address(style_reg: str, landmark_addr: str) -> str:
     """组合风格注册地址与地标地址为完整地标地址。
 
-    - 风格未注册（空）：地标地址必须自带世界观，作为完整地址原样使用。
-    - 风格已注册：地标地址只允许补“剩下的级”，不允许重复世界观。
-    - 双方都为空：返回 ''（未注册地标，视为到处可用）。
+    风格必须有世界观；若风格有绝对规模，则继承；地标的规模将被忽略。
     """
     style_reg = (style_reg or "").strip()
     landmark_addr = (landmark_addr or "").strip()
     if not style_reg and not landmark_addr:
         return ""
-    s_parts = split_address(style_reg)
-    l_parts = split_address(landmark_addr)
-    if not s_parts:
-        # 风格未注册世界观：地标地址应自带世界观。
-        if not l_parts:
-            return ""
-        return "-".join(l_parts)
-    if not l_parts:
-        return "-".join(s_parts)
-    # 风格已注册：地标只补“剩下的级”。若地标误存了完整地址（以风格前缀开头），
-    # 去掉与风格重复的前缀段，只追加多出来的部分。
+
+    s = parse_full(style_reg)
+    l = parse_full(landmark_addr)
+
+    # 风格不存在或风格无世界观：直接返回地标地址（必须有效）
+    if s is None or not s.world:
+        return _join_addr_text(l) if l is not None else ""
+
+    # 风格有效，地标无效：只返回风格（无地域扩展）
+    if l is None or not l.world:
+        return _join_addr_text(s)
+
+    # 两者都有世界观：用风格的地域前缀 + 地标多余的地域后缀
+    s_parts = [p for p in (s.world,) + s.regions if p]
+    l_parts = [p for p in (l.world,) + l.regions if p]
+
+    # 如果地标前缀与风格前缀相同，去重
     common = 0
     if l_parts[0] == s_parts[0]:
         n = min(len(s_parts), len(l_parts))
         while common < n and s_parts[common] == l_parts[common]:
             common += 1
-    l_rest = l_parts[common:]
-    if not l_rest:
-        return "-".join(s_parts)
-    return "-".join(s_parts + l_rest)
+    extra = l_parts[common:]
+    combined = s_parts + extra
+
+    merged = Addr(
+        world=combined[0],
+        regions=(combined[1] if len(combined) > 1 else "",
+                 combined[2] if len(combined) > 2 else "",
+                 combined[3] if len(combined) > 3 else ""),
+        scale=s.scale,
+        scale_raw=s.scale_raw,
+        chunk=s.chunk,
+        has_mark=s.has_mark
+    )
+    return _join_addr_text(merged)
 
 
-def _same_world(a_parts, b_parts) -> bool:
-    return bool(a_parts[0]) and a_parts[0] == b_parts[0]
+def jitter_address_cell(full_addr_text: str, reach: float, rng=None) -> str:
+    """把地址三级地域编号抖到相邻单元（保留前缀）。"""
+    import random as _random
+    rng = rng or _random
+    addr = parse_full(full_addr_text)
+    if addr is None or not addr.regions[2]:
+        return full_addr_text
+    last = addr.regions[2]
+    if not last.isdigit():
+        return full_addr_text   # 非数字不能抖动
+    exponent = int(last[-1])      # 保留末位作为指数（仅用于编号，无实际缩放意义）
+    idx = int(last[:-1]) if len(last) > 1 else 0
+    cell = max(1.0, cell_width_m(full_addr_text))
+    spread = max(1, int(reach / cell) if reach else 1)
+    new_idx = max(0, idx + rng.randint(-spread, spread))
+    new_last = (str(new_idx) if new_idx else "") + str(exponent)
+    merged = Addr(
+        world=addr.world,
+        regions=(addr.regions[0], addr.regions[1], new_last),
+        scale=addr.scale,
+        scale_raw=addr.scale_raw,
+        chunk=addr.chunk,
+        has_mark=addr.has_mark
+    )
+    return _join_addr_text(merged)
 
 
-def distance_m(a_text: str, b_text: str) -> Optional[float]:
-    """返回两地址的距离（米）。
+# ==================== 校验与展示 ====================
 
-    同一 / 互相包含 → 0.0；世界观不同 → None（不可达）。
-    其余情况：取“共同前缀后编号首次不同”那一级的边长作为距离
-    （同级不同编号一律按本级边长处理）。边长基准取 a 自身各级指数
-    （一般让更细的一方在前，即角色位置）。
-    """
-    a_parts = parse_parts(a_text)
-    b_parts = parse_parts(b_text)
-    if a_parts is None or b_parts is None:
+def validate_segment(seg: str, level: str) -> Optional[str]:
+    seg = (seg or "").strip()
+    if not seg:
         return None
-    if not _same_world(a_parts, b_parts):
+    if not _REGION_RE.match(seg):
+        return f"{LEVEL_LABELS[level]}段应为字母/数字/下划线"
+    return None
+
+
+def validate_address_text(text: str) -> Optional[str]:
+    if not (text or "").strip():
         return None
-
-    widths = level_width_m(a_parts)  # (大,中,小) 边长按 a 的各级指数推导
-
-    for level in (1, 2, 3):
-        sa, sb = a_parts[level], b_parts[level]
-        if sa and sb:
-            if sa == sb:
-                continue
-            return widths[level - 1]  # 同级不同编号 → 本级边长（一级）
-        if not sa and not sb:
-            continue
-        # 一方不再注册 → 粗地址包含细地址 → 距离 0
-        return 0.0
-    return 0.0
+    if parse_full(text) is not None:
+        return None
+    return _describe_invalid(text)
 
 
-def touches(a_text: str, b_text: str) -> bool:
-    """两个完整地址距离是否为 0（同一地址或互相包含）。"""
-    a_parts = parse_parts(a_text)
-    b_parts = parse_parts(b_text)
-    if a_parts is None or b_parts is None:
-        return False
-    if not _same_world(a_parts, b_parts):
-        return False
-    # 逐级比较，粗地址覆盖细地址即视为包含
-    for level in (1, 2, 3):
-        a_seg, b_seg = a_parts[level], b_parts[level]
-        if not a_seg and not b_seg:
-            continue
-        if not a_seg or not b_seg:
-            return True  # 一方不再注册 → 另一方被包含
-        if a_seg != b_seg:
-            return False
-    return True
+def _describe_invalid(text: str) -> str:
+    s = (text or "").strip()
+    if not s:
+        return ""
+    if s.count("@") > 1 or s.count("!") > 1:
+        return "地址中最多允许一个 @ 与一个 !"
+    at = s.find("@")
+    if at >= 0:
+        pre = s[:at]
+        if pre:
+            items = [t.strip() for t in pre.split("_") if t.strip()]
+            if len(items) != 3:
+                return "绝对规模应为 3 个数字（如 1e5_5e3_1e2）"
+            for it in items:
+                if not _SCALE_ITEM_RE.match(it):
+                    return f"规模值 {it} 格式不对"
+        else:
+            return "绝对规模不能为空"
+        rest = s[at+1:]
+        bang = rest.find("!")
+        chunk = rest[:bang] if bang >= 0 else ""
+        if chunk not in ("", "*") and not _CHUNK_RE.match(chunk):
+            return "私有名只能为字母/数字/下划线"
+    else:
+        # 没有 @ 但包含 '-' 是不允许的（缺少规模）
+        if "-" in s:
+            return "包含地域段时必须提供绝对规模（...@...）"
+        if not _WORLD_RE.match(s):
+            return "世界观段应为字母/数字/下划线"
+    parts = split_address(s)
+    if not parts:
+        return "缺少世界观"
+    if not _WORLD_RE.match(parts[0]):
+        return "世界观段无效"
+    for seg in parts[1:]:
+        if not _REGION_RE.match(seg):
+            return f"地域段 '{seg}' 应为字母/数字/下划线"
+    return "地址格式不正确"
 
 
-def cell_width_m(full_addr_text: str) -> float:
-    """返回完整地址所在“最小单元”的边长（米），供可达概率估算。"""
-    parts = parse_parts(full_addr_text)
-    if parts is None:
-        return SMALL_BASE_MULTIPLIER
-    widths = level_width_m(parts)
-    # 有清晰注册的三级地域 → 用它；否则用能推导的最细一级
-    if parts[3]:
-        return widths[2]
-    if parts[2]:
-        return widths[1]
-    return widths[0]
-
-
-def reachable(position_text: str, landmark_full_text: str, height: float) -> bool:
-    """地标是否在角色 10 倍身高可达范围内。地标无地址视为到处可用。"""
-    if not landmark_full_text:
-        return True
-    if not position_text:
-        # 无角色位置时不约束（首次由第一个地标锚定）
-        return True
-    d = distance_m(position_text, landmark_full_text)
-    if d is None:
-        return False
-    return d < 10.0 * height
+def _fmt_size_m(v: float) -> str:
+    if v >= 1000:
+        return f"{v / 1000:.4g} 千米"
+    return f"{v:.3g} 米"
 
 
 def format_addr_verbose(text: str) -> str:
-    """把地址文本格式化为可读的中文描述（供 UI / 报告展示）。"""
-    parts = parse_parts(text)
-    if parts is None:
+    addr = parse_full(text)
+    if addr is None:
         return (text or "").strip() or "（无地址）"
     segs = []
-    for level, label in ((0, "世界观"), (1, "一级地域"), (2, "二级地域"), (3, "三级地域")):
-        seg = parts[level]
+    if addr.scale_raw:
+        segs.append(f"规模 {addr.scale_raw}（{_fmt_size_m(addr.scale[0])}/"
+                    f"{_fmt_size_m(addr.scale[1])}/{_fmt_size_m(addr.scale[2])}）")
+    if addr.chunk not in ("", "*"):
+        segs.append(f"私有名 {addr.chunk}")
+    elif addr.chunk == "*":
+        segs.append("私有名 *")
+    labels = ("世界观", "一级地域", "二级地域", "三级地域")
+    for label, seg in zip(labels, (addr.world,) + addr.regions):
         if not seg:
             break
-        if level == 0:
-            segs.append(f"{label} {seg}")
-        else:
-            segs.append(f"{label} {seg}")
+        segs.append(f"{label} {seg}")
     return " / ".join(segs) if segs else "（无地址）"
 
 
 def describe_scale(full_addr_text: str) -> str:
-    """把完整地址的最小单元边长格式化成可读规模。"""
     w = cell_width_m(full_addr_text)
-    if w >= 10000:
-        return f"约{w / 1000:.1f}千米"
-    return f"约{w:.0f}米"
+    return _fmt_size_m(w) if w > 0 else "无单元"

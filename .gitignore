@@ -216,4 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
 data/user/api_keys.json
+/data/archives/

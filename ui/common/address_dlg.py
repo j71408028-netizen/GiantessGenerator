@@ -15,7 +15,7 @@ from ui.common import fonts as ui_fonts
 from ui.common.theme import (
     SOFT, TEXT, TEXT_MUTED, TEXT_DISABLED,
     BORDER_ALT, HOVER_ALT,
-    STATUS_OK, OK_HOVER, PNL_BG,
+    STATUS_OK, OK_HOVER, PNL_BG, CLEAR_BG, CLEAR_BORDER, STATUS_ERR,
 )
 from address_model import validate_address_text, format_addr_verbose, world_of
 
@@ -64,10 +64,9 @@ class AddressTextDialog(BaseDialog):
 
         ctk.CTkLabel(
             self,
-            text="地址格式：<世界观>-<大地区>-<中地区>-<小地区>。"
-                 "每级数字串的末位是缩放指数（2 的末位次方为该级相对下一级的放大倍数），"
-                 "其余数字是编号；小地区基础规模 = 10×2^末位（米）。风格注册最上面的若干级，"
-                 "地标补余下级别。空地址表示未注册（到处可用）。",
+            text="地址格式：<规模>@<私有名!><世界观>-<一级地域>-<二级地域>-<三级地域>，例如 1e5_5e3_1e2@abc!ea1-1-2 "
+                 "（@前分别为三级地域的规模（米）；@后为可选私有名，! 表示要求规模组相同）。"
+                 "风格注册最上面的若干级，地标可补余下级别。空地址表示未注册（到处可用）。",
             font=ui_fonts.ui_font(10), text_color=TEXT_DISABLED,
             justify='left', wraplength=500).pack(
             anchor='w', padx=20, pady=(10, 0))
@@ -79,11 +78,11 @@ class AddressTextDialog(BaseDialog):
                       fg_color="transparent", border_width=1,
                       border_color=STATUS_OK, text_color=STATUS_OK,
                       hover_color=OK_HOVER).pack(side='left', padx=(0, 8))
-        ctk.CTkButton(btn_frame, text="清除（未注册）", width=120, height=28,
+        ctk.CTkButton(btn_frame, text="消除", width=90, height=28,
                       font=self.UI_FONT, command=self._clear,
                       fg_color="transparent", border_width=1,
-                      border_color=BORDER_ALT, text_color=TEXT_MUTED,
-                      hover_color=HOVER_ALT).pack(side='left')
+                      border_color=CLEAR_BORDER, text_color=STATUS_ERR,
+                      hover_color=CLEAR_BG).pack(side='left')
         ctk.CTkButton(btn_frame, text="取消", width=90, height=28,
                       font=self.UI_FONT, command=self._on_close,
                       fg_color="transparent", border_width=1,
