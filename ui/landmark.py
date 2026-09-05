@@ -1,9 +1,11 @@
 import os
 import re
+import threading
 import tkinter as tk
 
 import customtkinter as ctk
 
+import services.address_registry as address_registry
 import ui.common.dialogs
 from models import Landmark
 from persistence.landmark_repo import LandmarkRepo, DEFAULT_LANDMARK_STYLE
@@ -16,7 +18,7 @@ from address_model import format_addr_verbose
 from ui.common.theme import (
     BASE, HOVER, BORDER_ALT, TEXT, SOFT,
     PNL_BG, HOVER_ALT, MENU_HOVER, LINK_BLUE,
-    BLUE_HOVER, STATUS_OK, OK_HOVER, ERR_STRONG, ERR_HOVER,
+    BLUE_HOVER, STATUS_OK, OK_HOVER, ERR_STRONG, ERR_HOVER, TEXT_MUTED,
 )
 from ui.common import fonts as ui_fonts
 
@@ -112,10 +114,11 @@ class LandmarkCardManager(CardManager):
         dlg = AddressTextDialog(
             self, "地标风格注册地址",
             description=(
-                "注册该地标风格所在的地址（仅注册最上面的若干级，世界观必填）。\n"
+                "注册该地标风格所在的地址。只能选择已申领的地址"
+                "（详见 docs/address_system.md）。\n"
                 "当前风格：" + style
             ),
-            initial=current)
+            initial=current, landmark_style=True)
         if dlg.result is not None:
             self.landmark_repo.save_style_address(style, dlg.result)
             if dlg.result:
@@ -376,8 +379,16 @@ class LandmarkCardManager(CardManager):
             return int(m.group(1)), int(m.group(2))
         return 1, 1
 
+    def _current_style_address(self) -> str:
+        """当前风格的注册地址（供地标地址下拉确定子地址树范围）。"""
+        style = self._get_current_style()
+        if not style:
+            return ""
+        return self.landmark_repo.load_style_address(style)
+
     def add_item_in_category(self):
-        dlg = LandmarkDialog(self, "添加地标", None)
+        dlg = LandmarkDialog(self, "添加地标", None,
+                             style_address=self._current_style_address())
         if dlg.result:
             new_item = Landmark(
                 name=dlg.result["name"],
@@ -395,7 +406,8 @@ class LandmarkCardManager(CardManager):
                 self.show_first_view()
 
     def edit_item(self, item):
-        dlg = LandmarkDialog(self, f"编辑地标", item)
+        dlg = LandmarkDialog(self, f"编辑地标", item,
+                             style_address=self._current_style_address())
         if dlg.result:
             item.name = dlg.result["name"]
             item.size = dlg.result["size"]
@@ -431,21 +443,31 @@ class LandmarkCardManager(CardManager):
 class LandmarkDialog(BaseDialog):
     """地标编辑对话框"""
 
-    def __init__(self, parent, title, landmark=None):
+    def __init__(self, parent, title, landmark=None, style_address: str = ""):
         super().__init__(parent.winfo_toplevel())
         self.title(title)
         self.landmark = landmark
         self.result = None
         self._parent = parent.winfo_toplevel()   # 保存顶层父窗口引用
+        self.style_address = (style_address or "").strip()
+
+        # 在线注册表子地址下拉所需状态
+        self._entries = []
+        self._child_options = []
+        self._display_map = {}
+        self._addr_dropdown = None
+        self._pending_fetch = None
 
         # 模态设置
         self.transient(self._parent)
         self.grab_set()
 
         self._create_widgets()
-        self.geometry("368x330")
+        self.geometry("368x360")
         self._center_dialog(parent)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        self._fetch_registry_async()
 
         # 等待窗口关闭后再返回
         self.wait_window()
@@ -503,17 +525,116 @@ class LandmarkDialog(BaseDialog):
         addr_entry = ctk.CTkEntry(self, textvariable=self.address_var, width=210, height=28,
                                   font=self.UI_FONT)
         addr_entry.grid(row=4, column=1, pady=(4, 6), padx=5)
-        ctk.CTkLabel(self, text="风格已注册时填剩余级（如 12-0），未注册时填完整地址（含世界观）",
-                     font=ui_fonts.ui_font(9), text_color=SOFT).grid(
+        ctk.CTkLabel(self, text="风格已注册时填剩余级（如 12-0），未注册时填完整地址（含世界观）；"
+                               "双击地址框可从注册表已申领的子地址中选择",
+                     font=ui_fonts.ui_font(9), text_color=SOFT, wraplength=210,
+                     justify='left').grid(
             row=5, column=1, sticky='w', pady=(0, 4), padx=5)
+
+        # 已申领子地址下拉：双击地址框弹出（后台联网刷新，含尺度过滤）
+        if self.style_address:
+            self._addr_dropdown = CTkScrollableDropdownFrame(
+                attach=addr_entry, values=[], command=self._on_pick_child,
+                height=220, width=300, button_height=24, justify="left")
+            self.size_var.trace_add("write", self._update_address_options)
+
+        # 注册表加载状态（row=6）
+        self.registry_status_var = tk.StringVar(value="")
+        ctk.CTkLabel(self, textvariable=self.registry_status_var,
+                     font=ui_fonts.ui_font(9), text_color=TEXT_MUTED,
+                     wraplength=210, justify='left', anchor='w').grid(
+            row=6, column=1, sticky='w', pady=(0, 2), padx=5)
 
         # 确定/取消按钮
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.grid(row=6, column=0, columnspan=2, pady=(12, 15))
+        btn_frame.grid(row=7, column=0, columnspan=2, pady=(8, 15))
         ctk.CTkButton(btn_frame, text="确定", command=self.ok, width=80,
                       height=28, font=self.UI_FONT).pack(side='left', padx=(0,7))
         ctk.CTkButton(btn_frame, text="取消", command=self._on_close, width=80,
                       height=28, font=self.UI_FONT).pack(side='left', padx=7)
+
+    # ---------- 已申领子地址下拉（在线注册表） ----------
+
+    def _fetch_registry_async(self):
+        if not self.style_address:
+            return
+        self.registry_status_var.set("正在从注册表仓库获取已申领地址……")
+        self._pending_fetch = None
+        threading.Thread(target=self._fetch_worker, daemon=True).start()
+        self.after(80, self._poll_fetch)
+
+    def _fetch_worker(self):
+        # 工作线程只写普通属性，不触碰 tkinter；由主线程轮询取结果。
+        offline = False
+        try:
+            data, _updated = address_registry.download_registry()
+            address_registry.save_cache(data, _updated)
+        except address_registry.RegistryOfflineError:
+            data = address_registry.load_cache().get("data") or {}
+            offline = True
+        self._pending_fetch = (address_registry.parse_entries(data), offline)
+
+    def _poll_fetch(self):
+        try:
+            if not self.winfo_exists():
+                return
+        except Exception:
+            return
+        if self._pending_fetch is None:
+            self.after(80, self._poll_fetch)
+            return
+        entries, offline = self._pending_fetch
+        self._pending_fetch = None
+        self._on_entries_loaded(entries, offline)
+
+    def _on_entries_loaded(self, entries, offline):
+        try:
+            if not self.winfo_exists():
+                return
+        except Exception:
+            return
+        self._entries = entries
+        self._update_address_options()
+        if offline:
+            self.registry_status_var.set(
+                "⚠ 离线：显示本地缓存的已申领地址")
+        elif not self._child_options:
+            self.registry_status_var.set("注册表中没有该风格地址的已申领子地址")
+        else:
+            self.registry_status_var.set(
+                f"已载入 {len(self._child_options)} 个已申领子地址，双击地址框选择")
+
+    def _update_address_options(self, *_args):
+        """按当前地标尺寸重建子地址候选（尺度小于地标的不推荐）。"""
+        if self._addr_dropdown is None:
+            return
+        try:
+            size = float(self.size_var.get())
+        except (TypeError, ValueError):
+            size = None
+        opts = address_registry.child_options(
+            self.style_address, self._entries, landmark_size=size)
+        self._child_options = opts
+        self._display_map = {o["display"]: o for o in opts}
+        self._addr_dropdown.configure(
+            values=[o["display"] for o in opts],
+            disabled_values=[o["display"] for o in opts if not o["recommended"]])
+
+    def _on_pick_child(self, display: str):
+        opt = self._display_map.get(display)
+        if opt is None:
+            return
+        if not opt["recommended"]:
+            try:
+                size = float(self.size_var.get())
+            except (TypeError, ValueError):
+                size = 0.0
+            ui.common.dialogs.showinfo(
+                "不推荐",
+                f"子地址 {opt['value']} 的最细单元尺度小于地标尺寸"
+                f"（{size:.4g} 米），已置为不推荐；如仍需使用请手动填写地址。")
+            return
+        self.address_var.set(opt["value"])
 
     def validate(self):
         if not self.name_var.get().strip():

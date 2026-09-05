@@ -95,7 +95,11 @@ data/
 ```
 
 世界包可在激活期间接管各数据源，并可通过**行为包**覆盖角色创建与状态服务的静态方法实现。
-行为包开发文档见 [world_pack_behaviors.md](world_pack_behaviors.md)。
+
+## 相关文档
+
+- [地址系统操作说明](docs/address_system.md)：地标 / 描述风格的地址申领、注册与匹配规则
+- [世界包行为包开发指南](docs/world_pack_behaviors.md)：行为包的开发流程、注册 API 与可覆盖目标
 
 
 ## 免责声明

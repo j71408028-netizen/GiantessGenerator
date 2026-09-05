@@ -18,13 +18,21 @@
 距离规则
 --------
 - 两地址相同、或一个完全包含另一个 → 距离 0。
-- 其余情况（同一世界观）：以“共同前缀之后编号首次不同”的那一级边长作为
-  距离（同级不同编号按本级边长处理）。边长由绝对规模提供。
-- 世界观不同、或任一方带 ``@...!`` 约束而双方规模组 / 私有名不匹配 →
-  距离未知（不可达）。
+- 其余情况（同一世界观）：以"共同前缀之后编号首次不同"的那一级作为分歧级，
+  距离 = 双方在该级边长的**平均值**（允许不同分支申领不同规模；同一分支内
+  的规模一致性由注册表的地址树保证）。
+- 世界观不同 → 距离未知（不可达）。
+
+配对规则
+--------
+- 地域序列同址 / 互相包含即可配对（不再要求规模三元组相等）；
+- 私有名约束仍然有效：一方声明了私有名时，另一方必须声明相同私有名。
+- 私有名取"最先声明的值"：地址树中子地址的私有名覆写无效（想在其他私有名
+  的语境下扩展，应申领平行地址）；组合时风格（较粗一方）的约束优先。
 
 风格注册地址通常包含绝对规模和前几级地域；地标注册地址仅含剩余级（可省略规模，
-继承风格的规模）。组合时风格规模优先级高于地标的规模。
+继承风格的规模）。组合时规模的优先级为"更细的一方胜出"（地标的规模覆写风格的
+规模），约束的优先级为"先声明的一方胜出"。
 """
 
 import re
@@ -208,26 +216,30 @@ def cell_width_m(full_addr_text: str) -> float:
     return 0.0   # 纯世界观，无单元
 
 
-def _scale_requirement_ok(this: Addr, other: Addr) -> bool:
-    """检查 this 对 other 的规模/私有名要求是否满足。"""
+def _chunk_requirement_ok(this: Addr, other: Addr) -> bool:
+    """检查 this 声明的私有名约束对 other 是否满足。
+
+    规模一致性不再作为配对条件（由注册表地址树保证），私有名仍有效。
+    """
     if not this.has_mark:
         return True
-    # 必须双方都有规模且相等
-    if this.scale is None or other.scale is None or this.scale != other.scale:
-        return False
     if this.chunk not in ("", "*"):
-        if other.chunk != this.chunk:
-            return False
+        return other.chunk == this.chunk
     return True
 
 
-def scale_compatible(a_text: str, b_text: str) -> bool:
-    """检查双方带约束时的规模组/私有名是否互相满足。"""
+def chunk_compatible(a_text: str, b_text: str) -> bool:
+    """检查双方声明的私有名约束是否互相满足。"""
     a = parse_full(a_text)
     b = parse_full(b_text)
     if a is None or b is None:
         return False
-    return _scale_requirement_ok(a, b) and _scale_requirement_ok(b, a)
+    return _chunk_requirement_ok(a, b) and _chunk_requirement_ok(b, a)
+
+
+def scale_compatible(a_text: str, b_text: str) -> bool:
+    """兼容旧名：现为私有名约束检查（规模一致性由地址树保证）。"""
+    return chunk_compatible(a_text, b_text)
 
 
 def touches(a_text: str, b_text: str) -> bool:
@@ -251,27 +263,23 @@ def touches(a_text: str, b_text: str) -> bool:
 
 
 def can_pair(a_text: str, b_text: str) -> bool:
-    """两个地址能否配对：地域包含/相同，且约束满足。"""
+    """两个地址能否配对：地域序列同址 / 互相包含，且私有名约束互相满足。"""
     if not touches(a_text, b_text):
         return False
-    return scale_compatible(a_text, b_text)
+    return chunk_compatible(a_text, b_text)
 
 
 def distance_m(a_text: str, b_text: str) -> Optional[float]:
-    """返回两地址的距离（米）；若不可达返回 None。"""
+    """返回两地址的距离（米）；若不可达返回 None。
+
+    地域序列同址 / 包含 → 0；首个分歧级的距离 = 双方该级边长的平均值
+    （允许不同分支申领不同规模）。
+    """
     a = parse_full(a_text)
     b = parse_full(b_text)
     if a is None or b is None:
         return None
     if not a.world or a.world != b.world:
-        return None
-    if not _scale_requirement_ok(a, b) or not _scale_requirement_ok(b, a):
-        return None
-
-    # 获取 a 的边长（若 a 无规模则无法计算）
-    try:
-        widths = addr_widths(a)
-    except ValueError:
         return None
 
     for level in range(3):
@@ -279,7 +287,9 @@ def distance_m(a_text: str, b_text: str) -> Optional[float]:
         if sa and sb:
             if sa == sb:
                 continue
-            return widths[level]
+            wa = a.scale[level] if a.scale else 0.0
+            wb = b.scale[level] if b.scale else 0.0
+            return (wa + wb) / 2.0
         if not sa and not sb:
             continue
         return 0.0   # 包含
@@ -321,7 +331,8 @@ def _join_addr_text(addr: Addr) -> str:
 def resolve_full_address(style_reg: str, landmark_addr: str) -> str:
     """组合风格注册地址与地标地址为完整地标地址。
 
-    风格必须有世界观；若风格有绝对规模，则继承；地标的规模将被忽略。
+    风格必须有世界观；规模取"更细一方胜出"（地标带绝对规模时覆写风格的）；
+    约束（私有名）取先声明的一方（风格在前）。
     """
     style_reg = (style_reg or "").strip()
     landmark_addr = (landmark_addr or "").strip()
@@ -352,15 +363,28 @@ def resolve_full_address(style_reg: str, landmark_addr: str) -> str:
     extra = l_parts[common:]
     combined = s_parts + extra
 
+    # 规模：更细的一方（通常为地标）有绝对规模则覆写风格的
+    if l.scale_raw:
+        merged_scale, merged_scale_raw = l.scale, l.scale_raw
+    else:
+        merged_scale, merged_scale_raw = s.scale, s.scale_raw
+    # 约束：按读取顺序取第一次声明的值（风格在前，子地址覆写无效）
+    if s.has_mark:
+        merged_chunk, merged_mark = s.chunk, True
+    elif l.has_mark:
+        merged_chunk, merged_mark = l.chunk, True
+    else:
+        merged_chunk, merged_mark = "", False
+
     merged = Addr(
         world=combined[0],
         regions=(combined[1] if len(combined) > 1 else "",
                  combined[2] if len(combined) > 2 else "",
                  combined[3] if len(combined) > 3 else ""),
-        scale=s.scale,
-        scale_raw=s.scale_raw,
-        chunk=s.chunk,
-        has_mark=s.has_mark
+        scale=merged_scale,
+        scale_raw=merged_scale_raw,
+        chunk=merged_chunk,
+        has_mark=merged_mark
     )
     return _join_addr_text(merged)
 
@@ -463,8 +487,8 @@ def format_addr_verbose(text: str) -> str:
         return (text or "").strip() or "（无地址）"
     segs = []
     if addr.scale_raw:
-        segs.append(f"规模 {addr.scale_raw}（{_fmt_size_m(addr.scale[0])}/"
-                    f"{_fmt_size_m(addr.scale[1])}/{_fmt_size_m(addr.scale[2])}）")
+        segs.append(f"（地域规模：{_fmt_size_m(addr.scale[0])} /"
+                    f" {_fmt_size_m(addr.scale[1])} / {_fmt_size_m(addr.scale[2])}）")
     if addr.chunk not in ("", "*"):
         segs.append(f"私有名 {addr.chunk}")
     elif addr.chunk == "*":

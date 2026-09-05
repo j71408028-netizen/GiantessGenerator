@@ -1,4 +1,4 @@
-# 世界包行为包开发文档
+# 世界包行为包开发指南
 
 行为包（Behavior Pack）是世界包中的一种资源类型，允许世界包作者在激活该世界包期间
 覆盖核心算法的实现，而无需修改主程序代码。可覆盖范围包括：
@@ -6,64 +6,30 @@
 - `CreationService` / `StateService` 的部分静态方法；
 - `logic.py` 中除 `get_size_category` 外的全部模块函数，以及 `PREDEFINED_TAGS` 常量。
 
-## 原理概述
+**核心规则**：
 
-程序把需要可定制的方法包装为“行为钩子”。每次调用这些函数时，会先查询进程内唯一的
-行为运行时（`behavior_runtime.py`）：
+- 行为包以**文件夹**为存储单位，一个世界包最多附带**一个**行为包；
+- 行为包**不能单独启用**，只能随世界包激活；停用、解散或删除世界包后覆盖自动
+  清空、恢复默认行为，不需要重启程序；
+- 目录内每个 `.py` 模块都会在激活时加载，且必须定义 `register(runtime)` 入口；
+- **任意代码执行**：行为包本质是 Python 代码，会在激活时于本机执行。只应加载
+  来自可信来源的世界包，如同对待一般软件一样。
 
-- 若当前激活的世界包声明并成功注册了对应覆盖，则调用覆盖实现；
-- 否则回退到主程序的默认实现。
+程序在 `data/static/behaviors/imperial_units/` 提供了一个现成示例：把显示单位从
+米 / 千米改为英尺 / 英里。想快速了解行为包长什么样，可直接阅读它（完整代码见附录 B）。
 
-因此，无论调用方是 `CreationService.x(...)` 这样的静态调用，还是通过
-`context.creation_service` 等实例调用，覆盖都会生效。停用或解散世界包后，覆盖会被清空，
-恢复默认行为。
+## 开发流程
 
-## 目录与清单声明
+### 第 1 步：编写行为模块
 
-行为包以**文件夹**为存储单位。开发时放在静态目录 `data/static/behaviors/<pack>/`，
-配置世界包时可单选其中一个；解散世界包时也会把包内行为包转存到该目录。
-行为包**不能单独启用**，仍只能随世界包激活。
+在静态目录 `data/static/behaviors/<pack>/` 下创建文件夹（`<pack>` 只能由字母开头，
+后跟字母、数字或下划线），在其中编写 `.py` 模块。
 
-世界包内部对应路径为 `behaviors/<pack>/`，包名在 `world.json` 的
-`resources.behaviors` 中以单元素列表声明：
-
-```
-data/static/behaviors/my_pack/     # 静态开发副本（文件夹）
-├── height_rules.py
-└── state_tuning.py
-
-data/worlds/<world_id>/
-├── world.json
-└── behaviors/
-    └── my_pack/                   # 随世界包启用的副本
-        ├── height_rules.py
-        └── state_tuning.py
-```
-
-`world.json` 示例：
-
-```json
-{
-  "format_version": 1,
-  "world_id": "my_world",
-  "name": "我的世界",
-  "version": "1.0",
-  "resources": {
-    "behaviors": ["my_pack"]
-  }
-}
-```
-
-行为包名只能由字母开头，后跟字母、数字或下划线。一个世界包最多附带一个行为包；
-目录内每个 `.py` 模块都会在激活时加载。
-
-## 行为模块的写法
-
-每个行为模块需要定义 `register(runtime)` 入口函数。程序激活世界包时，会加载该行为包
-目录内的全部模块，并把全局行为运行时作为参数传入：
+每个模块需定义 `register(runtime)` 入口函数；程序激活世界包时会加载全部模块并
+把全局行为运行时传入：
 
 ```python
-# behaviors/my_pack/height_rules.py
+# data/static/behaviors/my_pack/height_rules.py
 from services.creation_service import CreationService
 
 
@@ -78,6 +44,57 @@ def register(runtime):
     runtime.override(CreationService.calculate_height, my_calculate_height)
 ```
 
+覆盖实现必须与被覆盖函数保持**相同的参数顺序、默认值与返回约定**，否则会导致
+运行时参数错位或下游解析失败。可覆盖的目标及签名见附录 A。
+
+### 第 2 步：把行为包声明进世界包
+
+创建世界包时在资源页**单选**该行为包，清单会自动写入；也可以直接手写
+`world.json`：
+
+```json
+{
+  "format_version": 1,
+  "world_id": "my_world",
+  "name": "我的世界",
+  "version": "1.0",
+  "resources": {
+    "behaviors": ["my_pack"]
+  }
+}
+```
+
+目录结构：
+
+```
+data/static/behaviors/my_pack/     # 静态开发副本（文件夹）
+├── height_rules.py
+└── state_tuning.py
+
+data/worlds/<world_id>/
+├── world.json
+└── behaviors/
+    └── my_pack/                   # 随世界包启用的副本
+        ├── height_rules.py
+        └── state_tuning.py
+```
+
+### 第 3 步：激活世界包并验证
+
+激活世界包后，覆盖立即生效——无论调用方是 `CreationService.x(...)` 这样的静态
+调用（`ui` 中的直接引用也在内），还是通过 `context.creation_service` 等实例调用，
+都会使用覆盖实现。停用或解散世界包后自动恢复默认行为；切换世界包时会先卸载
+旧包再加载新包，不会串包。
+
+### 打包与分发
+
+- 使用「设置 → 世界包」的导出功能，或手动把整个 `<world_id>` 目录打包为
+  `<world_id>.world.zip`；
+- 解散世界包时，行为包会自动转存回 `data/static/behaviors/`（目录名冲突则
+  追加世界包名与版本号）。
+
+## 附录 A：注册 API 与可覆盖目标
+
 ### 注册 API
 
 | 方法 | 说明 |
@@ -85,11 +102,6 @@ def register(runtime):
 | `runtime.override(target, impl)` | 注册对某个可覆盖目标的实现。`target` 可以是 `"logic.compute_casualty"` 这样的字符串，也可以是 `CreationService.calculate_height` / `logic.compute_casualty` 等被包装的函数对象（带 `__hook_key__`）。函数覆盖的 `impl` 必须可调用且签名与原函数一致；对常量（如 `logic.PREDEFINED_TAGS`）也可直接传列表值。 |
 | `runtime.default(target)` | 返回被覆盖前的默认实现。覆盖函数内部如需复用默认逻辑，可调用 `runtime.default(target)(...)`。 |
 | `runtime.reset()` | 清空全部覆盖（一般由程序自动调用，模块内无需使用）。 |
-
-覆盖实现必须与被覆盖函数保持相同的参数顺序、默认值与返回约定，否则会导致运行时参数
-错位或下游解析失败。
-
-## 可覆盖的目标
 
 ### `CreationService`
 
@@ -139,13 +151,9 @@ def register(runtime):
 | `_build_size_description` | `(quip_result) -> str` | 由报告正文中的一条尺寸对比结果构造解锁描述。                                                                     |
 | `select_quip_with_budget` | `(size_cat, intrusion_val, destruction_val, quips_working, locked_coords, cumulative_actual, cumulative_base, rate_factor=1.0, step_index=0, selected_tags=None, skip_base_prob=0.0, posture_list=None, blocked_words=None) -> (text, style, coord, actual_step, new_cumulative_actual, new_cumulative_base)` | 在预算内挑选事件描述 quip。含屏蔽词的描述会被跳过（内部调用 `contains_blocked_word`）。注意它会**就地弹出** `quips_working` 中被选中的 quip，覆盖实现必须保持该行为并返回 6 元组。               |
 
+## 附录 B：完整示例（imperial_units）
 
-
-## 完整示例
-
-程序在 `data/static/behaviors/imperial_units/` 提供了一个现成示例，把显示单位从
-米 / 千米改为英尺 / 英里。
-创建世界包时在资源页选择 `imperial_units` 即可附带。
+程序自带的示例行为包，把显示单位从米 / 千米改为英尺 / 英里：
 
 ```python
 # data/static/behaviors/imperial_units/imperial_units.py
@@ -188,16 +196,7 @@ def register(runtime):
     runtime.override("logic.length_unit_label", length_unit_label)
 ```
 
-## 打包与分发
-
-1. 在 `data/static/behaviors/<pack>/` 下编写行为模块（每个文件需有 `register`）；
-2. 创建世界包时在资源页单选该行为包，清单会写入 `resources.behaviors: ["<pack>"]`；
-3. 也可直接使用「设置 → 世界包」的导出功能，或手动把整个 `<world_id>` 目录打包为
-   `<world_id>.world.zip`。
-
-解散世界包时，行为包会转存到 `data/static/behaviors/`（目录名冲突则追加世界包名与版本号）。
-
-## 注意事项
+## 附录 C：注意事项
 
 - **任意代码执行**：行为包本质是 Python 代码，会在激活时于本机执行。只应加载来自可信
   来源的世界包，如同对待一般软件一样。
@@ -205,11 +204,6 @@ def register(runtime):
   错位、异常或生成逻辑出错。
 - **错误隔离**：某个行为模块加载或注册失败时，程序会打印
   `[BehaviorPack] ...` 警告并跳过该模块，其余行为模块与默认行为不受影响。
-- **激活/停用生效时机**：行为覆盖只在世界包激活期间生效；停用、解散或删除世界包后自动
-  清空，不需要重启程序。切换世界包时会先卸载旧包再加载新包，保证不会串包。
-- **静态调用同样生效**：由于所有调用都经过行为钩子，`ui` 中直接引用
-  `CreationService.calculate_height(...)`、`StateService.recover_action_points(...)`、
-  `logic.compute_casualty(...)` 的位置也会一并使用覆盖实现。
 - **常量覆盖**：`logic.PREDEFINED_TAGS` 不是函数，必须用字符串键
   `"logic.PREDEFINED_TAGS"` 注册，且 `impl` 可为列表值或返回列表的可调用对象。
   程序统一通过 `logic.get_predefined_tags()` 读取该常量。
