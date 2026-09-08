@@ -13,7 +13,7 @@ PERSONALITY_COLUMNS = [
     "name",
     "init_intrusion", "step_intrusion",
     "init_destruction", "step_destruction",
-    "sensitivity", "skip_base_prob",
+    "sensitivity", "gravity", "skip_base_prob",
     "description",
 ]
 PERSONALITY_COLUMNS_WITH_WEIGHT = ["weight", *PERSONALITY_COLUMNS]
@@ -105,6 +105,7 @@ class PersonalityRepo:
             "init_destruction": row.get("init_destruction"),
             "step_destruction": row.get("step_destruction"),
             "sensitivity": row.get("sensitivity"),
+            "gravity": row.get("gravity"),
             "skip_base_prob": row.get("skip_base_prob"),
         }
         fields = {
@@ -113,6 +114,7 @@ class PersonalityRepo:
             "init_destruction": (0.0, 4.0, 1.0),
             "step_destruction": (-5.0, 5.0, 0.5),
             "sensitivity": (-5.0, 5.0, 1.0),
+            "gravity": (-5.0, 5.0, 0.0),
             "skip_base_prob": (0.0, 5.0, 3.0),
         }
         values = {}
@@ -120,6 +122,11 @@ class PersonalityRepo:
         for field, (lo, hi, default) in fields.items():
             text = (raw.get(field) or "").strip()
             if text == "":
+                # gravity 为新增列：旧表没有该列时按默认值 0 处理，不拒绝整行
+                if field == "gravity":
+                    values[field] = default
+                    ranges[field] = 0.0
+                    continue
                 return None
             parsed = parse_float_parameter(text)
             if parsed is None:
@@ -150,6 +157,8 @@ class PersonalityRepo:
                 item.step_destruction, ranges.get("step_destruction", 0.0)),
             "sensitivity": format_float_parameter(
                 item.sensitivity, ranges.get("sensitivity", 0.0)),
+            "gravity": format_float_parameter(
+                item.gravity, ranges.get("gravity", 0.0)),
             "skip_base_prob": format_float_parameter(
                 item.skip_base_prob, ranges.get("skip_base_prob", 0.0)),
             "description": item.description,

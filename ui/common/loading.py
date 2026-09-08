@@ -4,7 +4,7 @@ import sys
 
 import customtkinter as ctk
 
-from paths import assets_dir
+from paths import icon_dir
 from ui.common import fonts as ui_fonts
 from ui.common.theme import BASE, HARD_LABEL, SOFT
 
@@ -136,11 +136,11 @@ class LoadingWindow(ctk.CTkToplevel):
         self.page.show_error(message, title)
 
     def _apply_app_icon(self):
-        """设置应用图标（assets/icon.ico），缺失时回退到 customtkinter 图标。"""
+        """设置应用图标（assets/icons/icon.ico），缺失时回退到 customtkinter 图标。"""
         if not sys.platform.startswith("win"):
             return
         try:
-            icon_path = os.path.join(assets_dir(), "icon.ico")
+            icon_path = os.path.join(icon_dir(), "icon.ico")
             if not os.path.exists(icon_path):
                 icon_path = os.path.join(
                     os.path.dirname(ctk.__file__), "assets", "icons",

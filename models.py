@@ -63,7 +63,8 @@ class Personality:
     step_intrusion: float      # 介入度步长
     init_destruction: float    # 初始破坏性 (0-4)
     step_destruction: float    # 破坏性步长
-    sensitivity: float         # 敏感值 (影响地标切换时的额外变化)
+    sensitivity: float         # 敏感值 (影响地标切换等对介入度的额外变化)
+    gravity: float = 0.0       # 重力 (影响地标切换等对破坏性的额外变化)
     description: str = ""
     skip_base_prob: float = 3.0  # 个性强度，推荐 2~4
     weight: float = field(default=1.0, compare=False, repr=False)
@@ -77,6 +78,7 @@ class Personality:
             "init_destruction": (0.0, 4.0),
             "step_destruction": (-5.0, 5.0),
             "sensitivity": (-5.0, 5.0),
+            "gravity": (-5.0, 5.0),
             "skip_base_prob": (0.0, 5.0),
         }
         values = {
@@ -113,6 +115,28 @@ class EvolutionRecord:
 
 
 @dataclass
+class OfflineDetail:
+    """离线恢复的2小时精度步进/伤亡明细（落在偶数时间格点）。
+
+    start_at/end_at 为本地 ISO 时间，作为该明细在时间轴上的绝对区间
+    （对齐偶数整点，供导出图表直接读取）。step/casualties 为该区间
+    累计的步进与伤亡，env_factor 为该区间实际采用的环境因子（含噪声）。
+    明细只保留最近 _OFFLINE_WINDOW_HOURS(72) 小时；更早的离线时长按
+    “24小时平滑步进总量×离线天数×地址环境因子”汇总后只进入演化表总和。
+    """
+    start_at: str = ""         # 区间起始（本地 ISO 时间）
+    end_at: str = ""           # 区间结束（本地 ISO 时间）
+    step: float = 0.0          # 该区间累计步进
+    casualties: float = 0.0    # 该区间累计伤亡
+    env_factor: float = 0.0    # 该区间采用的环境因子（含噪声）
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "OfflineDetail":
+        allowed = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in allowed})
+
+
+@dataclass
 class CharacterSnapshot:
     giantess_id: str
     name: str
@@ -132,6 +156,10 @@ class CharacterSnapshot:
     greed: float = 0.0
     will: bool = False
     will_status: Optional[str] = None
+    # 当前介入度/破坏性步长：步长随故事演进而变化（演化坐标前向初始值恢复，
+    # 演化坐标后减去 步进×敏感/重力），初始值与 personality 一致，之后独立存储。
+    step_intrusion: Optional[float] = field(default=None, compare=False, repr=False)
+    step_destruction: Optional[float] = field(default=None, compare=False, repr=False)
     selected_tags: List[str] = field(default_factory=list)
     intro_hidden: str = ""
     intro_visible: str = ""
@@ -148,12 +176,18 @@ class CharacterSnapshot:
     # 注册地址系统：角色当前位置（完整地址，含世界观段）。首次生成报告时由
     # 第一个地标锚定并持久化；空表示尚无位置（新角色或当前内容未注册地址）。
     position: str = ""
+    # 离线恢复期间的2小时精度步进与伤亡明细，由 recover_evolution 计算填充。
+    offline_details: List[OfflineDetail] = field(default_factory=list)
 
     def __post_init__(self):
         # 允许以字典列表构造（从 JSON 加载），统一规范化为 EvolutionRecord
         self.evolution = [
             e if isinstance(e, EvolutionRecord) else EvolutionRecord(**e)
             for e in (self.evolution or [])
+        ]
+        self.offline_details = [
+            d if isinstance(d, OfflineDetail) else OfflineDetail.from_dict(d)
+            for d in (self.offline_details or [])
         ]
 
     @classmethod
@@ -175,6 +209,20 @@ class CharacterSnapshot:
     def destruction(self) -> float:
         """当前破坏性：演化表最后一行的记录值。"""
         return self.evolution[-1].destruction if self.evolution else 0.0
+
+    @property
+    def current_step_intrusion(self) -> float:
+        """当前介入度步长：存储字段；未初始化（None）时回退到性格初始步长。"""
+        if self.step_intrusion is not None:
+            return self.step_intrusion
+        return self.personality.step_intrusion if self.personality else 0.0
+
+    @property
+    def current_step_destruction(self) -> float:
+        """当前破坏性步长：存储字段；未初始化（None）时回退到性格初始步长。"""
+        if self.step_destruction is not None:
+            return self.step_destruction
+        return self.personality.step_destruction if self.personality else 0.0
 
     @property
     def total_casualties(self) -> float:
@@ -232,5 +280,8 @@ class ReportData:
     # 副本需要额外字段
     curr_intrusion: float = 0.0
     curr_destruction: float = 0.0
+    # 本次报告演化后的当前步长（介入度/破坏性）
+    step_intrusion: float = 0.0
+    step_destruction: float = 0.0
     # 本次报告锚定的角色位置（完整地址）；空表示未锚定
     position: str = ""

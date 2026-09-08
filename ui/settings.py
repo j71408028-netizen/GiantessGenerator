@@ -1,4 +1,3 @@
-import os
 import random
 import uuid
 import tkinter as tk
@@ -21,7 +20,7 @@ from persistence import PresetRepo, PersonalityRepo
 from persistence.name_repo import NameRepo, DEFAULT_NAME_TABLE
 from persistence.world_pack import list_behavior_packs
 from services.challenge_service import ChallengeService
-from services.news_service import DEFAULT_NEWS_TABLE, NewsService
+from services.character_service.news import DEFAULT_NEWS_TABLE, NewsService
 from ui.common.widgets import CollapsibleBlock, StyleListBox, CTkScrollableDropdownFrame
 from ui.common import fonts as ui_fonts
 from ui.common.theme import (

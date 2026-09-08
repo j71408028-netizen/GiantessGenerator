@@ -121,7 +121,13 @@ class DungeonWindowBase:
             self.dungeon_state = DungeonState(
                 intrusion=personality.init_intrusion if personality.init_intrusion != 0 else random.uniform(0.5, 2.5),
                 destruction=personality.init_destruction if personality.init_destruction != 0 else random.uniform(0.5, 2.5),
-                custom_attrs=init_custom
+                custom_attrs=init_custom,
+                step_intrusion=(character.current_step_intrusion
+                                if character is not None
+                                else personality.step_intrusion),
+                step_destruction=(character.current_step_destruction
+                                  if character is not None
+                                  else personality.step_destruction),
             )
             self.dungeon_state.total_steps = 0
             self.dungeon_state.steps_since_trigger = 0
@@ -156,7 +162,9 @@ class DungeonWindowBase:
                 self.dungeon_state = DungeonState(
                     intrusion=first_step["intrusion_before"],
                     destruction=first_step["destruction_before"],
-                    custom_attrs=first_step.get("custom_before", {})
+                    custom_attrs=first_step.get("custom_before", {}),
+                    step_intrusion=first_step.get("step_intrusion_before"),
+                    step_destruction=first_step.get("step_destruction_before"),
                 )
             self.dungeon_logic = None
             self.current_text_type = None

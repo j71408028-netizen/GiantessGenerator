@@ -49,6 +49,16 @@ def assets_dir() -> str:
     return os.path.join(resource_root(), "assets")
 
 
+def icon_dir() -> str:
+    """返回应用图标资源目录（默认为 <项目根>/assets/icons）。"""
+    return os.path.join(assets_dir(), "icons")
+
+
+def template_dir() -> str:
+    """返回文档/页面静态模板目录（默认为 <项目根>/assets/templates）。"""
+    return os.path.join(assets_dir(), "templates")
+
+
 def names_dir() -> str:
     """返回静态姓名表目录（默认为 <数据目录>/static/names）。"""
     return os.path.join(data_dir(), "static", "names")

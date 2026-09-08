@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" data-rank="$rank_tier">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$page_title - 角色档案</title>
+<style>$css</style>
+</head>
+<body>
+<header class="topbar"><div class="topbar-inner">
+  <span class="logo">📜 角色档案</span>
+  <nav class="topnav">$nav</nav>
+  <div class="search-box" title="搜索身体尺寸、报告与副本回放（按 / 聚焦）">
+    <input id="archiveSearch" type="search" placeholder="搜索尺寸 / 报告 / 回放" autocomplete="off" spellcheck="false">
+    <span id="searchCount" class="search-count"></span>
+    <button type="button" id="searchPrev" title="上一个（Shift+Enter）" disabled>▲</button>
+    <button type="button" id="searchNext" title="下一个（Enter）" disabled>▼</button>
+  </div>
+  <button type="button" id="themeBtn" title="切换亮/暗主题">🌙</button>
+</div><div class="progress" id="scrollProgress"></div></header>
+<div class="layout">
+<aside class="sidebar">
+  <div class="infobox">$infobox</div>
+</aside>
+<main>
+  <section class="section hero" id="overview">
+    $hero_style<div class="hero-veil"></div>
+    <div class="hero-content">
+      $hero_avatar
+      <div class="hero-id">
+        <h2>$hero_name</h2>
+        $nick
+        $tags
+      </div>
+      $intro
+    </div>
+    $hero_body
+  </section>
+  <section class="section" id="analysis">
+    <h2><span class="h2-ico">📊</span>分析</h2>
+    <div class="section-sub">性格倾向与探索态势</div>
+    $analysis
+  </section>
+  <section class="section" id="endings">
+    <h2><span class="h2-ico">🏁</span>重要结局</h2>
+    <div class="section-sub">角色达成过的重要结局索引</div>
+    $endings
+  </section>
+  <section class="section" id="sizes">
+    <h2><span class="h2-ico">📏</span>身体尺寸</h2>
+    <div class="section-sub">基准身高 $base_height · 蓝色部位名可展开解锁情报</div>
+    $sizes
+  </section>
+  <section class="section" id="gallery">
+    <h2><span class="h2-ico">🖼️</span>形象图</h2>
+    <div class="section-sub">共 $gallery_count 张</div>
+    <div class="gallery">$gallery</div>
+  </section>
+  <section class="section" id="reports">
+    <h2><span class="h2-ico">📜</span>报告</h2>
+    <div class="section-sub">共 $report_count 份</div>
+    $reports
+  </section>
+  <section class="section" id="replays">
+    <h2><span class="h2-ico">🏰</span>副本回放</h2>
+    <div class="section-sub">以文本形式回顾副本探索全程</div>
+    $replays
+  </section>
+</main>
+</div>
+<button type="button" id="backTop" title="回到顶部">↑</button>
+<footer class="footer">由 GiantessWiki 导出于 $exported_at。可能含有未公开信息。</footer>
+<script>$js</script>
+</body>
+</html>

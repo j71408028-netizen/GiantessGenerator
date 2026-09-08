@@ -10,7 +10,7 @@ import customtkinter as ctk
 import ui.common.dialogs
 import ui.common.ctk_patch  # noqa: F401  模式切换时同步刷新 CTk 控件 Frame 底色，避免几何重排露旧色
 from context import ExplorationContext
-from paths import assets_dir
+from paths import icon_dir
 from persistence import QuipRepo, DungeonRepo, CharacterRepo
 from persistence import SettingsRepo, LandmarkRepo, PresetRepo, PersonalityRepo
 from services.challenge_service import ChallengeService
@@ -371,11 +371,11 @@ class MainWindowManager:
         self.root.after(80, loading_page.destroy)
 
     def _apply_app_icon(self):
-        """设置主窗口应用图标（assets/icon.ico），缺失时回退到 customtkinter 图标。"""
+        """设置主窗口应用图标（assets/icons/icon.ico），缺失时回退到 customtkinter 图标。"""
         if not sys.platform.startswith("win"):
             return
         try:
-            icon_path = os.path.join(assets_dir(), "icon.ico")
+            icon_path = os.path.join(icon_dir(), "icon.ico")
             if not os.path.exists(icon_path):
                 icon_path = os.path.join(os.path.dirname(ctk.__file__), "assets", "icons",
                                          "CustomTkinter_icon_Windows.ico")

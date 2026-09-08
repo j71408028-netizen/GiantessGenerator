@@ -80,6 +80,13 @@ _SENSITIVITY_BUCKETS = [
     (1.5, "人类的拒绝会让患得患失的她强烈退缩，同时却经常有着一不小心有玩过头的模样。"),
 ]
 
+_GRAVITY_BUCKETS = [
+    (-3.0, "她的破坏冲动收敛而克制，面对景观时更易收手，任由文明保持完整。"),
+    (-0.5, "地标的风貌几乎不会撩动她的破坏欲，行动始终有自己的分寸。"),
+    (0.5, "她的破坏与否与眼前的景观无关，全凭当时的心绪起伏。"),
+    (1.5, "越是壮观独特的地标，越能点燃她碾碎一切的冲动。"),
+]
+
 _STRENGTH_BUCKETS = [
     (0.0, "她的身上几乎看不出个人特质，性格底色淡薄、随波逐流。"),
     (1.0, "习惯与爱好在她生活中的分量很轻，行动与破坏大多中规中矩。"),
@@ -141,6 +148,7 @@ def _personality_summary(values: dict,
     lines.append(f"{_init_step_phrase('破坏', values['init_destruction'],
                                       values['step_destruction'], _DESTRUCTION_BUCKETS)}")
     lines.append(f"{_pick_level(values['sensitivity'], _SENSITIVITY_BUCKETS)}")
+    lines.append(f"{_pick_level(values['gravity'], _GRAVITY_BUCKETS)}")
     lines.append(f"{_pick_level(values['skip_base_prob'], _STRENGTH_BUCKETS)}")
     return lines
 
@@ -187,6 +195,7 @@ class PersonalityCustomDialog(BaseDialog):
         ("init_destruction", "初始破坏性", 0.4, 4.5, 0.1),
         ("step_destruction", "破坏性步长", -3, 3, 0.1),
         ("sensitivity", "敏感值", -3, 3, 0.1),
+        ("gravity", "重力", -3, 3, 0.1),
         ("skip_base_prob", "个性强度", 0, 5, 0.1),
     ]
 
@@ -205,7 +214,7 @@ class PersonalityCustomDialog(BaseDialog):
         self._table_items = table_items or []
         self._sliders: Dict[str, ctk.CTkSlider] = {}
         self._value_labels: Dict[str, ctk.CTkLabel] = {}
-        self.geometry("465x450")
+        self.geometry("465x500")
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
         self._base_item = None
@@ -275,7 +284,7 @@ class PersonalityCustomDialog(BaseDialog):
         summary_frame = ctk.CTkFrame(self, fg_color="transparent")
         summary_frame.grid(row=2, column=0, sticky='ew', padx=14, pady=0)
         self._summary_lines = []
-        for _i in range(5):
+        for _i in range(6):
             lbl = ctk.CTkLabel(summary_frame, text="", anchor='w', justify="left",
                                font=self.UI_FONT, wraplength=470, text_color=TEXT)
             lbl.pack(fill='x', pady=0)

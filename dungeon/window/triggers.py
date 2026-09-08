@@ -106,15 +106,21 @@ class TriggerHandler:
                     duration = int(action_data.get("duration", 3))
                 except (TypeError, ValueError):
                     strength, objective, duration = 1.0, 0.0, 3
-                sensitivity = getattr(self.personality, "sensitivity", 0.0) if self.personality else 0.0
-                amount = strength * (sensitivity + objective)
+                # 破坏性相关属性由性格重力调制，介入度/自定义属性由敏感值调制
+                if self.personality is not None:
+                    base = (getattr(self.personality, "gravity", 0.0)
+                            if attr == "破坏性"
+                            else getattr(self.personality, "sensitivity", 0.0))
+                else:
+                    base = 0.0
+                amount = strength * (base + objective)
                 self.sensitivity_effects.append({
                     "attr": attr,
                     "amount": amount,
                     "remaining": max(1, duration),
                 })
                 print(f"[Trigger] 已触发: {trigger['name']}，敏感效果："
-                      f"{attr} 倍率 {amount:+.2f}（强度={strength}，性格敏感值={sensitivity}，"
+                      f"{attr} 倍率 {amount:+.2f}（强度={strength}，性格{'重力' if attr == '破坏性' else '敏感值'}={base}，"
                       f"客观影响={objective}），持续 {duration} 步")
                 self._record_trigger_action(trigger, action_type, action_data)
             elif action_type == "ending":

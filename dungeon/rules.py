@@ -43,13 +43,22 @@ class EvolutionRules:
         step = self.step_overrides.get(text_type.value, text_type.step_value)
         sensitivity_mods = sensitivity_mods or {}
 
-        intrusion_rate = personality.step_intrusion
-        destruction_rate = personality.step_destruction
+        # 步长演化（演算坐标前）：步长向初始值恢复 0.2*个性强度 的比例差值；
+        # 未初始化的步长（None）沿用性格初始步长，不参与恢复
+        si = state.step_intrusion if state.step_intrusion is not None else personality.step_intrusion
+        sd = state.step_destruction if state.step_destruction is not None else personality.step_destruction
+        strength = getattr(personality, "skip_base_prob", 3.0)
+        ratio = 0.2 * strength
+        si = si + (personality.step_intrusion - si) * ratio
+        sd = sd + (personality.step_destruction - sd) * ratio
+
+        intrusion_rate = si
+        destruction_rate = sd
         intrusion_delta = (direction + sensitivity_mods.get("介入度", 0.0)) * intrusion_rate * step
         destruction_delta = (direction + sensitivity_mods.get("破坏性", 0.0)) * destruction_rate * step
         if is_interaction_chosen:
             intrusion_delta += direction * personality.sensitivity
-            destruction_delta += direction * personality.sensitivity
+            destruction_delta += direction * getattr(personality, "gravity", 0.0)
         new_state.intrusion = max(0.0, min(5.0, new_state.intrusion + intrusion_delta))
         new_state.destruction = max(0.0, min(5.0, new_state.destruction + destruction_delta))
 
@@ -62,6 +71,10 @@ class EvolutionRules:
             if is_interaction_chosen:
                 delta += direction * personality.sensitivity * random.uniform(1 - offset, 1 + offset)
             new_state.custom_attrs[name] = new_state.custom_attrs.get(name, 0.0) + delta
+
+        # 步长演化（演算坐标后）：步长 -= 步进 × 敏感/重力
+        new_state.step_intrusion = si - step * personality.sensitivity
+        new_state.step_destruction = sd - step * getattr(personality, "gravity", 0.0)
 
         new_state.total_steps += 1
         new_state.steps_since_trigger += 1

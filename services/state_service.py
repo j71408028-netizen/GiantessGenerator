@@ -3,24 +3,6 @@ from typing import Optional, Tuple
 
 from models import CharacterSnapshot
 from behavior_runtime import behavior_hook
-from logic import compute_casualty
-
-
-def _daytime_hours(start: datetime.datetime, end: datetime.datetime) -> float:
-    """统计 [start, end) 中落在日间的小时数（按整点分段，不足一小时按比例计）。"""
-    day_start_hour = 6  # 日间起点（含）
-    night_start_hour = 18  # 夜间起点（含），日间为 [6, 18)
-    if end <= start:
-        return 0.0
-    total = 0.0
-    t = start
-    while t < end:
-        next_t = min(t.replace(minute=0, second=0, microsecond=0)
-                     + datetime.timedelta(hours=1), end)
-        if day_start_hour <= t.hour < night_start_hour:
-            total += (next_t - t).total_seconds() / 3600.0
-        t = next_t
-    return total
 
 
 class StateService:
@@ -30,6 +12,10 @@ class StateService:
     接受任意状态来源的数值，报告生成等字典流程也可直接使用），
     以及快照级操作（传入 CharacterSnapshot，有变化时向演化表追加一行）。
     行动点数的消耗/恢复/返还同样统一在此。
+
+    离线结算（角色下线期间的步进/伤亡/明细）已拆分到
+    :class:`OfflineService`，本类的 :meth:`recover_evolution` 保留
+    静态钩子入口并委托给它的实例方法。
     """
 
     # ==================== 坐标：纯数值运算 ====================
@@ -53,34 +39,78 @@ class StateService:
     @staticmethod
     @behavior_hook("StateService", "advance_coordinates")
     def advance_coordinates(personality, intrusion: float, destruction: float,
-                            step: float) -> Tuple[float, float]:
-        """按故事步进推进坐标：坐标 += 步进 × 性格步长。
-        步进视场景而定且本身无限制：报告事件取事件的实际步进，
-        负向演化取 -1 - 0.5 * 性格敏感值，由调用方传入。
+                            step: float,
+                            step_intrusion: Optional[float] = None,
+                            step_destruction: Optional[float] = None,
+                            ) -> Tuple[float, float]:
+        """按故事步进推进坐标：坐标 += 步进 × 步长。
+
+        未传入显式步长时沿用性格步长（旧行为，不演化步长）；
+        传入显式步长（角色已演化的当前步长）时按该步长推进，
+        供报告/副本等“步长随故事演化”的流程使用。调用方需自行
+        在演算前后调用 evolve_step_rates / evolve_step_rates_after。
         """
         if personality is None:
             return intrusion, destruction
+        si = personality.step_intrusion if step_intrusion is None else step_intrusion
+        sd = personality.step_destruction if step_destruction is None else step_destruction
         return StateService.shift_coordinates(
-            intrusion, destruction,
-            personality.step_intrusion * step, personality.step_destruction * step)
+            intrusion, destruction, si * step, sd * step)
+
+    @staticmethod
+    @behavior_hook("StateService", "evolve_step_rates")
+    def evolve_step_rates(personality, step_intrusion: float, step_destruction: float,
+                          step: float) -> Tuple[float, float]:
+        """按故事步进演化介入度/破坏性步长。
+
+        规则分两步（在演化坐标前后分别调用）：
+        - 演算坐标前：步长向初始值恢复 0.2 * 个性强度 的比例差值：
+            current += (init - current) * 0.2 * skip_base_prob
+        - 演算坐标后：步长减去 步进 × 性格值：
+            step_intrusion -= step * sensitivity
+            step_destruction -= step * gravity
+        调用方在演化坐标前调用本方法得到恢复后的步长，演算坐标后
+        再以同样的步进取扣除（见 evolve_step_rates_after）。
+        """
+        if personality is None:
+            return step_intrusion, step_destruction
+        strength = getattr(personality, "skip_base_prob", 3.0)
+        ratio = 0.2 * strength
+        step_intrusion = step_intrusion + (
+            personality.step_intrusion - step_intrusion) * ratio
+        step_destruction = step_destruction + (
+            personality.step_destruction - step_destruction) * ratio
+        return step_intrusion, step_destruction
+
+    @staticmethod
+    @behavior_hook("StateService", "evolve_step_rates_after")
+    def evolve_step_rates_after(personality, step_intrusion: float,
+                                step_destruction: float,
+                                step: float) -> Tuple[float, float]:
+        """演算坐标后按步进扣除步长：步长 -= 步进 × 性格值。"""
+        if personality is None:
+            return step_intrusion, step_destruction
+        return (step_intrusion - step * personality.sensitivity,
+                step_destruction - step * getattr(personality, "gravity", 0.0))
 
     @staticmethod
     @behavior_hook("StateService", "apply_landmark_switch")
     def apply_landmark_switch(personality, intrusion: float, destruction: float,
                               to_frequency: str) -> Tuple[float, float]:
-        """地标切换（含首次匹配）时的敏感值调整。
+        """地标切换（含首次匹配）时的性格调整。
         切换到 common：介入度 + 敏感值；切换到 unique：介入度 - 敏感值。
-        破坏性达到 3 以上时：切换到 unique 破坏性 + 敏感值，切换到 common 破坏性 - 敏感值。
+        破坏性达到 3 以上时：切换到 unique 破坏性 + 重力，切换到 common 破坏性 - 重力。
         """
         if personality is None:
             return intrusion, destruction
-        
+
         destruction_switch_threshold = 3.0  # 破坏性达到该值后，地标切换才影响破坏性
         sensitivity = personality.sensitivity
+        gravity = getattr(personality, "gravity", 0.0)
         to_unique = to_frequency == "unique"
         intrusion += -sensitivity if to_unique else sensitivity
         if destruction >= destruction_switch_threshold:
-            destruction += sensitivity if to_unique else -sensitivity
+            destruction += gravity if to_unique else -gravity
 
         return StateService.clamp_coordinates(intrusion, destruction)
 
@@ -121,19 +151,35 @@ class StateService:
     @behavior_hook("StateService", "apply_negative_evolution")
     def apply_negative_evolution(state: CharacterSnapshot):
         """行动点数不足（<50）时应用负向演化。
-        步进取 -1 - 0.5 * 性格敏感值，无限制地每次应用，仅受 0.5~4.5 边界约束；
-        有变化时向演化表追加一行，行的步进取本次负向步进。
+        介入度步进取 -1 - 0.5 * 性格敏感值，破坏性步进取 -1 - 0.5 * 性格重力，
+        无限制地每次应用，仅受 0.5~4.5 边界约束；
+        同时按步长演化规则恢复/扣除介入度与破坏性步长；
+        有变化时向演化表追加一行，行的步进取两种步进之和。
         """
         if state.action_points >= 50:
             return
         personality = state.personality
         if personality is None:
             return
-        step = -1.0 - 0.5 * personality.sensitivity
-        intrusion, destruction = StateService.advance_coordinates(
-            personality, state.intrusion, state.destruction, step)
-        if intrusion != state.intrusion or destruction != state.destruction:
-            state.record_change(step=step, intrusion=intrusion,
+        intrusion_step = -1.0 - 0.5 * personality.sensitivity
+        destruction_step = -1.0 - 0.5 * getattr(personality, "gravity", 0.0)
+        # 演算坐标前：步长向初始值恢复
+        si = state.current_step_intrusion
+        sd = state.current_step_destruction
+        si, sd = StateService.evolve_step_rates(personality, si, sd, 0.0)
+        intrusion, destruction = StateService.shift_coordinates(
+            state.intrusion, state.destruction,
+            si * intrusion_step, sd * destruction_step)
+        # 演算坐标后：各分量按自身步进扣除 步进×性格值
+        si = si - intrusion_step * personality.sensitivity
+        sd = sd - destruction_step * getattr(personality, "gravity", 0.0)
+        state.step_intrusion = si
+        state.step_destruction = sd
+        if (intrusion != state.intrusion or destruction != state.destruction
+                or si != state.current_step_intrusion
+                or sd != state.current_step_destruction):
+            state.record_change(step=intrusion_step + destruction_step,
+                                intrusion=intrusion,
                                 destruction=destruction,
                                 source="apply_negative_evolution")
 
@@ -155,51 +201,16 @@ class StateService:
     @behavior_hook("StateService", "recover_evolution")
     def recover_evolution(state: CharacterSnapshot,
                           now: Optional[datetime.datetime] = None):
-        """按加载间隔时长恢复：每分钟恢复少量行动点数并按步进衰减回落坐标。
-        衰减比例取离线分钟数 × 每分钟回落比例。
-        间隔超出宽限时长（1小时）的部分，按日间每小时 0.01 步进（夜间为 0）
-        累积离线步进，并按伤亡公式结算伤亡（伤亡用回落后的破坏性）。
-        有任何变化时向演化表追加一行，
+        """按加载间隔时长恢复：每分钟恢复行动点、坐标衰减，
+        并结算离线期间的步进与伤亡。
+
+        离线结算逻辑与参数已拆分到 :class:`OfflineService`（实例方法
+        :meth:`OfflineService.recover_offline`），此处仅保留行为钩子
+        兼容入口并委托；行为包仍可按 ``"StateService.recover_evolution"``
+        覆盖整套恢复流程。
         """
-        idle_grace_hours = 1  # 不计离线步进的宽限时长（小时）
-        idle_step_per_hour = 0.01  # 宽限后日间每小时累积的步进，夜间为 0
-        recovery_points_per_minute = 0.5  # 每分钟恢复的行动点数
-        recovery_decay_per_minute = 0.01  # 每分钟回落的步进比例（占一个性格步长）
-
-        now = now or datetime.datetime.now()
-
-        try:
-            updated = datetime.datetime.fromisoformat(state.updated_at)
-        except (TypeError, ValueError):
-            return
-        delta_seconds = (now - updated).total_seconds()
-        if delta_seconds <= 0:
-            return
-        delta_minutes = delta_seconds / 60.0
-
-        old_intrusion = state.intrusion
-        old_destruction = state.destruction
-        old_casualties = state.total_casualties
-        old_points = state.action_points
-
-        StateService.receive_action_points(
-            state, int(delta_minutes * recovery_points_per_minute))
-        intrusion, destruction = StateService.decayed_coordinates(
-            state.personality, state.intrusion, state.destruction,
-            delta_minutes * recovery_decay_per_minute)
-
-        idle_start = updated + datetime.timedelta(hours=idle_grace_hours)
-        idle_step = _daytime_hours(idle_start, now) * idle_step_per_hour
-        height = max(1.0, state.height or 1.0)
-        casualties = old_casualties + compute_casualty(
-            height, idle_step, destruction, "", env_factor=0.4)
-
-        if (intrusion != old_intrusion or destruction != old_destruction
-                or casualties != old_casualties
-                or state.action_points != old_points):
-            state.record_change(step=idle_step, intrusion=intrusion,
-                                destruction=destruction, casualties=casualties,
-                                source="recover_evolution")
+        from services.character_service.offline import OfflineService
+        OfflineService().recover_offline(state, now)
 
     # ==================== 行动点数 ====================
 

@@ -12,7 +12,7 @@ import sys
 
 import customtkinter as ctk
 
-from paths import assets_dir, ensure_cwd
+from paths import ensure_cwd, icon_dir
 from ui.common.loading import LoadingPage
 
 _DEFAULT_W = 1280
@@ -31,11 +31,11 @@ def _center(win, w=_DEFAULT_W, h=_DEFAULT_H):
 
 
 def _apply_app_icon(win):
-    """设置应用图标（assets/icon.ico），缺失时回退到 customtkinter 图标。"""
+    """设置应用图标（assets/icons/icon.ico），缺失时回退到 customtkinter 图标。"""
     if not sys.platform.startswith("win"):
         return
     try:
-        icon_path = os.path.join(assets_dir(), "icon.ico")
+        icon_path = os.path.join(icon_dir(), "icon.ico")
         if not os.path.exists(icon_path):
             icon_path = os.path.join(
                 os.path.dirname(ctk.__file__), "assets", "icons",

@@ -129,6 +129,12 @@ class DungeonPersistence:
                 casualties=char.total_casualties + cas_d,
                 source="_apply_ending_effects",
             )
+            # 副本会话内演化的步长同步到角色存储（未演化为 None 时保留角色现值）
+            ds = self.dungeon_state
+            if getattr(ds, "step_intrusion", None) is not None:
+                char.step_intrusion = ds.step_intrusion
+            if getattr(ds, "step_destruction", None) is not None:
+                char.step_destruction = ds.step_destruction
             if self.character_repo is not None:
                 try:
                     self.character_repo.save(char)
@@ -182,6 +188,9 @@ class DungeonPersistence:
             casualties=getattr(self.dungeon_state, "total_casualties", 0.0),
             source="_create_character_from_session",
         )
+        # 副本会话内演化的步长同步到角色存储
+        char.step_intrusion = getattr(self.dungeon_state, "step_intrusion", None)
+        char.step_destruction = getattr(self.dungeon_state, "step_destruction", None)
         return char
 
     def _write_replay_file(self, char) -> str:

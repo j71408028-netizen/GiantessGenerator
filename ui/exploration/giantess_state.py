@@ -14,7 +14,7 @@ from ui.common.theme import (
     BASE, BORDER, TEXT, SOFT, TEXT_MUTED, TITLE,
     PLACEHOLDER, TEXT_DISABLED,
     BORDER_ALT, HOVER_ALT, MENU_HOVER,
-    STATUS_ERR, ERR_STRONG, ERR_HOVER,
+    ERR_STRONG, ERR_HOVER,
     STAT_BLUE, STAT_BLUE_LIGHT, STAT_BLUE_DEEP,
 )
 from ui.common import fonts as ui_fonts
@@ -406,7 +406,7 @@ class GiantessStatePanel(ctk.CTkFrame):
             file_path = file_path.rsplit(".", 1)[0] + ".html"
             lower = file_path.lower()
         if lower.endswith(".html"):
-            from services.archive_export import export_character_mhtml
+            from services.character_service.archive_export import export_character_mhtml
             try:
                 export_character_mhtml(state, file_path,
                                        show_casualties=self._show_casualties())

@@ -8,7 +8,7 @@ import customtkinter as ctk
 from PIL import Image, ImageTk
 
 from services.image_service import ImageService
-from paths import assets_dir
+from paths import icon_dir
 from ui.common import fonts as ui_fonts
 from ui.common.theme import (
     TEXT, DLG_BORDER, DLG_HOVER, DLG_BTN_PRIMARY, DLG_BTN_PRIMARY_HOVER, DLG_FG,
@@ -21,7 +21,7 @@ from ui.common.theme import (
 
 
 # ── 常量 ──
-_ASSETS_DIR = assets_dir()
+_ASSETS_DIR = icon_dir()
 _MSG_ICON_IMAGES = {
     "info":     "ok.png",
     "warning":  "warning.png",
@@ -146,7 +146,7 @@ class BaseDialog(ctk.CTkToplevel):
             self._apply_titlebar_theme()
 
     def _apply_icon(self):
-        """创建时立即应用应用图标（assets/icon.ico），避免闪现 tkinter 默认图标。
+        """创建时立即应用应用图标（assets/icons/icon.ico），避免闪现 tkinter 默认图标。
 
         Windows 下无法通过 wm iconbitmap() 读取已有图标，故直接设置应用自带的
         icon.ico；若缺失则回退到 customtkinter 默认图标（与 CTkToplevel 延迟
@@ -653,7 +653,7 @@ class _MsgBox(BaseDialog):
         self._show_modal()
 
     def _load_icon_image(self, icon):
-        """加载 assets 中对应图标类型的 PNG（保留透明通道）并缩放至合适尺寸。"""
+        """加载 assets/icons 中对应图标类型的 PNG（保留透明通道）并缩放至合适尺寸。"""
         img_path = os.path.join(
             _ASSETS_DIR, _MSG_ICON_IMAGES.get(icon, _MSG_ICON_IMAGES["info"]))
         if not os.path.exists(img_path):

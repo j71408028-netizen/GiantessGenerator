@@ -21,7 +21,7 @@ from logic import ALL_PART_NAMES, format_size, get_size_category, replace_quip_t
 from models import CharacterSnapshot, ReportData
 from services import build_detail_pools
 from services.creation_service import CreationService
-from services.news_service import DEFAULT_NEWS_TABLE, NewsService
+from services.character_service.news import DEFAULT_NEWS_TABLE, NewsService
 from services.state_service import StateService
 from address_model import (
     resolve_full_address, world_of, depth_of, distance_m, touches,
@@ -171,6 +171,8 @@ class ExplorationContext:
                 "preset_obj": None,
                 "base_intrusion": state.intrusion,
                 "base_destruction": state.destruction,
+                "step_intrusion": state.current_step_intrusion,
+                "step_destruction": state.current_step_destruction,
                 "greed": state.greed,
                 "will": state.will,
                 "will_status": state.will_status,
@@ -232,6 +234,11 @@ class ExplorationContext:
                                 destruction=destruction_after,
                                 casualties=state.total_casualties + report_data["total_casualties"],
                                 source="report_from_core_or_character")
+            # 步长随本次报告演化后的当前值写回角色存储
+            state.step_intrusion = report_data.get("step_intrusion",
+                                                   state.current_step_intrusion)
+            state.step_destruction = report_data.get("step_destruction",
+                                                     state.current_step_destruction)
             state.landmark_durability = report_data.get("landmark_durability", {})
             new_position = report_data.get("position") or ""
             if new_position and new_position != (state.position or ""):
@@ -265,6 +272,8 @@ class ExplorationContext:
             casualty_breakdown=report_data["quip_results"],
             curr_intrusion=report_data["curr_intrusion"],
             curr_destruction=report_data["curr_destruction"],
+            step_intrusion=report_data.get("step_intrusion", 0.0),
+            step_destruction=report_data.get("step_destruction", 0.0),
             position=report_data.get("position", ""),
         )
 
@@ -459,6 +468,11 @@ class ExplorationContext:
         selected_tags = core_state["selected_tags"]
         greed = core_state["greed"]
         will = core_state["will"]
+        # 当前介入度/破坏性步长：未在 core_state 提供时沿用性格初始步长
+        curr_step_intrusion = core_state.get("step_intrusion",
+                                             personality_obj.step_intrusion)
+        curr_step_destruction = core_state.get("step_destruction",
+                                               personality_obj.step_destruction)
 
         comparison_order = self.settings.get("comparison_order", "match")
         comparison_count = self.settings.get("comparison_count", 5)
@@ -495,6 +509,8 @@ class ExplorationContext:
                 "total_casualties": 0.0,
                 "curr_intrusion": curr_intrusion,
                 "curr_destruction": curr_destruction,
+                "step_intrusion": curr_step_intrusion,
+                "step_destruction": curr_step_destruction,
                 "size_cat": get_size_category(height),
                 "position": position_now,
                 "engaged": plan["engaged"],
@@ -607,8 +623,17 @@ class ExplorationContext:
                     quip_text = re.sub(r'\s*\[summary:.*?\]', '', quip_text)
 
             if quip_text is not None:
+                # 步长演化（演算坐标前）：步长向初始值恢复 0.2*个性强度 的比例差值
+                curr_step_intrusion, curr_step_destruction = self.state_service.evolve_step_rates(
+                    personality_obj, curr_step_intrusion, curr_step_destruction, actual_step)
                 curr_intrusion, curr_destruction = self.state_service.advance_coordinates(
-                    personality_obj, curr_intrusion, curr_destruction, actual_step)
+                    personality_obj, curr_intrusion, curr_destruction, actual_step,
+                    step_intrusion=curr_step_intrusion,
+                    step_destruction=curr_step_destruction)
+                # 步长演化（演算坐标后）：步长 -= 步进 × 敏感/重力
+                curr_step_intrusion = curr_step_intrusion - actual_step * personality_obj.sensitivity
+                curr_step_destruction = curr_step_destruction - actual_step * getattr(
+                    personality_obj, "gravity", 0.0)
 
                 if (4, 4) in locked_coords and curr_intrusion >= 4.0 and curr_destruction >= 4.0:
                     if "涩涩" in selected_tags:
@@ -646,6 +671,8 @@ class ExplorationContext:
             "quip_results": quip_results,
             "curr_intrusion": curr_intrusion,
             "curr_destruction": curr_destruction,
+            "step_intrusion": curr_step_intrusion,
+            "step_destruction": curr_step_destruction,
             "total_casualties": total_casualties,
             "size_cat": size_cat,
             "style_meta_cache": style_meta_cache,
@@ -774,6 +801,10 @@ class ExplorationContext:
                             destruction=core['base_destruction'],
                             casualties=total_casualties,
                             source="character_from_core_or_report")
+        # 步长随本次报告演化后的当前值写入角色存储（新角色步长起点）
+        if from_report:
+            state.step_intrusion = source.step_intrusion or 0.0
+            state.step_destruction = source.step_destruction or 0.0
 
         uploaded_image = core.get('uploaded_image')
 

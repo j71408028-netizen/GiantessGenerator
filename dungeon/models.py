@@ -31,6 +31,20 @@ class DungeonState:
     steps_since_trigger: int = 0
     total_casualties: float = 0.0
     casualty_evolution: list[float] = field(default_factory=list)
+    # 当前介入度/破坏性步长：随故事步进演化（演算前恢复、演算后扣除），
+    # 初始来自性格；None 表示沿用性格初始步长（未演化）。
+    step_intrusion: float | None = None
+    step_destruction: float | None = None
+
+    @property
+    def rate_intrusion(self) -> float:
+        """当前介入度步长（None 时解释为 0，调用方负责回退性格值）。"""
+        return self.step_intrusion if self.step_intrusion is not None else 0.0
+
+    @property
+    def rate_destruction(self) -> float:
+        """当前破坏性步长（None 时解释为 0，调用方负责回退性格值）。"""
+        return self.step_destruction if self.step_destruction is not None else 0.0
 
     def clone(self) -> "DungeonState":
         return DungeonState(
@@ -41,4 +55,6 @@ class DungeonState:
             self.steps_since_trigger,
             self.total_casualties,
             list(self.casualty_evolution),
+            self.step_intrusion,
+            self.step_destruction,
         )
