@@ -230,6 +230,10 @@ class DungeonStoryEngine:
 
     def _on_close(self):
         self._closing = True
+        # 尚未进入会话阶段（仍在入口选择页）直接关闭窗口时，
+        # 不触发会话退出处理（未触发结局的数据丢失警告只对会话阶段有意义）
+        if getattr(self, "_is_entry_phase", False):
+            self._exit_from_entry = True
         if self._bg_resize_timer is not None:
             self._bg_resize_timer.cancel()
         self._unregister_with_parent()

@@ -8,6 +8,7 @@ from ui.common.widgets import CTkScrollableDropdownFrame, CTkSegmentedControl
 from ui.common.dialogs import BaseDialog, InputDialog
 from ui.scenario.evolution_attributes import EvolutionAtrrManager
 from ui.scenario.trigger_mgr import TriggerManager
+from ui.scenario.component_mgr import ComponentManager
 from ui.common.theme import (
     BORDER, BORDER_ALT, PNL_BG, HARD_TITLE, TEXT, SOFT,
     HOVER, HOVER_ALT, MENU_HOVER, STATUS_OK, OK_HOVER, ERR_STRONG, ERR_HOVER,
@@ -31,6 +32,8 @@ class ScenarioEditor(ctk.CTkFrame):
         self.view_mode = "story"
         self.evolution_attrs = []  # 统一演化量列表
         self.triggers = []
+        self.components = []  # 显示组件 id 列表
+        self.components_params = {}  # {组件id: {参数: 值}}
         self._modified = False
         self._saved_prompt_snapshot = {}  # 用于检测提示词是否被修改
         self._prompt_modified = False  # 辅助标志（实际用快照对比更准确）
@@ -51,9 +54,9 @@ class ScenarioEditor(ctk.CTkFrame):
         toolbar.pack(fill='x', padx=10, pady=6)
         self.dungeon_switch_btn = CTkSegmentedControl(
             toolbar,
-            values=[" 通用 ", "演化量", "触发器"],
+            values=[" 通用 ", "演化量", "触发器", "组件"],
             command=self._on_scenario_tab_switch,
-            width=160, font=ui_fonts.ui_font(12)
+            width=200, font=ui_fonts.ui_font(12)
         )
         self.dungeon_switch_btn.pack(side='left', padx=5, pady=(3, 1))
         # 初始化即选中“通用”
@@ -105,10 +108,12 @@ class ScenarioEditor(ctk.CTkFrame):
 
         self.evolution_panel = EvolutionAtrrManager(self.content_frame, self._dungeon_repo, self)
         self.trigger_panel = TriggerManager(self.content_frame, self._dungeon_repo, self)
+        self.component_panel = ComponentManager(self.content_frame, self._dungeon_repo, self)
 
         # 默认显示通用面板
         self.evolution_panel.pack_forget()
         self.trigger_panel.pack_forget()
+        self.component_panel.pack_forget()
         self.prompt_panel.pack(fill='both', expand=True)
 
     def _build_combined_items(self):
@@ -192,6 +197,7 @@ class ScenarioEditor(ctk.CTkFrame):
         self.prompt_panel.pack_forget()
         self.evolution_panel.pack_forget()
         self.trigger_panel.pack_forget()
+        self.component_panel.pack_forget()
 
         if value == " 通用 ":
             self.prompt_panel.pack(fill='both', expand=True)
@@ -199,6 +205,9 @@ class ScenarioEditor(ctk.CTkFrame):
             self.evolution_panel.pack(fill='both', expand=True)
         elif value == "触发器":
             self.trigger_panel.pack(fill='both', expand=True)
+        elif value == "组件":
+            self.component_panel.refresh_list()
+            self.component_panel.pack(fill='both', expand=True)
 
     # ------------------ 新版通用面板 ------------------
     def _build_prompt_ui(self, parent):
@@ -446,6 +455,7 @@ class ScenarioEditor(ctk.CTkFrame):
 
         self.evolution_panel.refresh_list()
         self.trigger_panel.refresh_list()
+        self.component_panel.refresh_list()
         self._update_prompt_snapshot()
 
     def _load_scenario(self, scenario_id):
@@ -460,6 +470,12 @@ class ScenarioEditor(ctk.CTkFrame):
         self.evolution_attrs = config.get("evolution_attrs", [])
         self.triggers = config.get("triggers", [])
         self.entry_action_cost = max(0, int(config.get("entry_action_cost", 0) or 0))
+        self.components = config.get("components", [])
+        if not isinstance(self.components, list):
+            self.components = []
+        self.components_params = config.get("components_params", {})
+        if not isinstance(self.components_params, dict):
+            self.components_params = {}
 
         # 加载步进值和转移矩阵，缺失则用默认
         self.section_steps = config.get("section_steps", {})
@@ -507,6 +523,11 @@ class ScenarioEditor(ctk.CTkFrame):
         config["section_steps"] = prompt_data["section_steps"]
         config["transition_matrix"] = prompt_data["transition_matrix"]
         config["entry_action_cost"] = prompt_data["entry_action_cost"]
+        # 保留组件选择与参数（组件面板独立保存，这里不覆盖已保存值）
+        if "components" in config:
+            config["components"] = self.components
+        if "components_params" in config:
+            config["components_params"] = self.components_params
         # 保存（保留 evolution_attrs 和 triggers）
         self._dungeon_repo.save_config(self.current_scenario_id, config)
         # 更新快照
@@ -580,7 +601,9 @@ class ScenarioEditor(ctk.CTkFrame):
             "section_prompts": {k: "" for k in ["background","branch","dialog","interaction","action"]},
             "custom_attrs": [],
             "triggers": [],
-            "entry_action_cost": 0
+            "entry_action_cost": 0,
+            "components": ["text"],
+            "components_params": {},
         }
         if self._dungeon_repo.create(new_id, empty_config):
             self._refresh_scenario_list()
@@ -620,6 +643,11 @@ class ScenarioEditor(ctk.CTkFrame):
     def _mark_modified(self):
         # 仅用于标识，暂不需要额外操作，因为保存时重新收集
         pass
+
+    def refresh_list_for_components(self):
+        """组件面板保存后同步编辑器的 components/components_params（保持一致性）。"""
+        self.components = list(self.component_panel.components)
+        self.components_params = dict(self.component_panel.components_params)
 
     def _on_view_mode_changed(self, value):
         self.view_mode = "game" if value == "游戏视图" else "story"

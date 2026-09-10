@@ -12,13 +12,59 @@ from .dispatcher import _dispatch
 _BYTE_TO_FLOAT = [value / 255.0 for value in range(256)]
 
 
+def _rotate_safe(image, angle):
+    """按对角线放大后旋转、再居中裁回原尺寸；透明边角用边缘色填充。
+
+    旋转会引入透明边角（内容转出画布）。为让背景铺满时不留黑缝，先在
+    对角线上扩充透明画布旋转（旋转不会丢失内容），裁回原尺寸后对透明
+    像素用就近的非透明边缘色填充。
+    """
+    w, h = image.size
+    diag = int((w * w + h * h) ** 0.5) + 1
+    phase = Image.new("RGBA", (diag, diag), (0, 0, 0, 0))
+    phase.paste(image, ((diag - w) // 2, (diag - h) // 2))
+    rotated = phase.rotate(angle, resample=Image.BICUBIC)
+    out = rotated.crop(((diag - w) // 2, (diag - h) // 2,
+                        (diag - w) // 2 + w, (diag - h) // 2 + h))
+    fill = _edge_tint(image)
+    if out.getchannel("A").getextrema() != (255, 255) and fill is not None:
+        alpha = out.getchannel("A")
+        solid = Image.new("RGBA", out.size, fill)
+        out = Image.composite(out, solid, alpha)
+    return out
+
+
+def _edge_tint(image):
+    """取图像四边中间点的非透明平均色，用作旋转后透明边角的填充。"""
+    w, h = image.size
+    if w < 4 or h < 4:
+        return None
+    pts = [
+        (w // 2, 1), (w // 2, h - 2), (1, h // 2), (w - 2, h // 2),
+        (w // 2, h // 2),
+    ]
+    rs = gs = bs = 0
+    cnt = 0
+    for x, y in pts:
+        r, g, b, a = image.getpixel((x, y))
+        if a > 0:
+            rs += r
+            gs += g
+            bs += b
+            cnt += 1
+    if not cnt:
+        return None
+    return (rs // cnt, gs // cnt, bs // cnt, 255)
+
+
 class DungeonBackground:
     """副本背景图的加载、裁剪、滤镜和淡入淡出。"""
 
     def __init__(self, owner):
         self.owner = owner
 
-    def change(self, image_path, smooth_transition=False, filter_effect=None):
+    def change(self, image_path, smooth_transition=False, filter_effect=None,
+               rotate_angle=None, blur_radius=None):
         owner = self.owner
         if not image_path:
             return
@@ -28,7 +74,13 @@ class DungeonBackground:
             return
         try:
             new_pil = Image.open(full_path).convert("RGBA")
-            if filter_effect:
+            # 入口动态背景：先轻微旋转（按对角线放大后旋转再居中裁回原尺寸，
+            # 避免旋转后四角露出透明），再模糊或滤镜
+            if rotate_angle:
+                new_pil = _rotate_safe(new_pil, rotate_angle)
+            if blur_radius:
+                new_pil = new_pil.filter(ImageFilter.GaussianBlur(blur_radius))
+            elif filter_effect:
                 new_pil = self.apply_filter(new_pil, filter_effect)
         except Exception as exc:
             print(f"图片加载错误: {exc}")
@@ -52,10 +104,11 @@ class DungeonBackground:
                 old_resized = old_resized.resize((width, height), Image.Resampling.LANCZOS)
             old_data = self.pil_to_dpg(old_resized)
             _dispatch.enqueue(owner._apply_prepared_bg, old_resized, old_data, width, height, revision)
-            for step in range(15):
+            # 24 步 × 0.03s ≈ 0.72s 平滑淡入淡出（入口动态背景更流畅）
+            for step in range(24):
                 if owner._closing or revision != owner._bg_revision:
                     return
-                alpha = step / 14
+                alpha = step / 23
                 blended = Image.blend(old_resized, new_resized, alpha)
                 _dispatch.enqueue(owner._set_bg_texture, self.pil_to_dpg(blended), width, height, revision)
                 time.sleep(0.03)

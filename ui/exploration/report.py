@@ -13,7 +13,7 @@ from services.image_service import ImageService
 from models import CharacterSnapshot
 from ui.common.theme import (
     BORDER_ALT, VIEW_PNL_FG, SOFT, TEXT_MUTED,
-    HARD_TITLE, HOVER_ALT, HEADER_BG, GOLD_TITLE,
+    BORDER, HOVER_ALT, HEADER_BG, GOLD_TITLE,
     TAG_SEPARATOR, TAG_INTRO, TAG_WILL, TAG_MEASURE, TAG_COMPARE,
     TAG_QUIP, TAG_CASUALTY, TAG_BODY, PLACEHOLDER,
 )
@@ -27,7 +27,7 @@ class ReportPanel(ctk.CTkFrame):
 
     def __init__(self, parent, app, context, params_panel, host):
         super().__init__(parent, border_width=1, corner_radius=12,
-                         border_color=BORDER_ALT,
+                         border_color=BORDER,
                          fg_color=VIEW_PNL_FG)
         self.app = app
         self.context = context

@@ -27,8 +27,6 @@ import importlib.util
 import os
 from typing import Any, Callable, Dict, Optional
 
-from persistence.world_pack import resolve_behavior_source
-
 _DEFAULTS: Dict[str, Callable] = {}
 
 
@@ -91,6 +89,7 @@ class BehaviorRuntime:
         if not packs:
             return
         pack_name = packs[0]
+        from persistence.world_pack import resolve_behavior_source
         source = resolve_behavior_source(
             os.path.join(installed, "behaviors"), pack_name)
         world_id = manifest.world_id or "unknown"

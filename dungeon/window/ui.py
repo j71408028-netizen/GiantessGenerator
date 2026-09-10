@@ -176,6 +176,7 @@ class DungeonWindowUI:
         self._text_update_pending = False
         if not self._closing:
             self._update_text_display()
+            self._refresh_components()
 
     def _display_text(self, text: str, text_type: DungeonTextType, highlight: bool = False):
         prefix = self._type_prefix(text_type)
@@ -229,33 +230,51 @@ class DungeonWindowUI:
             dpg.set_y_scroll("main_window", 0)
         if dpg.does_item_exist("bg_drawlist"):
             dpg.configure_item("bg_drawlist", width=w, height=h)
-        if dpg.does_item_exist("bg_image_item"):
+        # 入口阶段背景几何由 Ken Burns 运动接管，避免 resize 时与运动基准冲突
+        if dpg.does_item_exist("bg_image_item") and not getattr(self, "_is_entry_phase", False):
             dpg.configure_item("bg_image_item", pmin=[0, 0], pmax=[w, h])
 
-        margin_x = round(40 * self._dpi_scale)
-        margin_top = round(40 * self._dpi_scale)
-        margin_bottom = round(20 * self._dpi_scale)
-        cw = max(1, w - 2 * margin_x)
-        if self.view_mode == "story":
-            cpos, ch = [margin_x, margin_top], h - margin_top - margin_bottom
+        if getattr(self, "_is_entry_phase", False):
+            self._relayout_entry_panels(w, h)
         else:
-            ch = round(190 * self._dpi_scale)
-            cpos, ch = [margin_x, h - ch - margin_bottom], ch
-        if dpg.does_item_exist("text_container"):
-            dpg.configure_item("text_container", pos=cpos, width=cw, height=ch)
-        if dpg.does_item_exist("bg_overlay_child"):
-            # 衬底延伸到窗口底部：DPG 会把子窗口 ChildBg 在矩形下方约 12~19px 处
-            # 重复绘制一截（超大窗口下的渲染怪癖），延伸到底部后该副本被窗口边界
-            # 裁剪，不可见。
-            dpg.configure_item("bg_overlay_child", pos=cpos, width=cw,
-                               height=max(1, h - cpos[1]))
-        self._text_wrap_width = max(1, cw - round(40 * self._dpi_scale))
-        for tag in self._text_item_tags:
-            if dpg.does_item_exist(tag):
-                dpg.configure_item(tag, wrap=self._text_wrap_width)
+            # 会话阶段：组件接管布局；未构建组件时回退到旧 view_mode 几何
+            if getattr(self, "_components_built", False):
+                self._relayout_components()
+            else:
+                margin_x = round(40 * self._dpi_scale)
+                margin_top = round(40 * self._dpi_scale)
+                margin_bottom = round(20 * self._dpi_scale)
+                cw = max(1, w - 2 * margin_x)
+                if self.view_mode == "story":
+                    cpos, ch = [margin_x, margin_top], h - margin_top - margin_bottom
+                else:
+                    ch = round(190 * self._dpi_scale)
+                    cpos, ch = [margin_x, h - ch - margin_bottom], ch
+                if dpg.does_item_exist("text_container"):
+                    dpg.configure_item("text_container", pos=cpos, width=cw, height=ch)
+                if dpg.does_item_exist("bg_overlay_child"):
+                    dpg.configure_item("bg_overlay_child", pos=cpos, width=cw,
+                                       height=max(1, h - cpos[1]))
+                self._text_wrap_width = max(1, cw - round(40 * self._dpi_scale))
+                for tag in self._text_item_tags:
+                    if dpg.does_item_exist(tag):
+                        dpg.configure_item(tag, wrap=self._text_wrap_width)
 
         self._refresh_background()
         self._schedule_text_update()
+
+    def _relayout_entry_panels(self, w, h):
+        """入口阶段：右下角方案选择面板与左下角结局图标面板跟随窗口尺寸。"""
+        s = self._dpi_scale
+        margin = round(20 * s)
+        if dpg.does_item_exist("panel_controls"):
+            cw, ch = getattr(self, "_panel_controls_size", (round(360 * s), round(230 * s)))
+            dpg.configure_item("panel_controls", pos=[w - cw - margin, h - ch - margin],
+                               width=cw, height=ch)
+        if dpg.does_item_exist("panel_endings"):
+            pw, ph = getattr(self, "_panel_endings_rect", (round(300 * s), round(210 * s)))
+            dpg.configure_item("panel_endings", pos=[margin, h - ph - margin],
+                               width=pw, height=ph)
 
     def _refresh_background(self, delay=0.08):
         self._background.refresh(delay)
@@ -269,9 +288,13 @@ class DungeonWindowUI:
 
     # ---------- 事件回调 ----------
     def _on_mouse_click(self, sender, app_data):
+        if getattr(self, "_is_entry_phase", False):
+            return
         self._on_next_step()
 
     def _on_key_down(self, sender, app_data):
+        if getattr(self, "_is_entry_phase", False):
+            return
         self._on_next_step()
 
     def _toggle_fullscreen(self, sender, app_data):
@@ -282,8 +305,10 @@ class DungeonWindowUI:
         self._schedule_relayout()
 
     # ---------- 背景切换 ----------
-    def change_background(self, image_path, smooth_transition=False, filter_effect=None):
-        self._background.change(image_path, smooth_transition, filter_effect)
+    def change_background(self, image_path, smooth_transition=False,
+                          filter_effect=None, rotate_angle=None, blur_radius=None):
+        self._background.change(image_path, smooth_transition, filter_effect,
+                                rotate_angle, blur_radius)
 
     def _apply_bg_data(self, pil_img, dpg_data, w, h):
         self._background.apply_data(pil_img, dpg_data, w, h)

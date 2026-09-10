@@ -302,7 +302,7 @@ class IntroPanel(ctk.CTkFrame):
 
         ctk.CTkLabel(self.intro_edit_scroll, text="公开介绍", font=ui_fonts.ui_font(9),
                      text_color=FB_MUTED).pack(anchor='w')
-        self.intro_visible_entry = ctk.CTkTextbox(self.intro_edit_scroll, height=65, wrap='word',
+        self.intro_visible_entry = ctk.CTkTextbox(self.intro_edit_scroll, height=60, wrap='word',
             font=ui_fonts.ui_font(11), border_width=1, border_color=DLG_BORDER,
             fg_color=FB_CARD_BG)
         self.intro_visible_entry.pack(fill='x', pady=(1, 6))
@@ -312,7 +312,7 @@ class IntroPanel(ctk.CTkFrame):
 
         ctk.CTkLabel(self.intro_edit_scroll, text="隐藏设定", font=ui_fonts.ui_font(9),
                      text_color=FB_MUTED).pack(anchor='w')
-        self.intro_hidden_entry = ctk.CTkTextbox(self.intro_edit_scroll, height=40, wrap='word',
+        self.intro_hidden_entry = ctk.CTkTextbox(self.intro_edit_scroll, height=30, wrap='word',
             font=ui_fonts.ui_font(11), border_width=1, border_color=DLG_BORDER,
             fg_color=FB_CARD_BG)
         self.intro_hidden_entry.pack(fill='x', pady=(1, 6))
@@ -367,7 +367,7 @@ fg_color=FB_BTN, text_color="white",
 
         # ===== AP 消耗标签容器（位于保存按钮上方） =====
         self.cost_frame = ctk.CTkFrame(self.intro_edit_frame, fg_color="transparent")
-        self.cost_frame.pack(fill='x', pady=(4, 0), side='bottom')
+        self.cost_frame.pack(fill='x', side='bottom')
 
         self.save_cost_label = ctk.CTkLabel(
             self.cost_frame, text="",
@@ -512,7 +512,7 @@ fg_color=FB_BTN, text_color="white",
         if self._is_state_mode():
             state = self.generator_panel.current_state
             # 显示当前 AP 消耗提示
-            self.save_cost_label.configure(text=f"- 75 AP")
+            self.save_cost_label.configure(text=f"- 50 AP")
         else:
             self.save_cost_label.configure(text="")  # 非状态模式不显示
 
@@ -537,9 +537,9 @@ fg_color=FB_BTN, text_color="white",
 
         if self._is_state_mode():
             state = self.generator_panel.current_state
-            if not StateService.consume_action_points(state, 75):
+            if not StateService.consume_action_points(state, 50):
                 ui.common.dialogs.showerror("点数不足",
-                    f"保存角色信息需要75行动点数，当前仅剩{state.action_points}点。")
+                    f"保存角色信息需要50行动点数，当前仅剩{state.action_points}点。")
                 return
             state.intro_hidden = hidden
             state.intro_visible = visible

@@ -4,7 +4,7 @@ import math
 from tkinter import filedialog
 
 import ui.common.dialogs
-from typing import Optional, Tuple, List
+from typing import Optional, List
 
 import customtkinter as ctk
 
@@ -471,16 +471,55 @@ class ExplorationPanel(ctk.CTkFrame):
         self._launch_dungeon_with_data(data)
 
     def _launch_dungeon_with_data(self, data: dict):
-        choice = self._choose_dungeon()
-        if choice is None:
-            return
-        dungeon_id, replay_data = choice
-
         ai_config = resolve_ai_config(self.app.settings)
         from ui.common.fonts import dungeon_font_default
         dungeon_font = self.app.settings.get("dungeon_font", dungeon_font_default())
 
-        if replay_data is not None:
+        dungeons = self.app._dungeon_repo.list_all()
+        if not dungeons:
+            ui.common.dialogs.showerror("错误", "请先到“副本编辑”创建副本方案")
+            return
+
+        # 探索模式：入口阶段在 DungeonSessionWindow 内部完成副本方案选择，
+        # 与正式副本会话界面共享同一个 DPG 生命周期，不再创建独立窗口。
+        window = DungeonSessionWindow(
+            self, name=data["name"], nick=data.get("nick", ""),
+            height=data["height"], personality=data["personality_obj"],
+            preset=data.get("preset_obj"), greed=data.get("greed", 0),
+            original_height=data.get("original_height", 1.6),
+            intro_hidden=data.get("intro_hidden", ""),
+            intro_visible=data.get("intro_visible", ""),
+            tags=data.get("selected_tags", []),
+            uploaded_image=data.get("uploaded_image"),
+            dungeon_config=None, dungeon_repo=self.app._dungeon_repo,
+            merged_landmarks=self.context.merged_landmarks,
+            merged_quips=self.context.quips,
+            selected_styles=self.context.selected_styles,
+            selected_quip_styles=self.context.selected_quip_styles,
+            detail_pools=self.context.detail_pools,
+            ai_config=ai_config,
+            is_replay=False, replay_data=None,
+            dungeon_font=dungeon_font,
+            body_parts=data.get("body_parts", {}),
+            character=self.current_state,
+            character_repo=self.app._character_repo,
+            gui=self.app,
+            dungeon_ids=self.app._dungeon_repo.list_all(),
+        )
+
+        # 入口阶段选择失败（配置缺失/行动点数不足）：窗口已关闭，在主线程提示
+        launch_error = getattr(window, "_launch_error", "")
+        if launch_error:
+            ui.common.dialogs.showerror("错误", launch_error)
+            return
+
+        # 入口阶段点“加载回放”：窗口已关闭，回到 Tk 主线程弹回放文件选择
+        choice = getattr(window, "_launch_choice", None)
+        from dungeon.launcher import REPLAY_MARK
+        if choice == REPLAY_MARK:
+            replay_data = self._load_replay_file()
+            if replay_data is None:
+                return
             DungeonSessionWindow(
                 self, name=data["name"], nick=data.get("nick", ""),
                 height=data["height"], personality=data["personality_obj"],
@@ -504,106 +543,24 @@ class ExplorationPanel(ctk.CTkFrame):
                 character_repo=self.app._character_repo,
                 gui=self.app
             )
-            return
 
-        config = self.app._dungeon_repo.load_config(dungeon_id)
-        if config is None:
-            ui.common.dialogs.showerror("错误", f"无法加载副本配置 '{dungeon_id}'")
-            return
-
-        # 进入消耗：探索模式且已加载角色时按副本配置扣除行动点数
-        if self.current_state is not None:
-            try:
-                entry_cost = max(0, int(config.get("entry_action_cost", 0) or 0))
-            except (TypeError, ValueError):
-                entry_cost = 0
-            if entry_cost > 0:
-                if not self.context.state_service.consume_action_points(self.current_state, entry_cost):
-                    ui.common.dialogs.showerror(
-                        "行动点数不足",
-                        f"进入该副本需要 {entry_cost} 行动点数，当前仅剩 {self.current_state.action_points} 点。")
-                    return
-                self.app._character_repo.save(self.current_state)
-                self.state_panel.update_state(self.current_state)
-                self._update_report_cost_label()
-
-        DungeonSessionWindow(
-            self, ai_config=ai_config, name=data["name"],
-            nick=data.get("nick", ""), height=data["height"],
-            personality=data["personality_obj"], preset=data.get("preset_obj"),
-            greed=data.get("greed", 0),
-            original_height=data.get("original_height", 1.6),
-            intro_hidden=data.get("intro_hidden", ""),
-            intro_visible=data.get("intro_visible", ""),
-            tags=data.get("selected_tags", []),
-            uploaded_image=data.get("uploaded_image"),
-            dungeon_config=config, dungeon_repo=self.app._dungeon_repo,
-            merged_landmarks=self.context.merged_landmarks,
-            merged_quips=self.context.quips,
-            selected_styles=self.context.selected_styles,
-            selected_quip_styles=self.context.selected_quip_styles,
-            detail_pools=self.context.detail_pools,
-            dungeon_id=dungeon_id,
-            is_replay=False, replay_data=None,
-            dungeon_font=dungeon_font,
-            body_parts=data.get("body_parts", {}),
-            character=self.current_state,
-            character_repo=self.app._character_repo,
-            gui=self.app
+    def _load_replay_file(self) -> Optional[List[dict]]:
+        """读取用户选择的回放文件（入口页触发后回到 Tk 主线程弹出文件选择）。"""
+        file_path = filedialog.askopenfilename(
+            title="选择回放文件",
+            filetypes=[("副本回放", "*.replay.json"), ("所有文件", "*.*")]
         )
-
-    def _choose_dungeon(self) -> Optional[Tuple[str, Optional[List[dict]]]]:
-        dungeons = self.app._dungeon_repo.list_all()
-        if not dungeons:
-            ui.common.dialogs.showwarning("警告", "没有可用的副本方案，请先在副本编辑器中创建。")
+        if not file_path:
             return None
-
-        dialog = BaseDialog(self)
-        dialog.title("选择副本或加载回放")
-        dialog.geometry("350x250")
-        dialog.transient(self)
-        dialog.grab_set()
-
-        ctk.CTkLabel(dialog, text="请选择副本方案：").pack(pady=10)
-        combo = ctk.CTkOptionMenu(dialog, values=dungeons, width=200)
-        combo.pack(pady=5)
-
-        result = [None, None]
-
-        def confirm():
-            result[0] = combo.get()
-            result[1] = None
-            dialog.destroy()
-
-        def load_replay():
-            file_path = filedialog.askopenfilename(
-                title="选择回放文件",
-                filetypes=[("副本回放", "*.replay.json"), ("所有文件", "*.*")]
-            )
-            if not file_path:
-                return
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                if not isinstance(data, list) or not data:
-                    raise ValueError("回放文件格式错误")
-                result[0] = None
-                result[1] = data
-                dialog.destroy()
-            except Exception as e:
-                ui.common.dialogs.showerror("错误", f"加载回放失败：{e}")
-
-        btn_frame = ctk.CTkFrame(dialog, fg_color="transparent")
-        btn_frame.pack(pady=15)
-        ctk.CTkButton(btn_frame, text="进入副本", command=confirm, width=100).pack(side='left', padx=10)
-        ctk.CTkButton(btn_frame, text="加载回放", command=load_replay, width=100).pack(side='left', padx=10)
-        ctk.CTkButton(btn_frame, text="取消", command=dialog.destroy, width=80).pack(side='left', padx=10)
-
-        dialog._center_dialog(self)
-        dialog.wait_window()
-        if result[0] is None and result[1] is None:
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if not isinstance(data, list) or not data:
+                raise ValueError("回放文件格式错误")
+            return data
+        except Exception as e:
+            ui.common.dialogs.showerror("错误", f"加载回放失败：{e}")
             return None
-        return (result[0], result[1])
 
     # ---------- 面板辅助 ----------
     def update_theme(self, mode=None):
