@@ -1,15 +1,22 @@
+/* 基础色板：wiki 式冷色调（蓝/灰）。--gold 系变量名保留（历史命名），
+   实际语义是"强调色"，统一指向下方的 wiki 蓝令牌（正文用主蓝、
+   线条/边框用标识蓝、淡出用浅蓝），与大多数 wiki 的少量标志性蓝一致；
+   体型分级的 rank 色组与报告 --ln-* 保持原语义 */
 :root{
-  --bg1:#FAFAFA; --bg2:#E9E7E3; --card:#F8F7F4; --card2:#F1F0EC;
-  --border:#D5D2CC; --border-soft:#E2E0DB;
-  --text:#3A392B; --muted:#918C84; --soft:#7D776C;
-  --title:#6B5F47; --gold:#5D4037; --gold-line:#B8860B; --gold-hi:#E8C56A;
-  --topbar-bg:rgba(80,78,72,.96); --topbar-text:#F9F3F2; --chip-bg:#EFEEE9;
-  --stat-blue:#1976D2; --casualty:#C62828;
-  --shadow:rgba(90,82,64,.07); --shadow-hi:rgba(90,82,64,.12);
-  --shadow-deep:rgba(58,57,43,.10); --edge-hi:rgba(255,255,255,.5);
-  --row-alt:rgba(139,122,96,.05);
-  --rank-tint:rgba(184,134,11,.05);
-  --hero-veil:rgba(247,241,233,.8);
+  --wiki-blue:#2B79B9;       /* 主蓝：链接与强调文字（比 4F9CEE 深一档保证可读性） */
+  --wiki-blue-line:#4F9CEE;  /* 标识蓝：标题风格线、边框、悬浮态 */
+  --wiki-blue-soft:#C9E2F7;  /* 浅蓝：渐变淡出与柔和高亮 */
+  --bg1:#F5F5F5; --bg2:#E9EDF1; --card:#FCFDFE; --card2:#F0F3F6;
+  --border:#C6CFD8; --border-soft:#DEE4EA;
+  --text:#2F3B46; --muted:#7E8A95; --soft:#616F7C;
+  --title:#535A6E; --gold:var(--wiki-blue); --gold-line:var(--wiki-blue-line);
+  --gold-hi:var(--wiki-blue-soft);
+  --topbar-bg:rgba(20, 27, 55, 0.4); --topbar-text:#F3F7FA; --chip-bg:#ECF0F4;
+  --stat-blue:var(--wiki-blue); --casualty:#C62828;
+  --shadow:rgba(60,80,100,.08); --shadow-hi:rgba(60,80,100,.13);
+  --shadow-deep:rgba(30,45,60,.12); --edge-hi:rgba(255,255,255,.5);
+  --row-alt:rgba(100,125,150,.06);
+  --rank-tint:rgba(184,134,11,.10);
   --hero-grad1:#5D4037; --hero-grad2:#B8860B;
   --ln-quip-bg:rgba(106,27,182,.06); --ln-casualty-bg:rgba(183,28,28,.05);
   --ln-title:#5D4037; --ln-sep:#B8860B; --ln-intro:#4E342E; --ln-will:#2E7D32;
@@ -19,17 +26,18 @@
   --grain:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/><feComponentTransfer><feFuncA type='linear' slope='0.05' intercept='0'/></feComponentTransfer></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
 }
 html[data-theme="dark"]{
-  --bg1:#1E1E22; --bg2:#202024; --card:#1D2024; --card2:#23262B;
-  --border:#37393E; --border-soft:#2C2E33;
-  --text:#E0E0E0; --muted:#9E9E9E; --soft:#B5B0A8;
-  --title:#BCAAA4; --gold:#FFD54F; --gold-line:#8D6E63; --gold-hi:#FFD54F;
-  --topbar-bg:rgba(28,29,32,.94); --topbar-text:#F9F3F2; --chip-bg:#26282D;
-  --stat-blue:#42A5F5; --casualty:#EF5350;
+  --wiki-blue:#7CBEF2; --wiki-blue-line:#58A6E8; --wiki-blue-soft:#33587A;
+  --bg1:#2B2F34; --bg2:#2F343A; --card:#20262C; --card2:#272E35;
+  --border:#3C4550; --border-soft:#2E353D;
+  --text:#DBE2E9; --muted:#8B98A5; --soft:#AAB6C1;
+  --title:#C2D0DE; --gold:var(--wiki-blue); --gold-line:var(--wiki-blue-line);
+  --gold-hi:var(--wiki-blue-soft);
+  --topbar-bg:rgba(85,92,118,0.4); --topbar-text:#EDF2F6; --chip-bg:#2A313A;
+  --stat-blue:var(--wiki-blue); --casualty:#EF5350;
   --shadow:rgba(0,0,0,.26); --shadow-hi:rgba(0,0,0,.38);
   --shadow-deep:rgba(0,0,0,.42); --edge-hi:rgba(255,255,255,.04);
-  --row-alt:rgba(255,255,255,.03);
+  --row-alt:rgba(255,255,255,.035);
   --rank-tint:rgba(255,213,79,.08);
-  --hero-veil:rgba(22,24,30,.74);
   --hero-grad1:#FFD54F; --hero-grad2:#FFB74D;
   --ln-quip-bg:rgba(206,147,216,.10); --ln-casualty-bg:rgba(255,82,82,.08);
   --ln-title:#FFD54F; --ln-sep:#8D6E63; --ln-intro:#BCAAA4; --ln-will:#A5D6A7;
@@ -40,12 +48,14 @@ html[data-theme="dark"]{
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
-/* 概览/分析卡片的色组随身高对数分级（data-rank 由导出时按 log10(身高米) 计算） */
-html[data-rank="0"]{--hero-grad1:#01579B;--hero-grad2:#29B6F6;--rank-tint:rgba(2,119,189,.055)}
-html[data-rank="1"]{--hero-grad1:#1B5E20;--hero-grad2:#8BC34A;--rank-tint:rgba(27,94,32,.05)}
-html[data-rank="3"]{--hero-grad1:#BF360C;--hero-grad2:#FF9800;--rank-tint:rgba(191,54,12,.05)}
-html[data-rank="4"]{--hero-grad1:#7F0000;--hero-grad2:#E53935;--rank-tint:rgba(127,0,0,.05)}
-html[data-rank="5"]{--hero-grad1:#311B92;--hero-grad2:#AB47BC;--rank-tint:rgba(49,27,146,.055)}
+/* 概览/分析卡片的色组随身高对数分级（data-rank 由导出时按 log10(身高米) 计算）。
+   浅色模式：渐变亮端压暗到中明度并配更明显的分级底色，
+   保证浅底上各分级色相差异醒目、易区分；深色模式在下方另用明亮专版覆盖 */
+html[data-rank="0"]{--hero-grad1:#01579B;--hero-grad2:#039BE5;--rank-tint:rgba(2,119,189,.11)}
+html[data-rank="1"]{--hero-grad1:#1B5E20;--hero-grad2:#689F38;--rank-tint:rgba(27,94,32,.10)}
+html[data-rank="3"]{--hero-grad1:#BF360C;--hero-grad2:#EF6C00;--rank-tint:rgba(191,54,12,.10)}
+html[data-rank="4"]{--hero-grad1:#7F1005;--hero-grad2:#D32F2F;--rank-tint:rgba(127,0,0,.10)}
+html[data-rank="5"]{--hero-grad1:#311B62;--hero-grad2:#8E24AA;--rank-tint:rgba(49,27,146,.11)}
 html[data-theme="dark"][data-rank="0"]{--hero-grad1:#4FC3F7;--hero-grad2:#B3E5FC;--rank-tint:rgba(79,195,247,.08)}
 html[data-theme="dark"][data-rank="1"]{--hero-grad1:#81C784;--hero-grad2:#C5E1A5;--rank-tint:rgba(129,199,132,.08)}
 html[data-theme="dark"][data-rank="3"]{--hero-grad1:#FF8A65;--hero-grad2:#FFCC80;--rank-tint:rgba(255,138,101,.08)}
@@ -55,12 +65,12 @@ body{margin:0;color:var(--text);
   font-family:"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;line-height:1.7;
   background:
     var(--grain),
-    radial-gradient(1100px 520px at 88% -8%, rgba(184,134,11,.045), transparent 62%),
+    radial-gradient(1100px 520px at 88% -8%, rgba(80,110,140,.05), transparent 62%),
     linear-gradient(175deg, var(--bg1), var(--bg2));
   background-attachment:fixed}
 a{color:var(--stat-blue);text-decoration:none}
 img{max-width:100%}
-::selection{background:rgba(184,134,11,.28)}
+::selection{background:color-mix(in srgb,var(--wiki-blue) 28%,transparent)}
 ::-webkit-scrollbar{width:11px;height:11px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px;
@@ -80,7 +90,19 @@ html.theme-anim *,html.theme-anim *::before,html.theme-anim *::after{
 .topbar-inner{width:80%;max-width:none;margin:0 auto;display:flex;align-items:center;gap:18px;
   height:46px;padding:0 28px;flex-wrap:wrap}
 .logo{font-weight:700;font-size:17px;letter-spacing:1px;white-space:nowrap;
-  text-shadow:0 1px 2px rgba(0,0,0,.25)}
+  text-shadow:0 1px 2px rgba(0,0,0,.25);display:flex;align-items:center}
+.logo-sep{opacity:.5;margin:0 8px;font-weight:100}
+/* 角色名沿用概览/分析卡片的身高分级色组（原概览栏的变色显示移至此处）；
+   渐变两端各向对侧混入 45%，收窄色域避免过于艳丽。
+   注意 background-clip 必须写在两条 background 之后（shorthand 会重置 clip） */
+.logo-name{letter-spacing:.5px;color:transparent;text-shadow:none;
+  background:linear-gradient(115deg,var(--hero-grad2) 20%,var(--hero-grad1));
+  background:linear-gradient(115deg,
+    color-mix(in srgb,var(--hero-grad1) 55%,var(--hero-grad2)),
+    color-mix(in srgb,var(--hero-grad2) 55%,var(--hero-grad1)));
+  -webkit-background-clip:text;background-clip:text}
+/* 浅色模式在分级专版色组之上再对角色名做一次提亮：仅作用于顶栏文字，保持各分级色相差异清晰 */
+html[data-theme="light"] .logo-name{filter:brightness(2.2) saturate(1.03)}
 .topnav{display:flex;gap:2px;flex-wrap:wrap;flex:1}
 .topnav a{color:var(--topbar-text);opacity:.78;font-size:13.5px;padding:5px 13px;
   border-radius:8px;position:relative;
@@ -112,7 +134,7 @@ html.theme-anim *,html.theme-anim *::before,html.theme-anim *::after{
 #themeBtn:hover{background:rgba(255,255,255,.18)}
 .progress{position:absolute;left:0;bottom:-2px;height:2px;width:0;
   background:linear-gradient(90deg,var(--gold-line),var(--gold-hi));
-  box-shadow:0 0 8px rgba(232,197,106,.65)}
+  box-shadow:0 0 8px rgba(140,170,200,.6)}
 
 /* ---------- 布局 ---------- */
 .layout{width:80%;max-width:none;margin:26px auto 60px;padding:0 28px;display:grid;
@@ -124,7 +146,7 @@ main{min-width:0}
 
 /* ---------- 通用卡片 ---------- */
 .section,.infobox{background:var(--card);border:1px solid var(--border);
-  border-radius:6px;box-shadow:0 1px 2px var(--shadow)}
+  border-radius:4px;box-shadow:0 1px 2px var(--shadow)}
 .section{position:relative;padding:16px 24px;margin-bottom:14px;scroll-margin-top:60px}
 /* 各章节统一底色；仅分析卡片以身高对应的色组着色 */
 #analysis{background:linear-gradient(0deg,var(--rank-tint),var(--rank-tint)),var(--card)}
@@ -135,21 +157,22 @@ main{min-width:0}
   border-top-left-radius:4px}
 .section::after{bottom:9px;right:9px;border-bottom-width:2px;border-right-width:2px;
   border-bottom-right-radius:4px}
-.section h2{margin:0 0 4px;font-size:16px;color:var(--title);display:flex;
+.section h2{margin:0 0 10px;font-size:16px;color:var(--title);display:flex;
   align-items:center;gap:9px;padding-bottom:7px;border-bottom:1px solid transparent;
   border-image:linear-gradient(90deg,var(--gold-line),rgba(184,134,11,0)) 1;
   letter-spacing:.5px}
 .section h2::before{content:'';flex:none;width:3px;height:15px;border-radius:2px;
   background:linear-gradient(180deg,var(--gold-line),var(--gold))}
 .h2-ico{font-size:14px;transform:translateY(1px)}
-.section .section-sub{font-size:11.5px;color:var(--muted);margin:0 0 10px;letter-spacing:.5px;
-  display:flex;align-items:center;gap:8px}
-.section-sub::before{content:'';width:18px;height:1px;flex:none;
-  background:linear-gradient(90deg,var(--gold-line),transparent)}
 .section h3{font-size:14.5px;color:var(--gold);margin:18px 0 8px}
 .intro-text{white-space:pre-wrap;font-size:14.5px;max-width:72em}
 .empty-hint{color:var(--muted);font-size:13px}
 .muted{color:var(--muted)}
+
+/* ---------- 合并卡片（简介 / 尺寸 / 报告 / 回放 同卡分节） ---------- */
+/* 锚点与滚动高亮作用在 .sub-section 上，章节标题沿用 .section h2 的风格线 */
+.sub-section{min-width:0;scroll-margin-top:60px}
+.sub-section+.sub-section{margin-top:26px}
 
 /* 入场动画（仅当 JS 可用时启用，避免无脚本环境内容不可见） */
 .js main .section{opacity:0;transform:translateY(16px)}
@@ -181,50 +204,20 @@ main{min-width:0}
   border-top:1px solid var(--border-soft);white-space:nowrap;vertical-align:top}
 .infobox-table td{padding:4.5px 7px;border-top:1px solid var(--border-soft)}
 
-/* ---------- Hero 概览 ---------- */
-.hero{overflow:hidden;padding:0}
-.hero-bg{position:absolute;inset:-30px;background-size:cover;background-position:center 30%;
-  filter:blur(22px) saturate(.78);opacity:.3;animation:heroDrift 26s ease-in-out infinite}
-html[data-theme="dark"] .hero-bg{opacity:.2}
-@keyframes heroDrift{0%,100%{transform:scale(1)}50%{transform:scale(1.055)}}
-.hero-veil{position:absolute;inset:0;
-  background:linear-gradient(180deg,var(--hero-veil),var(--card))}
-.hero-content{position:relative;padding:24px 30px 0;display:flex;
-  align-items:center;gap:20px}
-.hero-avatar{flex:none;width:78px;height:78px;border-radius:50%;padding:3px;
-  background:linear-gradient(135deg,var(--hero-grad1),var(--hero-grad2));
-  box-shadow:0 2px 8px var(--shadow-hi)}
-.hero-avatar img{width:100%;height:100%;object-fit:cover;border-radius:50%;
-  display:block;border:2px solid var(--card)}
-.hero-id{min-width:0}
-.hero-content h2{font-size:26px;margin:0;border:none;padding:0;
-  letter-spacing:1px;line-height:1.25;
-  background:linear-gradient(115deg,var(--hero-grad1) 20%,var(--hero-grad2));
-  -webkit-background-clip:text;background-clip:text;color:transparent}
-.hero-content h2::before{display:none}
-.hero-nick{color:var(--muted);font-size:13px;margin-top:4px}
-.hero-nick::before{content:'✦ ';color:var(--hero-grad2)}
-.hero-nick::after{content:' ✦';color:var(--hero-grad2)}
-.hero-tags{margin-top:8px}
-/* 简介位于头像与名称右侧，不再单独占行 */
-.hero-intro{flex:1;min-width:240px;align-self:center;padding-left:20px;
-  border-left:1px solid var(--border-soft)}
-.hero-intro .intro-text{font-size:13px;line-height:1.65;max-width:none;margin:0}
-@media(max-width:900px){.hero-content{flex-wrap:wrap}
-  .hero-intro{flex-basis:100%;border-left:none;padding-left:0}}
-.hero-body{position:relative;padding:12px 30px 18px}
-
-/* ---------- 分析 ---------- */
-.ana-badge{display:inline-block;font-size:11px;font-weight:700;color:var(--hero-grad1);
-  border:1px solid var(--hero-grad2);border-radius:999px;padding:1px 10px;
-  letter-spacing:2px;margin-right:10px;vertical-align:2px}
-.ana-char-name{font-size:16.5px;font-weight:700;color:var(--title)}
-.ana-desc{font-size:13.5px;color:var(--soft);margin-top:8px;max-width:72em}
-.ana-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
-  gap:16px;margin-top:14px;padding-top:14px;border-top:1px dashed var(--border-soft)}
-.stat-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px}
-.stat-name{font-size:12.5px;color:var(--soft);letter-spacing:1px}
+/* ---------- 灾害分析 ---------- */
+/* 左右分栏：左为指标，右为演化统计图 */
+.ana-grid{display:grid;grid-template-columns:minmax(320px,1fr) minmax(0,1fr);gap:4px 24px}
+@media(max-width:900px){.ana-grid{grid-template-columns:1fr}}
+.ana-stats{display:grid;gap:16px;margin-top:2px}
+/* 指标三行：数值与趋势 / 进度条 / 解读 */
+.stat-line{display:flex;align-items:baseline;gap:12px;margin-bottom:6px}
+.stat-name{font-size:13px;font-weight:700;color:var(--soft);letter-spacing:1px}
 .stat-val{font-family:Consolas,monospace;font-size:12.5px;color:var(--muted)}
+.stat-trend{font-size:11.5px;margin-left:auto;letter-spacing:.5px}
+.trend-arrow{display:inline-block;margin-right:5px;font-weight:700}
+.trend-up{color:var(--casualty)}
+.trend-down{color:var(--ln-will)}
+.trend-flat{color:var(--muted)}
 .stat-track{height:10px;border-radius:5px;
   background:linear-gradient(180deg,var(--row-alt),var(--chip-bg));
   border:1px solid var(--border-soft);overflow:hidden;
@@ -235,26 +228,37 @@ html[data-theme="dark"] .hero-bg{opacity:.2}
 .stat-fill::after{content:'';position:absolute;inset:0;
   background:linear-gradient(180deg,rgba(255,255,255,.26),transparent 55%)}
 html[data-theme="dark"] .stat-fill{filter:brightness(1.12)}
-.casualty-num{font-family:Consolas,monospace;font-weight:700;font-size:28px;
-  letter-spacing:1px;color:var(--casualty);line-height:1.25;
+.stat-read{font-size:12px;color:var(--soft);line-height:1.65;margin-top:6px}
+.casualty-num{font-family:Consolas,monospace;font-weight:700;font-size:20px;
+  letter-spacing:1px;color:var(--casualty);line-height:1.2;
   text-shadow:0 1px 0 var(--edge-hi)}
-.stat-item.casualty .stat-name{color:var(--casualty)}
 
-/* ---------- 演化统计图 ---------- */
-.evo-chart{margin-top:14px;padding-top:14px;border-top:1px dashed var(--border-soft)}
-/* 左栏：累计伤亡数字 + 图例 + 图注；右栏：统计图 */
-.evo-split{display:grid;grid-template-columns:230px minmax(0,1fr);gap:6px 18px;
-  align-items:stretch}
-.evo-side{display:flex;flex-direction:column;gap:12px;min-width:0}
-.evo-side .casualty-num{font-size:24px}
-.evo-side .stat-head{margin-bottom:4px}
-.evo-chart-legend{display:flex;flex-direction:column;gap:6px;font-size:12px;
-  color:var(--text)}
+/* ---------- 演化统计图（紧凑：伤亡数字与图例并排于图上方） ---------- */
+.evo-chart{min-width:0}
+.evo-head{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;margin-bottom:4px}
+.evo-cas .stat-name{color:var(--casualty);font-size:12px;letter-spacing:1px;
+  display:inline-block;vertical-align:4px}
+.evo-cas .casualty-num{margin-left:8px}
+.evo-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;
+  color:var(--text);margin-left:auto}
 .legend-swatch{display:inline-block;width:10px;height:10px;border-radius:2px;
   margin-right:5px;vertical-align:-1px}
 .evo-chart svg{width:100%;height:auto;display:block}
-.evo-chart .chart-caption{font-size:11px;color:var(--muted);margin:0;line-height:1.6}
-@media(max-width:900px){.evo-split{grid-template-columns:1fr}}
+
+/* ---------- 应对参考（地址 / 疏散 / 警告） ---------- */
+.ana-guide{margin-top:14px;padding:10px 16px 11px;border:1px dashed var(--gold-line);
+  border-radius:6px;background:color-mix(in srgb,var(--gold-line) 10%,transparent)}
+.guide-title{font-weight:700;font-size:13px;color:var(--gold);letter-spacing:1.5px}
+.guide-row{display:flex;gap:10px;font-size:12.5px;margin-top:7px;align-items:baseline;
+  flex-wrap:wrap;line-height:1.7}
+.guide-k{flex:none;font-size:10.5px;color:var(--muted);letter-spacing:2px;
+  border:1px solid var(--border);border-radius:4px;padding:0 6px}
+.guide-addr{font-family:Consolas,monospace;font-weight:700;color:var(--title);
+  letter-spacing:.5px}
+.guide-sub{color:var(--muted);font-size:11.5px}
+.guide-num{color:var(--casualty);font-family:Consolas,monospace}
+.guide-warn{margin-top:9px;padding-top:8px;border-top:1px solid var(--border-soft);
+  font-size:11.5px;color:var(--casualty);opacity:.9}
 
 /* ---------- 形象图 ---------- */
 .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
@@ -263,11 +267,19 @@ html[data-theme="dark"] .stat-fill{filter:brightness(1.12)}
   transition:transform .18s,box-shadow .18s,border-color .18s}
 .gallery figure:hover{transform:translateY(-3px);border-color:var(--gold-line);
   box-shadow:0 3px 8px var(--shadow)}
-.img-wrap{position:relative;border-radius:3px;overflow:hidden}
-.img-wrap img{display:block;width:100%;transition:transform .35s ease;cursor:zoom-in}
+/* 统一缩略图高度：object-fit:contain 保证不同比例图片均完整显示，
+   透明区域以淡棋盘格衬底 */
+.img-wrap{position:relative;border-radius:3px;overflow:hidden;height:160px;
+  background-color:var(--card2);
+  background-image:
+    linear-gradient(45deg,var(--row-alt) 25%,transparent 25%,transparent 75%,var(--row-alt) 75%),
+    linear-gradient(45deg,var(--row-alt) 25%,transparent 25%,transparent 75%,var(--row-alt) 75%);
+  background-size:16px 16px;background-position:0 0,8px 8px}
+.img-wrap img{display:block;width:100%;height:100%;object-fit:contain;
+  transition:transform .35s ease;cursor:zoom-in}
 .gallery figure:hover .img-wrap img{transform:scale(1.045)}
 .img-wrap::after{content:'⤢';position:absolute;right:8px;bottom:8px;width:26px;height:26px;
-  border-radius:50%;background:rgba(20,18,14,.55);color:#fff;display:flex;
+  border-radius:50%;background:rgba(14,20,26,.55);color:#fff;display:flex;
   align-items:center;justify-content:center;font-size:13px;opacity:0;transition:opacity .2s}
 .gallery figure:hover .img-wrap::after{opacity:1}
 .gallery figcaption{font-size:11px;color:var(--muted);margin-top:6px;
@@ -275,7 +287,7 @@ html[data-theme="dark"] .stat-fill{filter:brightness(1.12)}
 
 /* 灯箱 */
 .lightbox{position:fixed;inset:0;z-index:300;display:flex;align-items:center;
-  justify-content:center;background:rgba(18,16,12,.84);
+  justify-content:center;background:rgba(13,17,22,.85);
   backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
   opacity:0;pointer-events:none;transition:opacity .22s ease}
 .lightbox.open{opacity:1;pointer-events:auto}
@@ -301,20 +313,29 @@ html[data-theme="dark"] .stat-fill{filter:brightness(1.12)}
 .size-table tr:last-child td{border-bottom:none}
 .size-table .sz-val{width:1%;white-space:nowrap;text-align:right;
   font-family:Consolas,monospace;font-variant-numeric:tabular-nums}
-.size-item{display:inline}
-.size-item summary{display:inline;list-style:none;cursor:pointer;
-  color:var(--stat-blue);text-decoration:underline dotted rgba(25,118,210,.45);
+/* 有解锁情报的部位名：链接样式按钮，点击弹出悬浮情报框 */
+.size-item{appearance:none;background:none;border:none;padding:0;font:inherit;
+  color:var(--wiki-blue);cursor:pointer;position:relative;
+  text-decoration:underline dotted color-mix(in srgb,var(--wiki-blue) 45%,transparent);
   text-underline-offset:2px}
-html[data-theme="dark"] .size-item summary{
-  text-decoration-color:rgba(66,165,245,.5)}
-.size-item summary::-webkit-details-marker{display:none}
-.size-item summary::marker{content:""}
-.size-item summary:hover{text-decoration:underline}
-.size-item[open] summary{font-weight:600}
+html[data-theme="dark"] .size-item{text-decoration-color:color-mix(in srgb,var(--wiki-blue) 55%,transparent)}
+.size-item:hover{text-decoration:underline}
 .size-item.has-hit{background:rgba(255,213,79,.30);border-radius:2px;
   box-shadow:0 0 0 1px rgba(184,134,11,.35)}
-.unlock-note{display:block;font-size:11.5px;color:var(--muted);padding:3px 2px 1px;
-  white-space:pre-wrap}
+/* 情报文本命中搜索时在部位名后提示圆点 */
+.size-item.note-hit::after{content:'●';font-size:8px;color:#C08A00;
+  vertical-align:2px;margin-left:3px;text-decoration:none}
+/* 悬浮情报框 */
+.size-popup{position:fixed;z-index:260;max-width:340px;background:var(--card);
+  border:1px solid var(--gold-line);border-radius:4px;
+  box-shadow:0 6px 24px var(--shadow-deep);padding:10px 14px;
+  font-size:12.5px;line-height:1.75;color:var(--text);white-space:pre-wrap;
+  opacity:0;transform:translateY(4px);pointer-events:none;
+  transition:opacity .18s ease,transform .18s ease}
+.size-popup.open{opacity:1;transform:none;pointer-events:auto}
+.size-popup::before{content:'';position:absolute;top:-6px;left:var(--arrow-x,18px);
+  width:10px;height:10px;transform:rotate(45deg);background:var(--card);
+  border-left:1px solid var(--gold-line);border-top:1px solid var(--gold-line)}
 mark.search-hit{background:rgba(255,213,79,.55);color:inherit;border-radius:2px;
   padding:0 1px;box-shadow:0 0 0 1px rgba(184,134,11,.35);scroll-margin-top:60px}
 mark.search-hit.current{background:#FFD54F;color:#3A392B;box-shadow:0 0 0 2px #B8860B}
@@ -335,14 +356,15 @@ mark.search-hit.current{background:#FFD54F;color:#3A392B;box-shadow:0 0 0 2px #B
   color:var(--gold);font-variant-numeric:tabular-nums}
 .re-name{display:block;font-size:11px;color:var(--muted);margin-top:2px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* has-hit 均为"搜索命中"指示，与 mark.search-hit 同用搜索黄，不随主题强调色变化 */
 .report-entry.has-hit::after{content:'';position:absolute;top:9px;right:9px;width:7px;
-  height:7px;border-radius:50%;background:var(--gold-hi);
+  height:7px;border-radius:50%;background:#FFD54F;
   box-shadow:0 0 0 2px rgba(255,213,79,.35)}
 .report-panes{min-width:0;overflow-y:auto;min-height:0;padding-right:4px}
 .report-pane{display:none}
 .report-pane.active{display:block;animation:paneIn .25s ease}
 @keyframes paneIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
-.report-pane.has-hit{outline:1px dashed var(--gold-line);outline-offset:6px;border-radius:8px}
+.report-pane.has-hit{outline:1px dashed rgba(217,165,32,.6);outline-offset:6px;border-radius:8px}
 
 /* 报告正文：排版紧凑 */
 .report-text{padding:4px 2px;white-space:pre-wrap;
@@ -359,7 +381,7 @@ mark.search-hit.current{background:#FFD54F;color:#3A392B;box-shadow:0 0 0 2px #B
 .ln-measure{color:var(--ln-measure);font-weight:700;font-size:12.5px}
 .ln-compare{color:var(--ln-compare);font-size:12.5px}
 .ln-quip{display:block;color:var(--ln-quip);font-style:italic;
-  font-family:Consolas,monospace;font-size:12px;background:var(--ln-quip-bg);
+  font-family:Consolas,monospace;font-size:12px;background:transparent;
   border-radius:4px;padding:1px 8px;margin:2px 0}
 .ln-casualty-sep{display:block;color:var(--muted);font-size:12px;overflow:hidden}
 .ln-casualty{display:block;color:var(--ln-casualty);font-weight:700;font-size:12.5px;
@@ -379,8 +401,8 @@ mark.search-hit.current{background:#FFD54F;color:#3A392B;box-shadow:0 0 0 2px #B
   font-size:11px;transition:transform .2s}
 .record-card[open]>summary::after{transform:rotate(180deg)}
 .record-card[open]>summary{border-bottom:1px solid var(--border-soft)}
-.record-card.has-hit,.record-card[open].has-hit{border-color:var(--gold-line)}
-.record-card.has-hit{box-shadow:0 0 0 1px var(--gold-line),0 2px 6px var(--shadow)}
+.record-card.has-hit,.record-card[open].has-hit{border-color:rgba(217,165,32,.55)}
+.record-card.has-hit{box-shadow:0 0 0 1px rgba(217,165,32,.55),0 2px 6px var(--shadow)}
 .file-icon{display:inline-flex;align-items:center;justify-content:center;width:26px;
   height:26px;border-radius:8px;background:var(--chip-bg);font-size:13.5px;
   border:1px solid var(--border-soft)}
@@ -431,17 +453,30 @@ mark.search-hit.current{background:#FFD54F;color:#3A392B;box-shadow:0 0 0 2px #B
 .rp-options{margin:5px 0 0;padding-left:20px;font-size:13.5px}
 .rp-options li.chosen{color:var(--gold);font-weight:700}
 
-/* ---------- 结局 ---------- */
-.ending-card{position:relative;border:1px solid var(--border-soft);background:var(--card2);
-  border-radius:5px;padding:11px 16px 10px;margin-bottom:10px;overflow:hidden;
-  transition:transform .15s,box-shadow .15s,border-color .15s}
-.ending-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;
-  background:linear-gradient(90deg,var(--gold-line),rgba(184,134,11,.12))}
-.ending-card:hover{transform:translateY(-2px);border-color:var(--gold-line);
-  box-shadow:0 2px 6px var(--shadow)}
-.ending-head{font-weight:700;font-size:14px;color:var(--gold);display:flex;
-  align-items:baseline;gap:10px;flex-wrap:wrap;letter-spacing:.5px}
-.ending-text{font-size:13.5px;margin-top:6px;white-space:pre-wrap}
+/* ---------- 简介栏（wiki 式连贯叙事） ---------- */
+.bio-p{font-size:13px;line-height:1.65;margin:0 0 8px;max-width:72em}
+.bio-p:last-of-type{margin-bottom:0}
+.bio-date{font-family:Consolas,monospace;font-size:12.5px;color:var(--gold);
+  font-variant-numeric:tabular-nums}
+.bio-event{color:var(--gold);font-weight:700}
+.bio-secret{margin-top:12px}
+.bio-secret .bio-secret-text{padding:12px 16px}
+/* 简介栏内的形象图小标题 */
+.bio-gal-title{font-size:13px;color:var(--gold);margin:16px 0 10px;letter-spacing:.5px}
+/* 灾害分析栏隐藏按钮：完全隐藏本栏，经顶部导航再次打开 */
+.sec-hide{appearance:none;margin-left:10px;width:20px;height:20px;padding:0;
+  border:1px solid var(--border);border-radius:5px;background:var(--chip-bg);
+  color:var(--muted);font-size:10px;line-height:1;cursor:pointer;vertical-align:1px;
+  transition:color .15s,border-color .15s}
+.sec-hide:hover{color:var(--casualty);border-color:var(--casualty)}
+.sec-hidden{display:none!important}
+/* 报告正文中的独特地标链接：点击悬浮显示当前耐久 */
+.lm-link{color:var(--wiki-blue);cursor:pointer;
+  text-decoration:underline dotted color-mix(in srgb,var(--wiki-blue) 45%,transparent);
+  text-underline-offset:2px}
+html[data-theme="dark"] .lm-link{text-decoration-color:color-mix(in srgb,var(--wiki-blue) 55%,transparent)}
+.lm-link:hover{font-weight:700}
+.guide-imprecise{color:var(--casualty);font-weight:700}
 
 /* ---------- 返回顶部 ---------- */
 #backTop{position:fixed;right:26px;bottom:26px;z-index:150;width:42px;height:42px;
@@ -467,6 +502,9 @@ mark.search-hit.current{background:#FFD54F;color:#3A392B;box-shadow:0 0 0 2px #B
   .report-panes{overflow:visible;height:auto}
   .layout{display:block;max-width:none}
   .section,.infobox{box-shadow:none;break-inside:avoid}
+  /* 合并卡片很长，允许跨页断开 */
+  .section-merged{break-inside:auto}
+  .sub-section{break-inside:avoid}
   .js main .section{opacity:1;transform:none}
   body{background:#fff}
 }

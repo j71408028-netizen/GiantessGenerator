@@ -170,7 +170,11 @@ class CharacterSnapshot:
     # name、icon_path（相对副本目录）、ending_text、replay_path、achieved_at。
     # icon_path 为空表示该结局不重要，不会出现在本列表中。
     achieved_endings: List[Dict] = field(default_factory=list)
-    landmark_durability: Dict[str, float] = field(default_factory=dict)  # 独特地标耐久：地标名 -> 耐久值
+    # 独特地标耐久：地标键 -> 耐久值。地标键为“名称@完整地址”；无地址时仅名称
+    # （兼容旧存档），因此同名不同地址的地标各自独立计算耐久。
+    landmark_durability: Dict[str, float] = field(default_factory=dict)
+    # 独特地标地址：地标键 -> 完整地址文本，与 landmark_durability 同键
+    landmark_addresses: Dict[str, str] = field(default_factory=dict)
     news_checked_at: str = ""          # 上次弹出新闻的时间（每日9点后首载门控）
     last_news: str = ""                # 上一次新闻正文，避免连续两次主干完全一致
     # 注册地址系统：角色当前位置（完整地址，含世界观段）。首次生成报告时由

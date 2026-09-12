@@ -183,6 +183,7 @@ class ExplorationContext:
                 "uploaded_image": self.character_repo.get_avatar_abspath(state.giantess_id, state.avatar_path) or None,
                 "multiplier": state.height / state.original_height if state.original_height > 0 else 1.0,
                 "landmark_durability": state.landmark_durability.copy(),
+                "landmark_addresses": dict(state.landmark_addresses or {}),
                 "position": state.position or "",
             }
             if consume_points:
@@ -240,6 +241,8 @@ class ExplorationContext:
             state.step_destruction = report_data.get("step_destruction",
                                                      state.current_step_destruction)
             state.landmark_durability = report_data.get("landmark_durability", {})
+            state.landmark_addresses = report_data.get("landmark_addresses",
+                                                       dict(state.landmark_addresses or {}))
             new_position = report_data.get("position") or ""
             if new_position and new_position != (state.position or ""):
                 state.position = new_position
@@ -258,7 +261,8 @@ class ExplorationContext:
             final_intrusion=report_data["curr_intrusion"],
             final_destruction=report_data["curr_destruction"],
             size_category=report_data["size_cat"],
-            report_text=self._build_report_text(report_data),
+            report_text=self._build_report_text(report_data,
+                                                show_will=not consume_points),
             detail_text=self._build_detail_text(report_data["body_parts"], report_data["height"]),
             uploaded_image_path=report_data.get("uploaded_image"),
             greed=report_data.get("greed", 0),
@@ -285,10 +289,11 @@ class ExplorationContext:
         for lm in self.merged_landmarks:
             if lm.frequency != "unique":
                 continue
-            # 耐久低于 0.5 的独特地标已不适合作落脚点
-            if durability.get(lm.name, 1.0) < 0.5:
-                continue
             addr = self._landmark_full_address(lm, registers)
+            key = f"{lm.name}@{addr}" if addr else lm.name
+            # 耐久低于 0.5 的独特地标已不适合作落脚点
+            if durability.get(key, 1.0) < 0.5:
+                continue
             if addr and addr not in seen:
                 seen[addr] = lm.name
         reg_worlds = sorted({world_of(r) for r in registers.values() if world_of(r)})
@@ -312,11 +317,11 @@ class ExplorationContext:
         return resolve_full_address(reg, getattr(landmark, "address", "") or "")
 
     @staticmethod
-    def _durable_ok(cand, durability, engaged: bool) -> bool:
+    def _durable_ok(cand, durability, engaged: bool, key: str = "") -> bool:
         lm = cand["landmark"]
         if lm.frequency != "unique":
             return True
-        value = durability.get(lm.name, 1.0)
+        value = durability.get(key or lm.name, 1.0)
         return value >= (0.5 if engaged else 0.0)
 
     def _quip_allowed_styles(self, landmark_addr_text: str, quip_registers: dict):
@@ -373,13 +378,22 @@ class ExplorationContext:
                 return ""
             return self._landmark_full_address(lm, registers)
 
+        def cand_key(cand) -> str:
+            """耐久表键：名称@完整地址；无地址时仅名称（旧存档兼容）。"""
+            lm = cand["landmark"]
+            if lm.frequency != "unique":
+                return lm.name
+            addr = cand_addr(cand)
+            return f"{lm.name}@{addr}" if addr else lm.name
+
         # engaged：当前选中风格中确有可锚定（带完整地址）的独特地标候选
         addressable = [c for c in candidates if cand_addr(c)]
         engaged = bool(addressable)
         limit = int(self.settings.get("comparison_count", 5) or 5)
         if not engaged:
             chosen = [c for c in candidates
-                      if self._durable_ok(c, durability, engaged=False)][:limit]
+                      if self._durable_ok(c, durability, engaged=False,
+                                          key=cand_key(c))][:limit]
             return {"engaged": False, "stuck": None, "position": position or "",
                     "comparisons": chosen}
 
@@ -392,7 +406,8 @@ class ExplorationContext:
                     "comparisons": []}
 
         # 可用（耐久满足）候选
-        usable = [c for c in candidates if self._durable_ok(c, durability, engaged=True)]
+        usable = [c for c in candidates
+                  if self._durable_ok(c, durability, engaged=True, key=cand_key(c))]
         usable_addrs = [c for c in usable if cand_addr(c)]
 
         reach = 10.0 * height
@@ -406,7 +421,8 @@ class ExplorationContext:
             if not usable_addrs:
                 # 独特地标都未注册或全部耐久不足：退回旧行为
                 chosen = [c for c in candidates
-                          if self._durable_ok(c, durability, engaged=False)][:limit]
+                          if self._durable_ok(c, durability, engaged=False,
+                                              key=cand_key(c))][:limit]
                 return {"engaged": False, "stuck": None, "position": position or "",
                         "comparisons": chosen}
             anchor = usable_addrs[0]
@@ -449,7 +465,7 @@ class ExplorationContext:
                 d = distance_m(pos_now, addr)
                 if d is not None and d < scan_radius:
                     near.append(cand)
-            if near and all(durability.get(c["landmark"].name, 1.0) < 0.5
+            if near and all(durability.get(cand_key(c), 1.0) < 0.5
                             for c in near):
                 stuck = {"reason": "all_damaged", "position": pos_now}
 
@@ -491,6 +507,7 @@ class ExplorationContext:
         )
 
         landmark_durability = core_state.get("landmark_durability", {})
+        landmark_addresses = dict(core_state.get("landmark_addresses") or {})
         # 地址规划：锚定、10 倍身高可达筛选、无路可走判定
         plan = self._plan_address_comparisons(
             candidates,
@@ -559,14 +576,18 @@ class ExplorationContext:
             suffix = "高" if comp["landmark"].dimension == "vertical" else (
                 "长" if comp["landmark"].horizontal_type == "length" else "宽")
             if comp["landmark"].frequency == "unique":
-                lm_name = comp["landmark"].name
-                durability = landmark_durability.get(lm_name, 1.0)
-                height_ratio = height / comp["landmark"].size
+                lm = comp["landmark"]
+                lm_addr = self._landmark_full_address(lm, landmark_registers)
+                lm_key = f"{lm.name}@{lm_addr}" if lm_addr else lm.name
+                if lm_addr:
+                    landmark_addresses[lm_key] = lm_addr
+                durability = landmark_durability.get(lm_key, 1.0)
+                height_ratio = height / lm.size
                 damage = ratio * (height_ratio ** 2) * curr_destruction * 0.1
                 durability -= damage
-                landmark_durability[lm_name] = durability
+                landmark_durability[lm_key] = durability
                 durability_suffix = "（残破的）" if durability < 0.5 else ""
-                compare_text = f"    └─ 约等于{comp['landmark'].name}{durability_suffix}{suffix}度的{ratio:.2f}倍"
+                compare_text = f"    └─ 约等于{lm.name}{durability_suffix}{suffix}度的{ratio:.2f}倍"
             else:
                 if ratio < 0.5:
                     compare_text = f"    └─ 尚不足{comp['landmark'].name}的{suffix}度"
@@ -677,12 +698,17 @@ class ExplorationContext:
             "size_cat": size_cat,
             "style_meta_cache": style_meta_cache,
             "landmark_durability": landmark_durability,
+            "landmark_addresses": landmark_addresses,
             "position": position_now,
             "engaged": plan["engaged"],
             "stuck": None,
         }
 
-    def _build_report_text(self, data: dict) -> str:
+    def _build_report_text(self, data: dict, show_will: bool = True) -> str:
+        """拼装报告纯文本。
+
+        show_will：是否输出意愿状态行（仅免费报告为 True）。
+        """
         name = data["name"]
         nick = data["nick"]
         height = data["height"]
@@ -701,22 +727,27 @@ class ExplorationContext:
         else:
             height_line = f"{name}    身高：{format_size(height)}"
         report.append(height_line)
-        report.append(f"{'═' * (16 + len(name))}\n")
+        report.append(f"{'═' * (16 + len(name))}")
 
         intro_display = intro_visible.strip()
-        if intro_display:
-            for line in intro_display.splitlines():
-                if line.strip():
-                    report.append(f"\u200b{line}")
-
         will_msg = {
             "implemented": f"✨ {name}表示内心渴望得到了回应。",
             "failed": f"💔 {name}似乎觉得还不够...",
             "within": f"✅ 身体规模满足了{name}的预期。"
         }.get(will_status, "")
-        if will_msg:
-            report.append(f"\n{will_msg}")
 
+        # 分隔线与对比循环之间的内容：简介与（免费报告的）意愿状态
+        between = []
+        if intro_display:
+            between.append("")
+            for line in intro_display.splitlines():
+                if line.strip():
+                    between.append(f"\u200b{line}")
+        if show_will and will_msg:
+            between.append("")
+            between.append(will_msg)
+        if between:
+            report.extend(between)
         report.append("")
 
         total_casualties = data.get("total_casualties", 0.0)

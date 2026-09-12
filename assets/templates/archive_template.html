@@ -8,10 +8,10 @@
 </head>
 <body>
 <header class="topbar"><div class="topbar-inner">
-  <span class="logo">📜 角色档案</span>
+  <span class="logo">巨大娘档案<span class="logo-sep">/</span><span class="logo-name">$hero_name</span></span>
   <nav class="topnav">$nav</nav>
   <div class="search-box" title="搜索身体尺寸、报告与副本回放（按 / 聚焦）">
-    <input id="archiveSearch" type="search" placeholder="搜索尺寸 / 报告 / 回放" autocomplete="off" spellcheck="false">
+    <input id="archiveSearch" type="search" placeholder="搜索内容" autocomplete="off" spellcheck="false">
     <span id="searchCount" class="search-count"></span>
     <button type="button" id="searchPrev" title="上一个（Shift+Enter）" disabled>▲</button>
     <button type="button" id="searchNext" title="下一个（Enter）" disabled>▼</button>
@@ -23,48 +23,27 @@
   <div class="infobox">$infobox</div>
 </aside>
 <main>
-  <section class="section hero" id="overview">
-    $hero_style<div class="hero-veil"></div>
-    <div class="hero-content">
-      $hero_avatar
-      <div class="hero-id">
-        <h2>$hero_name</h2>
-        $nick
-        $tags
-      </div>
-      $intro
-    </div>
-    $hero_body
-  </section>
-  <section class="section" id="analysis">
-    <h2><span class="h2-ico">📊</span>分析</h2>
-    <div class="section-sub">性格倾向与探索态势</div>
+  <section class="section$analysis_hidden" id="analysis">
+    <h2>灾害分析<button type="button" id="anaHideBtn" class="sec-hide" title="隐藏本栏（可从顶部导航再次打开）">✕</button></h2>
     $analysis
   </section>
-  <section class="section" id="endings">
-    <h2><span class="h2-ico">🏁</span>重要结局</h2>
-    <div class="section-sub">角色达成过的重要结局索引</div>
-    $endings
-  </section>
-  <section class="section" id="sizes">
-    <h2><span class="h2-ico">📏</span>身体尺寸</h2>
-    <div class="section-sub">基准身高 $base_height · 蓝色部位名可展开解锁情报</div>
-    $sizes
-  </section>
-  <section class="section" id="gallery">
-    <h2><span class="h2-ico">🖼️</span>形象图</h2>
-    <div class="section-sub">共 $gallery_count 张</div>
-    <div class="gallery">$gallery</div>
-  </section>
-  <section class="section" id="reports">
-    <h2><span class="h2-ico">📜</span>报告</h2>
-    <div class="section-sub">共 $report_count 份</div>
-    $reports
-  </section>
-  <section class="section" id="replays">
-    <h2><span class="h2-ico">🏰</span>副本回放</h2>
-    <div class="section-sub">以文本形式回顾副本探索全程</div>
-    $replays
+  <section class="section section-merged">
+    <div class="sub-section" id="bio">
+      <h2>人物简介</h2>
+      $bio
+    </div>
+    <div class="sub-section" id="sizes">
+      <h2>物理信息</h2>
+      $sizes
+    </div>
+    <div class="sub-section" id="reports">
+      <h2>测量报告</h2>
+      $reports
+    </div>
+    <div class="sub-section" id="replays">
+      <h2>事件记录</h2>
+      $replays
+    </div>
   </section>
 </main>
 </div>

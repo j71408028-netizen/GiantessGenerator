@@ -2,8 +2,9 @@
 
 图片以内嵌 data URI 封装，脚本与样式均写在同一文件内，可被任意浏览器
 直接打开；亮/暗双主题可平滑切换，并支持在尺寸 / 报告 / 回放中搜索定位。
-视觉要点：固定高度顶栏（滚动进度条 + 滚动高亮）、磨砂质感背景、低对比卡片、
-按身高对数分级的概览/分析色组、wiki 式紧凑尺寸表、按修改时间排序的形象图墙与
+视觉要点：固定高度顶栏（滚动进度条 + 滚动高亮 + 按身高分级变色的角色名）、
+磨砂质感背景、低对比卡片、wiki 式紧凑尺寸表（解锁情报以悬浮弹窗展示）、
+按身高对数分级的分析色组、wiki 式连贯简介栏、按修改时间排序的形象图墙与
 灯箱、双栏报告阅读器（左侧时间索引、右侧正文）、按类型着色的回放时间轴。
 """
 
@@ -15,6 +16,8 @@ import math
 import os
 import string
 
+from address_model import parse_full as _parse_addr, cell_width_m as _addr_cell_width, \
+    format_addr_verbose as _format_addr_verbose
 from logic import ALL_PART_NAMES, format_size
 from models import CharacterSnapshot
 from paths import data_dir, template_dir
@@ -108,6 +111,99 @@ def _stat_gradient(ratio) -> tuple:
             f"#{max(0, r - 30):02x}{max(0, g - 30):02x}{max(0, b - 30):02x}")
 
 
+# 介入度 / 破坏性分档解读（与性格参数对话框 creation_params_dlg 的分档文案一致）
+_INTRUSION_BUCKETS = [
+    (0.0, "她参与人类生活全凭机缘，时而缺乏兴趣，时而混迹其中。"),
+    (0.5, "她在多数时候作壁上观，只在兴趣使然时偶尔掺上一脚。"),
+    (1.5, "她习惯了主动进入人们的视野，但仍为自己留足退出的余地。"),
+    (2.5, "她巨大身体的存在感强烈地渗透进每场相遇，几乎从不缺席。"),
+    (3.5, "少女的甜蜜支配无孔不入，时刻摆弄着人类的精神与道德观。"),
+]
+
+_DESTRUCTION_BUCKETS = [
+    (0.0, "她的破坏与否全凭当下心情。随时需准备面临巨大损失。"),
+    (0.5, "她的行动多克制而留有余地，极少引发真正的破坏。"),
+    (1.5, "她不在意地在行动中留下或轻或重的痕迹，破坏如影随形。"),
+    (2.5, "她是一场算计着最大损失的天灾，乐意见到一片崩碎。"),
+    (3.5, "少女所过之处皆成废墟，毁灭已经成为她的本能与乐趣。"),
+]
+
+
+def _pick_level(value: float, buckets) -> str:
+    """按阈值表下限取文案：返回最后一个 value >= 下限 的形容。"""
+    picked = buckets[0][1]
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return picked
+    for lo, text in buckets:
+        if value + 1e-9 >= lo:
+            picked = text
+    return picked
+
+
+def _evacuation_coef(value: float) -> int:
+    """由介入度/破坏性档位给出影响范围系数（身高倍数）。"""
+    try:
+        d = float(value)
+    except (TypeError, ValueError):
+        d = 0.0
+    if d < 0.5:
+        return 2
+    if d < 1.5:
+        return 5
+    if d < 2.5:
+        return 10
+    if d < 3.5:
+        return 18
+    return 30
+
+
+def _build_guide_block(state: CharacterSnapshot) -> str:
+    """应对指南块：当前地址（含定位精度提示）+ 无秩序/疏散双范围 + 参考数据警告。"""
+    pos = (state.position or "").strip()
+    addr = _parse_addr(pos) if pos else None
+    if addr is not None:
+        loc_text = " - ".join(p for p in (addr.world,) + addr.regions if p)
+        cell = _addr_cell_width(pos)
+        loc_html = (f"<span class='guide-addr' title=\"{_esc(_format_addr_verbose(pos))}\">"
+                    f"{_esc(loc_text)}</span>")
+    else:
+        loc_html = (f"<span class='guide-addr'>"
+                    f"{_esc(pos) if pos else '（尚未记录位置）'}</span>")
+        cell = 0.0
+
+    try:
+        height = float(state.height or 0)
+    except (TypeError, ValueError):
+        height = 0.0
+    try:
+        intrusion_v = float(state.intrusion)
+    except (TypeError, ValueError):
+        intrusion_v = 0.0
+
+    coef_d = _evacuation_coef(state.destruction)
+    evac = height * coef_d
+    lawless = evac * intrusion_v / 10.0   # 无秩序范围 = 疏散范围 × 介入度 / 10
+
+    # 定位不精确警告直接拼接在地址行后
+    if height > 0 and cell > height * 100:
+        loc_html += " <span class='guide-imprecise'>⚠ 当前定位可能不精确</span>"
+
+    return (
+        "<div class='ana-guide'>"
+        "<div class='guide-title'>应对参考</div>"
+        f"<div class='guide-row'><span class='guide-k'>当前地址</span>{loc_html}</div>"
+        "<div class='guide-row'><span class='guide-k'>影响范围</span>"
+        "<span class='guide-v'>"
+        f"疏散范围 <strong class='guide-num'>{_esc(format_size(evac))}</strong>"
+        f"（无秩序范围 <strong class='guide-num'>{_esc(format_size(lawless))}</strong>内建议自行逃生）</span></div>"
+        "<div class='guide-warn'>⚠ 本栏数据均由 GiantessWiki 内部模型推算，"
+        "不代表真实应对建议，请以官方防灾指导为准。</div>"
+        "</div>"
+    )
+
+
 # -----------------------------------------------------------------
 # 报告文本渲染（与报告面板的行分类规则一致）
 # -----------------------------------------------------------------
@@ -133,7 +229,58 @@ def _strike_span(text: str) -> str:
     return "".join(parts)
 
 
-def _render_report_text(text: str) -> str:
+def _durability_text(d) -> str:
+    """把耐久值（1.0 为完好，<0.5 残破，可为负）转为展示文案。"""
+    try:
+        dv = float(d)
+    except (TypeError, ValueError):
+        dv = 1.0
+    pct = max(0.0, min(1.0, dv)) * 100
+    if dv <= 0:
+        state = "已损毁"
+    elif dv < 0.5:
+        state = "残破"
+    elif dv < 1.0:
+        state = "受损"
+    else:
+        state = "完好"
+    return f"当前耐久 {pct:.0f}%（{state}）"
+
+
+def _landmark_popup_info(lm_dur: dict, lm_addr: dict = None) -> dict:
+    """把耐久表与地址表整理为 显示名 -> 悬浮文案 的映射。
+
+    键为"名称@完整地址"（无地址时仅名称），同名不同地址的地标各算一条；
+    同名多条时合并进同一个链接的弹窗，每条一行"位于 地址 + 耐久"。
+    """
+    lm_addr = lm_addr or {}
+    lines_by_name = {}
+    for key in sorted(lm_dur):
+        if key in lm_addr:
+            name = key.split("@", 1)[0]
+            lines_by_name.setdefault(name, []).append(
+                f"位于 {lm_addr[key]}\n{_durability_text(lm_dur[key])}")
+        else:
+            lines_by_name.setdefault(key, []).append(_durability_text(lm_dur[key]))
+    return {name: "\n".join(lines) for name, lines in lines_by_name.items()}
+
+
+def _link_landmarks(html_str: str, lm_info: dict) -> str:
+    """把报告文本中的独特地标名替换为可点击链接（悬浮显示地址与当前耐久）。
+
+    长名优先替换，避免短名是长名子串时被提前截断。
+    """
+    for name in sorted(lm_info, key=len, reverse=True):
+        esc_name = html.escape(name)
+        if esc_name not in html_str:
+            continue
+        link = (f"<span class='lm-link' data-lm-info=\""
+                f"{_esc(lm_info[name])}\">{esc_name}</span>")
+        html_str = html_str.replace(esc_name, link)
+    return html_str
+
+
+def _render_report_text(text: str, lm_info: dict = None) -> str:
     """按报告面板同一套行规则，把报告纯文本转成带样式的 HTML。"""
     out = []
     for line in text.split("\n"):
@@ -163,7 +310,10 @@ def _render_report_text(text: str) -> str:
             out.append(f"<span class='ln-casualty'>{_strike_span(line)}</span>")
         else:
             out.append(f"<span class='ln-body'>{_strike_span(line)}</span>")
-    return "\n".join(out)
+    html_str = "\n".join(out)
+    if lm_info:
+        html_str = _link_landmarks(html_str, lm_info)
+    return html_str
 
 
 # -----------------------------------------------------------------
@@ -317,21 +467,21 @@ def _build_infobox(state: CharacterSnapshot, img_srcs: list, latest_date: str) -
 
 
 def _build_analysis_section(state: CharacterSnapshot) -> str:
-    """性格 + 介入度/破坏性渐变指标条 + 累计伤亡。"""
-    p = state.personality
-    char_html = ""
-    if p is not None:
-        desc = ""
-        if p.description:
-            desc = f"<div class='ana-desc'>{_esc(p.description)}</div>"
-        char_html = (
-            f"<div class='ana-char'><span class='ana-badge'>性格</span>"
-            f"<span class='ana-char-name'>{_esc(p.name)}</span>{desc}</div>"
-        )
-    else:
-        char_html = "<div class='ana-char muted'>(未记录性格)</div>"
+    """灾害分析：介入度/破坏性指标（数值与趋势、进度条、分档解读）、
+    演化统计图、当前地址与疏散范围参考，末尾附参考数据警告。"""
 
-    def bar(name, value):
+    def trend_of(step: float) -> tuple:
+        try:
+            step = float(step)
+        except (TypeError, ValueError):
+            step = 0.0
+        if step >= 0.25:
+            return ("↗", "预计持续增强", "trend-up")
+        if step <= -0.25:
+            return ("↘", "预计逐步收敛", "trend-down")
+        return ("→", "预计保持平稳", "trend-flat")
+
+    def metric(name, value, step, read_text):
         try:
             val = min(4.5, max(0.0, float(value)))
         except (TypeError, ValueError):
@@ -339,21 +489,36 @@ def _build_analysis_section(state: CharacterSnapshot) -> str:
         ratio = val / 4.5
         light, dark = _stat_gradient(ratio)
         pct = f"{ratio * 100:.0f}%"
+        arrow, phrase, cls = trend_of(step)
         return (
             f"<div class='stat-item'>"
-            f"<div class='stat-head'><span class='stat-name'>{name}</span>"
-            f"<span class='stat-val'>{_fmt_num(val)} / 4.5</span></div>"
+            f"<div class='stat-line'>"
+            f"<span class='stat-name'>{name}</span>"
+            f"<span class='stat-val'>{_fmt_num(val)} / 4.5</span>"
+            f"<span class='stat-trend {cls}'><span class='trend-arrow'>{arrow}</span>{phrase}</span>"
+            f"</div>"
             f"<div class='stat-track'><div class='stat-fill' "
             f"style='width:{pct};--sf1:{light};--sf2:{dark}'></div></div>"
+            f"<div class='stat-read'>{_esc(read_text)}</div>"
             f"</div>"
         )
 
-    # 累计伤亡数字改在统计图左栏展示（见 _build_evolution_chart）
+    step_i = state.current_step_intrusion
+    step_d = state.current_step_destruction
+    metrics_html = (
+        metric("介入度", state.intrusion, step_i,
+               _pick_level(state.intrusion, _INTRUSION_BUCKETS))
+        + metric("破坏性", state.destruction, step_d,
+                 _pick_level(state.destruction, _DESTRUCTION_BUCKETS))
+    )
+
+    left_html = f"<div class='ana-stats'>{metrics_html}</div>"
     return (
-        f"{char_html}"
-        f"<div class='ana-stats'>{bar('介入度', state.intrusion)}"
-        f"{bar('破坏性', state.destruction)}</div>"
-        f"{_build_evolution_chart(state)}"
+        "<div class='ana-grid'>"
+        f"<div class='ana-left'>{left_html}</div>"
+        f"<div class='ana-right'>{_build_evolution_chart(state)}</div>"
+        "</div>"
+        f"{_build_guide_block(state)}"
     )
 
 
@@ -553,8 +718,8 @@ def _build_evolution_chart(state: CharacterSnapshot) -> str:
     if not events:
         return "<p class='empty-hint'>暂无演化数据。</p>"
 
-    w, h = 720.0, 240.0
-    m_left, m_right, m_top, m_bottom = 62.0, 56.0, 18.0, 24.0
+    w, h = 650.0, 240.0
+    m_left, m_right, m_top, m_bottom = 62.0, 54.0, 18.0, 28.0
     plot_w = w - m_left - m_right
     plot_h = h - m_top - m_bottom
     base_y = m_top + plot_h
@@ -675,30 +840,27 @@ def _build_evolution_chart(state: CharacterSnapshot) -> str:
     def y_step(v):
         return m_top + plot_h * (1.0 - (v - step_lo) / (step_hi - step_lo))
 
-    # 纵向网格与左轴刻度
+    # 纵向网格与左轴刻度（虚线淡格，更轻盈）
     grid = "".join(
         f"<line x1='{m_left:g}' y1='{y_cas(v):.1f}' x2='{w - m_right:g}' "
-        f"y2='{y_cas(v):.1f}' stroke='var(--border-soft)' stroke-width='1'/>"
+        f"y2='{y_cas(v):.1f}' stroke='var(--border-soft)' stroke-width='1' "
+        f"stroke-dasharray='2 5' stroke-linecap='round'/>"
         f"<text x='{m_left - 6:g}' y='{y_cas(v) + 3:.1f}' text-anchor='end' "
-        f"font-size='12' fill='var(--muted)'>{_esc(_fmt_compact_num(v))}</text>"
+        f"font-size='12.5' fill='var(--muted)'>{_esc(_fmt_compact_num(v))}</text>"
         for v in cas_ticks)
 
     # 右轴刻度与横轴时间刻度（每 12 小时一个标签）
     right_axis = "".join(
         f"<text x='{w - m_right + 6:g}' y='{y_step(v) + 3:.1f}' "
-        f"font-size='12' fill='var(--muted)'>{_esc(_fmt_compact_num(v))}</text>"
+        f"font-size='12.5' fill='var(--muted)'>{_esc(_fmt_compact_num(v))}</text>"
         for v in step_ticks)
     x_labels = "".join(
         f"<text x='{x_of(t):.1f}' y='{h - 8:g}' text-anchor='middle' "
-        f"font-size='12' fill='var(--muted)'>{t:%m-%d %H:%M}</text>"
+        f"font-size='12.5' fill='var(--muted)'>{t:%m-%d %H:%M}</text>"
         for t in (t0 + datetime.timedelta(hours=12 * i)
                   for i in range(_WINDOW_HOURS // 12 + 1)))
     axis_lines = (
-        f"<line x1='{m_left:g}' y1='{m_top:g}' x2='{m_left:g}' y2='{base_y:g}' "
-        f"stroke='var(--border)' stroke-width='1'/>"
         f"<line x1='{m_left:g}' y1='{base_y:g}' x2='{w - m_right:g}' y2='{base_y:g}' "
-        f"stroke='var(--border)' stroke-width='1'/>"
-        f"<line x1='{w - m_right:g}' y1='{m_top:g}' x2='{w - m_right:g}' y2='{base_y:g}' "
         f"stroke='var(--border)' stroke-width='1'/>")
 
     # 曲线：伤亡取各桶末累计值（单调平滑），步进取各桶中心的桶内增量（Catmull-Rom 平滑）
@@ -718,13 +880,25 @@ def _build_evolution_chart(state: CharacterSnapshot) -> str:
     area_d = (f"{cas_line} "
               f"L {cas_smooth[-1][0]:.1f},{base_y:.1f} "
               f"L {cas_smooth[0][0]:.1f},{base_y:.1f} Z")
+    # 线端圆点：曲线末端的当前位置标记
+    cas_end, step_end = cas_smooth[-1], step_smooth[-1]
+    end_dots = (
+        f"<circle cx='{step_end[0]:.1f}' cy='{step_end[1]:.1f}' r='2.6' "
+        f"fill='var(--stat-blue)' stroke='var(--card)' stroke-width='1.4'/>"
+        f"<circle cx='{cas_end[0]:.1f}' cy='{cas_end[1]:.1f}' r='3.2' "
+        f"fill='var(--casualty)' stroke='var(--card)' stroke-width='1.5'/>")
     series = (
-        f"<path d='{area_d}' fill='var(--casualty)' fill-opacity='0.08'/>"
+        f"<defs><linearGradient id='evoArea' x1='0' y1='0' x2='0' y2='1'>"
+        f"<stop offset='0' style='stop-color:var(--casualty);stop-opacity:0.20'/>"
+        f"<stop offset='1' style='stop-color:var(--casualty);stop-opacity:0.02'/>"
+        f"</linearGradient></defs>"
+        f"<path d='{area_d}' fill='url(#evoArea)'/>"
         f"<path d='{cas_line}' fill='none' stroke='var(--casualty)' "
         f"stroke-width='2' stroke-linejoin='round' stroke-linecap='round'/>"
         f"<path d='{step_line}' fill='none' stroke='var(--stat-blue)' "
         f"stroke-width='1.6' stroke-linejoin='round' stroke-linecap='round' "
-        f"stroke-dasharray='4 3'/>")
+        f"stroke-dasharray='4 3'/>"
+        f"{end_dots}")
 
     try:
         casualties = float(state.total_casualties or 0)
@@ -736,26 +910,24 @@ def _build_evolution_chart(state: CharacterSnapshot) -> str:
         casualty_str = f"{int(casualties):,}"
 
     legend = (
-        "<div class='evo-chart-legend'>"
+        "<div class='evo-legend'>"
         "<span><span class='legend-swatch' style='background:var(--casualty)'></span>"
-        "累计伤亡（左轴）</span>"
+        "伤亡统计</span>"
         "<span><span class='legend-swatch' style='background:var(--stat-blue)'></span>"
-        "活动强度（右轴）</span></div>")
+        "活动强度</span></div>")
 
     svg = (f"<svg viewBox='0 0 {w:g} {h:g}' role='img' aria-label='伤亡与步进演化统计图'>"
            f"{grid}{right_axis}{x_labels}{axis_lines}{series}</svg>")
-    side_html = (
-        "<div class='evo-side'>"
-        "<div class='stat-item casualty'><div class='stat-head'>"
-        "<span class='stat-name'>☠ 累计伤亡</span></div>"
-        f"<div class='casualty-num'>{casualty_str}</div></div>"
+    head_html = (
+        "<div class='evo-head'>"
+        "<div class='evo-cas'><span class='stat-name'>☠ 累计伤亡</span>"
+        f"<span class='casualty-num'>{casualty_str}</span></div>"
         f"{legend}</div>")
-    return (f"<div class='evo-chart'><div class='evo-split'>{side_html}"
-            f"<div class='evo-plot'>{svg}</div></div></div>")
+    return f"<div class='evo-chart'>{head_html}{svg}</div>"
 
 
 def _build_sizes_section(state: CharacterSnapshot) -> str:
-    """wiki 式紧凑表格：部位与尺寸一一对应；有解锁情报的部位以链接样式展开。"""
+    """wiki 式紧凑表格：部位与尺寸一一对应；有解锁情报的部位点击弹出悬浮情报框。"""
     unlocks = state.size_unlocks or {}
     pairs = []
     for part in ALL_PART_NAMES:
@@ -773,8 +945,8 @@ def _build_sizes_section(state: CharacterSnapshot) -> str:
     cells = []
     for part, size_str, note in pairs:
         if note:
-            name_html = (f"<details class='size-item'><summary>{_esc(part)}</summary>"
-                         f"<div class='unlock-note'>{_esc(note)}</div></details>")
+            name_html = (f"<button type='button' class='size-item has-note' "
+                         f"data-note=\"{_esc(note)}\" title=\"查看解锁情报\">{_esc(part)}</button>")
         else:
             name_html = f"<span class='sz-plain'>{_esc(part)}</span>"
         cells.append(f"<td class='sz-name'>{name_html}</td>"
@@ -802,10 +974,16 @@ def _file_caption(path: str) -> tuple:
     return title, date_part
 
 
-def _build_reports_section(report_files: list, show_casualties: bool) -> str:
-    """双栏报告阅读器：左侧时间索引，右侧单篇正文（切换显示，节约纵向空间）。"""
+def _build_reports_section(report_files: list, show_casualties: bool,
+                           lm_info: dict = None) -> str:
+    """双栏报告阅读器：左侧时间索引，右侧单篇正文（切换显示，节约纵向空间）。
+
+    `lm_info` 为独特地标 显示名 -> 悬浮文案（地址+耐久）映射，
+    正文中的地标名会转为可点击链接。
+    """
     if not report_files:
         return "<p class='empty-hint'>暂无报告记录。</p>"
+    lm_info = lm_info or {}
     entries = []
     panes = []
     made = False
@@ -820,7 +998,7 @@ def _build_reports_section(report_files: list, show_casualties: bool) -> str:
         if not show_casualties:
             text = "\n".join(
                 ln for ln in text.split("\n") if "本报告总计" not in ln)
-        body = _render_report_text(text)
+        body = _render_report_text(text, lm_info)
         pid = f"rpt-{i}"
         act = " active" if not made else ""
         made = True
@@ -871,21 +1049,67 @@ def _build_replays_section(replay_files: list) -> str:
     return "\n".join(out)
 
 
-def _build_endings_section(state: CharacterSnapshot) -> str:
+def _build_bio_section(state: CharacterSnapshot,
+                       gallery_html: str = "", gallery_count: int = 0) -> str:
+    """wiki 式人物简介栏：以连贯文本讲述个人简介、生成信息与达成的重要事件。
+
+    末尾附“内部设定”折叠卡（隐藏简介）与人物形象图，仅当有内容时渲染。
+    """
+    name_part = _esc(state.name)
+    if state.nick:
+        name_part += f"（通称「{_esc(state.nick)}」）"
+    paras = []
+
+    if state.intro_visible:
+        paras.append(f"<p class='bio-p'>{_esc(state.intro_visible)}</p>")
+
+    created = _esc(str(state.created_at)[:19].replace("T", " "))
+    updated = _esc(str(state.updated_at)[:19].replace("T", " "))
+    info_bits = [
+        f"{name_part}的档案生成于 <span class='bio-date'>{created}</span>，"
+        f"最近更新于 <span class='bio-date'>{updated}</span>。"]
+    tags = [t for t in (state.selected_tags or []) if str(t).strip()]
+    if tags:
+        info_bits.append("角色倾向标签：" + "、".join(f"「{_esc(t)}」" for t in tags) + "。")
+    info_bits.append(f"基准身高为 {_esc(format_size(state.height))}。")
+    p = state.personality
+    if p is not None:
+        seg = f"性格表现为「{_esc(p.name)}」"
+        if p.description:
+            desc = _esc(p.description).rstrip("。")
+            seg += f"——{desc}"
+        info_bits.append(seg + "。")
+    paras.append("<p class='bio-p'>" + "".join(info_bits) + "</p>")
+
     endings = state.achieved_endings or []
-    if not endings:
-        return "<p class='empty-hint'>尚未达成任何重要结局。</p>"
-    items = []
-    for e in endings:
-        name = _esc(e.get("name", "未命名结局"))
-        text = _esc(e.get("ending_text", ""))
-        at = _esc(str(e.get("achieved_at", ""))[:19].replace("T", " "))
-        text_html = f"<div class='ending-text'>{text}</div>" if text else ""
-        items.append(
-            f"<div class='ending-card'><div class='ending-head'>🏁 {name}"
-            f"<span class='file-date'>{at}</span></div>{text_html}</div>"
+    if endings:
+        parts = [f"在已记录的探索历程中，{name_part}共达成 {len(endings)} 起重要事件："]
+        for e in endings:
+            ename = _esc(e.get("name", "未命名事件"))
+            etext = _esc(e.get("ending_text", "")).rstrip("。")
+            at = _esc(str(e.get("achieved_at", ""))[:19].replace("T", " "))
+            sentence = (f"<span class='bio-date'>{at}</span>，"
+                        f"达成<strong class='bio-event'>「{ename}」</strong>")
+            if etext:
+                sentence += f"——{etext}"
+            parts.append(sentence + "。")
+        paras.append("<p class='bio-p'>" + "".join(parts) + "</p>")
+    else:
+        paras.append(
+            f"<p class='bio-p'>截至最近一次更新，{name_part}尚未达成任何重要事件。</p>")
+
+    if state.intro_hidden:
+        paras.append(
+            "<details class='record-card secret bio-secret'><summary>"
+            "<span class='file-icon'>🔒</span>内部设定（隐藏简介）</summary>"
+            f"<div class='intro-text bio-secret-text'>{_esc(state.intro_hidden)}</div></details>"
         )
-    return "\n".join(items)
+
+    gallery_html = (gallery_html or "").strip()
+    if gallery_html and "empty-hint" not in gallery_html:
+        paras.append(f"<h3 class='bio-gal-title'>形象图 · 共 {gallery_count} 张</h3>"
+                     f"<div class='gallery'>{gallery_html}</div>")
+    return "\n".join(paras)
 
 
 
@@ -986,37 +1210,16 @@ def export_character_mhtml(state: CharacterSnapshot, file_path: str,
     gallery_html = ("".join(gallery_items) if gallery_items
                     else "<p class='empty-hint'>暂无形象图。</p>")
 
-    intro_html = (f"<div class='hero-intro'>"
-                  f"<div class='intro-text'>{_esc(state.intro_visible)}</div></div>"
-                  if state.intro_visible else "")
-    hidden_html = ""
-    if state.intro_hidden:
-        hidden_html = (
-            "<details class='record-card secret'><summary><span class='file-icon'>🔒</span>"
-            "内部设定（隐藏简介）</summary>"
-            f"<div class='intro-text' style='padding:12px 16px'>{_esc(state.intro_hidden)}</div></details>"
-        )
-
-    hero_style = ""
-    if img_srcs:
-        hero_style = f"<div class='hero-bg' style=\"background-image:url('{img_srcs[0]}')\"></div>"
-    hero_avatar = (f"<div class='hero-avatar'><img src='{img_srcs[0]}' alt='{_esc(state.name)}'></div>"
-                   if img_srcs else "")
-    hero_body_html = f"<div class='hero-body'>{hidden_html}</div>" if hidden_html else ""
-    nick_html = f"<div class='hero-nick'>{_esc(state.nick)}</div>" if state.nick else ""
+    bio_html = _build_bio_section(state, gallery_html, len(avatar_files))
 
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    nav_items = [("overview", "概览"), ("analysis", "分析"), ("endings", "重要结局"),
-                 ("sizes", "身体尺寸"), ("gallery", "形象图")]
+    nav_items = [("analysis", "灾害分析"), ("bio", "人物简介"),
+                 ("sizes", "物理信息")]
     if report_files:
-        nav_items.append(("reports", f"报告（{len(report_files)}）"))
+        nav_items.append(("reports", f"测量报告（{len(report_files)}）"))
     if replay_files:
-        nav_items.append(("replays", f"副本回放（{len(replay_files)}）"))
+        nav_items.append(("replays", f"事件记录（{len(replay_files)}）"))
     nav_html = "".join(f"<a href='#{anchor}'>{label}</a>" for anchor, label in nav_items)
-
-    tags_hero = " ".join(f"<span class='tag'>{_esc(t)}</span>"
-                         for t in (state.selected_tags or []))
-    tags_html = f"<div class='hero-tags'>{tags_hero}</div>" if tags_hero else ""
 
     doc = _render_template(
         page_title=_esc(state.name),
@@ -1024,22 +1227,19 @@ def export_character_mhtml(state: CharacterSnapshot, file_path: str,
         css=_archive_css(),
         js=_archive_js(),
         nav=nav_html,
-        infobox=_build_infobox(state, img_srcs, latest_date),
-        hero_style=hero_style,
-        hero_avatar=hero_avatar,
         hero_name=_esc(state.name),
-        nick=nick_html,
-        tags=tags_html,
-        intro=intro_html,
-        hero_body=hero_body_html,
+        infobox=_build_infobox(state, img_srcs, latest_date),
         analysis=_build_analysis_section(state),
-        endings=_build_endings_section(state),
+        # “显示伤亡统计”关闭时，灾害分析栏默认隐藏（可经顶部导航再次打开）
+        analysis_hidden="" if show_casualties else " sec-hidden",
+        bio=bio_html,
         base_height=_esc(format_size(state.height)),
         sizes=_build_sizes_section(state),
-        gallery_count=str(len(avatar_files)),
-        gallery=gallery_html,
-        report_count=str(len(report_files)),
-        reports=_build_reports_section(report_files, show_casualties),
+        reports=_build_reports_section(
+            report_files, show_casualties,
+            # 兼容旧构造路径：快照对象可能没有地标字段（AttributeError）
+            _landmark_popup_info(getattr(state, "landmark_durability", None) or {},
+                                 getattr(state, "landmark_addresses", None) or {})),
         replays=_build_replays_section(replay_files),
         exported_at=now_str,
     )

@@ -17,13 +17,15 @@
       var el=id&&document.getElementById(id);
       if(!el) return;
       e.preventDefault();
+      /* 隐藏中的栏（如灾害分析）经导航点击重新调出 */
+      if(el.classList.contains('sec-hidden')) el.classList.remove('sec-hidden');
       el.scrollIntoView({behavior:'smooth',block:'start'});
       if(history.replaceState) history.replaceState(null,'', '#'+id);
     });
   });
 
-  /* 章节入场动画 */
-  var sections=[].slice.call(document.querySelectorAll('main .section'));
+  /* 章节入场动画（合并卡片内的子区块不单独入场，由所在卡片统一动画） */
+  var sections=[].slice.call(document.querySelectorAll('main .section, main .sub-section'));
   if('IntersectionObserver' in window){
     var io=new IntersectionObserver(function(es){
       es.forEach(function(en){
@@ -50,6 +52,7 @@
       if(backTop) backTop.classList.toggle('show',st>560);
       var cur='';
       for(var i=0;i<sections.length;i++){
+        if(!sections[i].offsetParent) continue; /* 被隐藏的栏不参与高亮 */
         if(sections[i].getBoundingClientRect().top<=80) cur=sections[i].id;
       }
       navLinks.forEach(function(a){
@@ -81,8 +84,66 @@
     });
   });
 
+  /* 物理信息：解锁情报悬浮弹窗 */
+  var sizePopup=null,sizePopText=null,popAnchor=null;
+  function hideSizePopup(){
+    if(sizePopup) sizePopup.classList.remove('open');
+    popAnchor=null;
+  }
+  function ensureSizePopup(){
+    if(sizePopup) return;
+    sizePopup=document.createElement('div');
+    sizePopup.className='size-popup';
+    sizePopText=document.createElement('div');
+    sizePopup.appendChild(sizePopText);
+    document.body.appendChild(sizePopup);
+    sizePopup.addEventListener('click',function(e){e.stopPropagation();});
+  }
+  function showSizePopup(el, text){
+    ensureSizePopup();
+    if(!text) return;
+    if(popAnchor===el&&sizePopup.classList.contains('open')){hideSizePopup();return;}
+    popAnchor=el;
+    sizePopText.textContent=text;
+    sizePopup.classList.add('open');
+    var r=el.getBoundingClientRect();
+    var pw=sizePopup.offsetWidth,ph=sizePopup.offsetHeight;
+    var left=Math.max(8,Math.min(r.left,window.innerWidth-pw-8));
+    var top=r.bottom+8;
+    if(top+ph>window.innerHeight-8) top=Math.max(8,r.top-ph-8);
+    sizePopup.style.left=left+'px';
+    sizePopup.style.top=top+'px';
+    var arrowX=Math.max(10,Math.min(r.left+r.width/2-left-5,pw-15));
+    sizePopup.style.setProperty('--arrow-x',arrowX+'px');
+  }
+  document.querySelectorAll('#sizes .size-item').forEach(function(b){
+    b.addEventListener('click',function(e){
+      e.stopPropagation();
+      showSizePopup(b,b.getAttribute('data-note'));
+    });
+  });
+  /* 测量报告：独特地标链接 → 悬浮显示当前耐久 */
+  document.querySelectorAll('#reports .lm-link').forEach(function(el){
+    el.addEventListener('click',function(e){
+      e.stopPropagation();
+      showSizePopup(el,el.getAttribute('data-lm-info'));
+    });
+  });
+  document.addEventListener('click',hideSizePopup);
+  document.addEventListener('keydown',function(e){if(e.key==='Escape') hideSizePopup();});
+  window.addEventListener('scroll',hideSizePopup,{passive:true});
+
+  /* 灾害分析栏隐藏按钮：完全隐藏，经顶部导航再次打开 */
+  var anaSec=document.getElementById('analysis');
+  var anaHide=document.getElementById('anaHideBtn');
+  if(anaHide&&anaSec){
+    anaHide.addEventListener('click',function(){
+      anaSec.classList.add('sec-hidden');
+    });
+  }
+
   /* 画廊灯箱 */
-  var thumbs=[].slice.call(document.querySelectorAll('#gallery .img-wrap img'));
+  var thumbs=[].slice.call(document.querySelectorAll('#bio .img-wrap img'));
   if(thumbs.length){
     var lb=document.createElement('div');
     lb.className='lightbox';
@@ -136,6 +197,9 @@
     document.querySelectorAll('.has-hit').forEach(function(el){
       el.classList.remove('has-hit');
     });
+    document.querySelectorAll('.note-hit').forEach(function(el){
+      el.classList.remove('note-hit');
+    });
     hits=[];idx=-1;
   }
   function wrapMatches(el,q){
@@ -174,7 +238,10 @@
   }
   function updateChrome(){
     var n=hits.length,q=input.value.trim();
-    countEl.textContent=q?(n?(idx+1)+'/'+n:'无匹配'):'';
+    var nn=document.querySelectorAll('.note-hit').length;
+    var label='';
+    if(q) label=n?((idx+1)+'/'+n):(nn?('情报●'+nn):'无匹配');
+    countEl.textContent=label;
     prevBtn.disabled=!n;nextBtn.disabled=!n;
   }
   function goTo(i){
@@ -198,6 +265,11 @@
       wrapMatches(el,q);
       var card=el.closest('.size-item,.record-card,.report-pane');
       if(card) card.classList.add('has-hit');
+    });
+    /* 解锁情报文本存于 data-note，不在正文中：命中时以圆点提示部位名 */
+    document.querySelectorAll('#sizes .size-item').forEach(function(b){
+      var note=(b.getAttribute('data-note')||'').toLowerCase();
+      if(note&&note.indexOf(qLow)!==-1) b.classList.add('note-hit');
     });
     hits=Array.prototype.slice.call(document.querySelectorAll('mark.search-hit'));
     document.querySelectorAll('.report-pane').forEach(function(p){
