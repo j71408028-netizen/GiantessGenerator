@@ -29,7 +29,11 @@ class ChallengeService:
     # 环境变量名，用于存储所有挑战包的秘钥映射
     ENV_KEY = "GIANTESS_CHALLENGE_KEYS"
     # 加密文件中用于校验数据完整性的魔数（Magic Number）
+    # MAGIC：旧格式（逐字节密钥流）校验头；MAGIC_V2：分块密钥流新格式
     MAGIC = b"\x8a\xf3\x2b\x9c\x4d\x7e\x1f\x65\xa0\xd8\xbb\x31\x56\xe9\xc7\x42"
+    MAGIC_V2 = b"\x3d\x91\xc6\x08\xb4\x27\x5e\xf3\x61\xaa\x0d\x72\x48\xd5\xbe\x19"
+    # 新格式中每个 HMAC 摘要（32 字节）作为密钥流块使用
+    _KS_BLOCK_LEN = 32
 
     def __init__(self, settings_repo, character_repo=None, landmark_repo=None, quip_repo=None, dungeon_repo=None, data_dir="data", world_state=None):
         """
@@ -273,13 +277,37 @@ class ChallengeService:
         return hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'),
                                    salt, 100000, dklen=32)
 
+    @staticmethod
+    def _keystream(key: bytes, iv: bytes, length: int) -> bytes:
+        """生成分块密钥流：第 i 块为 HMAC(key, iv || i) 的完整 32 字节摘要。
+
+        相比旧格式（每字节一次 HMAC、只取摘要首字节），HMAC 调用次数
+        降为 1/32，是加解密提速约 30 倍的来源。
+        """
+        import numpy as np
+        blocks = []
+        counter = 0
+        while True:
+            blocks.append(hmac.digest(key, iv + counter.to_bytes(4, 'big'), 'sha256'))
+            counter += 1
+            if counter * ChallengeService._KS_BLOCK_LEN >= length:
+                break
+        return b"".join(blocks)[:length]
+
+    @staticmethod
+    def _xor_bytes(data: bytes, keystream: bytes) -> bytes:
+        """numpy 整块异或（替代逐字节 Python 循环）。"""
+        import numpy as np
+        return (np.frombuffer(data, dtype=np.uint8)
+                ^ np.frombuffer(keystream, dtype=np.uint8)).tobytes()
+
     def _encrypt(self, plaintext: bytes, password: str) -> bytes:
         """
         使用流加密（基于 HMAC-SHA256 的异或加密）加密明文
 
         加密结构：IV (16字节) + 密文
-        密文由 MAGIC + 明文与密钥流逐字节异或得到。
-        密钥流由 HMAC-SHA256(派生密钥, IV || 计数器) 生成。
+        密文由 MAGIC_V2 + 明文与分块密钥流逐字节异或得到；
+        密钥流第 i 块为 HMAC-SHA256(派生密钥, IV || 计数器) 的完整摘要。
 
         :param plaintext: 待加密的字节序列
         :param password: 秘钥字符串
@@ -287,20 +315,17 @@ class ChallengeService:
         """
         iv = os.urandom(16)
         key = self._derive_key(password, iv)
-        # 在明文前添加 MAGIC 用于解密后校验
-        payload = self.MAGIC + plaintext
-
-        ciphertext = bytearray()
-        for i, b in enumerate(payload):
-            # 生成密钥流字节：使用 HMAC 对 iv + 4字节计数器做摘要，取第一个字节
-            keystream_byte = hmac.digest(key, iv + i.to_bytes(4, 'big'), 'sha256')[0]
-            ciphertext.append(b ^ keystream_byte)
-
-        return iv + bytes(ciphertext)
+        # 在明文前添加 MAGIC_V2 用于解密后校验（同时标识新格式）
+        payload = self.MAGIC_V2 + plaintext
+        keystream = self._keystream(key, iv, len(payload))
+        return iv + self._xor_bytes(payload, keystream)
 
     def _decrypt(self, data: bytes, password: str) -> Optional[bytes]:
         """
         解密加密数据，与 _encrypt 配套
+
+        新格式（分块密钥流，MAGIC_V2 校验）优先尝试，失败时回退到
+        旧格式（逐字节密钥流，MAGIC 校验），保证旧挑战包仍可打开。
 
         :param data: 加密数据（IV + 密文）
         :param password: 秘钥字符串
@@ -314,15 +339,20 @@ class ChallengeService:
         ciphertext = data[16:]
         key = self._derive_key(password, iv)
 
-        # 异或解密得到 payload（包含 MAGIC + 明文）
+        # 新格式：分块密钥流
+        payload = self._xor_bytes(
+            ciphertext, self._keystream(key, iv, len(ciphertext)))
+        if payload[:len(self.MAGIC_V2)] == self.MAGIC_V2:
+            return payload[len(self.MAGIC_V2):]
+
+        # 旧格式：每字节一次 HMAC、取摘要首字节
         payload = bytearray()
         for i, b in enumerate(ciphertext):
             keystream_byte = hmac.digest(key, iv + i.to_bytes(4, 'big'), 'sha256')[0]
             payload.append(b ^ keystream_byte)
-
         payload = bytes(payload)
         # 校验 MAGIC，若不匹配说明秘钥错误或数据损坏
-        if len(payload) < len(self.MAGIC) or payload[:len(self.MAGIC)] != self.MAGIC:
+        if payload[:len(self.MAGIC)] != self.MAGIC:
             raise ValueError("秘钥不正确或数据损坏")
 
         # 返回去除 MAGIC 后的真实明文

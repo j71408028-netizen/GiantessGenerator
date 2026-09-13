@@ -188,11 +188,11 @@ class DungeonStoryEngine:
     def _replay_next_step(self):
         if self.dungeon_ended:
             print("回放结束")
-            dpg.stop_dearpygui()
+            self._request_close()
             return
         if self.current_replay_index >= len(self.loaded_replay):
             print("回放结束")
-            dpg.stop_dearpygui()
+            self._request_close()
             return
         entry = self.loaded_replay[self.current_replay_index]
         if entry.get("kind") == "trigger":

@@ -32,8 +32,8 @@ REPLAY_MARK = "__replay__"
 # 入场动态背景的旋转/模糊参数范围（随机抽取）
 _ROTATE_RANGE = (-8, 8)
 _BLUR_RANGE = (1.2, 3.0)
-# 轮播间隔（秒）：过快会因反复重建纹理导致卡顿，2.5~4.5s 兼顾流畅与开销
-_BG_CYCLE_INTERVAL = (3.0, 6.0)
+# 轮播间隔（秒）
+_BG_CYCLE_INTERVAL = (6.0, 10.0)
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +96,9 @@ def collect_dungeon_images(dungeon_repo) -> list:
             for name in filenames:
                 if name.lower().endswith(_IMAGE_EXTS):
                     found.append(os.path.join(dirpath, name))
-    return found
+    # 同一图片可能经相对/绝对两种根各采一次，按规范化路径去重，
+    # 否则轮播会在同一张图的两个路径间来回切换、反复重载。
+    return list(dict.fromkeys(os.path.normpath(p) for p in found))
 
 
 _BYTE_TO_FLOAT = [value / 255.0 for value in range(256)]
@@ -127,7 +129,7 @@ class DungeonLaunchStages:
         self._kb_dx = 0.0
         self._kb_dy = 0.0
         self._kb_phase = 0.0
-        self._kb_speed = random.uniform(0.10, 0.18)   # 每秒缩放幅度
+        self._kb_speed = random.uniform(0.02, 0.04)   # 每秒缩放幅度（放慢呼吸感）
         self._kb_dir = random.choice([-1, 1])          # 缓慢放大或缩小
 
         self._collect_bg_images()
@@ -412,8 +414,12 @@ class DungeonLaunchStages:
                 time.sleep(random.uniform(*_BG_CYCLE_INTERVAL))
                 if self._closing or not self._is_entry_phase:
                     break
-                self._bg_index = (self._bg_index + random.randint(1, n - 1)) % n
-                path = self._bg_images[self._bg_index]
+                # 只有一张图时 randrange 会因 low>=high 抛异常，直接保持不动
+                if n > 1:
+                    self._bg_index = (self._bg_index + random.randint(1, n - 1)) % n
+                    path = self._bg_images[self._bg_index]
+                else:
+                    path = self._bg_images[0]
                 angle = random.uniform(*_ROTATE_RANGE)
                 blur = random.uniform(*_BLUR_RANGE)
                 _dispatch.enqueue(self._switch_background, path, angle, blur)

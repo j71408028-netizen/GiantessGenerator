@@ -2,6 +2,7 @@ import os
 import threading
 import time
 
+import numpy as np
 from PIL import Image
 from PIL import ImageFilter
 import dearpygui.dearpygui as dpg
@@ -89,7 +90,10 @@ class DungeonBackground:
         owner._bg_pil_full = new_pil
         width, height = owner._layout_w, owner._layout_h
         if owner._bg_pil_original is None or not smooth_transition:
-            owner._refresh_background(delay=0)
+            # 无过渡（首图/强制刷新）：在当前线程同步应用。走 Timer+队列时
+            # 首图常因视口尚未稳定、revision 被后续刷新顶掉而延迟数秒才显示。
+            resized = self.crop_and_resize(new_pil, width, height)
+            self.apply_data(resized, self.pil_to_dpg(resized), width, height)
             return
 
         owner._bg_revision += 1
@@ -104,11 +108,12 @@ class DungeonBackground:
                 old_resized = old_resized.resize((width, height), Image.Resampling.LANCZOS)
             old_data = self.pil_to_dpg(old_resized)
             _dispatch.enqueue(owner._apply_prepared_bg, old_resized, old_data, width, height, revision)
-            # 24 步 × 0.03s ≈ 0.72s 平滑淡入淡出（入口动态背景更流畅）
-            for step in range(24):
+            # 30 步 × 0.03s ≈ 0.9s 平滑淡入淡出（numpy 转换后每步开销很小，
+            # 放慢过渡让切换更柔和；切换周期由轮播线程控制，不受影响）
+            for step in range(30):
                 if owner._closing or revision != owner._bg_revision:
                     return
-                alpha = step / 23
+                alpha = step / 29
                 blended = Image.blend(old_resized, new_resized, alpha)
                 _dispatch.enqueue(owner._set_bg_texture, self.pil_to_dpg(blended), width, height, revision)
                 time.sleep(0.03)
@@ -148,14 +153,22 @@ class DungeonBackground:
         owner._bg_resize_timer.start()
 
     def apply_data(self, pil_img, dpg_data, width, height):
+        # 尺寸一致时直接 set_value（接受 numpy float32，比整张重建快一个量级）；
+        # 仅在尺寸变化（窗口 resize / 首次应用）时才重建纹理，
+        # 注意 add_dynamic_texture 不接受 numpy，重建必须传 list。
         if dpg.does_item_exist("bg_texture"):
+            cur = dpg.get_item_configuration("bg_texture")
+            if cur.get("width") == width and cur.get("height") == height:
+                dpg.set_value("bg_texture", dpg_data)
+                self.owner._bg_pil_original = pil_img
+                return
             dpg.delete_item("bg_texture")
-        if dpg.does_alias_exist("bg_texture"):
-            dpg.remove_alias("bg_texture")
+            if dpg.does_alias_exist("bg_texture"):
+                dpg.remove_alias("bg_texture")
         dpg.add_dynamic_texture(
             width=width,
             height=height,
-            default_value=dpg_data,
+            default_value=list(dpg_data),
             tag="bg_texture",
             parent="dungeon_texture_registry",
         )
@@ -211,4 +224,7 @@ class DungeonBackground:
     def pil_to_dpg(image):
         if image.mode != "RGBA":
             image = image.convert("RGBA")
-        return [_BYTE_TO_FLOAT[value] for value in image.tobytes()]
+        # 全屏图约 2.5k×1.6k，逐像素 Python 推导需 ~1s；numpy 整块转换 ~30ms。
+        arr = np.frombuffer(image.tobytes(), dtype=np.uint8).astype(np.float32)
+        arr /= 255.0
+        return arr

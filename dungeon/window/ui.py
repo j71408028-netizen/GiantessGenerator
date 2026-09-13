@@ -16,14 +16,27 @@ class DungeonWindowUI:
     # ---------- UI 构建 ----------
     def _build_ui(self):
         dpg.create_context()
-        with dpg.texture_registry(tag="dungeon_texture_registry"):
-            dpg.add_dynamic_texture(width=1, height=1, default_value=[0.0, 0.0, 0.0, 0.0], tag="bg_texture")
 
         self.is_fullscreen = False
         (viewport_w, viewport_h, self._dpi_scale,
          self._main_client_w, self._main_client_h) = self._get_initial_viewport_size()
         self._layout_w = viewport_w
         self._layout_h = viewport_h
+
+        # 背景纹理直接建到主窗口客户区尺寸（与 _relayout 收敛后的布局一致，
+        # 也与 _prime_background 同步首图应用的尺寸一致）：后续背景应用几乎
+        # 都走 set_value 快速路径；若建为 1×1，首次应用需重建纹理并做一次
+        # 全分辨率 list 转换（约 1s）。
+        with dpg.texture_registry(tag="dungeon_texture_registry"):
+            dpg.add_dynamic_texture(
+                width=self._main_client_w, height=self._main_client_h,
+                default_value=[0.0] * (self._main_client_w * self._main_client_h * 4),
+                tag="bg_texture")
+
+        # 布局尺寸以主窗口客户区为基准；视口外框（标题栏/边框）尺寸只用于
+        # 创建视口，参与布局会因客户区查询时机不同造成首图尺寸不匹配。
+        self._layout_w = self._main_client_w
+        self._layout_h = self._main_client_h
 
         font_path = None
         possible_paths = [

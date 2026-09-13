@@ -44,6 +44,7 @@ class DungeonWindowBase:
         self.dungeon_config = dungeon_config
         self.dungeon_repo = dungeon_repo
         self.merged_landmarks = merged_landmarks
+        self.merged_quips = merged_quips
         self.selected_styles = selected_styles
         self.selected_quip_styles = selected_quip_styles
         self.detail_pools = detail_pools
@@ -355,28 +356,46 @@ class DungeonWindowBase:
     # ---------------- 入口阶段进入（由 dungeon.launcher.DungeonLaunchStages 提供） ----------------
     # 子类 mixin 会覆盖 _enter_entry_phase / _init_entry_materials：
     # base 只负责在 _build_ui() 后调用统一的 enter 钩子进入入口阶段。
+    def _request_close(self):
+        """请求退出 DPG 渲染循环（可在任意回调内安全调用）。
+
+        在控件/帧回调内直接调用 dpg.stop_dearpygui() 会让渲染帧中途停止，
+        随后的 destroy_context() 因 DPG 内部状态未正常收尾而破坏堆——
+        Windows 上表现为窗口关闭后进程在 Tk 主循环中于 _dearpygui.pyd
+        内崩溃退出。改为向视口窗口投递 WM_CLOSE，让 DPG 走与用户点窗口
+        X 按钮相同的原生关闭路径（在消息轮询阶段帧间停止），实测稳定。
+        非 Windows 平台回退为直接 stop。
+        """
+        if self._is_windows:
+            try:
+                import ctypes
+                hwnd = ctypes.windll.user32.FindWindowW(None, self._temp_title)
+                if not hwnd:
+                    hwnd = ctypes.windll.user32.FindWindowW(None, self._real_title)
+                if hwnd:
+                    ctypes.windll.user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
+                    return
+            except Exception as e:
+                print(f"副本窗口关闭请求失败: {e}")
+        try:
+            dpg.stop_dearpygui()
+        except Exception:
+            pass
+
     def _close_loop(self):
-        """入口阶段选择“返回”时关闭窗口。"""
+        """入口阶段选择“返回”时关闭窗口。
+
+        不在此处直接 stop 渲染循环（见 _request_close 的说明）；退出回调
+        _on_close 会在最后一帧完成标记清理（_closing/_exit_from_entry、
+        停调度器），后台线程的 join 由 __init__ 在循环退出后执行。
+        """
         self._closing = True
         if self._bg_resize_timer is not None:
             try:
                 self._bg_resize_timer.cancel()
             except Exception:
                 pass
-        if self._ending_thread is not None:
-            try:
-                self._ending_thread.join(timeout=0.5)
-            except Exception:
-                pass
-        if self._bg_thread is not None:
-            try:
-                self._bg_thread.join(timeout=0.5)
-            except Exception:
-                pass
-        try:
-            dpg.stop_dearpygui()
-        except Exception:
-            pass
+        self._request_close()
 
     # ---------- 视口尺寸（与正式副本会话窗口一致） ----------
     def _get_initial_viewport_size(self):
