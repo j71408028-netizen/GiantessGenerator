@@ -256,15 +256,19 @@ class TreeviewManager(ctk.CTkFrame):
             self.save_items(items)
             self.refresh_list()
 
+    def display_name(self, item: Any) -> str:
+        """条目的可读名称（删除确认等提示用）。子类可覆盖。"""
+        if isinstance(item, dict):
+            return str(item.get("name") or item)
+        return str(getattr(item, "name", None) or item)
+
     def delete_item(self):
         """删除选中项"""
         item = self.get_selected_item()
         if item is None:
             return
         idx = self.get_selected_index()
-        # 子类可以重写获取显示名称的方法，这里默认尝试获取 name 属性
-        name = getattr(item, 'name', str(item))
-        if ui.common.dialogs.askyesno("确认", f"确定要删除 '{name}' 吗？"):
+        if ui.common.dialogs.askyesno("确认", f"确定要删除 '{self.display_name(item)}' 吗？"):
             items = self.get_items()
             del items[idx]
             self.save_items(items)

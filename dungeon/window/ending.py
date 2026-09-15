@@ -8,9 +8,13 @@ from dungeon.dispatcher import _dispatch
 class EndingHandler:
     # ------------------ 敏感触发器 ------------------
     def _apply_sensitivity_mods(self) -> dict:
-        """汇总当前生效的敏感倍率修改（属性名 -> 倍率改变量）。"""
+        """汇总当前生效的敏感倍率修改（属性名 -> 倍率改变量）。
+
+        来源有两处：所在章节的持续敏感效果（离开章节即失效）与触发器触发的
+        限时敏感效果（按步数衰减）。
+        """
         mods = {}
-        for effect in self.sensitivity_effects:
+        for effect in list(self.chapter_sensitivity_effects) + list(self.sensitivity_effects):
             mods[effect["attr"]] = mods.get(effect["attr"], 0.0) + effect["amount"]
         return mods
 

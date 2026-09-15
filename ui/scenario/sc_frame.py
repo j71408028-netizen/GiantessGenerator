@@ -3,11 +3,12 @@ import customtkinter as ctk
 import re
 import copy
 import os
+from dungeon.chapters import normalize_chapters
 from dungeon.rules import EvolutionRules
 from ui.common.widgets import CTkScrollableDropdownFrame, CTkSegmentedControl
 from ui.common.dialogs import BaseDialog, InputDialog
+from ui.scenario.chapter_trigger_mgr import ChapterTriggerManager
 from ui.scenario.evolution_attributes import EvolutionAtrrManager
-from ui.scenario.trigger_mgr import TriggerManager
 from ui.scenario.component_mgr import ComponentManager
 from ui.common.theme import (
     BORDER, BORDER_ALT, PNL_BG, HARD_TITLE, TEXT, SOFT,
@@ -31,6 +32,7 @@ class ScenarioEditor(ctk.CTkFrame):
         self.section_prompts = {}
         self.view_mode = "story"
         self.evolution_attrs = []  # 统一演化量列表
+        self.chapters = []  # 章节列表（不含条件，只描述背景与持续敏感效果）
         self.triggers = []
         self.components = []  # 显示组件 id 列表
         self.components_params = {}  # {组件id: {参数: 值}}
@@ -54,9 +56,9 @@ class ScenarioEditor(ctk.CTkFrame):
         toolbar.pack(fill='x', padx=10, pady=6)
         self.dungeon_switch_btn = CTkSegmentedControl(
             toolbar,
-            values=[" 通用 ", "演化量", "触发器", "组件"],
+            values=[" 通用 ", "演化量", "章节/触发器", "组件"],
             command=self._on_scenario_tab_switch,
-            width=200, font=ui_fonts.ui_font(12)
+            width=340, font=ui_fonts.ui_font(12)
         )
         self.dungeon_switch_btn.pack(side='left', padx=5, pady=(3, 1))
         # 初始化即选中“通用”
@@ -102,17 +104,18 @@ class ScenarioEditor(ctk.CTkFrame):
         self.content_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.content_frame.pack(fill='both', expand=True, padx=10, pady=10)
 
-        # 创建三个面板
+        # 创建各面板
         self.prompt_panel = ctk.CTkFrame(self.content_frame, fg_color="transparent")
         self._build_prompt_ui(self.prompt_panel)  # 重写 UI 构建
 
         self.evolution_panel = EvolutionAtrrManager(self.content_frame, self._dungeon_repo, self)
-        self.trigger_panel = TriggerManager(self.content_frame, self._dungeon_repo, self)
+        self.chapter_trigger_panel = ChapterTriggerManager(
+            self.content_frame, self._dungeon_repo, self)
         self.component_panel = ComponentManager(self.content_frame, self._dungeon_repo, self)
 
         # 默认显示通用面板
         self.evolution_panel.pack_forget()
-        self.trigger_panel.pack_forget()
+        self.chapter_trigger_panel.pack_forget()
         self.component_panel.pack_forget()
         self.prompt_panel.pack(fill='both', expand=True)
 
@@ -196,15 +199,16 @@ class ScenarioEditor(ctk.CTkFrame):
         # 隐藏所有面板
         self.prompt_panel.pack_forget()
         self.evolution_panel.pack_forget()
-        self.trigger_panel.pack_forget()
+        self.chapter_trigger_panel.pack_forget()
         self.component_panel.pack_forget()
 
         if value == " 通用 ":
             self.prompt_panel.pack(fill='both', expand=True)
         elif value == "演化量":
             self.evolution_panel.pack(fill='both', expand=True)
-        elif value == "触发器":
-            self.trigger_panel.pack(fill='both', expand=True)
+        elif value == "章节/触发器":
+            self.chapter_trigger_panel.refresh_list()
+            self.chapter_trigger_panel.pack(fill='both', expand=True)
         elif value == "组件":
             self.component_panel.refresh_list()
             self.component_panel.pack(fill='both', expand=True)
@@ -454,7 +458,7 @@ class ScenarioEditor(ctk.CTkFrame):
         # 转移矩阵无需显示，但已保存在 self.transition_matrix 中
 
         self.evolution_panel.refresh_list()
-        self.trigger_panel.refresh_list()
+        self.chapter_trigger_panel.refresh_list()
         self.component_panel.refresh_list()
         self._update_prompt_snapshot()
 
@@ -468,6 +472,7 @@ class ScenarioEditor(ctk.CTkFrame):
         if self.view_mode not in ("story", "game"):
             self.view_mode = "story"
         self.evolution_attrs = config.get("evolution_attrs", [])
+        self.chapters = normalize_chapters(config.get("chapters", []))
         self.triggers = config.get("triggers", [])
         self.entry_action_cost = max(0, int(config.get("entry_action_cost", 0) or 0))
         self.components = config.get("components", [])
@@ -535,13 +540,14 @@ class ScenarioEditor(ctk.CTkFrame):
         ui.common.dialogs.showinfo("成功", "通用设置已保存")
 
     def _save_evolution_triggers(self):
-        """仅保存演化量和触发器，不修改提示词"""
+        """仅保存演化量、章节与触发器，不修改提示词"""
         if not self.current_scenario_id:
             return
         config = self._dungeon_repo.load_config(self.current_scenario_id)
         if config is None:
             config = {}
         config["evolution_attrs"] = self.evolution_attrs
+        config["chapters"] = self.chapters
         config["triggers"] = self.triggers
         self._dungeon_repo.save_config(self.current_scenario_id, config)
         # 不更新提示词快照
@@ -600,6 +606,7 @@ class ScenarioEditor(ctk.CTkFrame):
             "initial_prompt": "",
             "section_prompts": {k: "" for k in ["background","branch","dialog","interaction","action"]},
             "custom_attrs": [],
+            "chapters": [],
             "triggers": [],
             "entry_action_cost": 0,
             "components": ["text"],

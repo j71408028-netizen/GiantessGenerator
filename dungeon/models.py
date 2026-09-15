@@ -29,6 +29,8 @@ class DungeonState:
     custom_attrs: dict[str, float] = field(default_factory=dict)
     total_steps: int = 0
     steps_since_trigger: int = 0
+    # 进入当前章节后的步数；进入/离开章节时清零（条件键“节内计数”）
+    chapter_steps: int = 0
     total_casualties: float = 0.0
     casualty_evolution: list[float] = field(default_factory=list)
     # 当前介入度/破坏性步长：随故事步进演化（演算前恢复、演算后扣除），
@@ -47,14 +49,22 @@ class DungeonState:
         return self.step_destruction if self.step_destruction is not None else 0.0
 
     def clone(self) -> "DungeonState":
+        """复制状态。
+
+        字段一律按关键字传递：本类是数据类，字段顺序会随功能迭代变化
+        （``chapter_steps`` 就是从中间插入的），按位置一一对应会在增删字段
+        时静默错位——曾导致伤亡数组被填成步长浮点数，每步结算都抛异常、
+        副本无法继续推进。
+        """
         return DungeonState(
-            self.intrusion,
-            self.destruction,
-            self.custom_attrs.copy(),
-            self.total_steps,
-            self.steps_since_trigger,
-            self.total_casualties,
-            list(self.casualty_evolution),
-            self.step_intrusion,
-            self.step_destruction,
+            intrusion=self.intrusion,
+            destruction=self.destruction,
+            custom_attrs=self.custom_attrs.copy(),
+            total_steps=self.total_steps,
+            steps_since_trigger=self.steps_since_trigger,
+            chapter_steps=self.chapter_steps,
+            total_casualties=self.total_casualties,
+            casualty_evolution=list(self.casualty_evolution),
+            step_intrusion=self.step_intrusion,
+            step_destruction=self.step_destruction,
         )

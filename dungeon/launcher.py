@@ -1,9 +1,5 @@
 """副本入口阶段（DearPyGui 混入）：与正式副本会话窗口共享同一个 DPG 生命周期。
 
-历史背景：入口页曾是独立的 DPG 视口（create_context → start_dearpygui →
-destroy_context），与正式副本窗口各自拥有独立窗口，管理复杂且几乎不可用。
-现改为同一 DungeonSessionWindow 实例内的“入口阶段 → 会话阶段”：
-
 - 动态背景：从副本资源目录随机抽取图片，轻微旋转/高斯模糊后循环交叉淡入淡出；
 - 右下角：副本方案选择 + 开始副本 / 加载回放 / 返回；
 - 左下角：若已加载角色，循环展示其已通关结局的 png 图标；
@@ -535,6 +531,7 @@ class DungeonLaunchStages:
             self._relayout()
             self._replay_next_step()
         else:
+            self._enter_start_chapter()
             self.check_triggers()
             self._schedule_text_update()
 

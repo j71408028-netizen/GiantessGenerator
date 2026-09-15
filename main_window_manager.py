@@ -498,7 +498,7 @@ class MainWindowManager:
             self._apply_app_icon()
         if hasattr(self, 'dungeon_editor'):
             self.dungeon_editor.evolution_panel.update_theme(mode)
-            self.dungeon_editor.trigger_panel.update_theme(mode)
+            self.dungeon_editor.chapter_trigger_panel.update_theme(mode)
         if hasattr(self, 'landmark_mgr'):
             self.landmark_mgr.update_theme(mode)
         if hasattr(self, 'quip_card_mgr'):

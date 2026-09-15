@@ -14,35 +14,32 @@ import networkx as nx
 import graphviz as gv
 from PIL import Image
 
+from dungeon.actions import action_label, normalize_action_type
+from dungeon.chapters import scope_label
 from ui.common.dialogs import BaseDialog
 from ui.common.fonts import graphviz_font
 from ui.common.theme import (
     GRAPH_EDGE_ERR, GRAPH_EDGE_NORMAL, GRAPH_NODE_ERR_BORDER, GRAPH_NODE_ERR_FILL,
     GRAPH_NODE_OUTLINE, ACTION_FILL_BACKGROUND, ACTION_FILL_ENDING,
     ACTION_FILL_INSERT, ACTION_FILL_NONE, ACTION_FILL_OPTION, ACTION_FILL_SENSITIVITY,
+    ACTION_FILL_GOTO, ACTION_FILL_EFFECT,
     TEXT, SOFT, STATUS_ERR, STATUS_OK,
 )
 
-# 动作类型 → 展示名、节点填充色
-_ACTION_LABEL = {
-    "insert": "插入段落",
-    "option": "选项分支",
-    "sensitivity": "敏感效果",
-    "ending": "结局",
-    "background": "背景图",
-    "none": "空触发器",
-}
+# 动作类型 → 节点填充色（展示名统一取 dungeon.actions 的注册表）
 _ACTION_FILL = {
     "insert": ACTION_FILL_INSERT,
     "option": ACTION_FILL_OPTION,
     "sensitivity": ACTION_FILL_SENSITIVITY,
     "ending": ACTION_FILL_ENDING,
     "background": ACTION_FILL_BACKGROUND,
+    "goto": ACTION_FILL_GOTO,
+    "effect": ACTION_FILL_EFFECT,
     "none": ACTION_FILL_NONE,
 }
 
 # 图例文本
-_LEGEND = ("红色填充节点 / 红色箭头边：循环依赖；方框内括号为动作类型。"
+_LEGEND = ("红色填充节点 / 红色箭头边：循环依赖；方框内括号为动作类型，第二行是所在章节。"
            "箭头 A→B 表示 “A 是 B 的前置条件”。")
 
 
@@ -100,7 +97,9 @@ def _render_png(triggers, G, cycle_nodes):
     bin_dir = os.path.dirname(dot)
     os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
 
-    type_by_name = {t.get("name"): t.get("action_type") for t in triggers}
+    type_by_name = {t.get("name"): normalize_action_type(
+        t.get("action_type"), t.get("action_data")) for t in triggers}
+    scope_by_name = {t.get("name"): t.get("chapter") for t in triggers}
 
     font_name = graphviz_font()
     d = gv.Digraph()
@@ -112,7 +111,10 @@ def _render_png(triggers, G, cycle_nodes):
         at = type_by_name.get(n)
         label = n
         if at and at != "unknown":
-            label = f"{n}\n({_ACTION_LABEL.get(at, at)})"
+            label = f"{n}\n({action_label(at)})"
+        scope = scope_by_name.get(n)
+        if scope:
+            label += f"\n[{scope_label(scope)}]"
         if n in cycle_nodes:
             d.node(n, label=label, fillcolor=GRAPH_NODE_ERR_FILL, color=GRAPH_NODE_ERR_BORDER,
                    fontcolor="white", penwidth="1.6")

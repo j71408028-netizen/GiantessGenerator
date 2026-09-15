@@ -334,6 +334,8 @@ _ACTION_LABEL = {
     "background": "场景切换",
     "ending": "结局",
     "sensitivity": "敏感效果",
+    "goto": "章节跳转",
+    "effect": "短暂视效",
     "none": "条件标记",
 }
 
@@ -385,9 +387,30 @@ def _render_trigger_record(entry: dict) -> str:
         if attr or strength != "":
             body_parts.append(
                 f"<div class='rp-trigger-body'>属性 {html.escape(str(attr))} × 强度 {html.escape(str(strength))}</div>")
+    elif action_type == "goto":
+        target = str(data.get("chapter") or "").strip()
+        body_parts.append(
+            f"<div class='rp-trigger-body'>🚪 进入章节：{html.escape(target or '离开章节')}</div>")
+    elif action_type == "effect":
+        filter_key = str(data.get("filter") or "").strip()
+        if filter_key:
+            body_parts.append(
+                f"<div class='rp-trigger-body'>✨ 视效 {html.escape(filter_key)}"
+                f"（{html.escape(str(data.get('duration', '')))} 步）</div>")
     if not body_parts and action_type in ("none", "", None):
         body_parts.append("<div class='rp-trigger-body muted'>（仅标记条件成立，无动作）</div>")
     return head + "".join(body_parts)
+
+
+def _render_chapter_record(entry: dict) -> str:
+    """章节进入记录：章节自身没有条件，进入由触发器的跳转动作执行。"""
+    name = html.escape(str(entry.get("name", "")) or "无章节")
+    background = entry.get("background") or {}
+    image_path = str(background.get("image_path") or "")
+    tag = ""
+    if image_path:
+        tag = f"<span class='rp-trigger-tag'>🖼 {html.escape(os.path.basename(image_path))}</span>"
+    return f"<div class='rp-trigger-head'>📖 章节「{name}」{tag}</div>"
 
 
 def _render_replay_entries(entries: list) -> str:
@@ -397,6 +420,9 @@ def _render_replay_entries(entries: list) -> str:
             continue
         if entry.get("kind") == "trigger":
             blocks.append(f"<div class='rp-item rp-trigger'>{_render_trigger_record(entry)}</div>")
+            continue
+        if entry.get("kind") == "chapter":
+            blocks.append(f"<div class='rp-item rp-trigger'>{_render_chapter_record(entry)}</div>")
             continue
         t = str(entry.get("type", ""))
         label, cls = _TYPE_BADGE.get(t, ("未知", "t-unknown"))
@@ -1036,7 +1062,8 @@ def _build_replays_section(replay_files: list) -> str:
             continue
         title, date_part = _file_caption(path.replace(".replay.json", ".json"))
         date_html = f"<span class='file-date'>{_esc(date_part)}</span>" if date_part else ""
-        steps = sum(1 for e in entries if isinstance(e, dict) and e.get("kind") != "trigger")
+        steps = sum(1 for e in entries
+                    if isinstance(e, dict) and not e.get("kind"))
         triggers = len(entries) - steps
         meta = (f"<span class='file-meta'>{steps} 段" +
                 (f" · {triggers} 次触发" if triggers else "") + "</span>")

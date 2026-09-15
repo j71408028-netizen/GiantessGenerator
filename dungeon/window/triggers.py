@@ -1,7 +1,15 @@
-"""触发器判定、解锁坐标与插入段落。"""
+"""触发器判定、章节进入、短暂视效与插入段落。
+
+触发器 = 条件（所在章节 + 前置触发器 + 条件规则） + 一个动作。
+章节自身没有条件：进入/离开都由触发器的 ``goto`` 动作执行，章节只描述
+身处其中时的背景与敏感效果。
+"""
 
 import random
 
+from dungeon.actions import (EMPTY_ACTIONS, LEGACY_ACTIONS, VISUAL_FILTER_KEYS,
+                             action_label, normalize_action_type)
+from dungeon.chapters import find_chapter, matches_scope, sensitivity_amount
 from dungeon.dispatcher import _dispatch
 from dungeon.models import DungeonState, DungeonTextType
 from dungeon.rules import TriggerRules
@@ -27,11 +35,123 @@ class TriggerHandler:
     def evaluate_condition(self, condition: dict, state: DungeonState) -> bool:
         return TriggerRules.evaluate(condition, state, self.trigger_choices)
 
+    # ------------------ 章节 ------------------
+    def _build_chapter_effect(self, effect) -> dict:
+        """章节敏感效果：无持续步数，离开章节即失效。"""
+        return {
+            "attr": effect.get("attr", ""),
+            "amount": sensitivity_amount(effect.get("strength", 1.0),
+                                         effect.get("objective", 0.0),
+                                         effect.get("attr", ""), self.personality),
+        }
+
+    def _enter_chapter(self, name, record: bool = False, background=None,
+                       allow_unknown: bool = False) -> bool:
+        """进入章节（``""`` 表示离开章节）。
+
+        ``record`` 为真时写入一条回放记录；``background`` 用于回放时直接
+        复现当时的环境，避免依赖当前加载的章节配置。
+        """
+        name = str(name or "").strip()
+        chapter = find_chapter(self.chapters, name) if name else None
+        if name and chapter is None and not allow_unknown:
+            print(f"[Chapter] 章节不存在：{name}")
+            return False
+
+        self.current_chapter = name or None
+        self.dungeon_state.chapter_steps = 0
+        self.chapter_sensitivity_effects = [
+            self._build_chapter_effect(effect)
+            for effect in (chapter or {}).get("sensitivity", [])
+        ]
+        # 换章清除上一章遗留的短暂视效，并让背景滤镜回到本章节默认值
+        self.visual_effects = []
+        self._applied_visual_filter = None
+
+        bg = background if background is not None else (chapter or {}).get("background")
+        if record:
+            self.replay_data.append({
+                "kind": "chapter",
+                "name": self.current_chapter or "",
+                "background": dict(bg or {}),
+                "step": self.dungeon_state.total_steps,
+            })
+        self._apply_chapter_background(bg)
+        return True
+
+    def _enter_start_chapter(self):
+        """进入标记为起始的章节：章节不带条件，起始章节是唯一的自动进入点。"""
+        if self.current_chapter or not self.chapters:
+            return
+        start = next((c for c in self.chapters if c.get("start") and c.get("name")), None)
+        if start is None:
+            return
+        if self._enter_chapter(start["name"], record=True):
+            print(f"[Chapter] 起始章节：{start['name']}")
+
+    def _apply_chapter_background(self, background: dict = None):
+        """应用章节的特定背景（未配置背景时保持当前背景不变）。"""
+        if background is None:
+            chapter = (find_chapter(self.chapters, self.current_chapter)
+                       if self.current_chapter else None)
+            background = (chapter or {}).get("background") or {}
+        image_path = (background or {}).get("image_path")
+        if not image_path:
+            return
+        self._set_background(image_path,
+                             bool(background.get("smooth_transition", True)),
+                             background.get("filter_effect"))
+
+    def _set_background(self, image_path, smooth: bool = False, filter_effect=None):
+        """切换背景并记录当前图路径，供短暂视效重刷滤镜使用。"""
+        self.current_background_path = image_path or ""
+        self.change_background(image_path, smooth, filter_effect)
+
+    # ------------------ 短暂视效 ------------------
+    def _active_visual_filter(self):
+        """当前生效的视效滤镜（后触发的优先），无则返回 None。"""
+        for effect in reversed(self.visual_effects):
+            if effect.get("remaining", 0) > 0 and effect.get("filter"):
+                return effect["filter"]
+        return None
+
+    def _refresh_visual_effect(self):
+        """按当前生效的视效重刷背景滤镜；无视效则恢复章节默认滤镜。"""
+        active = self._active_visual_filter()
+        if active == self._applied_visual_filter:
+            return
+        self._applied_visual_filter = active
+        if not self.current_background_path:
+            if active:
+                print(f"[Trigger] 短暂视效 {active} 没有可用的背景，已忽略")
+            return
+        effect_filter = active
+        if effect_filter is None:
+            chapter = (find_chapter(self.chapters, self.current_chapter)
+                       if self.current_chapter else None)
+            effect_filter = ((chapter or {}).get("background") or {}).get("filter_effect")
+        self._set_background(self.current_background_path, False, effect_filter)
+
+    def _apply_visual_effects(self):
+        """每步收尾：消耗视效持续时间，到期后恢复章节滤镜。"""
+        if not self.visual_effects:
+            return
+        for effect in self.visual_effects:
+            effect["remaining"] = effect.get("remaining", 0) - 1
+        self.visual_effects = [e for e in self.visual_effects if e["remaining"] > 0]
+        self._refresh_visual_effect()
+
+    # ------------------ 触发判定 ------------------
     def check_triggers(self):
         if not self.triggers:
             return
         for trigger_index, trigger in enumerate(self.triggers):
             if trigger.get("name") in self.triggered_names:
+                continue
+            action_data = trigger.get("action_data", {})
+            action_type = normalize_action_type(trigger.get("action_type"), action_data)
+            # 所在章节：触发器只在指定章节内参与判定
+            if not matches_scope(trigger.get("chapter"), self.current_chapter):
                 continue
             pre_names = trigger.get("precondition_names", [])
             if not all(name in self.fired_triggers for name in pre_names):
@@ -39,31 +159,15 @@ class TriggerHandler:
             cond = trigger.get("condition", {})
             if not self.evaluate_condition(cond, self.dungeon_state):
                 continue
-            action_type = trigger.get("action_type")
-            action_data = trigger.get("action_data", {})
-            # 兼容早期配置中的动作名称。
-            if action_type == "sensitive":
-                action_type = "sensitivity"
-            if action_type is None:
-                action_type = action_data.get("type")
-                if action_type == "sensitive":
-                    action_type = "sensitivity"
+            # 旧版动作（背景切换 / 性格敏感化）已由章节属性承担，读到直接跳过：
+            # 不执行、不记入已触发集合，也不重置间隔计数。判定放在条件之后，
+            # 这样只在“它本来会触发”的时候留一行提示，日志不会被刷屏。
+            if action_type in LEGACY_ACTIONS:
+                print(f"[Trigger] 旧版触发器 {trigger.get('name')}"
+                      f"（{action_label(action_type)}）已跳过")
+                continue
             action_accepted = True
-            if action_type == "background":
-                image_path = action_data.get("image_path")
-                if not image_path:
-                    print(f"[Trigger] 背景触发器 {trigger['name']} 缺少图片路径，已跳过")
-                    action_accepted = False
-                else:
-                    smooth = action_data.get("smooth_transition", False)
-                    filter_effect = action_data.get("filter_effect", None)
-                    self.change_background(image_path, smooth, filter_effect)
-                    print(f"[Trigger] 已触发: {trigger['name']}")
-                    print(action_data)
-                    self._record_trigger_action(
-                        trigger, action_type, action_data,
-                        image_path_resolved=self._background.resolve_path(image_path))
-            elif action_type == "insert":
+            if action_type == "insert":
                 text = str(action_data.get("text", "")).strip()
                 if not text:
                     print(f"[Trigger] 插入触发器 {trigger['name']} 缺少插入文本，已跳过")
@@ -98,31 +202,36 @@ class TriggerHandler:
                     print(f"[Trigger] 已触发: {trigger['name']}，弹出选项")
                     self._start_option_generation()
                     self._last_option_record = self._record_trigger_action(trigger, action_type, action_data)
-            elif action_type == "sensitivity":
-                attr = action_data.get("attr", "")
-                try:
-                    strength = float(action_data.get("strength", 1.0))
-                    objective = float(action_data.get("objective", 0.0))
-                    duration = int(action_data.get("duration", 3))
-                except (TypeError, ValueError):
-                    strength, objective, duration = 1.0, 0.0, 3
-                # 破坏性相关属性由性格重力调制，介入度/自定义属性由敏感值调制
-                if self.personality is not None:
-                    base = (getattr(self.personality, "gravity", 0.0)
-                            if attr == "破坏性"
-                            else getattr(self.personality, "sensitivity", 0.0))
+            elif action_type == "effect":
+                filter_key = str(action_data.get("filter") or "").strip()
+                if filter_key not in VISUAL_FILTER_KEYS:
+                    print(f"[Trigger] 视效触发器 {trigger['name']} 的视效无效：{filter_key}，已跳过")
+                    action_accepted = False
                 else:
-                    base = 0.0
-                amount = strength * (base + objective)
-                self.sensitivity_effects.append({
-                    "attr": attr,
-                    "amount": amount,
-                    "remaining": max(1, duration),
-                })
-                print(f"[Trigger] 已触发: {trigger['name']}，敏感效果："
-                      f"{attr} 倍率 {amount:+.2f}（强度={strength}，性格{'重力' if attr == '破坏性' else '敏感值'}={base}，"
-                      f"客观影响={objective}），持续 {duration} 步")
-                self._record_trigger_action(trigger, action_type, action_data)
+                    try:
+                        duration = max(1, int(float(action_data.get("duration", 1))))
+                    except (TypeError, ValueError):
+                        duration = 1
+                    self.visual_effects.append({"filter": filter_key, "remaining": duration})
+                    self._refresh_visual_effect()
+                    print(f"[Trigger] 已触发: {trigger['name']}，短暂视效 {filter_key}（{duration} 步）")
+                    self._record_trigger_action(trigger, action_type, action_data)
+            elif action_type == "goto":
+                target = str(action_data.get("chapter") or "").strip()
+                chapter = find_chapter(self.chapters, target) if target else None
+                if target and chapter is None:
+                    print(f"[Trigger] 跳转触发器 {trigger['name']} 的目标章节不存在：{target}，已跳过")
+                    action_accepted = False
+                elif self.current_chapter == (target or None):
+                    print(f"[Trigger] 跳转触发器 {trigger['name']} 已处于章节「{target or '无章节'}」，已跳过")
+                    action_accepted = False
+                else:
+                    self._enter_chapter(target)
+                    print(f"[Trigger] 已触发: {trigger['name']}，"
+                          f"跳转章节：{target or '离开章节'}")
+                    self._record_trigger_action(
+                        trigger, action_type, action_data,
+                        chapter_background=dict((chapter or {}).get("background") or {}))
             elif action_type == "ending":
                 name = str(action_data.get("name") or action_data.get("ending_text") or "").strip()
                 if not name:
@@ -137,7 +246,7 @@ class TriggerHandler:
                     print(f"[Trigger] 已触发: {trigger['name']}，结局：{name}")
                     self._start_ending_generation()
                     self._last_ending_record = self._record_trigger_action(trigger, action_type, action_data)
-            elif action_type in ("none", None, ""):
+            elif action_type in EMPTY_ACTIONS:
                 # 空触发器：无动作，仅用于标记条件成立，供其他触发器作为前置条件
                 print(f"[Trigger] 空触发器 {trigger['name']} 条件成立（无动作）")
                 self._record_trigger_action(trigger, action_type, action_data)
@@ -166,20 +275,38 @@ class TriggerHandler:
         self.replay_data.append(record)
         return record
 
+    def _replay_chapter(self, record):
+        """回放时直接复现章节进入（含当时的背景，不依赖当前章节配置）。"""
+        name = record.get("name") or ""
+        self._enter_chapter(name, record=False,
+                            background=record.get("background"),
+                            allow_unknown=True)
+        print(f"[Replay] 复现章节进入: {name or '无章节'}")
+
     def _replay_trigger(self, record):
         """回放时复现触发器动作（不判定条件、不弹选项，选择作为一步直接展示）。"""
         action_type = record.get("action_type")
         action_data = record.get("action_data", {}) or {}
         name = record.get("name", "")
-        if action_type == "background":
-            image_path = record.get("image_path_resolved") or action_data.get("image_path")
-            if image_path:
-                self.change_background(
-                    image_path,
-                    bool(action_data.get("smooth_transition", False)),
-                    action_data.get("filter_effect"),
-                )
-                print(f"[Replay] 复现背景触发器: {name}")
+        if action_type in LEGACY_ACTIONS:
+            # 旧版动作不再复现（旧回放里的背景/敏感触发器记录直接忽略）
+            print(f"[Replay] 旧版触发器记录已跳过: {name} [{action_type}]")
+        elif action_type == "goto":
+            self._enter_chapter(str(action_data.get("chapter") or ""),
+                                record=False,
+                                background=record.get("chapter_background"),
+                                allow_unknown=True)
+            print(f"[Replay] 复现章节跳转: {name}")
+        elif action_type == "effect":
+            filter_key = str(action_data.get("filter") or "").strip()
+            if filter_key:
+                try:
+                    duration = max(1, int(float(action_data.get("duration", 1))))
+                except (TypeError, ValueError):
+                    duration = 1
+                self.visual_effects.append({"filter": filter_key, "remaining": duration})
+                self._refresh_visual_effect()
+            print(f"[Replay] 复现短暂视效: {name}")
         elif action_type == "option":
             choice_index = record.get("choice_index")
             if choice_index is None:

@@ -1,15 +1,20 @@
 import copy
-import datetime
 import os
-import re
 import tkinter as tk
-from tkinter import filedialog
 
 import customtkinter as ctk
 
 import ui.common
-from ui.common.dialogs import BaseDialog, ImageCropDialog
-from ui.common.theme import TEXT, BROWN_HINT
+from dungeon.actions import (
+    LEGACY_ACTIONS, NEW_ACTIONS, VISUAL_FILTERS, VISUAL_FILTER_KEYS, action_label,
+    normalize_action_type,
+)
+from dungeon.chapters import (
+    CHAPTER_ANY, CHAPTER_ANY_LABEL, CHAPTER_NONE, CHAPTER_NONE_LABEL, chapter_names,
+)
+from ui.common.dialogs import BaseDialog
+from ui.common.theme import BORDER_ALT, BROWN_HINT, HOVER, SOFT, TEXT
+from ui.scenario.asset_import import import_ending_icon
 
 
 class TriggerEditDialog(BaseDialog):
@@ -37,43 +42,39 @@ class TriggerEditDialog(BaseDialog):
             "选择记录：其他触发器可使用“选择:本触发器名称”判定选择次数、某编号占比、最后一次选择或趋势变化。\n"
             "注意：选项触发器需要先填写有效选项，否则触发时会被跳过。"
         ),
-        "sensitivity": (
-            "触发后属性的演化将偏置。相对偏置量 = 强度 ×（人物敏感值 + 客观影响），可为正数或负数。\n"
-            "属性：选择要影响的属性，例如介入度、破坏性或自定义演化属性。\n"
-            "持续步数：效果持续的副本步数，至少按 1 步计算。"
+        "effect": (
+            "短暂视效：在背景图上叠加一段限时滤镜，持续指定步数后自动恢复本章节的默认滤镜。\n"
+            "视效作用于当前背景图；若此时没有背景图，视效会被忽略。\n"
+            "换章会立即清除尚未结束的视效。"
+        ),
+        "goto": (
+            "跳转到章节：进入目标章节，立即应用该章节的特定背景与持续敏感效果。\n"
+            "选择“离开章节”表示跳出当前章节，回到无章节状态。\n"
+            "章节本身没有条件，所有进入与离开都由本动作执行。"
         ),
         "ending": (
             "触发后副本结束。\n"
             "结局结算增量：结束时统一结算一次，可修改介入度、破坏性、伤亡步进、自定义属性和行动点数返还。\n"
             "结局图标：选择 png 图标后视为重要结局，并在首次达成时记入档案；不配置图标则为普通结局。"
         ),
-        "background": (
-            "背景图片：选择或填写副本目录中的图片路径；条件满足后切换当前背景。\n"
-            "平滑切换：勾选后使用淡入淡出过渡，不勾选则直接切换。\n"
-            "图片路径会按副本目录保存相对路径，使用“选择图片”可完成裁剪并复制到副本 images 目录。"
-        ),
         "none": (
             "条件满足时不执行实际动作，只记录该触发器已经成立，其他触发器可以在前置条件中引用它。\n"
-            "适用场景：将复杂流程拆成多个阶段，或作为多个触发器共用的中间条件节点。"
+            "适用场景：作为多个触发器共用的中间条件节点。"
         ),
     }
-    ACTION_TITLES = {
-        "insert": "插入段落", "option": "选项分支", "sensitivity": "敏感效果",
-        "ending": "结局", "background": "背景图片", "none": "空触发器",
-    }
     OPERATOR_LABELS = (("且（全部满足）", "and"), ("或（任一满足）", "or"))
-
+    GOTO_LEAVE_LABEL = "（离开章节）"
 
     def __init__(self, parent, trigger: dict, evolution_names=None, all_triggers=None,
-                 dungeon_repo=None, dungeon_id=None, evolution_attrs=None):
+                 dungeon_repo=None, dungeon_id=None, evolution_attrs=None, chapters=None):
         if evolution_names is None:
             evolution_names = []
         if all_triggers is None:
             all_triggers = []
         super().__init__(parent)
         self.title("编辑触发器")
-        self.geometry("540x540")
-        self.minsize(480, 480)
+        self.geometry("540x620")
+        self.minsize(480, 540)
         self.resizable(True, True)
         self.trigger = trigger if trigger is not None else {}
         self.evolution_names = evolution_names
@@ -85,6 +86,7 @@ class TriggerEditDialog(BaseDialog):
         # 敏感效果只针对介入度、破坏性与自定义属性，总伤亡不在演化对象内
         self.sens_targets = [a["name"] for a in self.evolution_attrs
                              if a.get("name") and a.get("type") != "casualty"] or evolution_names
+        self.chapter_names = chapter_names(chapters)
         self.transient(parent)
         self.grab_set()
         self._hint_visible = False
@@ -92,20 +94,48 @@ class TriggerEditDialog(BaseDialog):
         self._center_dialog(parent)
         self.wait_window()
 
+    # ---------- 章节作用域 ----------
+    def _chapter_scope_labels(self) -> list:
+        return [CHAPTER_ANY_LABEL, CHAPTER_NONE_LABEL] + self.chapter_names
+
+    def _chapter_scope_to_label(self, scope) -> str:
+        if not scope:
+            return CHAPTER_ANY_LABEL
+        if scope == CHAPTER_NONE:
+            return CHAPTER_NONE_LABEL
+        return str(scope)
+
+    def _chapter_label_to_scope(self, label: str) -> str:
+        label = (label or "").strip()
+        if label == CHAPTER_ANY_LABEL:
+            return CHAPTER_ANY
+        if label == CHAPTER_NONE_LABEL:
+            return CHAPTER_NONE
+        return label
+
+    def _goto_scope_to_label(self, scope) -> str:
+        return str(scope) if scope else self.GOTO_LEAVE_LABEL
+
+    def _goto_label_to_scope(self, label: str) -> str:
+        label = (label or "").strip()
+        return "" if label == self.GOTO_LEAVE_LABEL else label
+
     def _build_ui(self):
         main = ctk.CTkFrame(self, fg_color="transparent")
         main.pack(fill='both', expand=True, padx=14, pady=12)
 
-        # 模板按钮行（选择动作类型）
+        # 动作模板按钮：仅新版动作（背景切换/性格敏感化已由章节属性承担，不再提供）
+        template_commands = {
+            "insert": self._insert_template, "option": self._option_template,
+            "effect": self._effect_template, "goto": self._goto_template,
+            "ending": self._ending_template, "none": self._empty_template,
+        }
         btn_frame = ctk.CTkFrame(main, fg_color="transparent")
-        btn_frame.pack(fill='x', pady=(0, 8))
-        for text, command in (
-            ("插入段落", self._insert_template), ("选项分支", self._option_template),
-            ("敏感效果", self._sensitivity_template), ("结局", self._ending_template),
-            ("背景图片", self._background_template), ("空触发器", self._empty_template),
-        ):
-            ctk.CTkButton(btn_frame, text=text, width=80, height=28,
-                          font=self.UI_FONT, command=command).pack(side='left', padx=3)
+        btn_frame.pack(fill='x', pady=(0, 2))
+        for action_type in NEW_ACTIONS:
+            ctk.CTkButton(btn_frame, text=action_label(action_type), width=76, height=28,
+                          font=self.UI_FONT,
+                          command=template_commands[action_type]).pack(side='left', padx=2)
 
         # 主滚动区：基础信息 -> 动作设置 -> 类型说明
         content = ctk.CTkScrollableFrame(main)
@@ -124,13 +154,22 @@ class TriggerEditDialog(BaseDialog):
             common, textvariable=self.name_var, width=250, height=28, font=self.UI_FONT)
         self.name_entry.grid(row=0, column=1, sticky='w', padx=5)
 
-        ctk.CTkLabel(common, text="前置条件 (名称, 逗号分隔):", font=self.UI_FONT).grid(
+        ctk.CTkLabel(common, text="所在章节:", font=self.UI_FONT).grid(
             row=1, column=0, sticky='w', padx=5, pady=(5, 0))
+        self.chapter_var = tk.StringVar(
+            value=self._chapter_scope_to_label(self.trigger.get("chapter")))
+        self.chapter_combo = ctk.CTkComboBox(
+            common, values=self._chapter_scope_labels(), variable=self.chapter_var,
+            state="readonly", width=250, height=28, font=self.UI_FONT)
+        self.chapter_combo.grid(row=1, column=1, sticky='w', padx=5, pady=(4, 0))
+
+        ctk.CTkLabel(common, text="前置条件 (名称, 逗号分隔):", font=self.UI_FONT).grid(
+            row=2, column=0, sticky='w', padx=5, pady=(5, 0))
         pre_names = ",".join(self.trigger.get("precondition_names", []))
         self.pre_var = tk.StringVar(value=pre_names)
         self.pre_entry = ctk.CTkEntry(
             common, textvariable=self.pre_var, width=250, height=28, font=self.UI_FONT)
-        self.pre_entry.grid(row=1, column=1, sticky='w', padx=5, pady=(4, 0))
+        self.pre_entry.grid(row=2, column=1, sticky='w', padx=5, pady=(4, 0))
 
         # 可再次触发（所有动作类型通用）
         self.repeatable_var = tk.BooleanVar(value=self.trigger.get("repeatable", True))
@@ -138,7 +177,7 @@ class TriggerEditDialog(BaseDialog):
             common, text="可再次触发", variable=self.repeatable_var,
             font=self.UI_FONT, text_color=TEXT,
             checkbox_width=20, checkbox_height=20)
-        self.repeatable_check.grid(row=2, column=0, columnspan=2, sticky='w', padx=5, pady=(4, 0))
+        self.repeatable_check.grid(row=3, column=0, columnspan=2, sticky='w', padx=5, pady=(4, 0))
         common.grid_columnconfigure(1, weight=1)
 
         # ---------- 动作设置（各类型独立分区，仅显示当前所选类型）----------
@@ -150,9 +189,9 @@ class TriggerEditDialog(BaseDialog):
         self.action_frames = {}
         self.action_frames["insert"] = self._build_insert_form(self.action_area)
         self.action_frames["option"] = self._build_option_form(self.action_area)
-        self.action_frames["sensitivity"] = self._build_sensitivity_form(self.action_area)
+        self.action_frames["effect"] = self._build_effect_form(self.action_area)
+        self.action_frames["goto"] = self._build_goto_form(self.action_area)
         self.action_frames["ending"] = self._build_ending_form(self.action_area)
-        self.action_frames["background"] = self._build_background_form(self.action_area)
 
         # ---------- 类型说明（滚动区内的说明文案）----------
         hint_area = ctk.CTkFrame(content, fg_color="transparent")
@@ -230,33 +269,49 @@ class TriggerEditDialog(BaseDialog):
         option_grid.grid_columnconfigure(1, weight=1)
         return frame
 
-    def _build_sensitivity_form(self, parent):
+    # ---------- 新版动作：短暂视效 / 跳转章节 ----------
+    def _build_effect_form(self, parent):
         frame = ctk.CTkFrame(parent, fg_color="transparent")
-        attr_row = ctk.CTkFrame(frame, fg_color="transparent")
-        attr_row.pack(fill='x', pady=(2, 8))
-        ctk.CTkLabel(attr_row, text="目标属性:", font=self.UI_FONT).pack(side='left')
-        self.sens_attr_var = tk.StringVar(value="介入度")
-        self.sens_attr_combo = ctk.CTkComboBox(
-            attr_row, values=self.sens_targets if self.sens_targets else ["介入度"],
-            variable=self.sens_attr_var, state="readonly", width=160, height=28,
-            font=self.UI_FONT)
-        self.sens_attr_combo.pack(side='left', padx=(6, 0))
-
-        num_row = ctk.CTkFrame(frame, fg_color="transparent")
-        num_row.pack(fill='x', pady=(0, 2))
-        self.sens_strength_var = tk.StringVar(value="1.0")
-        self.sens_objective_var = tk.StringVar(value="0.0")
-        self.sens_duration_var = tk.StringVar(value="3")
-        ctk.CTkLabel(num_row, text="强度:", font=self.UI_FONT).pack(side='left')
-        ctk.CTkEntry(num_row, textvariable=self.sens_strength_var,
-                     width=64, height=28, font=self.UI_FONT).pack(side='left', padx=(4, 12))
-        ctk.CTkLabel(num_row, text="客观影响:", font=self.UI_FONT).pack(side='left')
-        ctk.CTkEntry(num_row, textvariable=self.sens_objective_var,
-                     width=64, height=28, font=self.UI_FONT).pack(side='left', padx=(4, 12))
-        ctk.CTkLabel(num_row, text="持续步数:", font=self.UI_FONT).pack(side='left')
-        ctk.CTkEntry(num_row, textvariable=self.sens_duration_var,
-                     width=64, height=28, font=self.UI_FONT).pack(side='left', padx=(4, 0))
+        row = ctk.CTkFrame(frame, fg_color="transparent")
+        row.pack(fill='x', pady=(2, 4))
+        ctk.CTkLabel(row, text="背景滤镜:", font=self.UI_FONT).pack(side='left')
+        self.effect_labels = [label for _key, label in VISUAL_FILTERS]
+        self.effect_var = tk.StringVar(value=self.effect_labels[0])
+        ctk.CTkComboBox(row, values=self.effect_labels, variable=self.effect_var,
+                        state="readonly", width=150, height=28,
+                        font=self.UI_FONT).pack(side='left', padx=(6, 16))
+        ctk.CTkLabel(row, text="持续步数:", font=self.UI_FONT).pack(side='left')
+        self.effect_duration_var = tk.StringVar(value="1")
+        ctk.CTkEntry(row, textvariable=self.effect_duration_var, width=68, height=28,
+                     font=self.UI_FONT).pack(side='left', padx=(6, 0))
         return frame
+
+    def _build_goto_form(self, parent):
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
+        row = ctk.CTkFrame(frame, fg_color="transparent")
+        row.pack(fill='x', pady=(2, 4))
+        ctk.CTkLabel(row, text="目标章节:", font=self.UI_FONT).pack(side='left')
+        self.goto_values = [self.GOTO_LEAVE_LABEL] + self.chapter_names
+        self.goto_var = tk.StringVar(value=self.goto_values[0])
+        ctk.CTkComboBox(row, values=self.goto_values, variable=self.goto_var,
+                        state="readonly", width=200, height=28,
+                        font=self.UI_FONT).pack(side='left', padx=(6, 0))
+        if not self.chapter_names:
+            ctk.CTkLabel(frame, text="当前副本还没有章节，请先到「章节」页签添加。",
+                         font=self.UI_FONT_SMALL, text_color=BROWN_HINT).pack(anchor='w', pady=(2, 0))
+        return frame
+
+    def _effect_label_to_key(self, label: str) -> str:
+        for key, item_label in VISUAL_FILTERS:
+            if item_label == label:
+                return key
+        return VISUAL_FILTER_KEYS[0]
+
+    def _effect_key_to_label(self, key: str) -> str:
+        for item_key, label in VISUAL_FILTERS:
+            if item_key == key:
+                return label
+        return VISUAL_FILTERS[0][1]
 
     def _build_ending_form(self, parent):
         self.ending_frame = ctk.CTkFrame(parent, fg_color="transparent")
@@ -329,28 +384,6 @@ class TriggerEditDialog(BaseDialog):
         self._ending_icon_ctkimg = None
         return self.ending_frame
 
-    def _build_background_form(self, parent):
-        frame = ctk.CTkFrame(parent, fg_color="transparent")
-        path_row = ctk.CTkFrame(frame, fg_color="transparent")
-        path_row.pack(fill='x', pady=(2, 8))
-        ctk.CTkLabel(path_row, text="背景图片:",
-                     font=self.UI_FONT_BOLD).pack(side='left')
-        self.background_path_var = tk.StringVar()
-        self.background_path_entry = ctk.CTkEntry(
-            path_row, textvariable=self.background_path_var, height=28, font=self.UI_FONT)
-        self.background_path_entry.pack(side='left', fill='x', expand=True, padx=(8, 6))
-        self.background_import_btn = ctk.CTkButton(
-            path_row, text="选择图片", width=88, height=28,
-            font=self.UI_FONT, command=self._import_background)
-        self.background_import_btn.pack(side='left')
-        self.smooth_var = tk.BooleanVar(value=True)
-        self.smooth_check = ctk.CTkCheckBox(
-            frame, text="平滑切换（背景图淡入淡出切换）",
-            variable=self.smooth_var, font=self.UI_FONT,
-            text_color=TEXT, checkbox_width=20, checkbox_height=20)
-        self.smooth_check.pack(anchor='w', pady=(2, 2))
-        return frame
-
     def _show_action_frame(self, action_type):
         """仅显示当前动作类型的表单，其余动作帧隐藏。"""
         if action_type == "none":
@@ -374,11 +407,6 @@ class TriggerEditDialog(BaseDialog):
     def _set_action_template(self, action_type, name, action_data):
         self.name_var.set(name)
         self._refresh_action_ui(action_type, action_data)
-
-    def _background_template(self):
-        self._set_action_template("background", "背景图",
-                                  {"image_path": self.background_path_var.get(),
-                                   "smooth_transition": True})
 
     def _empty_template(self):
         self._set_action_template("none", "新空触发", {})
@@ -408,7 +436,8 @@ class TriggerEditDialog(BaseDialog):
 
         self.condition_rows = []
         base_keys = list(dict.fromkeys(
-            self.evolution_names + ["介入度", "破坏性", "总伤亡", "总计数", "间隔计数", "伤亡数组"]))
+            self.evolution_names + ["介入度", "破坏性", "总伤亡", "总计数", "间隔计数",
+                                    "节内计数", "伤亡数组"]))
         # 只有选项分支触发器才有选择数组可供判定
         base_keys += [f"选择:{t['name']}" for t in self.all_triggers
                       if t.get("name") and t.get("action_type") == "option"]
@@ -643,7 +672,13 @@ class TriggerEditDialog(BaseDialog):
         return {"operator": self._op_label_to_code(self.condition_operator_var.get()), "rules": rules}
 
     def _load_action_controls(self, action_data):
-        action_type = self.trigger.get("action_type") or action_data.get("type", "insert")
+        action_data = action_data or {}
+        action_type = normalize_action_type(
+            self.trigger.get("action_type"), action_data)
+        if action_type in LEGACY_ACTIONS:
+            # 旧版动作（背景切换 / 性格敏感化）已不再支持：没有对应表单，
+            # 回落到“条件标记”让用户重新选择动作类型，或直接在列表中删除它
+            action_type = "none"
         self._refresh_action_ui(action_type, action_data)
 
     def _collect_action_data(self):
@@ -656,9 +691,11 @@ class TriggerEditDialog(BaseDialog):
         elif action_type == "option":
             data["options"] = [{"id": i, "prompt": entry.get().strip()}
                                for i, entry in enumerate(self.option_entries) if entry.get().strip()]
-        elif action_type == "sensitivity":
-            data.update({"attr": self.sens_attr_var.get(), "strength": self.sens_strength_var.get(),
-                         "objective": self.sens_objective_var.get(), "duration": self.sens_duration_var.get()})
+        elif action_type == "effect":
+            data.update({"filter": self._effect_label_to_key(self.effect_var.get()),
+                         "duration": self.effect_duration_var.get().strip()})
+        elif action_type == "goto":
+            data["chapter"] = self._goto_label_to_scope(self.goto_var.get())
         elif action_type == "ending":
             data["name"] = self.ending_name_var.get().strip()
             data["intrusion_delta"] = self.ending_intrusion_var.get().strip()
@@ -668,9 +705,6 @@ class TriggerEditDialog(BaseDialog):
             data["custom_deltas"] = {name: var.get().strip()
                                      for name, var in self.ending_custom_delta_vars.items()}
             data["icon_path"] = self.ending_icon_var.get().strip()
-        elif action_type == "background":
-            data.update({"image_path": self.background_path_var.get().strip(),
-                         "smooth_transition": bool(self.smooth_var.get())})
         return data
 
     def _refresh_action_ui(self, action_type, action_data):
@@ -688,32 +722,38 @@ class TriggerEditDialog(BaseDialog):
                 entry.delete(0, "end")
             for entry, opt in zip(self.option_entries, action_data.get("options", [])):
                 entry.insert(0, opt.get("prompt", ""))
-        elif action_type == "sensitivity":
-            self.sens_attr_var.set(action_data.get("attr", "介入度"))
-            self.sens_strength_var.set(str(action_data.get("strength", 1.0)))
-            self.sens_objective_var.set(str(action_data.get("objective", 0.0)))
-            self.sens_duration_var.set(str(action_data.get("duration", 3)))
+        elif action_type == "effect":
+            self.effect_var.set(self._effect_key_to_label(action_data.get("filter") or ""))
+            self.effect_duration_var.set(str(action_data.get("duration", 1)))
+        elif action_type == "goto":
+            scope = action_data.get("chapter") or ""
+            if scope and scope not in self.goto_values:
+                # 目标章节已被删除：补进列表，避免直接改写既有配置
+                self.goto_values.append(scope)
+                self.goto_var.set(scope)
+            else:
+                self.goto_var.set(self._goto_scope_to_label(scope))
         elif action_type == "ending":
             self.ending_name_var.set(action_data.get("name") or action_data.get("ending_text") or "")
             self._load_ending_deltas(action_data)
             self.ending_icon_var.set(action_data.get("icon_path", ""))
             self._refresh_ending_icon_preview()
-        elif action_type == "background":
-            self.background_path_var.set(action_data.get("image_path", ""))
-            self.smooth_var.set(bool(action_data.get("smooth_transition", True)))
         self._update_action_description()
 
     def _update_action_description(self):
         """只显示当前动作类型的详细参数说明。"""
-        title = self.ACTION_TITLES.get(self.current_action_type, "")
+        title = action_label(self.current_action_type)
         description = self.ACTION_DESCRIPTIONS.get(self.current_action_type, "")
         text = f"【{title}】\n{description}" if title else ""
         self.action_description_label.configure(text=text)
 
-    def _sensitivity_template(self):
-        self._set_action_template("sensitivity", "新敏感",
-                                  {"attr": "介入度", "strength": 1.0,
-                                   "objective": 0.0, "duration": 3})
+    def _effect_template(self):
+        self._set_action_template("effect", "新视效",
+                                  {"filter": VISUAL_FILTER_KEYS[0], "duration": 1})
+
+    def _goto_template(self):
+        default_target = self.chapter_names[0] if self.chapter_names else ""
+        self._set_action_template("goto", "新跳转", {"chapter": default_target})
 
     def _load_ending_deltas(self, action_data):
         action_data = action_data or {}
@@ -783,120 +823,15 @@ class TriggerEditDialog(BaseDialog):
 
     def _import_ending_icon(self):
         """选择 png 图标并存入副本 endings 目录，路径以相对副本目录保存。"""
-        file_path = filedialog.askopenfilename(
-            title="选择结局图标",
-            filetypes=[("PNG 图片", "*.png"), ("图片文件", "*.png *.jpg *.jpeg *.bmp")]
-        )
-        if not file_path:
+        rel = import_ending_icon(self, self._dungeon_repo, self.dungeon_id)
+        if not rel:
             return
-        from PIL import Image as PILImage
-        try:
-            with PILImage.open(file_path) as img:
-                img.load()
-        except Exception as e:
-            ui.common.dialogs.showerror("错误", f"图片加载失败: {e}")
-            return
-        if not (self.dungeon_id and self._dungeon_repo):
-            ui.common.dialogs.showerror("错误", "无法解析副本目录，无法保存结局图标")
-            return
-        dungeon_dir = os.path.join(self._dungeon_repo.root, self.dungeon_id)
-        endings_dir = os.path.join(dungeon_dir, "endings")
-        os.makedirs(endings_dir, exist_ok=True)
-        ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-        base = os.path.splitext(os.path.basename(file_path))[0]
-        safe = re.sub(r"[^\w\u4e00-\u9fff-]", "_", base)[:40] or "ending"
-        dest_path = os.path.join(endings_dir, f"{ts}_{safe}.png")
-        try:
-            with PILImage.open(file_path) as img:
-                if img.mode in ("RGBA", "LA", "P"):
-                    img.convert("RGBA").save(dest_path, "PNG")
-                else:
-                    img.convert("RGB").save(dest_path, "PNG")
-        except Exception as e:
-            ui.common.dialogs.showerror("错误", f"保存结局图标失败: {e}")
-            return
-        rel = os.path.relpath(dest_path, dungeon_dir).replace("\\", "/")
         self.ending_icon_var.set(rel)
         self._refresh_ending_icon_preview()
 
     def _clear_ending_icon(self):
         self.ending_icon_var.set("")
         self._refresh_ending_icon_preview()
-
-    def _import_background(self):
-        file_path = filedialog.askopenfilename(
-            title="选择背景图片",
-            filetypes=[("图片文件", "*.png *.jpg *.jpeg *.gif *.bmp *.webp")]
-        )
-        if not file_path:
-            return
-
-        # 先弹出裁剪对话框（固定 16:9 比例）
-        try:
-            crop_dlg = ImageCropDialog(self, file_path, mode=ImageCropDialog.MODE_BACKGROUND)
-        except Exception as e:
-            ui.common.dialogs.showerror("错误", f"图片加载失败: {e}")
-            return
-        cropped_path = crop_dlg.get_cropped_path()
-        if not cropped_path:
-            return  # 用户取消裁剪
-
-        # 背景动作默认开启平滑切换
-        self.smooth_var.set(True)
-
-        # 若指定了副本ID且存在 dungeon_repo，则将裁剪结果存入副本 images 目录
-        if self.dungeon_id and self._dungeon_repo:
-            dungeon_root = self._dungeon_repo.root
-            dungeon_dir = os.path.join(dungeon_root, self.dungeon_id)
-            if not os.path.exists(dungeon_dir):
-                ui.common.dialogs.showerror("错误", f"副本目录不存在: {dungeon_dir}")
-                return
-
-            # 确保 images 子目录存在
-            images_dir = os.path.join(dungeon_dir, "images")
-            os.makedirs(images_dir, exist_ok=True)
-
-            basename = os.path.basename(file_path)
-            if os.path.splitext(basename)[1].lower() not in (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"):
-                basename += ".png"
-            dest_path = os.path.join(images_dir, basename)
-            # 若目标已存在，询问是否覆盖
-            if os.path.exists(dest_path):
-                if not ui.common.dialogs.askyesno("文件已存在", f"图片 {basename} 已存在，是否覆盖？"):
-                    return
-            try:
-                self._save_cropped_image(cropped_path, dest_path)
-            except Exception as e:
-                ui.common.dialogs.showerror("错误", f"保存裁剪图片失败: {e}")
-                return
-            rel_path = os.path.relpath(dest_path, dungeon_dir)
-
-            # 更新 action_data 并刷新编辑框（默认开启平滑切换）
-            action_data = {"type": "background", "image_path": rel_path, "smooth_transition": True}
-            self._refresh_action_ui("background", action_data)
-        else:
-            # 无副本信息，使用裁剪后的临时路径（兼容旧版本）
-            self._refresh_action_ui("background",
-                                    {"image_path": cropped_path, "smooth_transition": True})
-
-    def _save_cropped_image(self, cropped_path, dest_path):
-        """将裁剪结果按目标扩展名保存，并清理临时文件"""
-        from PIL import Image as PILImage
-        ext = os.path.splitext(dest_path)[1].lower()
-        fmt_map = {".png": "PNG", ".jpg": "JPEG", ".jpeg": "JPEG",
-                   ".bmp": "BMP", ".gif": "GIF", ".webp": "WEBP"}
-        fmt = fmt_map.get(ext, "PNG")
-        try:
-            with PILImage.open(cropped_path) as img:
-                if fmt in ("JPEG", "BMP", "GIF"):
-                    img.convert("RGB").save(dest_path, format=fmt)
-                else:
-                    img.save(dest_path, format=fmt)
-        finally:
-            try:
-                os.remove(cropped_path)
-            except OSError:
-                pass
 
     # ---------- 确定 ----------
     def _ok(self):
@@ -941,9 +876,38 @@ class TriggerEditDialog(BaseDialog):
             ui.common.dialogs.showerror("输入有误", str(exc))
             return
 
-        # 平滑切换开关（仅背景动作生效）
-        if action_type == "background":
-            action_data["smooth_transition"] = bool(self.smooth_var.get())
+        # 所在章节：空值=任意章节，CHAPTER_NONE=仅无章节，否则必须是已有章节
+        chapter_scope = self._chapter_label_to_scope(self.chapter_var.get())
+        if chapter_scope not in (CHAPTER_ANY, CHAPTER_NONE) \
+                and chapter_scope not in self.chapter_names:
+            ui.common.dialogs.showerror("错误", f"所在章节 '{chapter_scope}' 不存在")
+            return
+
+        # 短暂视效表单字段（仅视效动作生效）
+        if action_type == "effect":
+            try:
+                duration = int(float(self.effect_duration_var.get()))
+            except ValueError:
+                ui.common.dialogs.showerror("错误", "视效的持续步数必须是数字")
+                return
+            if duration < 1:
+                ui.common.dialogs.showerror("错误", "视效的持续步数至少为 1")
+                return
+            action_data["filter"] = self._effect_label_to_key(self.effect_var.get())
+            action_data["duration"] = duration
+
+        # 跳转章节表单字段（仅跳转动作生效）
+        if action_type == "goto":
+            target = self._goto_label_to_scope(self.goto_var.get())
+            if target and target not in self.chapter_names:
+                ui.common.dialogs.showerror(
+                    "错误", f"目标章节 '{target}' 不存在，请先在「章节」页签添加")
+                return
+            if target and target == chapter_scope:
+                ui.common.dialogs.showerror(
+                    "错误", "目标章节与所在章节相同，触发器触发后会立即被跳过")
+                return
+            action_data["chapter"] = target
 
         # 插入段落表单字段（仅插入动作生效）
         if action_type == "insert":
@@ -958,16 +922,6 @@ class TriggerEditDialog(BaseDialog):
                                        for i, entry in enumerate(self.option_entries)
                                        if entry.get().strip()]
 
-        # 敏感表单字段（仅敏感动作生效）
-        if action_type == "sensitivity":
-            action_data["attr"] = self.sens_attr_var.get()
-            try:
-                action_data["strength"] = float(self.sens_strength_var.get())
-                action_data["objective"] = float(self.sens_objective_var.get())
-                action_data["duration"] = int(float(self.sens_duration_var.get()))
-            except ValueError:
-                ui.common.dialogs.showerror("错误", "强度、客观影响、持续步数必须是数字")
-                return
 
         # 结局表单字段（仅结局动作生效）
         if action_type == "ending":
@@ -1000,7 +954,8 @@ class TriggerEditDialog(BaseDialog):
         if not isinstance(rules, list):
             ui.common.dialogs.showerror("错误", "condition.rules 必须是列表")
             return
-        allowed_keys = set(self.evolution_names) | {"介入度", "破坏性", "总伤亡", "总计数", "间隔计数", "伤亡数组"}
+        allowed_keys = set(self.evolution_names) | {"介入度", "破坏性", "总伤亡", "总计数",
+                                                   "间隔计数", "节内计数", "伤亡数组"}
         # 只有选项分支触发器才维护选择数组
         allowed_keys |= {f"选择:{t['name']}" for t in self.all_triggers
                          if t.get("name") and t.get("action_type") == "option"}
@@ -1067,7 +1022,7 @@ class TriggerEditDialog(BaseDialog):
                     ui.common.dialogs.showerror("错误", f"演化量 '{evo_name}' 的变化值必须是数字")
                     return
 
-        # 特定类型验证（除background外均需prompt）
+        # 特定类型验证
         if action_type == "insert" and not action_data.get("text"):
             ui.common.dialogs.showerror("错误", "插入动作必须填写插入段落文本")
             return
@@ -1081,12 +1036,10 @@ class TriggerEditDialog(BaseDialog):
         if action_type == "option" and ("options" not in action_data or not isinstance(action_data["options"], list)):
             ui.common.dialogs.showerror("错误", "选项类型必须包含 options 列表")
             return
-        if action_type == "background" and "image_path" not in action_data:
-            ui.common.dialogs.showerror("错误", "背景图必须指定 image_path")
-            return
 
         self.result = {
             "name": name,
+            "chapter": chapter_scope,
             "condition": condition,
             "precondition_names": pre_names,
             "action_type": action_type,

@@ -2,6 +2,8 @@ import json
 import os
 import shutil
 
+from dungeon.chapters import normalize_chapters
+
 
 class DungeonRepo:
     def __init__(self, data_dir: str = "data", world_state=None):
@@ -88,12 +90,16 @@ class DungeonRepo:
                 {"type": "destruction", "name": "破坏性", "display_state": "collapse"},
                 {"type": "casualty", "name": "总伤亡", "display_state": "collapse"},
             ],
+            "chapters": [],
             "triggers": []
         }
 
     @staticmethod
     def _migrate(config: dict) -> dict:
-        new_config = {
+        # 以原配置为底稿补齐/归一化字段：未知字段与 components 等
+        # 未被本函数显式处理的键都原样保留，避免读写一轮后丢数据。
+        new_config = dict(config)
+        new_config.update({
             "initial_prompt": config.get("initial_prompt", ""),
             "view_mode": config.get("view_mode", "story"),
             "entry_action_cost": max(0, int(config.get("entry_action_cost", 0) or 0)),
@@ -104,7 +110,11 @@ class DungeonRepo:
             "section_steps": config.get("section_steps", {}),
             "transition_matrix": config.get("transition_matrix"),
             "triggers": config.get("triggers", []),
-        }
+            "chapters": normalize_chapters(config.get("chapters", [])),
+        })
+        # 旧配置把进化量写成 custom_attrs，迁移成 evolution_attrs 后移除旧键
+        new_config.pop("custom_attrs", None)
+        new_config.pop("custom_attrs_def", None)
 
         if "evolution_attrs" in config:
             new_config["evolution_attrs"] = config["evolution_attrs"]
@@ -177,6 +187,8 @@ class DungeonRepo:
                     t["precondition_names"] = pre_names
                 elif "precondition_names" not in t:
                     t["precondition_names"] = []
+                # 所在章节：早期配置没有该字段，空值表示不限章节
+                t.setdefault("chapter", "")
             new_config["triggers"] = new_triggers
         else:
             new_config["triggers"] = []

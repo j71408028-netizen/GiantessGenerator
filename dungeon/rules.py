@@ -78,6 +78,7 @@ class EvolutionRules:
 
         new_state.total_steps += 1
         new_state.steps_since_trigger += 1
+        new_state.chapter_steps += 1
         return new_state
 
     @staticmethod
@@ -91,6 +92,7 @@ class EvolutionRules:
             "总伤亡": state.total_casualties,
             "总计数": state.total_steps,
             "间隔计数": state.steps_since_trigger,
+            "节内计数": state.chapter_steps,
         }
         results = []
         for rule in rules:
@@ -197,6 +199,7 @@ class TriggerRules:
                     "总伤亡": state.total_casualties,
                     "总计数": state.total_steps,
                     "间隔计数": state.steps_since_trigger,
+                    "节内计数": state.chapter_steps,
                 }
                 current = values.get(key, state.custom_attrs.get(key, 0.0))
             try:

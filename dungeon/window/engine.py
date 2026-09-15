@@ -155,8 +155,9 @@ class DungeonStoryEngine:
             char.size_unlocks, {part: text for part in parts}, info_update_rate)
 
     def _finish_step(self, text_type, text, step_info, check_unlock: bool = False):
-        """步进收尾：结算敏感衰减与伤亡、写入回放，并检查解锁与触发器。"""
+        """步进收尾：结算敏感衰减、短暂视效与伤亡、写入回放，并检查解锁与触发器。"""
         self._decay_sensitivity_effects()
+        self._apply_visual_effects()
         casualty_increase = self._record_casualties(text_type, text)
 
         step_info["intrusion_after"] = self.dungeon_state.intrusion
@@ -197,6 +198,10 @@ class DungeonStoryEngine:
         entry = self.loaded_replay[self.current_replay_index]
         if entry.get("kind") == "trigger":
             self._replay_trigger(entry)
+            self.current_replay_index += 1
+            return
+        if entry.get("kind") == "chapter":
+            self._replay_chapter(entry)
             self.current_replay_index += 1
             return
         step = entry

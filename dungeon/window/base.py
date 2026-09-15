@@ -13,6 +13,7 @@ import dearpygui.dearpygui as dpg
 
 from ai import create_client
 from dungeon.background import DungeonBackground
+from dungeon.chapters import normalize_chapters
 from dungeon.dispatcher import _dispatch
 from dungeon.models import DungeonTextType, DungeonState
 from dungeon.prompts import DungeonPromptBuilder
@@ -89,6 +90,13 @@ class DungeonWindowBase:
         # 回放模式相关
         self.current_replay_index = 0
         self.triggers = (dungeon_config or {}).get("triggers", []) if not is_replay else []
+        self.chapters = normalize_chapters((dungeon_config or {}).get("chapters", []))
+        # 章节运行时状态：当前章节、章节持续敏感效果、短暂视效
+        self.current_chapter = None
+        self.chapter_sensitivity_effects = []
+        self.visual_effects = []
+        self._applied_visual_filter = None
+        self.current_background_path = ""
         self.triggered_names = set()   # 已触发且不可再次触发的触发器
         self.fired_triggers = set()    # 至少触发过一次的触发器（前置条件判断用）
         self.replay_data = []
@@ -153,6 +161,7 @@ class DungeonWindowBase:
             # 立即构建显示组件。
             self._init_components()
             self._build_components()
+            self._enter_start_chapter()
 
         if self.parent and hasattr(self.parent, 'withdraw'):
             self.parent.withdraw()
@@ -218,6 +227,7 @@ class DungeonWindowBase:
         self.dungeon_config = config
         self.dungeon_id = dungeon_id
         self.triggers = config.get("triggers", [])
+        self.chapters = normalize_chapters(config.get("chapters", []))
         self.view_mode = config.get("view_mode", "story")
         if self.view_mode not in ("story", "game"):
             self.view_mode = "story"
@@ -339,7 +349,7 @@ class DungeonWindowBase:
         replay_data = replay_data or []
         # 回放数据可能以触发器记录开头（如开局即触发的背景触发器），
         # 取第一条步进记录还原初始属性；若全为触发器记录则使用默认值。
-        first_step = next((e for e in replay_data if e.get("kind") != "trigger"), None)
+        first_step = next((e for e in replay_data if not e.get("kind")), None)
         if first_step is None:
             self.dungeon_state = DungeonState(intrusion=0.0, destruction=0.0, custom_attrs={})
         else:
