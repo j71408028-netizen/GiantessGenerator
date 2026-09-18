@@ -8,10 +8,10 @@ import customtkinter as ctk
 from ui.common.dialogs import InputDialog
 from ui.common.widgets import ClickableCard, CTkSegmentedControl
 from ui.common.theme import (
-    BASE, BORDER, HOVER, BORDER_ALT, TEXT, SOFT,
-    HOVER_ALT, STATUS_OK, OK_HOVER, ERR_STRONG, ERR_HOVER,
-    TREE_ALT, TREE_SELECT_BG, TREE_SELECT_FG, TREE_HEAD_BG, TREE_HEAD_FG,
-    TREE_DISABLED_FG,
+    MGR_BG, MGR_HEADER_BG, MGR_BORDER, MGR_BORDER_STRONG,
+    MGR_HOVER, MGR_TEXT, MGR_TEXT_SOFT, MGR_OK,
+    MGR_OK_HOVER, MGR_ERR, MGR_ERR_HOVER, MGR_ROW_STRIPE,
+    MGR_ROW_SELECTED_BG, MGR_ROW_SELECTED_TEXT, MGR_ROW_DISABLED_TEXT, MGR_HEADER_TEXT,
 )
 from ui.common import fonts as ui_fonts
 
@@ -31,7 +31,7 @@ class TreeviewManager(ctk.CTkFrame):
         :param title: 标签页标题（未使用）
         :param item_name: 项目名称（仅用于提示，不再用于按钮文本）
         """
-        super().__init__(parent, fg_color=BASE)
+        super().__init__(parent, fg_color=MGR_BG)
         self.repository = repository
         self.columns = columns
         self.item_name = item_name
@@ -44,32 +44,33 @@ class TreeviewManager(ctk.CTkFrame):
             style.theme_use('clam')
 
         if theme_mode == "Dark":
-            bg_color = BASE[1]
-            alt_color = TREE_ALT[1]
-            fg_color = TEXT[1]
-            select_bg = TREE_SELECT_BG[1]
-            select_fg = TREE_SELECT_FG[1]
-            heading_bg = TREE_HEAD_BG[1]
-            heading_fg = TREE_HEAD_FG[1]
-            field_bg = BASE[1]
-            border_color = BORDER[1]
+            bg_color = MGR_BG[1]
+            alt_color = MGR_ROW_STRIPE[1]
+            fg_color = MGR_TEXT[1]
+            select_bg = MGR_ROW_SELECTED_BG[1]
+            select_fg = MGR_ROW_SELECTED_TEXT[1]
+            heading_bg = MGR_HEADER_BG[1]
+            heading_fg = MGR_HEADER_TEXT[1]
+            field_bg = MGR_BG[1]
+            border_color = MGR_BORDER[1]
         else:
-            bg_color = BASE[0]
-            alt_color = TREE_ALT[0]
-            fg_color = TEXT[0]
-            select_bg = TREE_SELECT_BG[0]
-            select_fg = TREE_SELECT_FG[0]
-            heading_bg = TREE_HEAD_BG[0]
-            heading_fg = TREE_HEAD_FG[0]
-            field_bg = BASE[0]
-            border_color = BORDER[0]
+            bg_color = MGR_BG[0]
+            alt_color = MGR_ROW_STRIPE[0]
+            fg_color = MGR_TEXT[0]
+            select_bg = MGR_ROW_SELECTED_BG[0]
+            select_fg = MGR_ROW_SELECTED_TEXT[0]
+            heading_bg = MGR_HEADER_BG[0]
+            heading_fg = MGR_HEADER_TEXT[0]
+            field_bg = MGR_BG[0]
+            border_color = MGR_BORDER[0]
 
         style.configure("Custom.Treeview",
                         background=bg_color,
                         foreground=fg_color,
                         fieldbackground=field_bg,
-                        rowheight=34,
-                        font=ui_fonts.ui_font(16),
+                        # 行高随系统缩放走，175% 屏约等于原 38px 的观感
+                        rowheight=int(round(22 * self._get_widget_scaling())),
+                        font=ui_fonts.ui_font(13),
                         borderwidth=0,
                         bordercolor=bg_color,
                         lightcolor=bg_color,
@@ -96,7 +97,7 @@ class TreeviewManager(ctk.CTkFrame):
         style.configure("Custom.Treeview.Heading",
                         background=heading_bg,
                         foreground=heading_fg,
-                        font=ui_fonts.ui_font(16, "bold"),
+                        font=ui_fonts.ui_font(13, "bold"),
                         relief="flat",
                         borderwidth=0)
         style.map("Custom.Treeview.Heading",
@@ -106,7 +107,7 @@ class TreeviewManager(ctk.CTkFrame):
         if hasattr(self, 'tree'):
             self.tree.configure(style="Custom.Treeview")
             self.tree.tag_configure("evenrow", background=alt_color)
-            self.tree.tag_configure("disabled", foreground=TREE_DISABLED_FG)
+            self.tree.tag_configure("disabled", foreground=MGR_ROW_DISABLED_TEXT)
 
     def _create_ui(self):
         """构建标准 UI 布局（使用 CTk 组件）- 探索模式风格"""
@@ -117,8 +118,8 @@ class TreeviewManager(ctk.CTkFrame):
 
         # 中间列表区域 - 带圆角边框
         list_frame = ctk.CTkFrame(self, fg_color="transparent",
-                                  border_width=1, corner_radius=12,
-                                  border_color=BORDER)
+                                  border_width=1, corner_radius=8,
+                                  border_color=MGR_BORDER)
         list_frame.pack(fill='both', expand=True, padx=9, pady=(0,9))
         self.list_frame = list_frame
 
@@ -143,9 +144,9 @@ class TreeviewManager(ctk.CTkFrame):
             fg_color="transparent", border_width=1, corner_radius=8,
             font=ui_fonts.ui_font(13)
         )
-        _btn_text = SOFT
-        _btn_hover = HOVER
-        _btn_border = BORDER_ALT
+        _btn_text = MGR_TEXT_SOFT
+        _btn_hover = MGR_HOVER
+        _btn_border = MGR_BORDER_STRONG
 
         # 左侧按钮组（添加、编辑、删除）
         left_btn_frame = ctk.CTkFrame(button_frame, fg_color="transparent")
@@ -162,9 +163,9 @@ class TreeviewManager(ctk.CTkFrame):
         ctk.CTkButton(left_btn_frame, text="删除",
                       command=self.delete_item, width=80,
                       fg_color="transparent", border_width=1, corner_radius=8,
-                      text_color=ERR_STRONG,
-                      hover_color=ERR_HOVER,
-                      border_color=ERR_STRONG,
+                      text_color=MGR_ERR,
+                      hover_color=MGR_ERR_HOVER,
+                      border_color=MGR_ERR,
                       font=ui_fonts.ui_font(13)).pack(side='left', padx=5)
 
         # 右侧按钮组（上移、下移）
@@ -377,12 +378,12 @@ class CardManager(ctk.CTkFrame):
                 self._masked_pack.append((child, child.pack_info()))
                 child.pack_forget()
         self._lock_overlay = ctk.CTkFrame(
-            self, fg_color=BASE, corner_radius=12)
+            self, fg_color=MGR_BG, corner_radius=12)
         ctk.CTkLabel(
             self._lock_overlay,
             text=f"世界包已锁定{self.item_name}资源管理，暂不可查看",
             font=ui_fonts.ui_font(14),
-            text_color=SOFT,
+            text_color=MGR_TEXT_SOFT,
         ).pack(expand=True)
         self._lock_overlay.pack(fill='both', expand=True, padx=10, pady=5)
 
@@ -467,14 +468,14 @@ class CardManager(ctk.CTkFrame):
         self.category_title_label.pack_forget()
 
     def _setup_ui(self):
-        self.top_row = ctk.CTkFrame(self, fg_color=BASE)
+        self.top_row = ctk.CTkFrame(self, fg_color=MGR_BG)
         self.top_row.pack(fill='x', padx=10, pady=6)
 
         self.switch_btn = CTkSegmentedControl(
             self.top_row,
             values=["地标管理", "描述管理"],
             command=self._on_module_switch,
-            width=160,
+            width=180,
             font=ui_fonts.ui_font(12)
         )
         self.switch_btn.pack(side='left', padx=5, pady=(3, 1))
@@ -488,12 +489,12 @@ class CardManager(ctk.CTkFrame):
 
         self.first_view = ctk.CTkScrollableFrame(
             self.view_container,
-            fg_color=BASE,
+            fg_color=MGR_BG,
             corner_radius=12
         )
         self.second_view = ctk.CTkScrollableFrame(
             self.view_container,
-            fg_color=BASE,
+            fg_color=MGR_BG,
             corner_radius=12
         )
 
@@ -509,22 +510,22 @@ class CardManager(ctk.CTkFrame):
         self.sort_frame.pack(anchor='w')
         ctk.CTkLabel(self.sort_frame, text="排序:",
                      font=ui_fonts.ui_font(13),
-                     text_color=SOFT).pack(side='left', padx=5)
+                     text_color=MGR_TEXT_SOFT).pack(side='left', padx=5)
         self.create_sort_widgets(self.sort_frame)
 
         self.category_title_label = ctk.CTkLabel(
             self.left_action_area, text="",
             font=ui_fonts.ui_font(14, "bold"),
-            text_color=TEXT
+            text_color=MGR_TEXT
         )
         self.category_title_label.pack_forget()
 
         self.back_btn = ctk.CTkButton(
             self.left_action_area, text="\u21A9 返回分类",
             fg_color="transparent", width=100, height=28,
-            text_color=SOFT,
-            hover_color=HOVER_ALT,
-            border_width=1, border_color=BORDER_ALT,
+            text_color=MGR_TEXT_SOFT,
+            hover_color=MGR_HOVER,
+            border_width=1, border_color=MGR_BORDER_STRONG,
             corner_radius=8,
             command=self.show_first_view
         )
@@ -533,9 +534,9 @@ class CardManager(ctk.CTkFrame):
             self.bottom_row, text=f"\uFF0B 添加{self.item_name}",
             width=120, font=ui_fonts.ui_font(14, "bold"),
             fg_color="transparent",
-text_color=STATUS_OK,
-                hover_color=OK_HOVER,
-                border_width=2, border_color=STATUS_OK,
+            text_color=MGR_OK,
+            hover_color=MGR_OK_HOVER,
+            border_width=2, border_color=MGR_OK,
             corner_radius=10,
             command=self.on_add_click
         )
@@ -583,7 +584,7 @@ text_color=STATUS_OK,
         if not sorted_cats:
             ctk.CTkLabel(self.first_view, text="暂无条目，请先添加",
                          font=ui_fonts.ui_font(14),
-                         text_color=SOFT).pack(pady=20)
+                         text_color=MGR_TEXT_SOFT).pack(pady=20)
             return
 
         for cat in sorted_cats:
@@ -601,7 +602,7 @@ text_color=STATUS_OK,
 
         title_label = ctk.CTkLabel(self.second_view, text=category_key,
                                    font=ui_fonts.ui_font(15, "bold"),
-                                   text_color=TEXT)
+                                   text_color=MGR_TEXT)
         title_label.pack(anchor='w', padx=5, pady=(5, 10))
 
         items = [item for item in self.all_items if self.get_category(item) == category_key]
@@ -616,9 +617,9 @@ text_color=STATUS_OK,
                 "text": "删除",
                 "command": lambda i=item: self.delete_item(i),
                 "fg_color": "transparent",
-"text_color": ERR_STRONG,
-            "hover_color": ERR_HOVER,
-            "border_color": ERR_STRONG,
+                "text_color": MGR_ERR,
+                "hover_color": MGR_ERR_HOVER,
+                "border_color": MGR_ERR,
                 "corner_radius": 6,
                 "width": 50
             }]
@@ -629,10 +630,10 @@ text_color=STATUS_OK,
                         "text": btn_text,
                         "command": lambda i=item, bc=btn_cmd: bc(i),
                         "fg_color": "transparent",
-                        "text_color": SOFT,
-                        "hover_color": HOVER_ALT,
+                        "text_color": MGR_TEXT_SOFT,
+                        "hover_color": MGR_HOVER,
                         "border_width": 1,
-                        "border_color": BORDER_ALT,
+                        "border_color": MGR_BORDER_STRONG,
                         "corner_radius": 6,
                         "width": 50
                     })

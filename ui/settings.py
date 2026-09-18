@@ -21,19 +21,21 @@ from persistence.name_repo import NameRepo, DEFAULT_NAME_TABLE
 from persistence.world_pack import list_behavior_packs
 from services.challenge_service import ChallengeService
 from services.character_service.news import DEFAULT_NEWS_TABLE, NewsService
-from ui.common.widgets import CollapsibleBlock, StyleListBox, CTkScrollableDropdownFrame
+from ui.common.widgets import (
+    CollapsibleBlock, StyleListBox, CycleOptionButton, ScrollableComboBox,
+)
 from ui.common import fonts as ui_fonts
 from ui.common.theme import (
-    HOVER,
-    HARD_LABEL, SOFT, CHECKBOX_HOVER,
-    PNL_BG, PNL_BORDER,
-    INPUT_BG, INPUT_BORDER, INPUT_HOVER,
-    MENU_BTN, MENU_BTN_HOVER,
-    SWC_FG, SWC_PROGRESS, SWC_BTN,
-    STATUS_OK, STATUS_ERR,
+    SETTINGS_PANEL_BG, SETTINGS_HOVER, SETTINGS_CHECKBOX_HOVER, SETTINGS_INPUT_HOVER,
+    SETTINGS_INPUT_BG, SETTINGS_INPUT_BORDER,
+    SETTINGS_SWITCH_TRACK, SETTINGS_SWITCH_PROGRESS, SETTINGS_SWITCH_KNOB, SETTINGS_TEXT_SOFT,
+    SETTINGS_LABEL, SETTINGS_OK, SETTINGS_ERR,
+)
+from ui.common.theme import (
+    DEFAULT_PALETTE, current_palette, palette_display_names,
 )
 
-_FONT = ui_fonts.ui_font(12)
+_FONT = ui_fonts.ui_font(13)
 
 # 信息更新覆写概率四档：显示名 → 覆写概率
 INFO_UPDATE_OPTIONS = {"保守": 0.25, "中等": 0.5, "高效": 0.75, "激进": 1.0}
@@ -84,6 +86,9 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.parts_checkboxes = {}
 
         self.theme_mode = self.settings.get("theme_mode", "Light")
+        # 界面配色（assets/theme/ 下的一套 token）。默认取当前已生效的配色，
+        # 这样即使设置里没存过也不会与界面实际配色不一致。
+        self.theme_palette = self.settings.get("theme_palette") or current_palette()
         self.user_seed = self.settings.get("seed", 0)
         self.comparison_count = self.settings.get("comparison_count", 5)
         self.comparison_order = self.settings.get("comparison_order", "match")
@@ -122,12 +127,12 @@ class SettingsPanel(ctk.CTkScrollableFrame):
 
         # 左右卡片：统一背景 + 圆角框线，sticky nsew 保证向下填满
         self.left_col = ctk.CTkFrame(
-            self.content, fg_color=PNL_BG,
-            border_width=1, border_color=PNL_BORDER, corner_radius=10)
+            self.content, fg_color=SETTINGS_PANEL_BG,
+            border_width=0, corner_radius=6)
         self.left_col.grid(row=0, column=0, sticky='nsew', padx=5)
         self.right_col = ctk.CTkFrame(
-            self.content, fg_color=PNL_BG,
-            border_width=1, border_color=PNL_BORDER, corner_radius=10)
+            self.content, fg_color=SETTINGS_PANEL_BG,
+            border_width=0, corner_radius=6)
         self.right_col.grid(row=0, column=1, sticky='nsew', padx=(12,0))
 
         self.world_block = CollapsibleBlock(self.left_col, "世界", body_padx=(6,12), body_pady=(6,12),
@@ -223,8 +228,8 @@ class SettingsPanel(ctk.CTkScrollableFrame):
     def _section_label(self, parent, row, text):
         ctk.CTkLabel(
             parent, text=text,
-            font=ui_fonts.ui_font(12, "bold"),
-            text_color=SOFT
+            font=ui_fonts.ui_font(13, "bold"),
+            text_color=SETTINGS_TEXT_SOFT
         ).grid(row=row, column=0, columnspan=2, sticky='w',
                padx=10, pady=6)
 
@@ -232,58 +237,56 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         """创建一行：标签在左，控件容器在右，两列对齐。"""
         label = ctk.CTkLabel(
             parent, text=text, anchor='w',
-            font=_FONT, text_color=HARD_LABEL
+            font=_FONT, text_color=SETTINGS_LABEL
         )
         label.grid(row=row, column=0, sticky='w', padx=(18, 12), pady=(0, 8))
         control = ctk.CTkFrame(parent, fg_color="transparent")
         control.grid(row=row, column=1, sticky='e', padx=(0, 18), pady=(0, 8))
         return label, control
 
-    def _make_option_menu(self, parent, values, command, variable=None, expand=True):
-        menu = ctk.CTkOptionMenu(
-            parent,
-            values=values, command=command, variable=variable,
-            width=120, height=27, corner_radius=7,
-            fg_color=INPUT_BG, button_color=MENU_BTN,
-            button_hover_color=MENU_BTN_HOVER,
-            text_color=HARD_LABEL, font=_FONT,
-            dropdown_fg_color=INPUT_BG,
-            dropdown_hover_color=INPUT_HOVER,
-            dropdown_text_color=HARD_LABEL,
-            dropdown_font=_FONT
-        )
+    @staticmethod
+    def _pack_control(control, expand=True):
         if expand:
-            menu.pack(fill='both', expand=True)
+            control.pack(fill='both', expand=True)
         else:
-            menu.pack(side='left')
+            control.pack(side='left')
+        return control
 
-        # 下拉列表使用统一的 CTkScrollableDropdownFrame
-        dropdown = CTkScrollableDropdownFrame(
-            attach=menu, values=values, command=command,
-            height=100, button_height=30,
-            fg_color=INPUT_BG, button_color=INPUT_BG,
-            hover_color=INPUT_HOVER, text_color=HARD_LABEL,
-            scrollbar_button_color=INPUT_HOVER,
-            scrollbar_button_hover_color=INPUT_HOVER,
-            frame_border_color=INPUT_BORDER,
-            frame_border_width=1, justify="left", font=_FONT
-        )
-        menu._profile_dropdown = dropdown
-        return menu
+    def _make_cycle_button(self, parent, values, command, variable=None, expand=True):
+        """选项数量固定的行：点击轮换，不弹下拉列表。"""
+        return self._pack_control(CycleOptionButton(
+            parent, values=values, command=command, variable=variable,
+            width=120, height=28, corner_radius=7, font=ui_fonts.ui_font(13),
+            fg_color=SETTINGS_INPUT_BG, border_color=SETTINGS_INPUT_BORDER,
+            hover_color=SETTINGS_INPUT_HOVER, text_color=SETTINGS_LABEL,
+            text_color_disabled=SETTINGS_TEXT_SOFT, marker_color=SETTINGS_TEXT_SOFT,
+        ), expand)
+
+    def _make_combo_box(self, parent, values, command, variable=None, expand=True):
+        """选项数量会变化的行：可编辑/可滚动的组合框。"""
+        return self._pack_control(ScrollableComboBox(
+            parent, values=values, command=command, variable=variable,
+            width=120, height=27, corner_radius=7, font=_FONT,
+            fg_color=SETTINGS_INPUT_BG, border_color=SETTINGS_INPUT_BORDER,
+            text_color=SETTINGS_LABEL,
+            dropdown_fg_color=SETTINGS_INPUT_BG,
+            dropdown_hover_color=SETTINGS_INPUT_HOVER,
+            dropdown_text_color=SETTINGS_LABEL,
+        ), expand)
 
     def _make_entry(self, parent, variable, width=120, show=None, placeholder_text=None):
         return ctk.CTkEntry(
             parent, textvariable=variable, width=width, height=28, show=show,
             placeholder_text=placeholder_text or "",
-            border_width=1, border_color=INPUT_BORDER,
-            fg_color=INPUT_BG, corner_radius=8, font=_FONT
+            border_width=1, border_color=SETTINGS_INPUT_BORDER,
+            fg_color=SETTINGS_INPUT_BG, corner_radius=8, font=_FONT
         )
 
     def _make_switch(self, parent, variable):
         switch = ctk.CTkSwitch(
             parent, text="", variable=variable, width=44, height=22,
-            progress_color=SWC_PROGRESS, fg_color=SWC_FG,
-            button_color=SWC_BTN, button_hover_color=SWC_BTN
+            progress_color=SETTINGS_SWITCH_PROGRESS, fg_color=SETTINGS_SWITCH_TRACK,
+            button_color=SETTINGS_SWITCH_KNOB, button_hover_color=SETTINGS_SWITCH_KNOB
         )
         switch.pack(side='left')
         return switch
@@ -301,13 +304,13 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         row += 1
         world_options = {"出现": "appear", "绝对巨大化": "abs_giant", "相对巨大化": "rel_giant"}
         self.world_setting_var = tk.StringVar(value=self.world_setting)
-        self.world_setting_menu = self._make_option_menu(
+        self.world_setting_button = self._make_cycle_button(
             ctrl, list(world_options.keys()),
             self._on_world_option_changed, self.world_setting_var
         )
         for display, value in world_options.items():
             if value == self.world_setting:
-                self.world_setting_var.set(display)
+                self.world_setting_button.set(display)
                 break
 
         _, ctrl = self._make_row(self.world_body, row, "种子")
@@ -318,10 +321,10 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.seed_random_btn = ctk.CTkButton(
             ctrl, text="随机", width=60, height=28,
             command=self._randomize_seed,
-            fg_color="transparent", text_color=SOFT,
-            hover_color=HOVER,
-            border_width=1, border_color=INPUT_BORDER,
-            corner_radius=8, font=ui_fonts.ui_font(11)
+            fg_color="transparent", text_color=SETTINGS_TEXT_SOFT,
+            hover_color=SETTINGS_HOVER,
+            border_width=1, border_color=SETTINGS_INPUT_BORDER,
+            corner_radius=8, font=ui_fonts.ui_font(12)
         )
         self.seed_random_btn.pack(side='left', padx=(8,0))
 
@@ -335,7 +338,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         name_tables = self.name_repo.get_tables()
         if self.name_table not in name_tables:
             name_tables.insert(0, self.name_table)
-        self.name_table_menu = self._make_option_menu(
+        self.name_table_menu = self._make_combo_box(
             ctrl, name_tables,
             self._on_name_table_changed, self.name_table_var
         )
@@ -350,7 +353,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             news_tables.insert(0, self.news_table)
         if not news_tables:
             news_tables = [DEFAULT_NEWS_TABLE]
-        self.news_table_menu = self._make_option_menu(
+        self.news_table_menu = self._make_combo_box(
             ctrl, news_tables,
             self._on_news_table_changed, self.news_table_var
         )
@@ -364,7 +367,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             preset_tables.insert(0, self.preset_table)
         if not preset_tables:
             preset_tables = ["default"]
-        self.preset_table_menu = self._make_option_menu(
+        self.preset_table_menu = self._make_combo_box(
             ctrl, preset_tables,
             self._on_preset_table_changed, self.preset_table_var
         )
@@ -377,7 +380,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             personality_tables.insert(0, self.personality_table)
         if not personality_tables:
             personality_tables = ["default"]
-        self.personality_table_menu = self._make_option_menu(
+        self.personality_table_menu = self._make_combo_box(
             ctrl, personality_tables,
             self._on_personality_table_changed, self.personality_table_var
         )
@@ -414,30 +417,30 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.world_pack_idle_frame = ctk.CTkFrame(ctrl, fg_color="transparent")
         self.world_pack_idle_frame.pack(side='left')
         self.world_pack_var = tk.StringVar(value="")
-        self.world_pack_menu = self._make_option_menu(
+        self.world_pack_menu = self._make_combo_box(
             self.world_pack_idle_frame, [],
             self._on_world_pack_changed, self.world_pack_var, expand=False
         )
         self.world_pack_new_btn = ctk.CTkButton(
             self.world_pack_idle_frame, text="新建", width=60, height=28,
             command=self._create_world_pack, fg_color="transparent",
-            text_color=SOFT, hover_color=HOVER,
-            border_width=1, border_color=INPUT_BORDER,
-            corner_radius=8, font=ui_fonts.ui_font(11)
+            text_color=SETTINGS_TEXT_SOFT, hover_color=SETTINGS_HOVER,
+            border_width=1, border_color=SETTINGS_INPUT_BORDER,
+            corner_radius=8, font=ui_fonts.ui_font(12)
         )
         self.world_pack_new_btn.pack(side='left', padx=(8, 0))
 
         self.world_pack_active_frame = ctk.CTkFrame(ctrl, fg_color="transparent")
         self.world_pack_active_label = ctk.CTkLabel(
             self.world_pack_active_frame, text="", anchor='w',
-            font=_FONT, text_color=STATUS_OK)
+            font=_FONT, text_color=SETTINGS_OK)
         self.world_pack_active_label.pack(side='left')
         self.world_pack_dissolve_btn = ctk.CTkButton(
             self.world_pack_active_frame, text="删除", width=60, height=28,
             command=self._dissolve_world_pack, fg_color="transparent",
-            text_color=STATUS_ERR, hover_color=HOVER,
-            border_width=1, border_color=INPUT_BORDER,
-            corner_radius=8, font=ui_fonts.ui_font(11)
+            text_color=SETTINGS_ERR, hover_color=SETTINGS_HOVER,
+            border_width=1, border_color=SETTINGS_INPUT_BORDER,
+            corner_radius=8, font=ui_fonts.ui_font(12)
         )
         self.world_pack_dissolve_btn.pack(side='left', padx=(12, 0))
         self.world_pack_active_frame.pack_forget()
@@ -449,8 +452,8 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.world_pack_switch = ctk.CTkSwitch(
             ctrl, text="", variable=self.world_pack_enable_var,
             width=44, height=22, command=self._on_world_pack_switch,
-            progress_color=SWC_PROGRESS, fg_color=SWC_FG,
-            button_color=SWC_BTN, button_hover_color=SWC_BTN
+            progress_color=SETTINGS_SWITCH_PROGRESS, fg_color=SETTINGS_SWITCH_TRACK,
+            button_color=SETTINGS_SWITCH_KNOB, button_hover_color=SETTINGS_SWITCH_KNOB
         )
         self.world_pack_switch.pack(side='left')
 
@@ -461,7 +464,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         """刷新包设置段：未启用时显示 optionmenu+新建键，已启用时显示启用标签+解散键。"""
         if self.world_manager is None:
             self.world_pack_label.configure(
-                text="世界包（不可用）", text_color=SOFT)
+                text="世界包（不可用）", text_color=SETTINGS_TEXT_SOFT)
             self.world_pack_menu.configure(state="disabled")
             self.world_pack_new_btn.configure(state="disabled")
             self.world_pack_dissolve_btn.configure(state="disabled")
@@ -482,20 +485,19 @@ class SettingsPanel(ctk.CTkScrollableFrame):
                 names.append(p["name"])
         current = self.world_pack_var.get()
         self.world_pack_menu.configure(values=names)
-        self.world_pack_menu._profile_dropdown.configure(values=names)
         if current not in names:
             self.world_pack_var.set(names[0] if names else "")
 
         active = self.world_state is not None and self.world_state.active
         if active:
-            self.world_pack_label.configure(text="世界包", text_color=HARD_LABEL)
+            self.world_pack_label.configure(text="世界包", text_color=SETTINGS_LABEL)
             self.world_pack_active_label.configure(
                 text=f"已启用：{self.world_state.pack_name}")
             self._show_pack_row(True)
             self.world_pack_var.set(self.world_state.pack_name)
             self.world_pack_enable_var.set(True)
         else:
-            self.world_pack_label.configure(text="世界包", text_color=HARD_LABEL)
+            self.world_pack_label.configure(text="世界包", text_color=SETTINGS_LABEL)
             self.world_pack_active_label.configure(text="已启用：")
             self._show_pack_row(False)
             self.world_pack_enable_var.set(False)
@@ -589,7 +591,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
     def _set_world_controls_locked(self):
         """按包锁定的设置键禁用对应控件（世界块）。"""
         locked = self.world_state.locked_keys() if self.world_state is not None else set()
-        self.world_setting_menu.configure(
+        self.world_setting_button.configure(
             state="disabled" if "world_setting" in locked else "normal")
         self.seed_entry.configure(state="disabled" if "seed" in locked else "normal")
         self.seed_random_btn.configure(state="disabled" if "seed" in locked else "normal")
@@ -608,7 +610,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         world_setting = self.settings.get("world_setting", "appear")
         for display, value in world_options.items():
             if value == world_setting:
-                self.world_setting_var.set(display)
+                self.world_setting_button.set(display)
                 break
         self.world_setting = world_setting
 
@@ -623,7 +625,6 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.name_table = name_table
         self.name_table_var.set(name_table)
         self.name_table_menu.configure(values=name_tables)
-        self.name_table_menu._profile_dropdown.configure(values=name_tables)
 
         news_table = self.settings.get("news_table", DEFAULT_NEWS_TABLE)
         news_service = NewsService(news_table=news_table,
@@ -636,7 +637,6 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.news_table = news_table
         self.news_table_var.set(news_table)
         self.news_table_menu.configure(values=news_tables)
-        self.news_table_menu._profile_dropdown.configure(values=news_tables)
 
         preset_table = self.settings.get("preset_table", "default")
         preset_tables = self.preset_repo.get_tables()
@@ -647,7 +647,6 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.preset_table = preset_table
         self.preset_table_var.set(preset_table)
         self.preset_table_menu.configure(values=preset_tables)
-        self.preset_table_menu._profile_dropdown.configure(values=preset_tables)
 
         personality_table = self.settings.get("personality_table", "default")
         personality_tables = self.personality_repo.get_tables()
@@ -658,7 +657,6 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.personality_table = personality_table
         self.personality_table_var.set(personality_table)
         self.personality_table_menu.configure(values=personality_tables)
-        self.personality_table_menu._profile_dropdown.configure(values=personality_tables)
 
     def _after_world_state_change(self):
         """世界包状态变化后同步面板控件、上下文与全局绿色指示。"""
@@ -781,13 +779,13 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         row += 1
         order_options = {"匹配度": "match", "尺寸升序": "size_asc", "尺寸降序": "size_desc"}
         self.order_var = tk.StringVar(value=self.comparison_order)
-        self.order_menu = self._make_option_menu(
+        self.order_button = self._make_cycle_button(
             ctrl, list(order_options.keys()),
             self._on_order_option_changed, self.order_var
         )
         for display, value in order_options.items():
             if value == self.comparison_order:
-                self.order_var.set(display)
+                self.order_button.set(display)
                 break
         row += 1
 
@@ -846,17 +844,31 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self._section_label(self.disp_body, row, "主题")
         row += 1
 
+        _, ctrl = self._make_row(self.disp_body, row, "色彩")
+        row += 1
+        palette_options = {display: name
+                           for name, display in palette_display_names().items()}
+        self.palette_var = tk.StringVar(value=self.theme_palette)
+        self.palette_menu = self._make_combo_box(
+            ctrl, list(palette_options.keys()),
+            self._on_palette_option_changed, self.palette_var
+        )
+        for display, value in palette_options.items():
+            if value == self.theme_palette:
+                self.palette_menu.set(display)
+                break
+
         _, ctrl = self._make_row(self.disp_body, row, "主题模式")
         row += 1
         theme_options = {"亮色": "Light", "暗色": "Dark", "跟随系统": "System"}
         self.theme_mode_var = tk.StringVar(value=self.theme_mode)
-        self.theme_menu = self._make_option_menu(
+        self.theme_mode_button = self._make_cycle_button(
             ctrl, list(theme_options.keys()),
             self._on_theme_option_changed, self.theme_mode_var
         )
         for display, value in theme_options.items():
             if value == self.theme_mode:
-                self.theme_mode_var.set(display)
+                self.theme_mode_button.set(display)
                 break
 
         self._section_label(self.disp_body, row, "界面选项")
@@ -914,7 +926,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             if abs(value - self.info_update_rate) < 1e-9:
                 self.info_update_var.set(display)
                 break
-        self.info_update_menu = self._make_option_menu(
+        self.info_update_button = self._make_cycle_button(
             ctrl, list(INFO_UPDATE_OPTIONS.keys()),
             self._on_info_update_changed, self.info_update_var
         )
@@ -932,9 +944,9 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         for idx, part_name in enumerate(ALL_PART_NAMES):
             var = tk.BooleanVar(value=(part_name in selected))
             cb = ctk.CTkCheckBox(
-                grid_frame, text=part_name, variable=var,
-                font=ui_fonts.ui_font(11), text_color=HARD_LABEL,
-                fg_color=SOFT, hover_color=CHECKBOX_HOVER,
+                grid_frame, text=part_name, variable=var, width=95,
+                font=ui_fonts.ui_font(12), text_color=SETTINGS_LABEL,
+                fg_color=SETTINGS_TEXT_SOFT, hover_color=SETTINGS_CHECKBOX_HOVER,
                 checkbox_width=18, checkbox_height=18, corner_radius=4
             )
             row_i = idx // cols
@@ -950,15 +962,15 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         # 第1行：下拉框和新建按钮并排
         _, ai_provider_control = self._make_row(parent, row, "选择配置")
         self.ai_provider_var = tk.StringVar(value=self._profile_name(self.ai_provider))
-        self.ai_provider_menu = self._make_option_menu(
+        self.ai_provider_menu = self._make_combo_box(
             ai_provider_control, self._profile_names(),
             self._on_ai_provider_changed, self.ai_provider_var, expand=False
         )
         ctk.CTkButton(
             ai_provider_control, text="新建", width=60, height=28,
-            command=self._new_ai_config, fg_color="transparent", text_color=SOFT,
-            hover_color=HOVER, border_width=1, border_color=INPUT_BORDER,
-            corner_radius=8, font=ui_fonts.ui_font(11)
+            command=self._new_ai_config, fg_color="transparent", text_color=SETTINGS_TEXT_SOFT,
+            hover_color=SETTINGS_HOVER, border_width=1, border_color=SETTINGS_INPUT_BORDER,
+            corner_radius=8, font=ui_fonts.ui_font(12)
         ).pack(side="left", padx=(8, 0))
         row += 1
 
@@ -967,10 +979,10 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         ctk.CTkButton(
             status_control, text="配置", width=60, height=28,
             command=self._open_ai_config_dialog,
-            fg_color="transparent", text_color=SOFT,
-            hover_color=HOVER,
-            border_width=1, border_color=INPUT_BORDER,
-            corner_radius=8, font=ui_fonts.ui_font(11)
+            fg_color="transparent", text_color=SETTINGS_TEXT_SOFT,
+            hover_color=SETTINGS_HOVER,
+            border_width=1, border_color=SETTINGS_INPUT_BORDER,
+            corner_radius=8, font=ui_fonts.ui_font(12)
         ).pack(side='left', padx=(12, 0))
 
     def _load_ai_configs(self):
@@ -988,8 +1000,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
     def _refresh_ai_menu(self):
         names = self._profile_names()
         self.ai_provider_menu.configure(values=names)
-        self.ai_provider_menu._profile_dropdown.configure(values=names)
-        self.ai_provider_var.set(self._profile_name(self.ai_provider))
+        self.ai_provider_menu.set(self._profile_name(self.ai_provider))
 
     def _on_ai_provider_changed(self, choice):
         for pid, cfg in self.ai_configs.items():
@@ -1062,6 +1073,12 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.theme_mode = theme_options.get(choice, "Light")
         self.theme_mode_var.set(choice)  # 保持显示文字
 
+    def _on_palette_option_changed(self, choice):
+        """记录待保存的界面配色；真正的换色在保存返回时由主窗口统一执行。"""
+        palette_options = {display: name
+                           for name, display in palette_display_names().items()}
+        self.theme_palette = palette_options.get(choice, DEFAULT_PALETTE)
+
     def _on_world_changed(self):
         self.world_setting = self.world_setting_var.get()
         if self.on_world_setting_changed:
@@ -1083,12 +1100,17 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         """进入设置页时丢弃未保存的主题选择，显示持久化值。"""
         saved_mode = self.settings.get("theme_mode", "Light")
         self.theme_mode = saved_mode
-        # 设置 OptionMenu 显示值
+        # 设置轮换控件显示值
         theme_options = {"亮色": "Light", "暗色": "Dark", "跟随系统": "System"}
         for display, value in theme_options.items():
             if value == saved_mode:
-                self.theme_mode_var.set(display)
+                self.theme_mode_button.set(display)
                 break
+
+        saved_palette = self.settings.get("theme_palette") or current_palette()
+        self.theme_palette = saved_palette
+        # palette_display_names() 是 {配色名: 显示名}，这里要反查显示名
+        self.palette_menu.set(palette_display_names().get(saved_palette, saved_palette))
 
     def _on_order_changed(self):
         self.comparison_order = self.order_var.get()
@@ -1259,6 +1281,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
 
         self.settings.update({
             "theme_mode": theme_mode,
+            "theme_palette": self.theme_palette or DEFAULT_PALETTE,
             "seed": seed,
             "comparison_count": count,
             "comparison_order": comparison_order,

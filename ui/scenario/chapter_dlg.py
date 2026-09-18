@@ -10,8 +10,8 @@ from dungeon.chapters import (
 )
 from ui.common.dialogs import BaseDialog
 from ui.common.theme import (
-    BORDER_ALT, BROWN_HINT, ERR_HOVER, ERR_STRONG, GOLD_OUTLINE, HOVER,
-    SOFT, TEXT,
+    CHAPTER_BORDER, CHAPTER_HOVER, CHAPTER_TEXT, CHAPTER_TEXT_SOFT,
+    CHAPTER_HINT, CHAPTER_ERR, CHAPTER_ERR_HOVER, CHAPTER_SWATCH_SELECTED_BORDER,
 )
 from ui.scenario.asset_import import import_background_image
 
@@ -67,7 +67,7 @@ class ChapterEditDialog(BaseDialog):
 
         self.start_var = tk.BooleanVar(value=bool(self.chapter.get("start", False)))
         ctk.CTkCheckBox(info, text="起始章节（副本开始时自动进入）", variable=self.start_var,
-                        font=self.UI_FONT, text_color=TEXT,
+                        font=self.UI_FONT, text_color=CHAPTER_TEXT,
                         checkbox_width=20, checkbox_height=20).grid(
                             row=0, column=2, columnspan=2, sticky='w', padx=(14, 0), pady=3)
 
@@ -78,7 +78,7 @@ class ChapterEditDialog(BaseDialog):
         for preset in CHAPTER_COLOR_PRESETS:
             button = ctk.CTkButton(swatch_row, text="", width=24, height=24, corner_radius=6,
                                    fg_color=preset, hover_color=preset, border_width=2,
-                                   border_color=BORDER_ALT,
+                                   border_color=CHAPTER_BORDER,
                                    command=lambda c=preset: self._select_color(c))
             button.pack(side='left', padx=2)
             self._swatch_buttons[preset.lower()] = button
@@ -111,14 +111,14 @@ class ChapterEditDialog(BaseDialog):
                       command=self._import_background).pack(side='left')
         ctk.CTkButton(path_row, text="清除", width=52, height=28, font=self.UI_FONT,
                       fg_color="transparent", border_width=1, corner_radius=8,
-                      text_color=SOFT, hover_color=HOVER, border_color=BORDER_ALT,
+                      text_color=CHAPTER_TEXT_SOFT, hover_color=CHAPTER_HOVER, border_color=CHAPTER_BORDER,
                       command=lambda: self.background_path_var.set("")).pack(side='left', padx=(6, 0))
 
         option_row = ctk.CTkFrame(bg_frame, fg_color="transparent")
         option_row.pack(fill='x', pady=(6, 0))
         self.smooth_var = tk.BooleanVar(value=bool(background.get("smooth_transition", True)))
         ctk.CTkCheckBox(option_row, text="平滑切换", variable=self.smooth_var,
-                        font=self.UI_FONT, text_color=TEXT,
+                        font=self.UI_FONT, text_color=CHAPTER_TEXT,
                         checkbox_width=20, checkbox_height=20).pack(side='left')
         ctk.CTkLabel(option_row, text="滤镜:", font=self.UI_FONT).pack(side='left', padx=(18, 4))
         self.filter_labels = [NO_FILTER_LABEL] + [label for _key, label in VISUAL_FILTERS]
@@ -135,7 +135,7 @@ class ChapterEditDialog(BaseDialog):
                      **section_label).pack(side='left')
         ctk.CTkButton(sens_head, text="添加效果", width=84, height=26, font=self.UI_FONT,
                       fg_color="transparent", border_width=1, corner_radius=8,
-                      text_color=SOFT, hover_color=HOVER, border_color=BORDER_ALT,
+                      text_color=CHAPTER_TEXT_SOFT, hover_color=CHAPTER_HOVER, border_color=CHAPTER_BORDER,
                       command=self._add_sensitivity_row).pack(side='right')
 
         self.sens_container = ctk.CTkFrame(main, fg_color="transparent")
@@ -146,7 +146,7 @@ class ChapterEditDialog(BaseDialog):
         if not self.sens_rows:
             self._empty_sens_hint = ctk.CTkLabel(
                 self.sens_container, text="（未配置敏感效果）", font=self.UI_FONT_SMALL,
-                text_color=BROWN_HINT, anchor='w')
+                text_color=CHAPTER_HINT, anchor='w')
             self._empty_sens_hint.pack(fill='x')
 
         ctk.CTkLabel(
@@ -154,7 +154,7 @@ class ChapterEditDialog(BaseDialog):
             text="敏感效果倍率 = 强度 ×（人物敏感值 + 客观影响）；破坏性使用性格重力。\n"
                  "章节背景与敏感效果由「跳转章节」触发器在进入时应用，离开章节即失效。",
             justify='left', anchor='w', wraplength=520, font=self.UI_FONT_SMALL,
-            text_color=BROWN_HINT).pack(fill='x', padx=6, pady=(10, 0))
+            text_color=CHAPTER_HINT).pack(fill='x', padx=6, pady=(10, 0))
 
         buttons = ctk.CTkFrame(main, fg_color="transparent")
         buttons.pack(pady=(12, 0))
@@ -174,7 +174,7 @@ class ChapterEditDialog(BaseDialog):
     def _refresh_swatches(self):
         current = (self.color_var.get() or "").strip().lower()
         for preset, button in self._swatch_buttons.items():
-            button.configure(border_color=GOLD_OUTLINE if preset == current else BORDER_ALT)
+            button.configure(border_color=CHAPTER_SWATCH_SELECTED_BORDER if preset == current else CHAPTER_BORDER)
 
     # ---------- 滤镜 ----------
     def _filter_key_to_label(self, key: str) -> str:
@@ -224,7 +224,7 @@ class ChapterEditDialog(BaseDialog):
                  "objective_var": objective_var}
         ctk.CTkButton(row, text="移除", width=52, height=28, font=self.UI_FONT,
                       fg_color="transparent", border_width=1, corner_radius=8,
-                      text_color=ERR_STRONG, hover_color=ERR_HOVER, border_color=ERR_STRONG,
+                      text_color=CHAPTER_ERR, hover_color=CHAPTER_ERR_HOVER, border_color=CHAPTER_ERR,
                       command=lambda: self._remove_sensitivity_row(entry)).pack(side='left', padx=(12, 0))
         self.sens_rows.append(entry)
 

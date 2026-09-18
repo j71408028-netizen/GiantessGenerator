@@ -16,9 +16,10 @@ from ui.common.widgets import ClickableCard, CTkScrollableDropdownFrame
 from ui.common.address_dlg import AddressTextDialog
 from address_model import format_addr_verbose
 from ui.common.theme import (
-    BASE, HOVER, BORDER_ALT, TEXT, SOFT,
-    PNL_BG, HOVER_ALT, MENU_HOVER, LINK_BLUE,
-    BLUE_HOVER, STATUS_OK, OK_HOVER, ERR_STRONG, ERR_HOVER, TEXT_MUTED,
+    LM_BG, LM_PANEL_BG, LM_BORDER_STRONG, LM_HOVER,
+    LM_MENU_HOVER, LM_CARD_HOVER, LM_TEXT, LM_TEXT_SOFT,
+    LM_TEXT_MUTED, LM_LINK, LM_OK, LM_OK_HOVER,
+    LM_ERR, LM_ERR_HOVER,
 )
 from ui.common import fonts as ui_fonts
 
@@ -73,33 +74,33 @@ class LandmarkCardManager(CardManager):
     # ----- 风格控件 -----
     def create_style_widgets(self, parent):
         ctk.CTkLabel(parent, text="当前风格:",
-                     text_color=SOFT).pack(side='left', padx=5)
+                     text_color=LM_TEXT_SOFT).pack(side='left', padx=5)
         self.style_combo = ctk.CTkComboBox(
             parent, variable=self.style_var, state="readonly",
             width=150,
-            fg_color=PNL_BG,
-            border_color=BORDER_ALT,
-            button_color=BORDER_ALT,
-            button_hover_color=MENU_HOVER,
-            dropdown_fg_color=PNL_BG,
-            dropdown_hover_color=HOVER_ALT
+            fg_color=LM_PANEL_BG,
+            border_color=LM_BORDER_STRONG,
+            button_color=LM_BORDER_STRONG,
+            button_hover_color=LM_MENU_HOVER,
+            dropdown_fg_color=LM_PANEL_BG,
+            dropdown_hover_color=LM_HOVER
         )
         self.style_combo.pack(side='left', padx=7)
         self._rebuild_dropdown()
         _btn_spec = {"fg_color": "transparent", "border_width": 1, "corner_radius": 8}
-        _btn_muted = {"text_color": SOFT,
-                      "hover_color": HOVER_ALT,
-                      "border_color": BORDER_ALT}
+        _btn_muted = {"text_color": LM_TEXT_SOFT,
+                      "hover_color": LM_HOVER,
+                      "border_color": LM_BORDER_STRONG}
         ctk.CTkButton(parent, text="新建", width=80, command=self.create_style,
-                       text_color=STATUS_OK,
-                       hover_color=OK_HOVER,
-                       border_color=STATUS_OK,
+                       text_color=LM_OK,
+                       hover_color=LM_OK_HOVER,
+                       border_color=LM_OK,
                        **_btn_spec).pack(side='left', padx=2)
         ctk.CTkButton(parent, text="重命名", width=80, command=self.rename_style,
                        **_btn_spec, **_btn_muted).pack(side='left', padx=2)
-        _del_spec = {"text_color": ERR_STRONG,
-                     "hover_color": ERR_HOVER,
-                     "border_color": ERR_STRONG}
+        _del_spec = {"text_color": LM_ERR,
+                     "hover_color": LM_ERR_HOVER,
+                     "border_color": LM_ERR}
         ctk.CTkButton(parent, text="删除", width=80, command=self.delete_style,
                        **_btn_spec, **_del_spec).pack(side='left', padx=2)
         # 风格注册地址：世界观 + 该风格注册的若干上级级
@@ -142,7 +143,7 @@ class LandmarkCardManager(CardManager):
         for pack in packs:
             display = f"⚔ {os.path.splitext(pack)[0]}"
             items.append(display)
-            text_colors[display] = LINK_BLUE
+            text_colors[display] = LM_LINK
             self._pack_display_map[display] = pack
         return items, text_colors
 
@@ -158,13 +159,13 @@ class LandmarkCardManager(CardManager):
                 text_colors=text_colors,
                 command=self._on_dropdown_select,
                 height=200, button_height=28,
-                fg_color=BASE,
-                hover_color=BLUE_HOVER,
-                scrollbar_button_color=HOVER,
-                scrollbar_button_hover_color=HOVER_ALT,
-                frame_border_color=BORDER_ALT,
-                text_color=TEXT,
-                button_color=BASE,
+                fg_color=LM_BG,
+                hover_color=LM_CARD_HOVER,
+                scrollbar_button_color=LM_HOVER,
+                scrollbar_button_hover_color=LM_HOVER,
+                frame_border_color=LM_BORDER_STRONG,
+                text_color=LM_TEXT,
+                button_color=LM_BG,
                 frame_border_width=1,
                 justify="left"
             )
@@ -243,17 +244,17 @@ class LandmarkCardManager(CardManager):
         ctk.CTkRadioButton(parent, text="尺寸\u2191", variable=self.sort_var,
                            value="size_asc", command=self.refresh_ui,
                            font=ui_fonts.ui_font(13),
-                           fg_color=(HOVER[1], TEXT[1]),
-                           border_color=BORDER_ALT,
-                           hover_color=HOVER,
-                           text_color=TEXT).pack(side='left', padx=2)
+                           fg_color=(LM_HOVER[1], LM_TEXT[1]),
+                           border_color=LM_BORDER_STRONG,
+                           hover_color=LM_HOVER,
+                           text_color=LM_TEXT).pack(side='left', padx=2)
         ctk.CTkRadioButton(parent, text="尺寸\u2193", variable=self.sort_var,
                            value="size_desc", command=self.refresh_ui,
                            font=ui_fonts.ui_font(13),
-                           fg_color=(HOVER[1], TEXT[1]),
-                           border_color=BORDER_ALT,
-                           hover_color=HOVER,
-                           text_color=TEXT).pack(side='left', padx=2)
+                           fg_color=(LM_HOVER[1], LM_TEXT[1]),
+                           border_color=LM_BORDER_STRONG,
+                           hover_color=LM_HOVER,
+                           text_color=LM_TEXT).pack(side='left', padx=2)
 
     # ---------- 视图切换，控制排序控件可见性 ----------
     def show_first_view(self):
@@ -296,7 +297,7 @@ class LandmarkCardManager(CardManager):
         if not cat_counts:
             ctk.CTkLabel(self.first_view, text="暂无条目，请先添加",
                          font=ui_fonts.ui_font(14),
-                         text_color=SOFT).pack(pady=20)
+                         text_color=LM_TEXT_SOFT).pack(pady=20)
             return
 
         sort_mode = self.sort_var.get()
@@ -326,7 +327,7 @@ class LandmarkCardManager(CardManager):
                 title_extra=[{
                     "text": names_text,
                     "font": ui_fonts.ui_font(12),
-                    "text_color": SOFT
+                    "text_color": LM_TEXT_SOFT
                 }],
                 on_click=lambda c=cat: self.show_second_view(c)
             )
@@ -356,16 +357,16 @@ class LandmarkCardManager(CardManager):
                 title_extra=[{
                     "text": sub_text,
                     "font": ui_fonts.ui_font(12),
-                    "text_color": SOFT
+                    "text_color": LM_TEXT_SOFT
                 }],
                 on_click=lambda i=item: self.edit_item(i),
                 buttons=[
                     {"text": "删除",
                      "command": lambda i=item: self.delete_item(i),
                      "fg_color": "transparent",
-                     "text_color": ERR_STRONG,
-                     "hover_color": ERR_HOVER,
-                     "border_width": 1, "border_color": ERR_STRONG,
+                     "text_color": LM_ERR,
+                     "hover_color": LM_ERR_HOVER,
+                     "border_width": 1, "border_color": LM_ERR,
                      "corner_radius": 6, "width": 50}
                 ]
             )
@@ -527,7 +528,7 @@ class LandmarkDialog(BaseDialog):
         addr_entry.grid(row=4, column=1, pady=(4, 6), padx=5)
         ctk.CTkLabel(self, text="风格已注册时填剩余级（如 12-0），未注册时填完整地址（含世界观）；"
                                "双击地址框可从注册表已申领的子地址中选择",
-                     font=ui_fonts.ui_font(9), text_color=SOFT, wraplength=210,
+                     font=ui_fonts.ui_font(9), text_color=LM_TEXT_SOFT, wraplength=210,
                      justify='left').grid(
             row=5, column=1, sticky='w', pady=(0, 4), padx=5)
 
@@ -541,7 +542,7 @@ class LandmarkDialog(BaseDialog):
         # 注册表加载状态（row=6）
         self.registry_status_var = tk.StringVar(value="")
         ctk.CTkLabel(self, textvariable=self.registry_status_var,
-                     font=ui_fonts.ui_font(9), text_color=TEXT_MUTED,
+                     font=ui_fonts.ui_font(9), text_color=LM_TEXT_MUTED,
                      wraplength=210, justify='left', anchor='w').grid(
             row=6, column=1, sticky='w', pady=(0, 2), padx=5)
 

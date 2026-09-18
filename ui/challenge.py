@@ -11,10 +11,10 @@ from models import Personality, BodyPreset
 from address_model import world_of
 from ui.common.widgets import ClickableCard, CollapsibleBlock, StyleListBox, CTkScrollableDropdownFrame
 from ui.common.theme import (
-    TEXT, HARD_TITLE, SOFT, TEXT_MUTED, PLACEHOLDER,
-    PNL_BG, BORDER_ALT, HOVER_ALT, MENU_HOVER, BLUE_HOVER,
-    STATUS_OK, OK_HOVER, ERR_STRONG, ERR_HOVER,
-    TEXT_CYAN, TEXT_ORANGE, STATUS_ERR,
+    CHAL_PANEL_BG, CHAL_BORDER_STRONG, CHAL_HOVER, CHAL_CARD_HOVER,
+    CHAL_TEXT, CHAL_TEXT_SOFT, CHAL_TEXT_MUTED, CHAL_TITLE,
+    CHAL_PLACEHOLDER, CHAL_OK, CHAL_OK_HOVER, CHAL_ERR,
+    CHAL_ERR_HOVER, CHAL_INTRO_CYAN, CHAL_INTRO_ORANGE,
 )
 from ui.common import fonts as ui_fonts
 
@@ -37,13 +37,13 @@ class ChallengeModePanel(ctk.CTkFrame):
         title_bar.pack(fill='x', padx=22, pady=(13, 2))
 
         self.title_label = ctk.CTkLabel(title_bar, text="🎯  挑战模式", font=ui_fonts.ui_font(16, "bold"),
-                                        text_color=SOFT)
+                                        text_color=CHAL_TEXT_SOFT)
         self.title_label.pack(side='left')
 
         info_bar = ctk.CTkFrame(self, fg_color="transparent")
         info_bar.pack(fill='x', padx=22, pady=(2, 5))
         self.info_label = ctk.CTkLabel(info_bar, text="", font=ui_fonts.ui_font(11),
-                                       text_color=PLACEHOLDER)
+                                       text_color=CHAL_PLACEHOLDER)
         self.info_label.pack(side='left')
 
         # 创建挑战包折叠块：标题按钮置于标题栏右侧，内容区展开在信息栏下方
@@ -56,10 +56,10 @@ class ChallengeModePanel(ctk.CTkFrame):
         form_body = self.create_block.body
 
         ctk.CTkLabel(form_body, text="挑战包名称", font=ui_fonts.ui_font(13, "bold"),
-                     text_color=HARD_TITLE).pack(anchor='w', pady=(6, 2), padx=10)
+                     text_color=CHAL_TITLE).pack(anchor='w', pady=(6, 2), padx=10)
         self.pack_name_entry = ctk.CTkEntry(form_body, width=300, placeholder_text="输入挑战包名称（不含扩展名）",
-                                            border_width=1, border_color=BORDER_ALT,
-                                            fg_color=PNL_BG)
+                                            border_width=1, border_color=CHAL_BORDER_STRONG,
+                                            fg_color=CHAL_PANEL_BG)
         self.pack_name_entry.pack(fill='x', pady=(0, 6), padx=10)
 
         # ---- 三列布局 ----
@@ -74,51 +74,51 @@ class ChallengeModePanel(ctk.CTkFrame):
         left_col.grid(row=0, column=0, sticky='nsew', padx=(0, 10))
 
         ctk.CTkLabel(left_col, text="选择角色", font=ui_fonts.ui_font(11, "bold"),
-                     text_color=SOFT).pack(anchor='w', pady=(2, 2))
+                     text_color=CHAL_TEXT_SOFT).pack(anchor='w', pady=(2, 2))
         self.char_combo = ctk.CTkComboBox(left_col, values=[], state="readonly",
-                                          border_width=1, border_color=BORDER_ALT,
-                                          fg_color=PNL_BG,
-                                          button_color=HOVER_ALT,
-                                          button_hover_color=HARD_TITLE,
-                                          dropdown_fg_color=PNL_BG,
-                                          dropdown_hover_color=HOVER_ALT)
+                                          border_width=1, border_color=CHAL_BORDER_STRONG,
+                                          fg_color=CHAL_PANEL_BG,
+                                          button_color=CHAL_HOVER,
+                                          button_hover_color=CHAL_TITLE,
+                                          dropdown_fg_color=CHAL_PANEL_BG,
+                                          dropdown_hover_color=CHAL_HOVER)
         self.char_combo.pack(fill='x', pady=(2, 2))
         self._char_dropdown = CTkScrollableDropdownFrame(
             attach=self.char_combo, values=[], command=self._on_char_change,
             height=160, button_height=28,
-            fg_color=PNL_BG,
-            hover_color=BLUE_HOVER,
-            frame_border_color=BORDER_ALT,
-            text_color=TEXT,
-            button_color=PNL_BG,
-            scrollbar_button_color=HOVER_ALT,
-            scrollbar_button_hover_color=HOVER_ALT,
+            fg_color=CHAL_PANEL_BG,
+            hover_color=CHAL_CARD_HOVER,
+            frame_border_color=CHAL_BORDER_STRONG,
+            text_color=CHAL_TEXT,
+            button_color=CHAL_PANEL_BG,
+            scrollbar_button_color=CHAL_HOVER,
+            scrollbar_button_hover_color=CHAL_HOVER,
             frame_border_width=1, justify="left")
         self.char_info_label = ctk.CTkLabel(left_col, text="", font=ui_fonts.ui_font(10),
-                                             text_color=PLACEHOLDER)
+                                             text_color=CHAL_PLACEHOLDER)
         self.char_info_label.pack(anchor='w')
 
         ctk.CTkLabel(left_col, text="副本方案", font=ui_fonts.ui_font(11, "bold"),
-                     text_color=SOFT).pack(anchor='w', pady=2)
+                     text_color=CHAL_TEXT_SOFT).pack(anchor='w', pady=2)
         dungeons = self.gui._dungeon_repo.list_all()
         self.dungeon_combo = ctk.CTkComboBox(left_col, values=dungeons, state="readonly",
-                                             border_width=1, border_color=BORDER_ALT,
-                                             fg_color=PNL_BG,
-                                             button_color=HOVER_ALT,
-                                             button_hover_color=HARD_TITLE,
-                                             dropdown_fg_color=PNL_BG,
-                                             dropdown_hover_color=HOVER_ALT)
+                                             border_width=1, border_color=CHAL_BORDER_STRONG,
+                                             fg_color=CHAL_PANEL_BG,
+                                             button_color=CHAL_HOVER,
+                                             button_hover_color=CHAL_TITLE,
+                                             dropdown_fg_color=CHAL_PANEL_BG,
+                                             dropdown_hover_color=CHAL_HOVER)
         self.dungeon_combo.pack(fill='x', pady=(2, 6))
         self._dungeon_dropdown = CTkScrollableDropdownFrame(
             attach=self.dungeon_combo, values=dungeons, command=self.dungeon_combo.set,
             height=160, button_height=28,
-            fg_color=PNL_BG,
-            hover_color=BLUE_HOVER,
-            frame_border_color=BORDER_ALT,
-            text_color=TEXT,
-            button_color=PNL_BG,
-            scrollbar_button_color=HOVER_ALT,
-            scrollbar_button_hover_color=HOVER_ALT,
+            fg_color=CHAL_PANEL_BG,
+            hover_color=CHAL_CARD_HOVER,
+            frame_border_color=CHAL_BORDER_STRONG,
+            text_color=CHAL_TEXT,
+            button_color=CHAL_PANEL_BG,
+            scrollbar_button_color=CHAL_HOVER,
+            scrollbar_button_hover_color=CHAL_HOVER,
             frame_border_width=1, justify="left")
         if dungeons:
             self.dungeon_combo.set(dungeons[0])
@@ -145,10 +145,10 @@ class ChallengeModePanel(ctk.CTkFrame):
 
         # 简介（可用 / 分隔背景与目标文本，卡片视图中会自动着色）
         ctk.CTkLabel(form_body, text="简介（可用 / 分隔背景与目标文本）", font=ui_fonts.ui_font(11, "bold"),
-                     text_color=SOFT).pack(anchor='w', pady=(6, 2), padx=10)
+                     text_color=CHAL_TEXT_SOFT).pack(anchor='w', pady=(6, 2), padx=10)
         self.intro_text = ctk.CTkTextbox(form_body, height=80, wrap='word',
-                                         border_width=1, border_color=BORDER_ALT,
-                                         fg_color=PNL_BG)
+                                         border_width=1, border_color=CHAL_BORDER_STRONG,
+                                         fg_color=CHAL_PANEL_BG)
         self.intro_text.pack(fill='x', pady=(0, 6), padx=10)
 
         # 创建/取消按钮
@@ -156,15 +156,15 @@ class ChallengeModePanel(ctk.CTkFrame):
         btn_frame.pack(fill='x', pady=(6, 6))
         ctk.CTkButton(btn_frame, text="创建", command=self._do_create, width=100,
                       fg_color="transparent",
-                    text_color=STATUS_OK,
-                    hover_color=OK_HOVER,
-                    border_width=2, border_color=STATUS_OK,
+                    text_color=CHAL_OK,
+                    hover_color=CHAL_OK_HOVER,
+                    border_width=2, border_color=CHAL_OK,
                       corner_radius=10).pack(side='left', padx=10)
         ctk.CTkButton(btn_frame, text="取消", command=self._toggle_create_block, width=100,
                       fg_color="transparent",
-                      text_color=TEXT_MUTED,
-                      hover_color=HOVER_ALT,
-                      border_width=1, border_color=BORDER_ALT,
+                      text_color=CHAL_TEXT_MUTED,
+                      hover_color=CHAL_HOVER,
+                      border_width=1, border_color=CHAL_BORDER_STRONG,
                       corner_radius=8).pack(side='left')
 
         # 卡片列表
@@ -358,7 +358,7 @@ class ChallengeModePanel(ctk.CTkFrame):
                    else "暂无挑战包\n\n点击上方「创建挑战包」折叠块创建新挑战")
             ctk.CTkLabel(self.card_frame, text=msg,
                          font=ui_fonts.ui_font(14),
-                         text_color=PLACEHOLDER).pack(expand=True, pady=60)
+                         text_color=CHAL_PLACEHOLDER).pack(expand=True, pady=60)
             return
 
         for meta in metas:
@@ -373,8 +373,8 @@ class ChallengeModePanel(ctk.CTkFrame):
 
             def _colorize_card(tb):
                 txt = tb._textbox
-                txt.tag_configure("cyan_part", foreground=TEXT_CYAN)
-                txt.tag_configure("orange_part", foreground=TEXT_ORANGE)
+                txt.tag_configure("cyan_part", foreground=CHAL_INTRO_CYAN)
+                txt.tag_configure("orange_part", foreground=CHAL_INTRO_ORANGE)
                 content = txt.get("1.0", "end-1c")
                 dbl = "//"
                 if dbl in content:
@@ -393,10 +393,10 @@ class ChallengeModePanel(ctk.CTkFrame):
                     "text": "删除",
                     "command": lambda p=file_path: self._delete_pack(p),
                     "fg_color": "transparent",
-                    "text_color": STATUS_ERR,
-                    "hover_color": ERR_HOVER,
+                    "text_color": CHAL_ERR,
+                    "hover_color": CHAL_ERR_HOVER,
                     "border_width": 1,
-                    "border_color": STATUS_ERR,
+                    "border_color": CHAL_ERR,
                     "corner_radius": 8,
                     "width": 50,
                     "pack_kw": {"side": "top", "pady": 2}
@@ -417,10 +417,10 @@ class ChallengeModePanel(ctk.CTkFrame):
                     "text": "读取",
                     "command": lambda p=pack_base: None,
                     "fg_color": "transparent",
-                    "text_color": STATUS_OK,
-                    "hover_color": OK_HOVER,
+                    "text_color": CHAL_OK,
+                    "hover_color": CHAL_OK_HOVER,
                     "border_width": 1,
-                    "border_color": STATUS_OK,
+                    "border_color": CHAL_OK,
                     "corner_radius": 8,
                     "width": 50,
                     "pack_kw": {"side": "top", "pady": 2}

@@ -12,8 +12,8 @@ from dungeon.chapters import (
 )
 from ui.common.managers import TreeviewManager
 from ui.common.theme import (
-    BORDER_ALT, ERR_HOVER, ERR_STRONG, HOVER, OK_HOVER, SOFT,
-    STATUS_ERR, STATUS_OK,
+    SCRIPT_BORDER, SCRIPT_HOVER, SCRIPT_TEXT_SOFT, SCRIPT_OK,
+    SCRIPT_OK_HOVER, SCRIPT_ERR, SCRIPT_ERR_HOVER,
 )
 from ui.common import fonts as ui_fonts
 from ui.scenario.chapter_dlg import ChapterEditDialog
@@ -26,7 +26,7 @@ ROW_TRIGGER = "trigger"
 LOOSE_GROUP = "__loose__"
 
 
-class ChapterTriggerManager(TreeviewManager):
+class ScriptManager(TreeviewManager):
     """章节与触发器的一体化编辑面板。
 
     章节行按章节自定义配色着色，其下的触发器紧跟章节行显示；不属于任何章节
@@ -61,8 +61,8 @@ class ChapterTriggerManager(TreeviewManager):
 
         btn_style = dict(fg_color="transparent", border_width=1, corner_radius=8,
                          font=ui_fonts.ui_font(13))
-        muted = dict(text_color=SOFT, hover_color=HOVER, border_color=BORDER_ALT)
-        create = dict(text_color=STATUS_OK, hover_color=OK_HOVER, border_color=STATUS_OK)
+        muted = dict(text_color=SCRIPT_TEXT_SOFT, hover_color=SCRIPT_HOVER, border_color=SCRIPT_BORDER)
+        create = dict(text_color=SCRIPT_OK, hover_color=SCRIPT_OK_HOVER, border_color=SCRIPT_OK)
 
         left = ctk.CTkFrame(self.button_frame, fg_color="transparent")
         left.pack(side='left', fill='x', expand=True)
@@ -73,8 +73,8 @@ class ChapterTriggerManager(TreeviewManager):
         ctk.CTkButton(left, text="编辑", command=self.edit_item,
                       width=80, **muted, **btn_style).pack(side='left', padx=5)
         ctk.CTkButton(left, text="删除", command=self.delete_item,
-                      width=80, text_color=ERR_STRONG, hover_color=ERR_HOVER,
-                      border_color=ERR_STRONG, **btn_style).pack(side='left', padx=5)
+                      width=80, text_color=SCRIPT_ERR, hover_color=SCRIPT_ERR_HOVER,
+                      border_color=SCRIPT_ERR, **btn_style).pack(side='left', padx=5)
 
         right = ctk.CTkFrame(self.button_frame, fg_color="transparent")
         right.pack(side='right', fill='x', expand=True)
@@ -91,19 +91,19 @@ class ChapterTriggerManager(TreeviewManager):
             bar,
             text="章节行下方的缩进行是其触发器；「任意章节 / 无章节」的触发器排在最后。",
             font=ui_fonts.ui_font(12),
-            text_color=SOFT).pack(side='left', padx=(4, 12))
+            text_color=SCRIPT_TEXT_SOFT).pack(side='left', padx=(4, 12))
         self.dep_status_label = ctk.CTkLabel(
             bar, text="点击 “检查依赖” 查看触发器前置依赖与循环依赖",
             font=ui_fonts.ui_font(12),
-            text_color=SOFT)
+            text_color=SCRIPT_TEXT_SOFT)
         self.dep_status_label.pack(side='left', padx=(4, 5))
         ctk.CTkButton(
             bar, text="检查依赖", width=100,
             fg_color="transparent", border_width=1, corner_radius=8,
             font=ui_fonts.ui_font(13),
-            text_color=SOFT,
-            hover_color=HOVER,
-            border_color=BORDER_ALT,
+            text_color=SCRIPT_TEXT_SOFT,
+            hover_color=SCRIPT_HOVER,
+            border_color=SCRIPT_BORDER,
             command=self.check_dependencies).pack(side='right', padx=(8, 0))
 
     def check_dependencies(self):
@@ -115,10 +115,10 @@ class ChapterTriggerManager(TreeviewManager):
         dlg = DependencyGraphDialog(self, triggers)
         if getattr(dlg, "cycle_nodes", set()):
             self.dep_status_label.configure(
-                text=f"发现循环依赖（{len(dlg.cycle_nodes)} 个触发器）", text_color=STATUS_ERR)
+                text=f"发现循环依赖（{len(dlg.cycle_nodes)} 个触发器）", text_color=SCRIPT_ERR)
         else:
             self.dep_status_label.configure(
-                text="依赖关系正常，无循环依赖", text_color=STATUS_OK)
+                text="依赖关系正常，无循环依赖", text_color=SCRIPT_OK)
 
     # ---------- 行着色 ----------
     def update_theme(self, theme_mode: str):
@@ -126,9 +126,9 @@ class ChapterTriggerManager(TreeviewManager):
         self._apply_row_tags(theme_mode)
 
     def _apply_row_tags(self, theme_mode: str):
-        self.tree.tag_configure("chapter_head", font=ui_fonts.ui_font(16, "bold"))
+        self.tree.tag_configure("chapter_head", font=ui_fonts.ui_font(13, "bold"))
         self.tree.tag_configure(
-            "loose_trigger", foreground=SOFT[1] if theme_mode == "Dark" else SOFT[0])
+            "loose_trigger", foreground=SCRIPT_TEXT_SOFT[1] if theme_mode == "Dark" else SCRIPT_TEXT_SOFT[0])
         for index, chapter in enumerate(self._chapter_list()):
             self.tree.tag_configure(
                 f"chapter_color_{index}",

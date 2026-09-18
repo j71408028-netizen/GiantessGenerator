@@ -17,10 +17,10 @@ from ui.exploration.intro import IntroPanel
 from ui.exploration.report import ReportPanel
 from ui.common.dialogs import BaseDialog
 from ui.common.theme import (
-    BASE, BORDER, SOFT, TEXT_MUTED, TEXT_DISABLED,
-    BORDER_ALT, HOVER_ALT,
-    STATUS_OK, OK_HOVER, REPORT, REPORT_HOVER, DUNGEON, DUNGEON_HOVER,
-    GOLD_STRONG_BORDER, ERR_STRONG, ERR_HOVER,
+    EXP_BG, EXP_BORDER, EXP_BORDER_STRONG, EXP_HOVER,
+    EXP_TEXT_SOFT, EXP_TEXT_MUTED, EXP_TEXT_DISABLED, EXP_OK,
+    EXP_OK_HOVER, EXP_ERR, EXP_ERR_HOVER, EXP_REPORT,
+    EXP_REPORT_HOVER, EXP_DUNGEON, EXP_DUNGEON_HOVER, EXP_STYLE_SELECTED_BORDER,
 )
 from ui.common import fonts as ui_fonts
 from models import CharacterSnapshot
@@ -73,7 +73,7 @@ class ExplorationPanel(ctk.CTkFrame):
         title_frame.grid(row=0, column=0, sticky='ew', padx=8, pady=(6, 2))
         self.title_label = ctk.CTkLabel(title_frame, text="🧭  探索模式",
                                         font=ui_fonts.ui_font(16, "bold"),
-                                        text_color=SOFT)
+                                        text_color=EXP_TEXT_SOFT)
         self.title_label.pack(side='left')
 
         # 面板堆叠层 (row 1)
@@ -127,64 +127,64 @@ class ExplorationPanel(ctk.CTkFrame):
         self.report_cost_label = ctk.CTkLabel(
             self.button_hint, text="",
             font=ui_fonts.ui_font(10, "bold"),
-            text_color=REPORT)
+            text_color=EXP_REPORT)
         left_side = ctk.CTkFrame(self.button_inner, fg_color="transparent")
         left_side.pack(side='left')
         select_btn = ctk.CTkButton(left_side, text="加载角色", width=100,
-                                    font=ui_fonts.ui_font(12),
-                                    fg_color="transparent",
-                                    text_color=TEXT_MUTED,
-                                    hover_color=HOVER_ALT,
-                                    border_color=BORDER_ALT,
-                                    border_width=1,
-                                    corner_radius=8,
-                                    command=self.switch_to_select_panel)
+                                   font=ui_fonts.ui_font(12),
+                                   fg_color="transparent",
+                                   text_color=EXP_TEXT_MUTED,
+                                   hover_color=EXP_HOVER,
+                                   border_color=EXP_BORDER_STRONG,
+                                   border_width=1,
+                                   corner_radius=6,
+                                   command=self.switch_to_select_panel)
         select_btn.pack(side='left', padx=3, pady=(0,5))
 
         right_side = ctk.CTkFrame(self.button_inner, fg_color="transparent")
         right_side.pack(side='right')
 
-        btn_cr = STATUS_OK
-        btn_ch = OK_HOVER
+        btn_cr = EXP_OK
+        btn_ch = EXP_OK_HOVER
         self.action_btn = ctk.CTkButton(
             right_side, text="✨ 创建角色", width=100,
             font=ui_fonts.ui_font(12),
             fg_color="transparent",
-            border_width=2,
+            border_width=1,
             border_color=btn_cr,
             text_color=btn_cr,
             hover_color=btn_ch,
-            corner_radius=10,
+            corner_radius=6,
             command=self._on_action_btn_click
         )
         self.action_btn.pack(side='left', padx=4, pady=(0,5))
 
-        btn_rr = REPORT
-        btn_rh = REPORT_HOVER
+        btn_rr = EXP_REPORT
+        btn_rh = EXP_REPORT_HOVER
         self.report_btn = ctk.CTkButton(
             right_side, text="📜 生成报告", width=100,
             font=ui_fonts.ui_font(12),
             fg_color="transparent",
-            border_width=2,
+            border_width=1,
             border_color=btn_rr,
             text_color=btn_rr,
             hover_color=btn_rh,
-            corner_radius=10,
+            corner_radius=6,
             command=self._generate_giantess
         )
         self.report_btn.pack(side='left', padx=4, pady=(0,5))
 
-        btn_dr = DUNGEON
-        btn_dh = DUNGEON_HOVER
+        btn_dr = EXP_DUNGEON
+        btn_dh = EXP_DUNGEON_HOVER
         self.dungeon_btn = ctk.CTkButton(
             right_side, text="🏰 进入副本", width=100,
             font=ui_fonts.ui_font(12),
             fg_color="transparent",
-            border_width=2,
+            border_width=1,
             border_color=btn_dr,
             text_color=btn_dr,
             hover_color=btn_dh,
-            corner_radius=10,
+            corner_radius=6,
             command=self._start_dungeon
         )
         self.dungeon_btn.pack(side='left', padx=4, pady=(0,5))
@@ -197,15 +197,15 @@ class ExplorationPanel(ctk.CTkFrame):
         right_frame.grid_columnconfigure(0, weight=1)
 
         # 风格栏 ─ 紧凑容器，整体可点击，hover 强化边框效果
-        style_frame = ctk.CTkFrame(right_frame, fg_color=BASE,
-                                   border_width=1, border_color=BORDER,
+        style_frame = ctk.CTkFrame(right_frame, fg_color=EXP_BG,
+                                   border_width=1, border_color=EXP_BORDER,
                                    corner_radius=10, cursor="hand2")
         style_frame.grid(row=0, column=0, sticky='ew', padx=5, pady=(0, 5))
         style_frame.bind("<Button-1>", lambda e: self._jump_to_style_settings())
         def _style_hover_enter(e):
-            style_frame.configure(border_color=GOLD_STRONG_BORDER, border_width=2)
+            style_frame.configure(border_color=EXP_STYLE_SELECTED_BORDER, border_width=2)
         def _style_hover_leave(e):
-            style_frame.configure(border_color=BORDER, border_width=1)
+            style_frame.configure(border_color=EXP_BORDER, border_width=1)
 
         style_frame.bind("<Enter>", _style_hover_enter)
         style_frame.bind("<Leave>", _style_hover_leave)
@@ -218,8 +218,8 @@ class ExplorationPanel(ctk.CTkFrame):
 
         self.landmark_hint_label = ctk.CTkLabel(
             style_bar, text="🏔 地标: 未选择",
-            text_color=SOFT,
-            font=ui_fonts.ui_font(11, "bold")
+            text_color=EXP_TEXT_SOFT,
+            font=ui_fonts.ui_font(12, "bold")
         )
         self.landmark_hint_label.pack(side='left', padx=(0, 14))
         self.landmark_hint_label.bind("<Button-1>", lambda e: self._jump_to_style_settings())
@@ -228,8 +228,8 @@ class ExplorationPanel(ctk.CTkFrame):
 
         self.quip_hint_label = ctk.CTkLabel(
             style_bar, text="💬 描述: 未选择",
-            text_color=SOFT,
-            font=ui_fonts.ui_font(11, "bold")
+            text_color=EXP_TEXT_SOFT,
+            font=ui_fonts.ui_font(12, "bold")
         )
         self.quip_hint_label.pack(side='left')
         self.quip_hint_label.bind("<Button-1>", lambda e: self._jump_to_style_settings())
@@ -237,8 +237,8 @@ class ExplorationPanel(ctk.CTkFrame):
         self.quip_hint_label.bind("<Leave>", _style_hover_leave)
 
         click_label = ctk.CTkLabel(style_bar, text="点击切换",
-                     text_color=TEXT_DISABLED,
-                     font=ui_fonts.ui_font(11))
+                     text_color=EXP_TEXT_DISABLED,
+                     font=ui_fonts.ui_font(12))
         click_label.pack(side='left', padx=(20,0))
         click_label.bind("<Enter>", _style_hover_enter)
         click_label.bind("<Leave>", _style_hover_leave)
@@ -311,9 +311,9 @@ class ExplorationPanel(ctk.CTkFrame):
         self._repack_action_buttons()
         self.action_btn.configure(
             text="✨ 创建角色",
-            border_color=STATUS_OK,
-            text_color=STATUS_OK,
-            hover_color=OK_HOVER
+            border_color=EXP_OK,
+            text_color=EXP_OK,
+            hover_color=EXP_OK_HOVER
         )
 
     def switch_to_state_panel(self, state_data=None):
@@ -660,7 +660,7 @@ class _StuckRelocateDialog(BaseDialog):
             "all_damaged": "角色所在范围（50×身高×个性强度）内的独特建筑耐久均已低于 0.5。",
         }.get(reason, "角色目前没有可去的地标地址。")
         ctk.CTkLabel(self, text=f"📡 {reason_text}", font=ui_fonts.ui_font(12),
-                     text_color=SOFT, justify='left', wraplength=520).pack(
+                     text_color=EXP_TEXT_SOFT, justify='left', wraplength=520).pack(
             anchor='w', padx=18, pady=(16, 6))
 
         addresses = self.options.get("addresses", [])
@@ -672,7 +672,7 @@ class _StuckRelocateDialog(BaseDialog):
             labels.append(label)
         if labels:
             ctk.CTkLabel(self, text="可切换的地标地址：", font=ui_fonts.ui_font(12, "bold"),
-                         text_color=TEXT_MUTED).pack(anchor='w', padx=18, pady=(14, 2))
+                         text_color=EXP_TEXT_MUTED).pack(anchor='w', padx=18, pady=(14, 2))
             self.combo = ctk.CTkComboBox(self, values=labels, state="readonly", width=520,
                                          height=30, font=ui_fonts.ui_font(11))
             self.combo.set(labels[0])
@@ -680,7 +680,7 @@ class _StuckRelocateDialog(BaseDialog):
         else:
             self.combo = None
             ctk.CTkLabel(self, text="（当前选中风格内没有已注册地标的可切换地址）",
-                         font=ui_fonts.ui_font(11), text_color=SOFT).pack(
+                         font=ui_fonts.ui_font(11), text_color=EXP_TEXT_SOFT).pack(
                 anchor='w', padx=18, pady=(14, 2))
 
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -688,22 +688,22 @@ class _StuckRelocateDialog(BaseDialog):
         if self.combo is not None:
             ctk.CTkButton(btn_frame, text="🚶 前往该地址", width=130,
                           font=ui_fonts.ui_font(12), command=self._apply_move,
-                          fg_color="transparent", border_width=1, border_color=STATUS_OK,
-                          text_color=STATUS_OK, hover_color=OK_HOVER).pack(side='left', padx=(0, 8))
+                          fg_color="transparent", border_width=1, border_color=EXP_OK,
+                          text_color=EXP_OK, hover_color=EXP_OK_HOVER).pack(side='left', padx=(0, 8))
         if self.options.get("worlds"):
             ctk.CTkButton(btn_frame, text="🌍 切换世界观（125 AP）", width=200,
                           font=ui_fonts.ui_font(12), command=self._apply_world_switch,
                           fg_color="transparent", border_width=1,
-                          border_color=DUNGEON, text_color=DUNGEON,
-                          hover_color=DUNGEON_HOVER).pack(side='left', padx=(0, 8))
+                          border_color=EXP_DUNGEON, text_color=EXP_DUNGEON,
+                          hover_color=EXP_DUNGEON_HOVER).pack(side='left', padx=(0, 8))
         ctk.CTkButton(btn_frame, text="💤 放弃（负向演化）", width=170,
                       font=ui_fonts.ui_font(12), command=self._decline,
-                      fg_color="transparent", border_width=1, border_color=ERR_STRONG,
-                      text_color=ERR_STRONG, hover_color=ERR_HOVER).pack(side='left')
+                      fg_color="transparent", border_width=1, border_color=EXP_ERR,
+                      text_color=EXP_ERR, hover_color=EXP_ERR_HOVER).pack(side='left')
 
         ctk.CTkLabel(self,
                      text="切换地址消耗 = 0.05 × 距离 ÷ 身高 的行动点数；不切换则进入负向演化。",
-                     font=ui_fonts.ui_font(10), text_color=TEXT_DISABLED).pack(
+                     font=ui_fonts.ui_font(10), text_color=EXP_TEXT_DISABLED).pack(
             anchor='w', padx=18, pady=(10, 0))
 
     def _entry_label(self, it) -> str:

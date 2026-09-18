@@ -17,10 +17,11 @@ from ui.common.address_dlg import AddressTextDialog
 from ui.quip_dlg import QuipDialog, _TargetSelectDialog
 from address_model import format_addr_verbose
 from ui.common.theme import (
-    BASE, HOVER, BORDER_ALT, TEXT, SOFT,
-    PNL_BG, HOVER_ALT, MENU_HOVER, LINK_BLUE,
-    BLUE_HOVER, STATUS_OK, OK_HOVER, ERR_STRONG, ERR_HOVER,
-    QUIP_TYPE_COLORS, TYPEVIEW, TYPEVIEW_HOVER, PLACEHOLDER
+    QUIP_BG, QUIP_PANEL_BG, QUIP_BORDER_STRONG, QUIP_HOVER,
+    QUIP_MENU_HOVER, QUIP_CARD_HOVER, QUIP_TEXT, QUIP_TEXT_SOFT,
+    QUIP_PLACEHOLDER, QUIP_LINK, QUIP_OK, QUIP_OK_HOVER,
+    QUIP_ERR, QUIP_ERR_HOVER, QUIP_TYPEVIEW, QUIP_TYPEVIEW_HOVER,
+    QUIP_TYPE_COLORS,
 )
 from ui.common import fonts as ui_fonts
 
@@ -74,33 +75,33 @@ class QuipCardManager(CardManager):
     # ----- 风格控件 -----
     def create_style_widgets(self, parent):
         ctk.CTkLabel(parent, text="当前风格:",
-                     text_color=SOFT).pack(side='left', padx=5)
+                     text_color=QUIP_TEXT_SOFT).pack(side='left', padx=5)
         self.style_combo = ctk.CTkComboBox(
             parent, variable=self.style_var, state="readonly",
             width=150,
-            fg_color=PNL_BG,
-            border_color=BORDER_ALT,
-            button_color=BORDER_ALT,
-            button_hover_color=MENU_HOVER,
-            dropdown_fg_color=PNL_BG,
-            dropdown_hover_color=HOVER_ALT
+            fg_color=QUIP_PANEL_BG,
+            border_color=QUIP_BORDER_STRONG,
+            button_color=QUIP_BORDER_STRONG,
+            button_hover_color=QUIP_MENU_HOVER,
+            dropdown_fg_color=QUIP_PANEL_BG,
+            dropdown_hover_color=QUIP_HOVER
         )
         self.style_combo.pack(side='left', padx=7)
         self._rebuild_dropdown()
         _btn_spec = {"fg_color": "transparent", "border_width": 1, "corner_radius": 8}
-        _btn_muted = {"text_color": SOFT,
-                      "hover_color": HOVER_ALT,
-                      "border_color": BORDER_ALT}
+        _btn_muted = {"text_color": QUIP_TEXT_SOFT,
+                      "hover_color": QUIP_HOVER,
+                      "border_color": QUIP_BORDER_STRONG}
         ctk.CTkButton(parent, text="新建", width=80, command=self.create_style,
-                       text_color=STATUS_OK,
-                       hover_color=OK_HOVER,
-                       border_color=STATUS_OK,
+                       text_color=QUIP_OK,
+                       hover_color=QUIP_OK_HOVER,
+                       border_color=QUIP_OK,
                        **_btn_spec).pack(side='left', padx=2)
         ctk.CTkButton(parent, text="重命名", width=80, command=self.rename_style,
                        **_btn_spec, **_btn_muted).pack(side='left', padx=2)
-        _del_spec = {"text_color": ERR_STRONG,
-                     "hover_color": ERR_HOVER,
-                     "border_color": ERR_STRONG}
+        _del_spec = {"text_color": QUIP_ERR,
+                     "hover_color": QUIP_ERR_HOVER,
+                     "border_color": QUIP_ERR}
         ctk.CTkButton(parent, text="删除", width=80, command=self.delete_style,
                        **_btn_spec, **_del_spec).pack(side='left', padx=2)
         # 描述风格注册地址：世界观 + 该风格注册的若干上级级
@@ -143,7 +144,7 @@ class QuipCardManager(CardManager):
         for pack in packs:
             display = f"⚔ {os.path.splitext(pack)[0]}"
             items.append(display)
-            text_colors[display] = LINK_BLUE
+            text_colors[display] = QUIP_LINK
             self._pack_display_map[display] = pack
         return items, text_colors
 
@@ -159,13 +160,13 @@ class QuipCardManager(CardManager):
                 text_colors=text_colors,
                 command=self._on_dropdown_select,
                 height=200, button_height=28,
-                fg_color=BASE,
-                hover_color=BLUE_HOVER,
-                scrollbar_button_color=HOVER,
-                scrollbar_button_hover_color=HOVER_ALT,
-                frame_border_color=BORDER_ALT,
-                text_color=TEXT,
-                button_color=BASE,
+                fg_color=QUIP_BG,
+                hover_color=QUIP_CARD_HOVER,
+                scrollbar_button_color=QUIP_HOVER,
+                scrollbar_button_hover_color=QUIP_HOVER,
+                frame_border_color=QUIP_BORDER_STRONG,
+                text_color=QUIP_TEXT,
+                button_color=QUIP_BG,
                 frame_border_width=1,
                 justify="left"
             )
@@ -219,7 +220,7 @@ class QuipCardManager(CardManager):
             if colors:
                 color = colors[1] if mode == "Dark" else colors[0]
             else:
-                color = PLACEHOLDER
+                color = QUIP_PLACEHOLDER
             tags.append((start, end, color))
         return tags
 
@@ -291,22 +292,22 @@ class QuipCardManager(CardManager):
     # ---------- 体型选择 ----------
     def _create_size_widgets(self):
         ctk.CTkLabel(self.size_row, text="体型:",
-                     text_color=SOFT).pack(side='left', padx=5)
+                     text_color=QUIP_TEXT_SOFT).pack(side='left', padx=5)
         for cat in self.SIZE_CATEGORIES:
             rb = ctk.CTkRadioButton(
                 self.size_row, text=self.SIZE_DISPLAY.get(cat, cat),
                 variable=self.size_var, value=cat,
                 command=self.on_size_changed,
-                fg_color=(HOVER[1], TEXT[1]),
-                border_color=BORDER_ALT,
-                hover_color=HOVER,
-                text_color=TEXT
+                fg_color=(QUIP_HOVER[1], QUIP_TEXT[1]),
+                border_color=QUIP_BORDER_STRONG,
+                hover_color=QUIP_HOVER,
+                text_color=QUIP_TEXT
             )
             rb.pack(side='left', padx=5)
         _purple_btn = {"fg_color": "transparent", "border_width": 1,
-                       "border_color": TYPEVIEW,
-                       "text_color": TYPEVIEW,
-                       "hover_color": TYPEVIEW_HOVER,
+                       "border_color": QUIP_TYPEVIEW,
+                       "text_color": QUIP_TYPEVIEW,
+                       "hover_color": QUIP_TYPEVIEW_HOVER,
                        "corner_radius": 8}
         self.type_view_btn = ctk.CTkButton(self.size_row, text="类型视图", width=80,
                                            command=self.toggle_type_view, **_purple_btn)
@@ -317,17 +318,17 @@ class QuipCardManager(CardManager):
         ctk.CTkRadioButton(parent, text="介入度\u2191", variable=self.sort_var,
                            value="intrusion_asc", command=self._on_category_sort_changed,
                            font=ui_fonts.ui_font(13),
-                           fg_color=(HOVER[1], TEXT[1]),
-                           border_color=BORDER_ALT,
-                           hover_color=HOVER,
-                           text_color=TEXT).pack(side='left', padx=5)
+                           fg_color=(QUIP_HOVER[1], QUIP_TEXT[1]),
+                           border_color=QUIP_BORDER_STRONG,
+                           hover_color=QUIP_HOVER,
+                           text_color=QUIP_TEXT).pack(side='left', padx=5)
         ctk.CTkRadioButton(parent, text="破坏性\u2191", variable=self.sort_var,
                            value="destruction_asc", command=self._on_category_sort_changed,
                            font=ui_fonts.ui_font(13),
-                           fg_color=(HOVER[1], TEXT[1]),
-                           border_color=BORDER_ALT,
-                           hover_color=HOVER,
-                           text_color=TEXT).pack(side='left', padx=5)
+                           fg_color=(QUIP_HOVER[1], QUIP_TEXT[1]),
+                           border_color=QUIP_BORDER_STRONG,
+                           hover_color=QUIP_HOVER,
+                           text_color=QUIP_TEXT).pack(side='left', padx=5)
 
     # ---------- 视图切换 ----------
     def show_first_view(self):
@@ -481,7 +482,7 @@ class QuipCardManager(CardManager):
         if not cat_items:
             ctk.CTkLabel(self.first_view, text="暂无描述，请先添加",
                          font=ui_fonts.ui_font(14),
-                         text_color=SOFT).pack(pady=20)
+                         text_color=QUIP_TEXT_SOFT).pack(pady=20)
             return
 
         sort_mode = self.sort_var.get()
@@ -509,7 +510,7 @@ class QuipCardManager(CardManager):
                 title_extra=[{
                     "text": preview,
                     "font": ui_fonts.ui_font(12),
-                    "text_color": SOFT
+                    "text_color": QUIP_TEXT_SOFT
                 }],
                 on_click=lambda c=cat: self.show_second_view(c),
                 gold_hover=True
@@ -542,10 +543,10 @@ class QuipCardManager(CardManager):
                 title_extra=[
                     {"text": f"  ({display_len}字)",
                      "font": ui_fonts.ui_font(13, "bold"),
-                     "text_color": TEXT},
+                     "text_color": QUIP_TEXT},
                     {"text": f"步进: {step_val:.2f}",
                      "font": ui_fonts.ui_font(13),
-                     "text_color": SOFT},
+                     "text_color": QUIP_TEXT_SOFT},
                 ],
                 detail=clean_text,
                 is_detail_textbox=True,
@@ -558,24 +559,24 @@ class QuipCardManager(CardManager):
                     {"text": "复制",
                      "command": lambda i=item: self.copy_item(i),
                      "fg_color": "transparent", "border_width": 1,
-                     "border_color": BORDER_ALT,
-                     "text_color": SOFT,
-                     "hover_color": HOVER_ALT,
+                     "border_color": QUIP_BORDER_STRONG,
+                     "text_color": QUIP_TEXT_SOFT,
+                     "hover_color": QUIP_HOVER,
                      "corner_radius": 6, "width": 50, "height": 25,
                      "pack_kw": {"side": "top", "pady": 2}},
                     {"text": "移动",
                      "command": lambda i=item: self.move_item(i),
                      "fg_color": "transparent", "border_width": 1,
-                     "border_color": BORDER_ALT,
-                     "text_color": SOFT,
-                     "hover_color": HOVER_ALT,
+                     "border_color": QUIP_BORDER_STRONG,
+                     "text_color": QUIP_TEXT_SOFT,
+                     "hover_color": QUIP_HOVER,
                      "corner_radius": 6, "width": 50, "height": 25,
                      "pack_kw": {"side": "top", "pady": 2}},
                     {"text": "删除",
                      "fg_color": "transparent",
-"text_color": ERR_STRONG,
-            "hover_color": ERR_HOVER,
-            "border_width": 1, "border_color": ERR_STRONG,
+"text_color": QUIP_ERR,
+            "hover_color": QUIP_ERR_HOVER,
+            "border_width": 1, "border_color": QUIP_ERR,
                      "corner_radius": 6, "width": 50, "height": 25,
                      "command": lambda i=item: self.delete_item(i),
                      "pack_kw": {"side": "top", "pady": 2}},
@@ -771,9 +772,9 @@ class QuipTypeViewManager(TreeviewManager):
 
         _btn_style = dict(fg_color="transparent", border_width=1, corner_radius=8,
                           font=ui_fonts.ui_font(13))
-        _btn_text = SOFT
-        _btn_hover = HOVER
-        _btn_border = BORDER_ALT
+        _btn_text = QUIP_TEXT_SOFT
+        _btn_hover = QUIP_HOVER
+        _btn_border = QUIP_BORDER_STRONG
 
         left_frame = ctk.CTkFrame(self.button_frame, fg_color="transparent")
         left_frame.pack(side='left', fill='x', expand=True)
@@ -786,9 +787,9 @@ class QuipTypeViewManager(TreeviewManager):
                       border_color=_btn_border, **_btn_style).pack(side='left', padx=5)
         ctk.CTkButton(left_frame, text="删除", command=self.delete_item, width=90,
                       fg_color="transparent", border_width=1, corner_radius=8,
-text_color=ERR_STRONG,
-                hover_color=ERR_HOVER,
-                border_color=ERR_STRONG,
+text_color=QUIP_ERR,
+                hover_color=QUIP_ERR_HOVER,
+                border_color=QUIP_ERR,
                       font=ui_fonts.ui_font(13)).pack(side='left', padx=5)
 
     def update_theme(self, theme_mode: str):

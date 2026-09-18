@@ -17,11 +17,10 @@ from logic import format_size, length_unit_label
 from ui.common.widgets import CTkSegmentedControl
 from ui.exploration.creation_params_dlg import PersonalityCustomDialog, PresetCustomDialog
 from ui.common.theme import (
-    TEXT, HARD_TITLE, TITLE, SOFT, TEXT_MUTED,
-    PLACEHOLDER, TEXT_DISABLED,
-    PNL_BG, PNL_BORDER, BORDER_ALT, HOVER_ALT, MENU_HOVER,
-    PROGRESS_BTN, PROGRESS_BTN_HOVER, SLIDER_TRACK,
-    GOLD, GOLD_BTN, GOLD_BTN_HOVER,
+    PARAMS_PANEL_BG, PARAMS_PANEL_BORDER, PARAMS_BORDER_STRONG, PARAMS_HOVER,
+    PARAMS_MENU_HOVER, PARAMS_SLIDER_BTN, PARAMS_SLIDER_BTN_HOVER, PARAMS_SLIDER_TRACK,
+    PARAMS_GOLDEN_SLIDER_BTN, PARAMS_GOLDEN_SLIDER_BTN_HOVER, PARAMS_GOLDEN_TEXT, PARAMS_TEXT_SOFT,
+    PARAMS_TEXT_MUTED, PARAMS_TEXT_DISABLED, PARAMS_LABEL, PARAMS_PLACEHOLDER,
 )
 from ui.common import fonts as ui_fonts
 
@@ -52,8 +51,8 @@ class CreationParamsPanel(ctk.CTkFrame):
             gui_ref: 主界面实例（用于调用导出角色卡等方法）
             on_* : 可选回调
         """
-        super().__init__(parent, fg_color=PNL_BG,
-                         border_width=1, border_color=PNL_BORDER,
+        super().__init__(parent, fg_color=PARAMS_PANEL_BG,
+                         border_width=1, border_color=PARAMS_PANEL_BORDER,
                          corner_radius=10)
         self.grid_columnconfigure(0, weight=1)
         self.parent = parent
@@ -174,19 +173,19 @@ class CreationParamsPanel(ctk.CTkFrame):
             self.greed_slider.set(-5)
             self.on_greed_change(-5)
             self.greed_slider.configure(state="disabled",
-                                         button_color=TEXT_DISABLED,
-                                         button_hover_color=TEXT_DISABLED,
-                                         progress_color=SLIDER_TRACK,
-                                          fg_color=SLIDER_TRACK)
-            self.greed_title_label.configure(text_color=TEXT_DISABLED)
-            self.greed_display_label.configure(text_color=TEXT_DISABLED)
+                                         button_color=PARAMS_TEXT_DISABLED,
+                                         button_hover_color=PARAMS_TEXT_DISABLED,
+                                         progress_color=PARAMS_SLIDER_TRACK,
+                                          fg_color=PARAMS_SLIDER_TRACK)
+            self.greed_title_label.configure(text_color=PARAMS_TEXT_DISABLED)
+            self.greed_display_label.configure(text_color=PARAMS_TEXT_DISABLED)
             self.custom_unit_label.configure(text=self._height_unit())
         else:
             self.greed_slider.configure(state="normal",
-                                         button_color=GOLD_BTN,
-                                         button_hover_color=GOLD_BTN_HOVER,
-                                         progress_color=GOLD_BTN,
-                                         fg_color=HOVER_ALT)
+                                        button_color=PARAMS_GOLDEN_SLIDER_BTN,
+                                        button_hover_color=PARAMS_GOLDEN_SLIDER_BTN_HOVER,
+                                        progress_color=PARAMS_GOLDEN_SLIDER_BTN,
+                                        fg_color=PARAMS_HOVER)
             self.on_greed_change(self.greed_slider.get())
             self.custom_unit_label.configure(text=self._height_unit())
 
@@ -199,12 +198,12 @@ class CreationParamsPanel(ctk.CTkFrame):
         # 更新显示和配色
         if val < 0:
             self.greed_display_label.configure(text="关闭",
-                                               text_color=TEXT_DISABLED)
-            self.greed_title_label.configure(text_color=TEXT_DISABLED)
+                                               text_color=PARAMS_TEXT_DISABLED)
+            self.greed_title_label.configure(text_color=PARAMS_TEXT_DISABLED)
         else:
             self.greed_display_label.configure(text=f"意愿值: {int(val)}%",
-                                               text_color=GOLD)
-            self.greed_title_label.configure(text_color=GOLD)
+                                               text_color=PARAMS_GOLDEN_TEXT)
+            self.greed_title_label.configure(text_color=PARAMS_GOLDEN_TEXT)
 
     def _sync_personality_ui(self):
         """根据当前状态刷新性格按钮文本与描述，并触发外部回调。"""
@@ -243,7 +242,7 @@ class CreationParamsPanel(ctk.CTkFrame):
 
         def smart_fmt(v):
             if self.world_setting == "rel_giant":
-                return f"{v:.2f}倍"
+                return f"{v:.1f}倍"
             return format_size(v)
 
         self.range_label.configure(text=f"范围: {smart_fmt(min_value)} - {smart_fmt(max_value)}")
@@ -280,17 +279,17 @@ class CreationParamsPanel(ctk.CTkFrame):
     def _build_name_input(self):
         # 章节标题 + 导出导入
         title_frame = ctk.CTkFrame(self, fg_color="transparent")
-        title_frame.grid(row=0, column=0, columnspan=5, sticky='ew', padx=(14, 16), pady=(12, 4))
+        title_frame.grid(row=0, column=0, columnspan=5, sticky='ew', padx=(14, 16), pady=(8, 3))
 
         ctk.CTkLabel(title_frame, text="✨ 角色邂逅",
                      font=ui_fonts.ui_font(13, "bold"),
-                     text_color=TITLE).pack(side='left')
+                     text_color=PARAMS_LABEL).pack(side='left')
 
         sep = ctk.CTkFrame(
             self,
             height=3,
             corner_radius=0,
-            fg_color=MENU_HOVER
+            fg_color=PARAMS_MENU_HOVER
         )
         sep.grid(
             row=1,
@@ -302,9 +301,9 @@ class CreationParamsPanel(ctk.CTkFrame):
         )
 
         btn_fg = "transparent"
-        btn_hover = HOVER_ALT
-        btn_border = BORDER_ALT
-        btn_text = TEXT_MUTED
+        btn_hover = PARAMS_HOVER
+        btn_border = PARAMS_BORDER_STRONG
+        btn_text = PARAMS_TEXT_MUTED
 
         self.export_btn_title = ctk.CTkButton(title_frame, text="📥 导出", width=50,
                                                fg_color=btn_fg, text_color=btn_text,
@@ -335,26 +334,26 @@ class CreationParamsPanel(ctk.CTkFrame):
         name_entry = ctk.CTkEntry(name_frame, textvariable=self.name_var,
                                   placeholder_text="名字",
                                   border_width=1,
-                                  border_color=BORDER_ALT,
-                                  fg_color=PNL_BG)
+                                  border_color=PARAMS_BORDER_STRONG,
+                                  fg_color=PARAMS_PANEL_BG)
         name_entry.grid(row=0, column=0, sticky='ew', padx=(0, 6))
 
         self.nick_entry = ctk.CTkEntry(
             name_frame,
             placeholder_text="昵称",
-            placeholder_text_color=PLACEHOLDER,
+            placeholder_text_color=PARAMS_PLACEHOLDER,
             border_width=1,
-            border_color=BORDER_ALT,
-            fg_color=PNL_BG
+            border_color=PARAMS_BORDER_STRONG,
+            fg_color=PARAMS_PANEL_BG
         )
         self.nick_entry.grid(row=0, column=1, sticky='ew', padx=(0, 6))
 
         self.random_btn = ctk.CTkButton(name_frame, text="🎲", width=34,
                                         fg_color="transparent",
-                                        text_color=TEXT_MUTED,
-                                        hover_color=HOVER_ALT,
+                                        text_color=PARAMS_TEXT_MUTED,
+                                        hover_color=PARAMS_HOVER,
                                         border_width=1,
-                                        border_color=MENU_HOVER,
+                                        border_color=PARAMS_MENU_HOVER,
                                         command=self.random_fill_name_nick)
         self.random_btn.grid(row=0, column=2, padx=(6, 0))
 
@@ -378,21 +377,21 @@ class CreationParamsPanel(ctk.CTkFrame):
         height_row.columnconfigure(4, weight=0)
 
         self._ref_height_label = ctk.CTkLabel(
-            height_row, text="参照身高", font=ui_fonts.ui_font(10),
-            text_color=TITLE
+            height_row, text="参照身高", font=ui_fonts.ui_font(12),
+            text_color=PARAMS_LABEL
         )
         self._ref_height_label.grid(row=0, column=0, padx=(0, 6))
         self.original_height_var = tk.StringVar(value="1.6")
         ref_entry = ctk.CTkEntry(
             height_row, textvariable=self.original_height_var,
             width=48, justify='center', border_width=1,
-            border_color=BORDER_ALT,
-            fg_color=PNL_BG
+            border_color=PARAMS_BORDER_STRONG,
+            fg_color=PARAMS_PANEL_BG
         )
         ref_entry.grid(row=0, column=1, padx=(0, 6), sticky='w')
         self.orig_unit_label = ctk.CTkLabel(
-            height_row, text=length_unit_label(), font=ui_fonts.ui_font(10),
-            text_color=PLACEHOLDER
+            height_row, text=length_unit_label(), font=ui_fonts.ui_font(12),
+            text_color=PARAMS_PLACEHOLDER
         )
         self.orig_unit_label.grid(row=0, column=2, padx=(0, 6), sticky='w')
 
@@ -400,14 +399,14 @@ class CreationParamsPanel(ctk.CTkFrame):
         self.height_option = tk.StringVar(value="random")
         mode_container = ctk.CTkFrame(height_row, fg_color="transparent")
         mode_container.grid(row=0, column=3, columnspan=2, sticky='e')
-        ctk.CTkLabel(mode_container, text="巨大化", font=ui_fonts.ui_font(10),
-                     text_color=TITLE).pack(side='left', padx=(0, 6))
+        ctk.CTkLabel(mode_container, text="巨大化", font=ui_fonts.ui_font(12),
+                     text_color=PARAMS_LABEL).pack(side='left', padx=(0, 6))
         self._mode_segment = CTkSegmentedControl(
             mode_container,
             values=["随机", "指定"],
             command=self._set_height_mode,
             width=100, height=23, corner_radius=5,
-            font=ui_fonts.ui_font(10)
+            font=ui_fonts.ui_font(12)
         )
         self._mode_segment.pack(side='left')
 
@@ -419,21 +418,21 @@ class CreationParamsPanel(ctk.CTkFrame):
         self.custom_frame.columnconfigure(1, weight=0)
         self.custom_frame.columnconfigure(2, weight=1)
         self.current_height_label = ctk.CTkLabel(
-            self.custom_frame, text="当前身高", font=ui_fonts.ui_font(10),
-            text_color=TITLE
+            self.custom_frame, text="当前身高", font=ui_fonts.ui_font(12),
+            text_color=PARAMS_LABEL
         )
         self.current_height_label.grid(row=0, column=0, padx=(0, 6))
         self.custom_height_var = tk.StringVar(value="100")
         self.custom_height_entry = ctk.CTkEntry(
             self.custom_frame, textvariable=self.custom_height_var,
             width=50, justify='center', border_width=1,
-            border_color=BORDER_ALT,
-            fg_color=PNL_BG
+            border_color=PARAMS_BORDER_STRONG,
+            fg_color=PARAMS_PANEL_BG
         )
         self.custom_height_entry.grid(row=0, column=1, padx=(0, 6), sticky='w')
         self.custom_unit_label = ctk.CTkLabel(
-            self.custom_frame, text=self._height_unit(), font=ui_fonts.ui_font(10),
-            text_color=PLACEHOLDER
+            self.custom_frame, text=self._height_unit(), font=ui_fonts.ui_font(12),
+            text_color=PARAMS_PLACEHOLDER
         )
         self.custom_unit_label.grid(row=0, column=2, sticky='w')
 
@@ -452,27 +451,27 @@ class CreationParamsPanel(ctk.CTkFrame):
         self.min_slider = ctk.CTkSlider(
             self.range_frame, from_=1, to=5, number_of_steps=24,
                 command=self.on_slider_change,
-                button_color=PROGRESS_BTN,
-                button_hover_color=PROGRESS_BTN_HOVER,
-                progress_color=PROGRESS_BTN,
-                fg_color=HOVER_ALT
+                button_color=PARAMS_SLIDER_BTN,
+                button_hover_color=PARAMS_SLIDER_BTN_HOVER,
+                progress_color=PARAMS_SLIDER_BTN,
+                fg_color=PARAMS_HOVER
         )
         self.min_slider.set(2)
         self.min_slider.grid(row=0, column=0, sticky='ew', padx=(0, 8))
 
         self.range_label = ctk.CTkLabel(
-            self.range_frame, text="", font=("Consolas", 10),
-            text_color=SOFT
+            self.range_frame, text="", font=("Consolas", 12),
+            text_color=PARAMS_TEXT_SOFT
         )
         self.range_label.grid(row=0, column=1, padx=8)
 
         self.max_slider = ctk.CTkSlider(
             self.range_frame, from_=1, to=5, number_of_steps=24,
             command=self.on_slider_change,
-button_color=PROGRESS_BTN,
-                button_hover_color=PROGRESS_BTN_HOVER,
-                progress_color=PROGRESS_BTN,
-                fg_color=HOVER_ALT
+            button_color=PARAMS_SLIDER_BTN,
+            button_hover_color=PARAMS_SLIDER_BTN_HOVER,
+            progress_color=PARAMS_SLIDER_BTN,
+            fg_color=PARAMS_HOVER
         )
         self.max_slider.set(3)
         self.max_slider.grid(row=0, column=2, sticky='ew', padx=(8, 0))
@@ -504,26 +503,26 @@ button_color=PROGRESS_BTN,
         self.greed_row.columnconfigure(2, weight=1)
 
         self.greed_title_label = ctk.CTkLabel(
-            self.greed_row, text="少女的意愿   ", font=ui_fonts.ui_font(10, "italic"),
-            text_color=TEXT_DISABLED
+            self.greed_row, text="少女的意愿   ", font=ui_fonts.ui_font(12, "italic"),
+            text_color=PARAMS_TEXT_DISABLED
         )
         self.greed_title_label.grid(row=0, column=0, padx=(0, 6), sticky='w')
 
         self.greed_slider = ctk.CTkSlider(
             self.greed_row, from_=-5, to=100, number_of_steps=21,
             width=180,
-            button_color=GOLD_BTN,
-            button_hover_color=GOLD_BTN_HOVER,
-            progress_color=GOLD_BTN,
-            fg_color=HOVER_ALT,
+            button_color=PARAMS_GOLDEN_SLIDER_BTN,
+            button_hover_color=PARAMS_GOLDEN_SLIDER_BTN_HOVER,
+            progress_color=PARAMS_GOLDEN_SLIDER_BTN,
+            fg_color=PARAMS_HOVER,
             command=self.on_greed_change
         )
         self.greed_slider.set(-5)
         self.greed_slider.grid(row=0, column=1, padx=(4, 8))
 
         self.greed_display_label = ctk.CTkLabel(
-            self.greed_row, text="关闭", font=ui_fonts.ui_font(10),
-            text_color=TEXT_DISABLED
+            self.greed_row, text="关闭", font=ui_fonts.ui_font(12),
+            text_color=PARAMS_TEXT_DISABLED
         )
         self.greed_display_label.grid(row=0, column=2, sticky='e', padx=(0, 4))
 
@@ -534,10 +533,10 @@ button_color=PROGRESS_BTN,
         row.columnconfigure(1, weight=1)
 
         btn_style = dict(
-            font=ui_fonts.ui_font(10),
-            fg_color="transparent", text_color=SOFT,
-            hover_color=HOVER_ALT,
-            border_width=1, border_color=MENU_HOVER,
+            font=ui_fonts.ui_font(12),
+            fg_color="transparent", text_color=PARAMS_TEXT_SOFT,
+            hover_color=PARAMS_HOVER,
+            border_width=1, border_color=PARAMS_MENU_HOVER,
             corner_radius=13,
         )
 
@@ -551,13 +550,13 @@ button_color=PROGRESS_BTN,
         self.preset_btn.grid(row=0, column=1, sticky='ew', padx=(4, 0))
 
         desc_row = ctk.CTkFrame(self, fg_color="transparent")
-        desc_row.grid(row=9, column=0, columnspan=5, sticky='ew', padx=(14, 16), pady=(1, 20))
+        desc_row.grid(row=9, column=0, columnspan=5, sticky='ew', padx=(14, 16), pady=(1, 10))
         self.personality_desc_label = ctk.CTkLabel(
             desc_row,
             text="",
-            text_color=PLACEHOLDER,
+            text_color=PARAMS_PLACEHOLDER,
             wraplength=400,
-            font=ui_fonts.ui_font(10),
+            font=ui_fonts.ui_font(12),
             anchor="w"
         )
         self.personality_desc_label.pack(side='left', fill='x', expand=True)

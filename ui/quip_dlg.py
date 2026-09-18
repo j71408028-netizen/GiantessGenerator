@@ -8,7 +8,9 @@ import ui.common
 from logic import SIZE_CATEGORIES
 from persistence import QuipRepo
 from ui.common.dialogs import BaseDialog
-from ui.common.theme import QUIP_TYPE_COLORS, COLD_DEL_BG, COLD_DEL_HOVER
+from ui.common.theme import (
+    QUIP_DLG_DELETE_BG, QUIP_DLG_DELETE_HOVER, QUIP_TYPE_COLORS,
+)
 
 
 
@@ -199,7 +201,7 @@ class QuipDialog(BaseDialog):
         ctk.CTkButton(right_frame, text="标记", height=28, font=self.UI_FONT,
                       command=self._insert_mark_tag).pack(padx=15, pady=3)
         ctk.CTkButton(right_frame, text="删除", height=28, font=self.UI_FONT,
-                      command=self._delete_tag, fg_color=COLD_DEL_BG, hover_color=COLD_DEL_HOVER).pack(padx=15, pady=3)
+                      command=self._delete_tag, fg_color=QUIP_DLG_DELETE_BG, hover_color=QUIP_DLG_DELETE_HOVER).pack(padx=15, pady=3)
 
         # 初始化细分选项
         self._on_type_changed()

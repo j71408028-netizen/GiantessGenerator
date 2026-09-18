@@ -11,12 +11,12 @@ from services.image_service import ImageService
 from paths import icon_dir
 from ui.common import fonts as ui_fonts
 from ui.common.theme import (
-    TEXT, DLG_BORDER, DLG_HOVER, DLG_BTN_PRIMARY, DLG_BTN_PRIMARY_HOVER, DLG_FG,
-    SOFT, HARD_TITLE, PLACEHOLDER, TEXT_WHITE,
-    PNL_BG, BORDER_ALT, HOVER_ALT,
-    STATUS_OK, OK_BTN_HOVER, STATUS_ERR,
-    PROGRESS_BTN, PROGRESS_BTN_HOVER,
-    CANVAS_BG, CANVAS_BORDER, OVERLAY, GOLD_OUTLINE,
+    DLG_BG, DLG_PANEL_BG, DLG_BORDER, DLG_BORDER_STRONG,
+    DLG_HOVER, DLG_SLIDER_BTN, DLG_SLIDER_BTN_HOVER, DLG_BTN_PRIMARY,
+    DLG_BTN_PRIMARY_HOVER, DLG_TEXT, DLG_TEXT_SOFT, DLG_TITLE,
+    DLG_PLACEHOLDER, DLG_TEXT_WHITE, DLG_OK, DLG_OK_BTN_HOVER,
+    DLG_ERR, DLG_CROP_OUTLINE, DLG_CANVAS_BG, DLG_CANVAS_BORDER,
+    DLG_OVERLAY,
 )
 
 
@@ -72,7 +72,7 @@ class BaseDialog(ctk.CTkToplevel):
 
     def __init__(self, parent, fg_color=None, corner_radius=8, *args, **kwargs):
         if fg_color is None:
-            fg_color = DLG_FG
+            fg_color = DLG_BG
         super().__init__(parent.winfo_toplevel(), fg_color=fg_color)
         self._dialog_geometry_size = None  # 显式设置的窗口逻辑尺寸 (宽, 高)
         self._center_reference = parent.winfo_toplevel()
@@ -191,12 +191,12 @@ class BaseDialog(ctk.CTkToplevel):
                 parent, text=text, width=92, height=32,
                 corner_radius=self.corner_radius,
                 fg_color=DLG_BTN_PRIMARY, hover_color=DLG_BTN_PRIMARY_HOVER,
-                text_color=TEXT_WHITE, font=ui_fonts.ui_font(13),
+                text_color=DLG_TEXT_WHITE, font=ui_fonts.ui_font(13),
                 command=command)
         return ctk.CTkButton(
             parent, text=text, width=92, height=32,
             corner_radius=self.corner_radius,
-            fg_color="transparent", text_color=TEXT, hover_color=DLG_HOVER,
+            fg_color="transparent", text_color=DLG_TEXT, hover_color=DLG_HOVER,
             border_width=1, border_color=DLG_BORDER, font=ui_fonts.ui_font(13),
             command=command)
 
@@ -234,13 +234,13 @@ class InputDialog(BaseDialog):
 
         ctk.CTkLabel(
             self, text=prompt, wraplength=300, font=self.UI_FONT,
-            text_color=TEXT).pack(padx=20, pady=(20, 8))
+            text_color=DLG_TEXT).pack(padx=20, pady=(20, 8))
 
         self._entry = ctk.CTkEntry(
             self, width=230, height=28, font=self.UI_FONT,
-            fg_color=PNL_BG,
-            border_color=BORDER_ALT,
-            text_color=TEXT)
+            fg_color=DLG_PANEL_BG,
+            border_color=DLG_BORDER_STRONG,
+            text_color=DLG_TEXT)
         self._entry.pack(padx=20, pady=(0, 16))
 
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -397,8 +397,8 @@ class ImageCropDialog(BaseDialog):
 
         self._canvas = tk.Canvas(
             cv_frame, width=canvas_w, height=canvas_h,
-            highlightthickness=1, highlightbackground=CANVAS_BORDER,
-            bg=CANVAS_BG, cursor="hand2"
+            highlightthickness=1, highlightbackground=DLG_CANVAS_BORDER,
+            bg=DLG_CANVAS_BG, cursor="hand2"
         )
         self._canvas.pack()
         cx, cy = canvas_w // 2, canvas_h // 2
@@ -418,24 +418,24 @@ class ImageCropDialog(BaseDialog):
             row1.pack(fill='x', pady=(0, 8))
             ctk.CTkLabel(row1, text="比例", width=56,
                          font=self.UI_FONT,
-                         text_color=HARD_TITLE).pack(side='left')
+                         text_color=DLG_TITLE).pack(side='left')
 
             # 横向范围从 0.5 到 1.5，纵向固定为 1
             self._ratio_slider = ctk.CTkSlider(
                 row1, from_=self.RATIO_MIN, to=self.RATIO_MAX, number_of_steps=100,
                 variable=self._ratio_var, width=slider_w,
                 command=self._on_slider_change,
-                button_color=PROGRESS_BTN,
-                button_hover_color=PROGRESS_BTN_HOVER,
-                progress_color=PROGRESS_BTN,
-                fg_color=HOVER_ALT
+                button_color=DLG_SLIDER_BTN,
+                button_hover_color=DLG_SLIDER_BTN_HOVER,
+                progress_color=DLG_SLIDER_BTN,
+                fg_color=DLG_HOVER
             )
             self._ratio_slider.pack(side='left', padx=6)
 
             # 两位小数格式化显示（横向:纵向）
             self._ratio_label = ctk.CTkLabel(
                 row1, text="1.00:1", font=self.UI_FONT,
-                text_color=SOFT, width=56
+                text_color=DLG_TEXT_SOFT, width=56
             )
             self._ratio_label.pack(side='left')
 
@@ -446,7 +446,7 @@ class ImageCropDialog(BaseDialog):
         self._axis_label_widget = ctk.CTkLabel(
             row2, text="纵向位置",
             font=self.UI_FONT, width=56, anchor="w",
-            text_color=HARD_TITLE
+            text_color=DLG_TITLE
         )
         self._axis_label_widget.pack(side='left')
 
@@ -456,22 +456,22 @@ class ImageCropDialog(BaseDialog):
             row2, from_=0.0, to=1.0, number_of_steps=100,
             variable=self._offset_var, width=slider_w,
             command=self._on_slider_change,
-            button_color=PROGRESS_BTN,
-            button_hover_color=PROGRESS_BTN_HOVER,
-            progress_color=PROGRESS_BTN,
-            fg_color=HOVER_ALT
+            button_color=DLG_SLIDER_BTN,
+            button_hover_color=DLG_SLIDER_BTN_HOVER,
+            progress_color=DLG_SLIDER_BTN,
+            fg_color=DLG_HOVER
         )
         self._offset_slider.pack(side='left', padx=6)
         self._offset_label = ctk.CTkLabel(
             row2, text="50%", font=self.UI_FONT,
-            text_color=SOFT, width=40
+            text_color=DLG_TEXT_SOFT, width=40
         )
         self._offset_label.pack(side='left')
 
         if self._mode == self.MODE_BACKGROUND:
             ctk.CTkLabel(ctrl, text="裁剪比例固定为 16:9",
                          font=self.UI_FONT_SMALL,
-                         text_color=PLACEHOLDER).pack(anchor='w', pady=(6, 0))
+                         text_color=DLG_PLACEHOLDER).pack(anchor='w', pady=(6, 0))
 
         # ── Buttons ──
         btn_frame = ctk.CTkFrame(ctrl, fg_color="transparent")
@@ -480,7 +480,7 @@ class ImageCropDialog(BaseDialog):
             ctk.CTkButton(
                 btn_frame, text="还原", width=80, height=28,
                 fg_color="transparent",
-                text_color=HARD_TITLE,
+                text_color=DLG_TITLE,
                 hover_color=DLG_HOVER,
                 border_width=1, border_color=DLG_BORDER,
                 corner_radius=self.corner_radius, font=self.UI_FONT,
@@ -488,16 +488,16 @@ class ImageCropDialog(BaseDialog):
             ).pack(side='left', padx=5)
         ctk.CTkButton(
             btn_frame, text="确定", width=80, height=28,
-            fg_color=STATUS_OK,
-            text_color=TEXT_WHITE,
-            hover_color=OK_BTN_HOVER,
+            fg_color=DLG_OK,
+            text_color=DLG_TEXT_WHITE,
+            hover_color=DLG_OK_BTN_HOVER,
             corner_radius=self.corner_radius, font=self.UI_FONT,
             command=self._confirm
         ).pack(side='right', padx=5)
         ctk.CTkButton(
             btn_frame, text="取消", width=80, height=28,
             fg_color="transparent",
-            text_color=STATUS_ERR,
+            text_color=DLG_ERR,
             hover_color=DLG_HOVER,
             border_width=1, border_color=DLG_BORDER,
             corner_radius=self.corner_radius, font=self.UI_FONT,
@@ -538,7 +538,7 @@ class ImageCropDialog(BaseDialog):
         dw, dh = self._display.size
         rx, ry, rw, rh = self._calc_crop_rect()
 
-        overlay_color = OVERLAY
+        overlay_color = DLG_OVERLAY
         if ry > 0:
             self._canvas.create_rectangle(0, 0, dw, ry, fill=overlay_color,
                                           stipple='gray25', tag='overlay', outline='')
@@ -553,7 +553,7 @@ class ImageCropDialog(BaseDialog):
                                           stipple='gray25', tag='overlay', outline='')
 
         self._canvas.create_rectangle(rx, ry, rx + rw, ry + rh,
-                                      outline=GOLD_OUTLINE, width=2, dash=(6, 3),
+                                      outline=DLG_CROP_OUTLINE, width=2, dash=(6, 3),
                                       tag='overlay')
 
         # 更新横向与纵向比例提示标签（横向保留 2 位小数）
@@ -688,7 +688,7 @@ class _MsgBox(BaseDialog):
         content.pack(expand=True)
 
         ctk.CTkLabel(content, text=message, wraplength=340, justify="left",
-                     anchor="w", text_color=TEXT,
+                     anchor="w", text_color=DLG_TEXT,
                      font=ui_fonts.ui_font(13)).pack(anchor="w", pady=(4, 14))
 
         btn_frame = ctk.CTkFrame(content, fg_color="transparent")

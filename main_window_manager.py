@@ -24,7 +24,10 @@ from ui.scenario.sc_frame import ScenarioEditor
 from ui.settings import SettingsPanel
 from ui.exploration.news_dlg import NewsDialog
 from ui.common.loading import LoadingPage
-from ui.common.theme import BASE, SOFT, HOVER_ALT, BORDER_ALT
+from ui.common.theme import (
+    APP_BG, APP_BORDER_STRONG, APP_HOVER, APP_TEXT_SOFT,
+    DEFAULT_PALETTE, apply_palette, current_palette, refresh_widgets,
+)
 from ui.common import fonts as ui_fonts
 
 
@@ -64,6 +67,8 @@ class MainWindowManager:
         # 全局外观模式导致已创建控件再次重绘。
         self.theme_mode = self.settings.get("theme_mode", "Light")
         self.color_theme = self.settings.get("color_theme", "blue")
+        # 启动阶段 main() 已按设置切换过配色，这里记录当前生效值即可。
+        self.theme_palette = current_palette()
 
         # Windows 下禁用 customtkinter 的标题栏切换（withdraw/deiconify 会导致整窗闪烁、
         # 并可能丢失窗口图标），改为直接调用 DWM API，避免浅色/深色切换时的加载闪烁。
@@ -81,21 +86,21 @@ class MainWindowManager:
         self.selected_quip_styles = self.context.selected_quip_styles
 
         # ── 构建主框架 ──
-        self.main_frame = ctk.CTkFrame(root, corner_radius=0, fg_color=BASE)
+        self.main_frame = ctk.CTkFrame(root, corner_radius=0, fg_color=APP_BG)
         self.main_frame.pack(fill='both', expand=True)
 
         self.nav_bar = NavigationBar(self.main_frame, on_switch=self.show_page)
         self.nav_bar.pack(side='left', fill='y')
 
         self.content_frame = ctk.CTkFrame(self.main_frame, corner_radius=0,
-                                           fg_color=BASE)
+                                           fg_color=APP_BG)
         self.content_frame.pack(side='left', fill='both', expand=True)
 
         # 创建各页面框架
         self.pages = {}
         for key in ["generator", "text_mgmt", "dungeon", "challenge", "settings"]:
             frame = ctk.CTkFrame(self.content_frame, corner_radius=0,
-                                  fg_color=BASE)
+                                  fg_color=APP_BG)
             frame.place(relwidth=1, relheight=1)
             self.pages[key] = frame
 
@@ -266,9 +271,9 @@ class MainWindowManager:
             main_container, text="保存并返回主页面",
             command=self.settings_panel._save_and_return,
             fg_color="transparent", height=30,
-            text_color=SOFT,
-            hover_color=HOVER_ALT,
-            border_width=1, border_color=BORDER_ALT,
+            text_color=APP_TEXT_SOFT,
+            hover_color=APP_HOVER,
+            border_width=1, border_color=APP_BORDER_STRONG,
             corner_radius=8, font=ui_fonts.ui_font(12, "bold")
         )
         return_btn.pack(side='bottom', fill='x', padx=18, pady=9)
@@ -337,6 +342,27 @@ class MainWindowManager:
         if hasattr(self, 'settings_panel'):
             self.settings_panel._refresh_world_pack_ui()
 
+    def _refresh_palette_bound_widgets(self):
+        """配色切换后重建把单色 token 写死在创建参数里的控件。
+
+        成对 token 由 refresh_widgets() 就地生效；下拉框条目文字色
+        （LM_LINK / QUIP_LINK / SC_LINK）与挑战卡简介高亮
+        （CHAL_INTRO_*）是单色，只能在重建时重新取值。
+        """
+        for attr in ("landmark_mgr", "quip_card_mgr", "dungeon_editor"):
+            target = getattr(self, attr, None)
+            if target is None:
+                continue
+            try:
+                target._rebuild_dropdown()
+            except Exception as e:
+                print(f"[Warning] 重建 {attr} 下拉框失败: {e}")
+        if hasattr(self, "challenge_panel"):
+            try:
+                self.challenge_panel.refresh_world_resources()
+            except Exception as e:
+                print(f"[Warning] 刷新挑战卡片失败: {e}")
+
     def refresh_style_listboxes(self):
         """风格新建/重命名/删除后，刷新所有 StyleListBox（挑战面板与设置面板）。"""
         if hasattr(self, 'challenge_panel'):
@@ -354,12 +380,30 @@ class MainWindowManager:
         loading_page.update_progress(0.15, "读取主题设置...")
 
         saved_theme_mode = self.settings.get("theme_mode", "Light")
+        saved_palette = self.settings.get("theme_palette") or DEFAULT_PALETTE
+        palette_changed = saved_palette != current_palette()
+
         self.theme_mode = saved_theme_mode
         ctk.set_appearance_mode(saved_theme_mode)
-        loading_page.update_progress(0.40, "应用界面主题...")
+        loading_page.update_progress(0.30, "应用界面主题...")
+
+        if palette_changed:
+            loading_page.update_progress(0.45, "切换界面配色...")
+            try:
+                self.theme_palette = apply_palette(saved_palette)
+            except Exception as e:
+                print(f"[Warning] 应用配色 '{saved_palette}' 失败: {e}")
+                self.theme_palette = current_palette()
+            # token 已被就地改写（成对色）或重新绑定到各模块（单色），
+            # 这里强制所有 CTk 控件按新值重绘一次，等价于模式切换的整批刷新。
+            refresh_widgets()
+
         self.context.apply_context_settings()
         loading_page.update_progress(0.60, "刷新页面控件...")
         self.update_all_managers_theme()
+        if palette_changed:
+            # 少数控件把单色 token 在创建时写死了，需重建才能用上新值。
+            self._refresh_palette_bound_widgets()
         if hasattr(self, 'generator_panel'):
             self.generator_panel.update_world_setting(self.world_setting)
             self.generator_panel.refresh_style_hint()
@@ -484,10 +528,10 @@ class MainWindowManager:
         self._restore_cover_active = False
 
     def _theme_bg_color(self):
-        """当前主题的主界面底色（BASE），遮罩用它保证闪烁色与界面无缝。"""
+        """当前主题的主界面底色（APP_BG），遮罩用它保证闪烁色与界面无缝。"""
         try:
             dark = ctk.get_appearance_mode().lower() == "dark"
-            return BASE[1] if dark else BASE[0]
+            return APP_BG[1] if dark else APP_BG[0]
         except Exception:
             return self.root.cget("bg")
 

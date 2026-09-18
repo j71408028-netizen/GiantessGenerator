@@ -13,7 +13,9 @@ from dungeon.chapters import (
     CHAPTER_ANY, CHAPTER_ANY_LABEL, CHAPTER_NONE, CHAPTER_NONE_LABEL, chapter_names,
 )
 from ui.common.dialogs import BaseDialog
-from ui.common.theme import BORDER_ALT, BROWN_HINT, HOVER, SOFT, TEXT
+from ui.common.theme import (
+    TRIGGER_TEXT, TRIGGER_HINT,
+)
 from ui.scenario.asset_import import import_ending_icon
 
 
@@ -175,7 +177,7 @@ class TriggerEditDialog(BaseDialog):
         self.repeatable_var = tk.BooleanVar(value=self.trigger.get("repeatable", True))
         self.repeatable_check = ctk.CTkCheckBox(
             common, text="可再次触发", variable=self.repeatable_var,
-            font=self.UI_FONT, text_color=TEXT,
+            font=self.UI_FONT, text_color=TRIGGER_TEXT,
             checkbox_width=20, checkbox_height=20)
         self.repeatable_check.grid(row=3, column=0, columnspan=2, sticky='w', padx=5, pady=(4, 0))
         common.grid_columnconfigure(1, weight=1)
@@ -199,7 +201,7 @@ class TriggerEditDialog(BaseDialog):
         ctk.CTkLabel(hint_area, text="类型说明", **section_label).pack(fill='x', pady=(0, 4))
         self.action_description_label = ctk.CTkLabel(
             hint_area, text="", justify='left', anchor='nw', wraplength=460,
-            font=self.UI_FONT, text_color=BROWN_HINT)
+            font=self.UI_FONT, text_color=TRIGGER_HINT)
         self.action_description_label.pack(fill='x', pady=(2, 6))
 
         # ---------- 触发条件（固定区域，始终可见）----------
@@ -243,11 +245,11 @@ class TriggerEditDialog(BaseDialog):
         self.insert_type_combo.pack(side='left', padx=(5, 12))
         self.highlight_var = tk.BooleanVar(value=False)
         ctk.CTkCheckBox(attr_row, text="高亮", variable=self.highlight_var,
-                        font=self.UI_FONT, text_color=TEXT,
+                        font=self.UI_FONT, text_color=TRIGGER_TEXT,
                         checkbox_width=20, checkbox_height=20).pack(side='left', padx=5)
         self.delayed_var = tk.BooleanVar(value=False)
         ctk.CTkCheckBox(attr_row, text="延迟插入", variable=self.delayed_var,
-                        font=self.UI_FONT, text_color=TEXT,
+                        font=self.UI_FONT, text_color=TRIGGER_TEXT,
                         checkbox_width=20, checkbox_height=20).pack(side='left', padx=5)
         return frame
 
@@ -298,7 +300,7 @@ class TriggerEditDialog(BaseDialog):
                         font=self.UI_FONT).pack(side='left', padx=(6, 0))
         if not self.chapter_names:
             ctk.CTkLabel(frame, text="当前副本还没有章节，请先到「章节」页签添加。",
-                         font=self.UI_FONT_SMALL, text_color=BROWN_HINT).pack(anchor='w', pady=(2, 0))
+                         font=self.UI_FONT_SMALL, text_color=TRIGGER_HINT).pack(anchor='w', pady=(2, 0))
         return frame
 
     def _effect_label_to_key(self, label: str) -> str:
@@ -431,7 +433,7 @@ class TriggerEditDialog(BaseDialog):
         self.cond_preview = ctk.CTkLabel(
             frame, text="条件预览: （留空或整行未填 → 无条件触发）", anchor='w', justify='left',
             wraplength=470, font=self.UI_FONT_SMALL,
-            text_color=BROWN_HINT)
+            text_color=TRIGGER_HINT)
         self.cond_preview.pack(fill='x', padx=6, pady=(0, 4))
 
         self.condition_rows = []

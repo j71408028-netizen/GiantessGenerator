@@ -12,38 +12,37 @@ from ui.common.dialogs import BaseDialog
 from ui.common import fonts as ui_fonts
 from ui.common.widgets import CTkScrollableDropdownFrame, CTkSegmentedControl
 from ui.common.theme import (
-    PARAMS_STATUS, VAL_DISABLED, VAL_GOLDEN,
-    VIEW_PNL_FG, VIEW_PNL_BORDER,
-    TEXT, SOFT, TITLE,
-    PNL_BG, BORDER_ALT, HOVER_ALT, MENU_HOVER,
-    STATUS_ERR, CLEAR_BG, CLEAR_BORDER,
-    GOLD_BTN, GOLD_BTN_HOVER,
-    PROGRESS_BTN, PROGRESS_BTN_HOVER, SLIDER_TRACK, TEXT_DISABLED,
-    VIEW_OUTLINE, VIEW_OUTLINE_DARK, VIEW_HAIR, VIEW_HAIR_SHADE,
-    VIEW_SKIN, VIEW_SKIN_SHADE, VIEW_SKIN_LINE, VIEW_CLOTH,
-    VIEW_NAVY, VIEW_NAVY_LINE, VIEW_EYE, VIEW_EYE_WHITE, VIEW_EYE_WHITE_LINE,
-    VIEW_PUPIL, VIEW_HIGHLIGHT, VIEW_MOUTH, VIEW_BLUSH, VIEW_SHADOW,
-    VIEW_CLOTH_DARK, VIEW_CLOTH_DARK_LINE, VIEW_WHITE_LINE, VIEW_SLEEVE, VIEW_STITCH,
+    PARAMS_DLG_PANEL_BG, PARAMS_DLG_BORDER_STRONG, PARAMS_DLG_HOVER, PARAMS_DLG_MENU_HOVER,
+    PARAMS_DLG_SLIDER_BTN, PARAMS_DLG_SLIDER_BTN_HOVER, PARAMS_DLG_SLIDER_TRACK, PARAMS_DLG_GOLDEN_SLIDER_BTN,
+    PARAMS_DLG_GOLDEN_SLIDER_BTN_HOVER, PARAMS_DLG_CLEAR_HOVER, PARAMS_DLG_CLEAR_BORDER, PARAMS_DLG_TEXT,
+    PARAMS_DLG_TEXT_SOFT, PARAMS_DLG_TEXT_DISABLED, PARAMS_DLG_LABEL, PARAMS_DLG_ERR,
+    PARAMS_DLG_STATUS_COLORS, PARAMS_DLG_VALUE_DISABLED, PARAMS_DLG_VALUE_GOLDEN, VIEW_BLUSH,
+    VIEW_CLOTH, VIEW_CLOTH_DARK, VIEW_CLOTH_DARK_LINE, VIEW_EYE,
+    VIEW_EYE_WHITE, VIEW_EYE_WHITE_LINE, VIEW_HAIR, VIEW_HAIR_SHADE,
+    VIEW_HIGHLIGHT, VIEW_MOUTH, VIEW_NAVY, VIEW_NAVY_LINE,
+    VIEW_OUTLINE, VIEW_OUTLINE_DARK, VIEW_PNL_BORDER, VIEW_PNL_FG,
+    VIEW_PUPIL, VIEW_SHADOW, VIEW_SKIN, VIEW_SKIN_LINE,
+    VIEW_SKIN_SHADE, VIEW_SLEEVE, VIEW_STITCH, VIEW_WHITE_LINE,
 )
 
 # 滑块配色（对齐面板滑块条：棕色=正常、金色=随机、灰色=禁用）
 _SLIDER_BROWN = dict(
-    button_color=PROGRESS_BTN,
-    button_hover_color=PROGRESS_BTN_HOVER,
-    progress_color=PROGRESS_BTN,
-    fg_color=HOVER_ALT,
+    button_color=PARAMS_DLG_SLIDER_BTN,
+    button_hover_color=PARAMS_DLG_SLIDER_BTN_HOVER,
+    progress_color=PARAMS_DLG_SLIDER_BTN,
+    fg_color=PARAMS_DLG_HOVER,
 )
 _SLIDER_GOLD = dict(
-    button_color=GOLD_BTN,
-    button_hover_color=GOLD_BTN_HOVER,
-    progress_color=GOLD_BTN,
-    fg_color=HOVER_ALT,
+    button_color=PARAMS_DLG_GOLDEN_SLIDER_BTN,
+    button_hover_color=PARAMS_DLG_GOLDEN_SLIDER_BTN_HOVER,
+    progress_color=PARAMS_DLG_GOLDEN_SLIDER_BTN,
+    fg_color=PARAMS_DLG_HOVER,
 )
 _SLIDER_GRAY = dict(
-    button_color=TEXT_DISABLED,
-    button_hover_color=TEXT_DISABLED,
-    progress_color=SLIDER_TRACK,
-    fg_color=SLIDER_TRACK,
+    button_color=PARAMS_DLG_TEXT_DISABLED,
+    button_hover_color=PARAMS_DLG_TEXT_DISABLED,
+    progress_color=PARAMS_DLG_SLIDER_TRACK,
+    fg_color=PARAMS_DLG_SLIDER_TRACK,
 )
 
 
@@ -224,13 +223,13 @@ class PersonalityCustomDialog(BaseDialog):
         top = ctk.CTkFrame(self, fg_color="transparent")
         top.grid(row=0, column=0, sticky='ew', padx=(14, 8), pady=(12, 2))
         ctk.CTkLabel(top, text="导入性格", anchor='w', font=self.UI_FONT,
-                     text_color=TITLE).pack(side="left")
+                     text_color=PARAMS_DLG_LABEL).pack(side="left")
         self._dropdown_btn = ctk.CTkButton(
             top, text="选择…", width=110, height=26, font=self.UI_FONT,
-            fg_color=PNL_BG,
-            text_color=TEXT,
-            hover_color=HOVER_ALT,
-            border_width=1, border_color=BORDER_ALT,
+            fg_color=PARAMS_DLG_PANEL_BG,
+            text_color=PARAMS_DLG_TEXT,
+            hover_color=PARAMS_DLG_HOVER,
+            border_width=1, border_color=PARAMS_DLG_BORDER_STRONG,
             corner_radius=8,
             state="disabled" if not self._table_items else "normal")
         self._dropdown_btn.pack(side="left", padx=(10, 85))
@@ -241,20 +240,20 @@ class PersonalityCustomDialog(BaseDialog):
                 values=[p.name for p in self._table_items],
                 command=self._import_from_table,
                 height=200, button_height=28,
-                fg_color=PNL_BG,
-                button_color=PNL_BG,
-                hover_color=HOVER_ALT,
-                scrollbar_button_color=HOVER_ALT,
-                scrollbar_button_hover_color=MENU_HOVER,
-                frame_border_color=MENU_HOVER,
-                text_color=TEXT,
+                fg_color=PARAMS_DLG_PANEL_BG,
+                button_color=PARAMS_DLG_PANEL_BG,
+                hover_color=PARAMS_DLG_HOVER,
+                scrollbar_button_color=PARAMS_DLG_HOVER,
+                scrollbar_button_hover_color=PARAMS_DLG_MENU_HOVER,
+                frame_border_color=PARAMS_DLG_MENU_HOVER,
+                text_color=PARAMS_DLG_TEXT,
                 frame_border_width=1,
                 justify="left")
         ctk.CTkLabel(top, text="状态:", font=self.UI_FONT,
-                     text_color=TITLE).pack(side="left", padx=(0, 6))
+                     text_color=PARAMS_DLG_LABEL).pack(side="left", padx=(0, 6))
         self._status_label = ctk.CTkLabel(
             top, text="随机", anchor='w', font=self.UI_FONT_BOLD,
-            text_color=PARAMS_STATUS["random"])
+            text_color=PARAMS_DLG_STATUS_COLORS["random"])
         self._status_label.pack(side="left", padx=3)
 
         # ---- 中间：参数滑块 ----
@@ -266,7 +265,7 @@ class PersonalityCustomDialog(BaseDialog):
             row_frame.columnconfigure(1, weight=1)
             ctk.CTkLabel(row_frame, text=label, width=110, anchor='w',
                          font=self.UI_FONT,
-                         text_color=TEXT).grid(row=0, column=0, padx=(0, 6))
+                         text_color=PARAMS_DLG_TEXT).grid(row=0, column=0, padx=(0, 6))
             slider = ctk.CTkSlider(
                 row_frame, from_=lo, to=hi,
                 number_of_steps=int(round((hi - lo) / step)),
@@ -275,7 +274,7 @@ class PersonalityCustomDialog(BaseDialog):
             slider.grid(row=0, column=1, sticky='ew')
             val_label = ctk.CTkLabel(row_frame, text="", width=76, anchor='e',
                                      font=("Consolas", 11),
-                                     text_color=SOFT)
+                                     text_color=PARAMS_DLG_TEXT_SOFT)
             val_label.grid(row=0, column=2, padx=(8, 0))
             self._sliders[attr] = slider
             self._value_labels[attr] = val_label
@@ -286,7 +285,7 @@ class PersonalityCustomDialog(BaseDialog):
         self._summary_lines = []
         for _i in range(6):
             lbl = ctk.CTkLabel(summary_frame, text="", anchor='w', justify="left",
-                               font=self.UI_FONT, wraplength=470, text_color=TEXT)
+                               font=self.UI_FONT, wraplength=470, text_color=PARAMS_DLG_TEXT)
             lbl.pack(fill='x', pady=0)
             self._summary_lines.append(lbl)
 
@@ -296,9 +295,9 @@ class PersonalityCustomDialog(BaseDialog):
         ctk.CTkButton(btn_frame, text="确定", width=88, height=28, font=self.UI_FONT,
                       command=self._ok).pack(side='left', padx=7)
         ctk.CTkButton(btn_frame, text="消除", width=88, height=28, font=self.UI_FONT,
-                      fg_color="transparent", text_color=STATUS_ERR,
-                      hover_color=CLEAR_BG,
-                      border_width=1, border_color=CLEAR_BORDER,
+                      fg_color="transparent", text_color=PARAMS_DLG_ERR,
+                      hover_color=PARAMS_DLG_CLEAR_HOVER,
+                      border_width=1, border_color=PARAMS_DLG_CLEAR_BORDER,
                       command=self._clear).pack(side='left', padx=7)
 
         # ---- 状态初始化（默认取下拉框第一项） ----
@@ -345,7 +344,7 @@ class PersonalityCustomDialog(BaseDialog):
         for attr, _label, _lo, _hi, _step in self.PARAMS:
             val = self._semantic_value(attr)
             self._value_labels[attr].configure(text=f"{val:.1f}",
-                                               text_color=SOFT)
+                                               text_color=PARAMS_DLG_TEXT_SOFT)
 
     def _update_special(self):
         """表现初始介入度/破坏性为 0 的特殊性（随机演化，步长禁用并高亮标注）。"""
@@ -354,7 +353,7 @@ class PersonalityCustomDialog(BaseDialog):
             zero = val == 0
             self._value_labels[init_attr].configure(
                 text="（随机）" if zero else f"{val:.1f}",
-                text_color=VAL_GOLDEN if zero else SOFT)
+                text_color=PARAMS_DLG_VALUE_GOLDEN if zero else PARAMS_DLG_TEXT_SOFT)
             self._sliders[init_attr].configure(
                 **(_SLIDER_GOLD if zero else _SLIDER_BROWN))
             step_slider = self._sliders[step_attr]
@@ -363,7 +362,7 @@ class PersonalityCustomDialog(BaseDialog):
             else:
                 step_slider.configure(state="normal", **_SLIDER_BROWN)
             self._value_labels[step_attr].configure(
-                text_color=VAL_DISABLED if zero else SOFT)
+                text_color=PARAMS_DLG_VALUE_DISABLED if zero else PARAMS_DLG_TEXT_SOFT)
 
     def _apply_values(self, item: Personality):
         for attr, _label, _lo, _hi, _step in self.PARAMS:
@@ -382,7 +381,7 @@ class PersonalityCustomDialog(BaseDialog):
         self._base_item = base_item
         self._manual = manual
         key = "custom" if manual else ("item" if base_item is not None else "random")
-        self._status_label.configure(text=text, text_color=PARAMS_STATUS[key])
+        self._status_label.configure(text=text, text_color=PARAMS_DLG_STATUS_COLORS[key])
         self._refresh_summary()
 
     def _refresh_summary(self):
@@ -392,7 +391,7 @@ class PersonalityCustomDialog(BaseDialog):
         lines = _personality_summary(self._values(), self._base_item)
         for idx, lbl in enumerate(self._summary_lines):
             if idx < len(lines):
-                lbl.configure(text=lines[idx], text_color=SOFT, font=self._DESC_ITALIC_FONT)
+                lbl.configure(text=lines[idx], text_color=PARAMS_DLG_TEXT_SOFT, font=self._DESC_ITALIC_FONT)
                 lbl.pack(fill='x', pady=0)
             else:
                 lbl.pack_forget()
@@ -408,7 +407,7 @@ class PersonalityCustomDialog(BaseDialog):
         val = round(slider.get(), 1)
         slider.set(val)
         self._value_labels[attr].configure(text=f"{self._semantic_value(attr):.1f}",
-                                           text_color=SOFT)
+                                           text_color=PARAMS_DLG_TEXT_SOFT)
         self._update_special()
         self._set_status("自定义", base_item=None, manual=True)
 
@@ -494,12 +493,12 @@ class PresetCustomDialog(BaseDialog):
         top.grid(row=0, column=0, sticky='ew', padx=(14, 8), pady=(12, 2))
         top.columnconfigure(1, weight=1)
         ctk.CTkLabel(top, text="导入身材", anchor='w', font=self.UI_FONT,
-                     text_color=TITLE).pack(side="left")
+                     text_color=PARAMS_DLG_LABEL).pack(side="left")
 
         self._dropdown_btn = ctk.CTkButton(
             top, text="选择…", width=110, height=26, font=self.UI_FONT,
-            fg_color=PNL_BG, text_color=TEXT,
-            hover_color=HOVER_ALT, border_width=1, border_color=BORDER_ALT,
+            fg_color=PARAMS_DLG_PANEL_BG, text_color=PARAMS_DLG_TEXT,
+            hover_color=PARAMS_DLG_HOVER, border_width=1, border_color=PARAMS_DLG_BORDER_STRONG,
             corner_radius=8, state="disabled" if not self._table_items else "normal")
         self._dropdown_btn.pack(side="left", padx=(10, 85))
 
@@ -508,14 +507,14 @@ class PresetCustomDialog(BaseDialog):
             self._dropdown = CTkScrollableDropdownFrame(
                 attach=self._dropdown_btn, values=[p.name for p in self._table_items],
                 command=self._import_from_table, height=160, button_height=28,
-                fg_color=PNL_BG, button_color=PNL_BG,
-                hover_color=HOVER_ALT, scrollbar_button_color=HOVER_ALT,
-                scrollbar_button_hover_color=MENU_HOVER, frame_border_color=MENU_HOVER,
-                text_color=TEXT, frame_border_width=1, justify="left")
+                fg_color=PARAMS_DLG_PANEL_BG, button_color=PARAMS_DLG_PANEL_BG,
+                hover_color=PARAMS_DLG_HOVER, scrollbar_button_color=PARAMS_DLG_HOVER,
+                scrollbar_button_hover_color=PARAMS_DLG_MENU_HOVER, frame_border_color=PARAMS_DLG_MENU_HOVER,
+                text_color=PARAMS_DLG_TEXT, frame_border_width=1, justify="left")
 
-        ctk.CTkLabel(top, text="状态:", font=self.UI_FONT, text_color=TITLE).pack(side="left", padx=(0, 6))
+        ctk.CTkLabel(top, text="状态:", font=self.UI_FONT, text_color=PARAMS_DLG_LABEL).pack(side="left", padx=(0, 6))
         self._status_label = ctk.CTkLabel(top, text="随机", anchor='w', font=self.UI_FONT_BOLD,
-                                          text_color=PARAMS_STATUS["random"])
+                                          text_color=PARAMS_DLG_STATUS_COLORS["random"])
         self._status_label.pack(side="left", padx=3)
 
         # ---- 中间左侧：按 ALL_PART_NAMES 顺序分页的参数滑块 ----
@@ -541,7 +540,7 @@ class PresetCustomDialog(BaseDialog):
                 row_frame.pack(fill='x', pady=3)
                 row_frame.columnconfigure(1, weight=1)
                 ctk.CTkLabel(row_frame, text=label, width=110, anchor='w', font=self.UI_FONT,
-                             text_color=TEXT).grid(row=0, column=0, padx=(0, 6))
+                             text_color=PARAMS_DLG_TEXT).grid(row=0, column=0, padx=(0, 6))
 
                 slider = ctk.CTkSlider(row_frame, from_=lo, to=hi, number_of_steps=int(round((hi - lo) / step)),
                                        command=lambda _v, a=attr: self._on_param_change(a),
@@ -549,7 +548,7 @@ class PresetCustomDialog(BaseDialog):
                 slider.grid(row=0, column=1, sticky='ew')
 
                 val_label = ctk.CTkLabel(row_frame, text="", width=50, anchor='w', font=("Consolas", 11),
-                                         text_color=SOFT)
+                                         text_color=PARAMS_DLG_TEXT_SOFT)
                 val_label.grid(row=0, column=2, padx=10, sticky='w')
                 self._sliders[attr] = slider
                 self._value_labels[attr] = val_label
@@ -561,7 +560,7 @@ class PresetCustomDialog(BaseDialog):
                                      fg_color=VIEW_PNL_FG, border_width=0, corner_radius=8)
         preview_panel.grid(row=0, column=1, rowspan=3, sticky='nsew', padx=(8, 10), pady=(6, 9))
         ctk.CTkLabel(preview_panel, text="身材比例预览", font=self.UI_FONT_BOLD,
-                     text_color=TITLE).pack(pady=(8, 0))
+                     text_color=PARAMS_DLG_LABEL).pack(pady=(8, 0))
 
         canvas_bg = (VIEW_PNL_FG[0] if ctk.get_appearance_mode().lower() == "light"
                      else VIEW_PNL_FG[1])
@@ -577,8 +576,8 @@ class PresetCustomDialog(BaseDialog):
         ctk.CTkButton(btn_frame, text="确定", width=88, height=28, font=self.UI_FONT, command=self._ok).pack(
             side='left', padx=7)
         ctk.CTkButton(btn_frame, text="消除", width=88, height=28, font=self.UI_FONT, fg_color="transparent",
-                      text_color=STATUS_ERR, hover_color=CLEAR_BG,
-                      border_width=1, border_color=CLEAR_BORDER, command=self._clear).pack(side='left',
+                      text_color=PARAMS_DLG_ERR, hover_color=PARAMS_DLG_CLEAR_HOVER,
+                      border_width=1, border_color=PARAMS_DLG_CLEAR_BORDER, command=self._clear).pack(side='left',
                                                                                            padx=7)
 
         # ---- 状态初始化 ----
@@ -621,7 +620,7 @@ class PresetCustomDialog(BaseDialog):
         for attr, _label, _lo, _hi, step in self.PARAMS:
             val = self._sliders[attr].get()
             dec = _step_decimals(step)
-            self._value_labels[attr].configure(text=f"{val:.{dec}f}", text_color=SOFT)
+            self._value_labels[attr].configure(text=f"{val:.{dec}f}", text_color=PARAMS_DLG_TEXT_SOFT)
 
     def _apply_values(self, item: BodyPreset):
         for attr, _label, _lo, _hi, _step in self.PARAMS:
@@ -639,7 +638,7 @@ class PresetCustomDialog(BaseDialog):
         self._base_item = base_item
         self._manual = manual
         key = "custom" if manual else ("item" if base_item is not None else "random")
-        self._status_label.configure(text=text, text_color=PARAMS_STATUS[key])
+        self._status_label.configure(text=text, text_color=PARAMS_DLG_STATUS_COLORS[key])
 
     def _import_from_table(self, choice):
         item = next((p for p in self._table_items if p.name == choice), None)
@@ -653,7 +652,7 @@ class PresetCustomDialog(BaseDialog):
         dec = _step_decimals(step)
         val = round(slider.get(), dec)
         slider.set(val)
-        self._value_labels[attr].configure(text=f"{val:.{dec}f}", text_color=SOFT)
+        self._value_labels[attr].configure(text=f"{val:.{dec}f}", text_color=PARAMS_DLG_TEXT_SOFT)
         self._set_status("自定义", base_item=None, manual=True)
         self._preview_canvas.update_values(self._values())
 

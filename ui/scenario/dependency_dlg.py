@@ -19,11 +19,11 @@ from dungeon.chapters import scope_label
 from ui.common.dialogs import BaseDialog
 from ui.common.fonts import graphviz_font
 from ui.common.theme import (
-    GRAPH_EDGE_ERR, GRAPH_EDGE_NORMAL, GRAPH_NODE_ERR_BORDER, GRAPH_NODE_ERR_FILL,
-    GRAPH_NODE_OUTLINE, ACTION_FILL_BACKGROUND, ACTION_FILL_ENDING,
+    DEPENDENCY_TEXT, DEPENDENCY_TEXT_SOFT, DEPENDENCY_OK, DEPENDENCY_ERR,
+    ACTION_FILL_BACKGROUND, ACTION_FILL_EFFECT, ACTION_FILL_ENDING, ACTION_FILL_GOTO,
     ACTION_FILL_INSERT, ACTION_FILL_NONE, ACTION_FILL_OPTION, ACTION_FILL_SENSITIVITY,
-    ACTION_FILL_GOTO, ACTION_FILL_EFFECT,
-    TEXT, SOFT, STATUS_ERR, STATUS_OK,
+    GRAPH_EDGE_ERR, GRAPH_EDGE_NORMAL, GRAPH_NODE_ERR_BORDER, GRAPH_NODE_ERR_FILL,
+    GRAPH_NODE_OUTLINE,
 )
 
 # 动作类型 → 节点填充色（展示名统一取 dungeon.actions 的注册表）
@@ -165,7 +165,7 @@ class DependencyGraphDialog(BaseDialog):
         if not self.triggers:
             ctk.CTkLabel(main, text="当前方案没有触发器。",
                          font=self.UI_FONT,
-                         text_color=TEXT).pack(pady=40)
+                         text_color=DEPENDENCY_TEXT).pack(pady=40)
             ctk.CTkButton(main, text="关闭", width=88, height=28,
                           font=self.UI_FONT,
                           command=self.destroy).pack(pady=10)
@@ -179,13 +179,13 @@ class DependencyGraphDialog(BaseDialog):
         self.summary_label = ctk.CTkLabel(
             main, text=summary, justify="left", wraplength=720,
             font=self.UI_FONT,
-            text_color=STATUS_ERR if self.cycle_nodes else STATUS_OK)
+            text_color=DEPENDENCY_ERR if self.cycle_nodes else DEPENDENCY_OK)
         self.summary_label.pack(fill='x', padx=4, pady=(0, 6))
 
         # 图例
         ctk.CTkLabel(main, text=_LEGEND, justify="left", wraplength=720,
                      font=self.UI_FONT_SMALL,
-                     text_color=SOFT).pack(
+                     text_color=DEPENDENCY_TEXT_SOFT).pack(
                          fill='x', padx=4, pady=(0, 6))
 
         # 图片滚动区
@@ -197,7 +197,7 @@ class DependencyGraphDialog(BaseDialog):
         footer.pack(fill='x', pady=(8, 0))
         self.render_status = ctk.CTkLabel(
             footer, text="", font=self.UI_FONT,
-            text_color=STATUS_ERR)
+            text_color=DEPENDENCY_ERR)
         self.render_status.pack(side='left', padx=4)
         ctk.CTkButton(footer, text="关闭", width=88, height=28,
                       font=self.UI_FONT,

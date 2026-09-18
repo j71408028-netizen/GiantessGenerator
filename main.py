@@ -6,6 +6,7 @@ import customtkinter as ctk
 
 from paths import ensure_cwd
 import ui.common.ctk_patch  # noqa: F401  模式切换时同步刷新 CTk 控件 Frame 底色，避免几何重排露旧色
+from ui.common import fonts as ui_fonts
 from context import ExplorationContext
 from main_window_manager import MainWindowManager
 from persistence import SettingsRepo, LandmarkRepo, PresetRepo, PersonalityRepo
@@ -13,6 +14,7 @@ from persistence import QuipRepo, DungeonRepo, CharacterRepo
 from services.world_service import WorldManager
 from ui.common.loading import LoadingWindow
 from ui.common.splash import splash_process
+from ui.common.theme import DEFAULT_PALETTE, apply_palette
 
 
 def _load_repos(state):
@@ -54,14 +56,14 @@ def _build_settings(state):
     state["manager"].create_settings_panel()
 
 
-def _launch_splash(theme_mode, color_theme):
+def _launch_splash(theme_mode, color_theme, palette):
     """启动独立进程启动屏，返回 (Pipe 连接, Process)；失败时返回 (None, None)。"""
     parent_conn = child_conn = None
     try:
         parent_conn, child_conn = multiprocessing.Pipe()
         proc = multiprocessing.Process(
             target=splash_process,
-            args=(child_conn, theme_mode, color_theme, "「正在初始化」"),
+            args=(child_conn, theme_mode, color_theme, "「正在初始化」", palette),
             daemon=True,
         )
         proc.start()
@@ -187,14 +189,28 @@ def main():
     ctk.set_appearance_mode(theme_mode)
     ctk.set_default_color_theme(color_theme)
 
+    # 界面配色必须在任何控件创建前切换：UI 模块在 import 期就把 token 绑成了
+    # 模块级常量，apply_palette() 会就地改写这些对象并同步各模块的同名全局量，
+    # 因此这里切换后后续构建的控件直接用新配色。
+    palette = settings.get("theme_palette", DEFAULT_PALETTE)
+    try:
+        apply_palette(palette)
+    except Exception as e:
+        print(f"[Warning] 应用配色 '{palette}' 失败，回退默认配色: {e}")
+        palette = DEFAULT_PALETTE
+
     # 真实主窗口先创建但保持隐藏：初始化期间不参与拖动/缩放等窗口事件，界面在“后台”逐步构建，完成后原位替换。
     root = ctk.CTk()
     root.title("巨大娘生成器")
     root.withdraw()
 
+    # 原生控件（ttk.Treeview / tk.Listbox / canvas 文字 / Text tag 字体）的
+    # 磅→像素换算必须与 CTk 的缩放一致，否则同字号在两套链路里大小不同。
+    ui_fonts.align_native_scaling(root)
+
     # 启动屏跑在独立子进程里，拥有自己的 Tk 事件循环——主进程无论怎么同步
     # 阻塞构建界面，都不影响它的拖动/放大流畅度。失败时回退到进程内窗口。
-    splash_conn, splash_proc = _launch_splash(theme_mode, color_theme)
+    splash_conn, splash_proc = _launch_splash(theme_mode, color_theme, palette)
     fallback_loading = None
     abort = {"requested": False}
 

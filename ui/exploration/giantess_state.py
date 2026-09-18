@@ -11,20 +11,19 @@ from persistence.character_repo import CharacterRepo
 from logic import format_size
 from address_model import format_addr_verbose
 from ui.common.theme import (
-    BASE, BORDER, TEXT, SOFT, TEXT_MUTED, TITLE,
-    PLACEHOLDER, TEXT_DISABLED,
-    BORDER_ALT, HOVER_ALT, MENU_HOVER,
-    ERR_STRONG, ERR_HOVER,
-    STAT_BLUE, STAT_BLUE_LIGHT, STAT_BLUE_DEEP,
+    STATE_BG, STATE_BORDER, STATE_BORDER_STRONG, STATE_HOVER,
+    STATE_MENU_HOVER, STATE_TEXT, STATE_TEXT_SOFT, STATE_TEXT_MUTED,
+    STATE_TEXT_DISABLED, STATE_LABEL, STATE_PLACEHOLDER, STATE_ERR,
+    STATE_ERR_HOVER, STATE_METRIC_BAR, STATE_METRIC_TEXT, STATE_METRIC_BAR_LOW,
 )
 from ui.common import fonts as ui_fonts
 
 
 class GiantessStatePanel(ctk.CTkFrame):
     def __init__(self, parent, character_repo: CharacterRepo, context: ExplorationContext, gui_ref, **kwargs):
-        super().__init__(parent, fg_color=BASE,
-                         border_width=1, border_color=BORDER,
-                         corner_radius=14, **kwargs)
+        super().__init__(parent, fg_color=STATE_BG,
+                         border_width=1, border_color=STATE_BORDER,
+                         corner_radius=10, **kwargs)
         self.character_repo = character_repo
         self.context = context
         self.gui_ref = gui_ref
@@ -41,22 +40,22 @@ class GiantessStatePanel(ctk.CTkFrame):
             top_frame, text="←", width=27, height=24,
             command=self._back_to_params,
             fg_color="transparent",
-            text_color=TEXT_MUTED,
-            hover_color=HOVER_ALT,
-            border_width=1, border_color=BORDER_ALT,
+            text_color=STATE_TEXT_MUTED,
+            hover_color=STATE_HOVER,
+            border_width=1, border_color=STATE_BORDER_STRONG,
             corner_radius=8
         )
         self.back_btn.pack(side='left')
 
         ctk.CTkLabel(top_frame, text="角色档案", font=ui_fonts.ui_font(13, "bold"),
-                     text_color=TITLE).pack(side='left', padx=(5, 0))
+                     text_color=STATE_LABEL).pack(side='left', padx=(5, 0))
 
         # 标题分割线
         sep = ctk.CTkFrame(
             self,
             height=3,
             corner_radius=0,
-            fg_color=MENU_HOVER
+            fg_color=STATE_MENU_HOVER
         )
         sep.pack(
             padx=(14, 16),
@@ -68,9 +67,9 @@ class GiantessStatePanel(ctk.CTkFrame):
             top_frame, text="🗑", width=27, height=24,
             command=self._delete_character,
             fg_color="transparent",
-            text_color=ERR_STRONG,
-            hover_color=ERR_HOVER,
-            border_width=1, border_color=ERR_STRONG,
+            text_color=STATE_ERR,
+            hover_color=STATE_ERR_HOVER,
+            border_width=1, border_color=STATE_ERR,
             corner_radius=8
         )
         self.delete_btn.pack(side='right', padx=(2, 0))
@@ -79,9 +78,9 @@ class GiantessStatePanel(ctk.CTkFrame):
             top_frame, text="📤", width=27, height=24,
             command=self._export_chara,
             fg_color="transparent",
-            text_color=TEXT_MUTED,
-            hover_color=HOVER_ALT,
-            border_width=1, border_color=BORDER_ALT,
+            text_color=STATE_TEXT_MUTED,
+            hover_color=STATE_HOVER,
+            border_width=1, border_color=STATE_BORDER_STRONG,
             corner_radius=8
         )
         self.export_chara_btn.pack(side='right', padx=(0, 2))
@@ -99,14 +98,14 @@ class GiantessStatePanel(ctk.CTkFrame):
         self.name_label = ctk.CTkLabel(
             profile_frame, text="",
             font=ui_fonts.ui_font(18, "bold"),
-            text_color=TEXT
+            text_color=STATE_TEXT
         )
         self.name_label.pack(anchor='w', pady=(0, 2))
 
         self.nick_label = ctk.CTkLabel(
             profile_frame, text="",
             font=ui_fonts.ui_font(12),
-            text_color=PLACEHOLDER
+            text_color=STATE_PLACEHOLDER
         )
         self.nick_label.pack(anchor='w', pady=(0, 2))
 
@@ -115,29 +114,29 @@ class GiantessStatePanel(ctk.CTkFrame):
         self.height_label = ctk.CTkLabel(
             height_frame, text="",
             font=("Consolas", 12),
-            text_color=TEXT_MUTED
+            text_color=STATE_TEXT_MUTED
         )
         self.height_label.pack(side='left')
         self.random_size_btn = ctk.CTkButton(
             height_frame, text="...", width=24, height=20,
             font=("Consolas", 11), command=self._show_random_size,
-            fg_color="transparent", text_color=SOFT,
-            hover_color=HOVER_ALT,
-            border_width=1, border_color=BORDER_ALT, corner_radius=5
+            fg_color="transparent", text_color=STATE_TEXT_SOFT,
+            hover_color=STATE_HOVER,
+            border_width=1, border_color=STATE_BORDER_STRONG, corner_radius=5
         )
         self.random_size_btn.pack(side='left', padx=(6, 0))
 
         self.random_size_label = ctk.CTkLabel(
             profile_frame, text="", font=("Consolas", 11),
-            text_color=TITLE, justify='left', wraplength=250
+            text_color=STATE_LABEL, justify='left', wraplength=250
         )
         self.random_size_info_label = ctk.CTkLabel(
             profile_frame, text="", font=ui_fonts.ui_font(10),
-            text_color=PLACEHOLDER, justify='left', wraplength=250
+            text_color=STATE_PLACEHOLDER, justify='left', wraplength=250
         )
         self.position_label = ctk.CTkLabel(
             profile_frame, text="", font=ui_fonts.ui_font(10),
-            text_color=SOFT, justify='left', wraplength=250
+            text_color=STATE_TEXT_SOFT, justify='left', wraplength=250
         )
 
         # ---- 右侧状态指标（固定宽度列） ----
@@ -146,13 +145,13 @@ class GiantessStatePanel(ctk.CTkFrame):
 
         self.intrusion_block, self.intrusion_label, self.intrusion_progress, \
             self.intrusion_question, _ = self._build_stat_block(
-            "介入度", STAT_BLUE)
+            "介入度", STATE_METRIC_BAR)
         self.destruction_block, self.destruction_label, self.destruction_progress, \
             self.destruction_question, _ = self._build_stat_block(
-            "破坏性", STAT_BLUE)
+            "破坏性", STATE_METRIC_BAR)
         self.action_block, self.action_label, self.action_progress, _, \
             self.action_pct_label = self._build_stat_block(
-            "行动点数", STAT_BLUE, with_pct=True)
+            "行动点数", STATE_METRIC_BAR, with_pct=True)
 
         # 伤亡统计
         self.casualty_frame = ctk.CTkFrame(self.progress_frame, fg_color="transparent")
@@ -160,7 +159,7 @@ class GiantessStatePanel(ctk.CTkFrame):
         self.casualty_label = ctk.CTkLabel(
             self.casualty_frame, text="☠ 伤亡  0",
             font=ui_fonts.ui_font(12),
-            text_color=ERR_STRONG
+            text_color=STATE_ERR
         )
         self.casualty_label.pack(side='left')
 
@@ -171,7 +170,7 @@ class GiantessStatePanel(ctk.CTkFrame):
     @staticmethod
     def _gradient_color(ratio):
         if ratio <= 0:
-            return TEXT_DISABLED
+            return STATE_TEXT_DISABLED
         ratio = min(1.0, ratio)
         if ratio <= 0.5:
             t = ratio / 0.5
@@ -219,7 +218,7 @@ class GiantessStatePanel(ctk.CTkFrame):
         if with_pct:
             pct_label = ctk.CTkLabel(
                 bar_line, text="0%", font=ui_fonts.ui_font(10),
-                text_color=STAT_BLUE_LIGHT
+                text_color=STATE_METRIC_TEXT
             )
             pct_label.pack(side='right', padx=(6, 0))
         else:
@@ -227,7 +226,7 @@ class GiantessStatePanel(ctk.CTkFrame):
         question = ctk.CTkLabel(
             bar_line, text="?",
             font=ui_fonts.ui_font(14, "bold"),
-            text_color=TEXT_DISABLED
+            text_color=STATE_TEXT_DISABLED
         )
         return block, title_label, bar, question, pct_label
 
@@ -328,9 +327,9 @@ class GiantessStatePanel(ctk.CTkFrame):
         self.action_progress.set(action_val / 100.0)
 
         if action_val < 50:
-            colors = STAT_BLUE_DEEP
+            colors = STATE_METRIC_BAR_LOW
         else:
-            colors = STAT_BLUE
+            colors = STATE_METRIC_BAR
         self.action_progress.configure(
             progress_color=colors, fg_color=self._progress_track_color(colors)
         )

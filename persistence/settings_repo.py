@@ -22,6 +22,7 @@ class SettingsRepo:
             "selected_quip_styles": ["Events"],
             "theme_mode": "Light",
             "color_theme": "blue",
+            "theme_palette": "Slate",
             "ai_provider": "zhipu",
             "ai_configs": {
                 "zhipu": {"name": "智谱AI", "url": "https://open.bigmodel.cn/api/paas/v4/", "model": "glm-4.7-flash", "api_key": ""},

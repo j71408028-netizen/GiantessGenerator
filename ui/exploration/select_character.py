@@ -10,8 +10,9 @@ from persistence.character_repo import CharacterRepo
 from logic import format_size
 from services.image_service import ImageService
 from ui.common.theme import (
-    TEXT, HARD_TITLE, SOFT, TEXT_MUTED, PLACEHOLDER,
-    PNL_BG, BORDER, BORDER_ALT, HOVER_ALT,
+    SELECT_PANEL_BG, SELECT_BORDER, SELECT_BORDER_STRONG, SELECT_HOVER,
+    SELECT_TEXT, SELECT_TEXT_SOFT, SELECT_TEXT_MUTED, SELECT_TITLE,
+    SELECT_PLACEHOLDER,
 )
 from ui.common import fonts as ui_fonts
 
@@ -22,9 +23,9 @@ _IMG_HEIGHT = 120
 class SelectCharacterPanel(ctk.CTkFrame):
     def __init__(self, parent, character_repo: CharacterRepo, on_selected=None, on_back=None, context=None, **kwargs):
         kwargs.setdefault("height", 310)
-        super().__init__(parent, fg_color=PNL_BG,
-                         border_width=1, border_color=BORDER,
-                         corner_radius=14, **kwargs)
+        super().__init__(parent, fg_color=SELECT_PANEL_BG,
+                         border_width=1, border_color=SELECT_BORDER,
+                         corner_radius=10, **kwargs)
         
         # 阻止子控件撑开/压缩 Frame 尺寸，确保 height 设置生效
         self.grid_propagate(False)
@@ -65,9 +66,9 @@ class SelectCharacterPanel(ctk.CTkFrame):
             top, text="←", width=30, height=28,
             command=self._back,
             fg_color="transparent",
-text_color=TEXT_MUTED,
-                hover_color=HOVER_ALT,
-                border_width=1, border_color=BORDER_ALT,
+text_color=SELECT_TEXT_MUTED,
+                hover_color=SELECT_HOVER,
+                border_width=1, border_color=SELECT_BORDER_STRONG,
             corner_radius=8
         )
         self.back_btn.pack(side='left', padx=2)
@@ -75,7 +76,7 @@ text_color=TEXT_MUTED,
         # 标题文本（靠左）
         title_lbl = ctk.CTkLabel(
             top, text="选择角色", font=ui_fonts.ui_font(12, "bold"),
-text_color=SOFT
+text_color=SELECT_TEXT_SOFT
             )
         title_lbl.pack(side='left', padx=8)
 
@@ -83,10 +84,10 @@ text_color=SOFT
         self._search_entry = ctk.CTkEntry(
             top,
             placeholder_text="搜索名称或昵称",
-            placeholder_text_color=PLACEHOLDER,
+            placeholder_text_color=SELECT_PLACEHOLDER,
             border_width=1,
-            border_color=BORDER_ALT,
-            fg_color=PNL_BG
+            border_color=SELECT_BORDER_STRONG,
+            fg_color=SELECT_PANEL_BG
         )
         self._search_entry.pack(side='left', fill='x', expand=True, padx=22)
         
@@ -110,7 +111,7 @@ text_color=SOFT
         self._placeholder = ctk.CTkLabel(
             self._detail, text="悬停角色卡片\n查看详情",
             font=ui_fonts.ui_font(11),
-            text_color=PLACEHOLDER,
+            text_color=SELECT_PLACEHOLDER,
             anchor='center',
             justify='center'
         )
@@ -167,7 +168,7 @@ text_color=SOFT
         ctk.CTkLabel(
             self._detail_content, text=name_text,
             font=ui_fonts.ui_font(12, "bold"),
-            text_color=TEXT,
+            text_color=SELECT_TEXT,
             anchor='center'
         ).grid(row=row, column=0, columnspan=2, sticky='ew', pady=(0, 2))
         row += 1
@@ -181,13 +182,13 @@ text_color=SOFT
             ctk.CTkLabel(
                 self._detail_content, text=label,
                 font=ui_fonts.ui_font(11),
-                text_color=SOFT,
+                text_color=SELECT_TEXT_SOFT,
                 anchor='w'
             ).grid(row=row, column=0, sticky='w', pady=0, padx=(25, 5))
             ctk.CTkLabel(
                 self._detail_content, text=value,
                 font=ui_fonts.ui_font(11),
-                text_color=HARD_TITLE,
+                text_color=SELECT_TITLE,
                 anchor='w'
             ).grid(row=row, column=1, sticky='w', pady=0, padx=(5, 25))
             row += 1
@@ -237,7 +238,7 @@ text_color=SOFT
         if not self._characters:
             self._empty_label = ctk.CTkLabel(
                 self._scroll, text="没有已保存的角色",
-                text_color=PLACEHOLDER,
+                text_color=SELECT_PLACEHOLDER,
                 font=ui_fonts.ui_font(13))
             self._empty_label.pack(pady=30)
             return
@@ -248,7 +249,7 @@ text_color=SOFT
             if item.get("nick"):
                 title_extra = [
                     {"text": f"({item['nick']})", "font": ui_fonts.ui_font(10),
-                     "text_color": SOFT}
+                     "text_color": SELECT_TEXT_SOFT}
                 ]
 
             card = ClickableCard(

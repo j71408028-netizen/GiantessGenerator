@@ -14,13 +14,13 @@ from services.image_service import ImageService
 from services.state_service import StateService
 from ui.common.widgets import CTkScrollableDropdownFrame
 from ui.common.theme import (
-    TEXT, SOFT, BORDER_ALT,
-    PNL_BG, HOVER_ALT, MENU_HOVER, BLUE_HOVER,
-    STATUS_ERR, DLG_HOVER, DLG_BORDER,
-    FB_CARD_BG, FB_ACCENT, FB_TEXT, FB_BLUE, FB_CHIP_BG, FB_CHIP_HOVER,
-    FB_MUTED, FB_BTN, FB_BTN_HOVER, FB_TAG_BG, FB_TAG_FG,
-    FB_TAG_HOVER, FB_TAG_BORDER,
+    INTRO_PANEL_BG, INTRO_BORDER, INTRO_BORDER_STRONG, INTRO_HOVER,
+    INTRO_MENU_HOVER, INTRO_CARD_HOVER, FB_TEXT, INTRO_TEXT_SOFT,
+    INTRO_ERR, FB_ACCENT, FB_BLUE, FB_BTN,
+    FB_BTN_HOVER, FB_CARD_BG, FB_CHIP_BG, FB_CHIP_HOVER,
     FB_MENU_BORDER, FB_MENU_SCROLL, FB_MENU_SCROLL_HOVER, FB_MENU_TEXT,
+    FB_MUTED, FB_TAG_BG, FB_TAG_BORDER, FB_TAG_FG,
+    FB_TAG_HOVER,
 )
 from ui.common import fonts as ui_fonts
 
@@ -28,8 +28,8 @@ from ui.common import fonts as ui_fonts
 class IntroPanel(ctk.CTkFrame):
     def __init__(self, parent, params_panel, generator_panel=None):
         super().__init__(parent, fg_color=FB_CARD_BG,
-                         border_width=1, border_color=DLG_BORDER,
-                         corner_radius=12)
+                         border_width=1, border_color=INTRO_BORDER,
+                         corner_radius=10)
         self.params_panel = params_panel
         self.generator_panel = generator_panel
 
@@ -205,19 +205,19 @@ class IntroPanel(ctk.CTkFrame):
         intro_text_frame.pack(side='left', fill='both', expand=True)
 
         nick_row = ctk.CTkFrame(intro_text_frame, fg_color="transparent")
-        nick_row.pack(fill='x')
+        nick_row.pack(fill='x', pady=(3, 0))
 
         self.nick_display_label = ctk.CTkLabel(nick_row, text="",
-            font=ui_fonts.ui_font(12, "bold"), text_color=FB_TEXT,
+            font=ui_fonts.ui_font(16, "bold"), text_color=FB_TEXT,
             anchor="w")
         self.nick_display_label.pack(side='left', fill='x', expand=True)
 
         self.save_cost_label = ctk.CTkLabel(nick_row, text="",
-            font=ui_fonts.ui_font(9, "bold"), text_color=FB_BLUE,
+            font=ui_fonts.ui_font(10, "bold"), text_color=FB_BLUE,
             height=0)
 
         self.intro_mode_btn = ctk.CTkButton(
-            nick_row, text="✏️ 编辑", font=ui_fonts.ui_font(9),
+            nick_row, text="✏️ 编辑", font=ui_fonts.ui_font(10),
             fg_color=FB_CHIP_BG, text_color=FB_BLUE,
             hover_color=FB_CHIP_HOVER, border_width=0,
             corner_radius=14, width=50, height=24, command=self._toggle_edit
@@ -227,17 +227,17 @@ class IntroPanel(ctk.CTkFrame):
         intro_row = ctk.CTkFrame(intro_text_frame, fg_color="transparent")
         intro_row.pack(fill='x')
         self.intro_visible_label = ctk.CTkLabel(intro_row, text="",
-            font=ui_fonts.ui_font(10), text_color=FB_TEXT,
+            font=ui_fonts.ui_font(11), text_color=FB_TEXT,
             anchor="w", wraplength=400, justify='left')
         self.intro_visible_label.pack(fill='x', pady=(1, 4))
 
         self.intro_tags_label = ctk.CTkLabel(self.intro_display_frame, text="",
-            font=ui_fonts.ui_font(9), text_color=FB_BLUE,
+            font=ui_fonts.ui_font(11), text_color=FB_BLUE,
             anchor="w", wraplength=480)
         self.intro_tags_label.pack(fill='x', pady=(1, 2))
 
         self.intro_birthday_label = ctk.CTkLabel(self.intro_display_frame, text="",
-                                                 font=ui_fonts.ui_font(9), text_color=SOFT,
+                                                 font=ui_fonts.ui_font(9), text_color=INTRO_TEXT_SOFT,
                                                  anchor="w")
         self.intro_birthday_label.pack(fill='x', pady=(1, 2))
 
@@ -270,10 +270,10 @@ class IntroPanel(ctk.CTkFrame):
 
         self.delete_img_btn = ctk.CTkButton(edit_avatar_frame, text="删除", font=ui_fonts.ui_font(9),
                                               fg_color="transparent",
-                                              text_color=STATUS_ERR,
-                                              hover_color=DLG_HOVER,
+                                              text_color=INTRO_ERR,
+                                              hover_color=INTRO_HOVER,
                                               border_width=1,
-                                              border_color=DLG_BORDER,
+                                              border_color=INTRO_BORDER,
                                               corner_radius=14, width=50, height=24,
                                               command=self._delete_image)
         self.delete_img_btn.pack(side='left', padx=(4, 0))
@@ -281,39 +281,39 @@ class IntroPanel(ctk.CTkFrame):
         # 生日输入（与形象编辑同一行）
         self.birthday_clear_btn = ctk.CTkButton(edit_avatar_frame, text="✕", width=24, height=24,
                                                 fg_color="transparent",
-                                                text_color=STATUS_ERR,
-                                                hover_color=DLG_HOVER,
+                                                text_color=INTRO_ERR,
+                                                hover_color=INTRO_HOVER,
                                                 border_width=1,
-                                                border_color=DLG_BORDER,
+                                                border_color=INTRO_BORDER,
                                                 corner_radius=12,
-                                                font=ui_fonts.ui_font(9),
+                                                font=ui_fonts.ui_font(10),
                                                 command=self._clear_birthday_edit)
         self.birthday_clear_btn.pack(side='right', padx=(4,0))
         self.birthday_edit_entry = CTkBirthdayEntry(edit_avatar_frame, width=120,
                                                      font=ui_fonts.ui_font(11),
                                                      border_width=1,
-                                                     border_color=DLG_BORDER,
+                                                     border_color=INTRO_BORDER,
                                                      fg_color=FB_CARD_BG)
         self.birthday_edit_entry.pack(side='right')
         ctk.CTkLabel(edit_avatar_frame, text="生日",
-                     font=ui_fonts.ui_font(9),
+                     font=ui_fonts.ui_font(10),
                      text_color=FB_MUTED).pack(side='right', padx=4)
 
 
-        ctk.CTkLabel(self.intro_edit_scroll, text="公开介绍", font=ui_fonts.ui_font(9),
+        ctk.CTkLabel(self.intro_edit_scroll, text="公开介绍", font=ui_fonts.ui_font(10),
                      text_color=FB_MUTED).pack(anchor='w')
-        self.intro_visible_entry = ctk.CTkTextbox(self.intro_edit_scroll, height=60, wrap='word',
-            font=ui_fonts.ui_font(11), border_width=1, border_color=DLG_BORDER,
+        self.intro_visible_entry = ctk.CTkTextbox(self.intro_edit_scroll, height=70, wrap='word',
+            font=ui_fonts.ui_font(12), border_width=1, border_color=INTRO_BORDER,
             fg_color=FB_CARD_BG)
         self.intro_visible_entry.pack(fill='x', pady=(1, 6))
         self.intro_visible_text = self.intro_visible_entry._textbox
         self._setup_rich_text(self.intro_visible_text)
         self.intro_visible_text.bind("<FocusIn>", lambda e: self._on_text_focus(self.intro_visible_text), add="+")
 
-        ctk.CTkLabel(self.intro_edit_scroll, text="隐藏设定", font=ui_fonts.ui_font(9),
+        ctk.CTkLabel(self.intro_edit_scroll, text="隐藏设定", font=ui_fonts.ui_font(10),
                      text_color=FB_MUTED).pack(anchor='w')
-        self.intro_hidden_entry = ctk.CTkTextbox(self.intro_edit_scroll, height=30, wrap='word',
-            font=ui_fonts.ui_font(11), border_width=1, border_color=DLG_BORDER,
+        self.intro_hidden_entry = ctk.CTkTextbox(self.intro_edit_scroll, height=35, wrap='word',
+            font=ui_fonts.ui_font(12), border_width=1, border_color=INTRO_BORDER,
             fg_color=FB_CARD_BG)
         self.intro_hidden_entry.pack(fill='x', pady=(1, 6))
         self.intro_hidden_text = self.intro_hidden_entry._textbox
@@ -324,13 +324,13 @@ class IntroPanel(ctk.CTkFrame):
         # 标签按钮（单行横向滚动，带悬停提示）
         tag_frame = ctk.CTkScrollableFrame(self.intro_edit_scroll, orientation="horizontal",
                                             fg_color="transparent", height=32,
-                                            scrollbar_button_color=BORDER_ALT,
-                                            scrollbar_button_hover_color=MENU_HOVER)
+                                            scrollbar_button_color=INTRO_BORDER_STRONG,
+                                            scrollbar_button_hover_color=INTRO_MENU_HOVER)
         tag_frame.pack(fill='x', pady=2)
         for tag in get_predefined_tags():
             btn = ctk.CTkButton(
                 tag_frame, text=tag, width=80, height=24,
-                font=ui_fonts.ui_font(9),
+                font=ui_fonts.ui_font(11),
                 fg_color=FB_TAG_BG,  # 浅色/深色背景
                 hover_color=FB_TAG_HOVER,  # 悬停背景
                 text_color=FB_TAG_FG,  # 文字颜色
@@ -344,7 +344,7 @@ class IntroPanel(ctk.CTkFrame):
             btn.bind("<Leave>", lambda e: self._hide_hint())
 
         self._hint_label = ctk.CTkLabel(self.intro_edit_scroll, text="",
-            font=ui_fonts.ui_font(10), text_color=FB_MUTED, height=0)
+            font=ui_fonts.ui_font(11), text_color=FB_MUTED, height=0)
         self._hint_label.pack(fill='x', pady=(0, 2))
 
         # 底部按钮栏（保存/取消）
@@ -359,9 +359,9 @@ fg_color=FB_BTN, text_color="white",
             corner_radius=14, width=64, height=26, command=self._save
         ).pack(side='right', padx=(4, 0), pady=0)
         ctk.CTkButton(btn_row, text="✖ 取消", font=ui_fonts.ui_font(10),
-            fg_color="transparent", text_color=STATUS_ERR,
-            hover_color=DLG_HOVER,
-            border_width=1, border_color=DLG_BORDER,
+            fg_color="transparent", text_color=INTRO_ERR,
+            hover_color=INTRO_HOVER,
+            border_width=1, border_color=INTRO_BORDER,
             corner_radius=14, width=64, height=26, command=self._cancel
         ).pack(side='right', pady=0)
 
@@ -612,9 +612,9 @@ class CTkBirthdayEntry(customtkinter.CTkEntry):
             command=self._on_dropdown_select,
             frame_border_width=1,
 frame_border_color=FB_MENU_BORDER,
-                fg_color=PNL_BG,
-                button_color=PNL_BG,
-                hover_color=BLUE_HOVER,
+                fg_color=INTRO_PANEL_BG,
+                button_color=INTRO_PANEL_BG,
+                hover_color=INTRO_CARD_HOVER,
                 scrollbar_button_color=FB_MENU_SCROLL,
                 scrollbar_button_hover_color=FB_MENU_SCROLL_HOVER,
                 text_color=FB_MENU_TEXT

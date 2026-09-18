@@ -10,6 +10,7 @@ Windows / macOS / Linux 的中文字族互不相同：
 """
 
 import sys
+import tkinter as tk
 
 
 # 各平台首选家族 + 回退候选列表（按可用性优先排序）。
@@ -68,6 +69,30 @@ def ui_font(size: int, weight: str = "") -> tuple:
     if weight:
         return (cjk_family(), size, weight)
     return (cjk_family(), size)
+
+
+def align_native_scaling(root) -> None:
+    """把 Tk 的磅→像素换算系数（tk scaling）对齐到 CTk 的控件缩放系数。
+
+    CTk 控件把正数字号换算成 -N×widget_scaling 的像素字号；而 ttk.Treeview、
+    tk.Listbox、canvas 文字、CTkTextbox 内部 Text 的 tag 字体等原生链路仍按
+    Tk 全局 scaling（启动时按 96 DPI 算出的固定值）换算磅值，导致同一个字号
+    在高缩放屏上两套链路显示大小不同（175% 屏相差约 24%）。进程被 CTk 激活
+    DPI 感知后窗口不再被系统拉伸，但 Tk 的 scaling 值并不会随之更新，因此
+    在启动时把它改写为 widget_scaling，使原生控件与 CTk 控件的字号含义一致；
+    并注册回调，系统缩放变化时保持同步。负数像素字号不受此系数影响，CTk
+    控件自身的显示不变。
+    """
+    from customtkinter.windows.widgets.scaling.scaling_tracker import ScalingTracker
+
+    def _sync(widget_scaling, _window_scaling):
+        try:
+            root.tk.call("tk", "scaling", widget_scaling)
+        except tk.TclError:
+            pass  # 窗口已销毁
+
+    _sync(ScalingTracker.get_widget_scaling(root), 1.0)
+    ScalingTracker.add_widget(_sync, root)
 
 
 def font_family_for(name: str, default: str) -> str:

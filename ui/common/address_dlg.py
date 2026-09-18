@@ -19,9 +19,9 @@ from ui.common.dialogs import BaseDialog
 from ui.common import fonts as ui_fonts
 from ui.common.widgets import CTkScrollableDropdownFrame
 from ui.common.theme import (
-    SOFT, TEXT, TEXT_MUTED, TEXT_DISABLED,
-    BORDER_ALT, HOVER_ALT,
-    STATUS_OK, OK_HOVER, PNL_BG, CLEAR_BG, CLEAR_BORDER, STATUS_ERR,
+    ADDR_PANEL_BG, ADDR_BORDER_STRONG, ADDR_HOVER, ADDR_CLEAR_HOVER,
+    ADDR_CLEAR_BORDER, ADDR_TEXT, ADDR_TEXT_SOFT, ADDR_TEXT_MUTED,
+    ADDR_OK, ADDR_OK_HOVER, ADDR_ERR,
 )
 from address_model import validate_address_text, format_addr_verbose
 
@@ -69,13 +69,13 @@ class AddressTextDialog(BaseDialog):
 
     def _create_widgets(self, initial):
         ctk.CTkLabel(self, text=self.description, font=self.UI_FONT,
-                     text_color=SOFT, justify='left', wraplength=640).pack(
+                     text_color=ADDR_TEXT_SOFT, justify='left', wraplength=640).pack(
             anchor='w', padx=20, pady=(12, 4))
 
         # ---- 序列化地址：输入框 + 下拉（与级联双向联动） ----
         ctk.CTkLabel(self, text="序列化地址：",
                      font=self.UI_FONT_BOLD,
-                     text_color=TEXT).pack(anchor='w', padx=20, pady=(8, 2))
+                     text_color=ADDR_TEXT).pack(anchor='w', padx=20, pady=(8, 2))
         addr_frame = ctk.CTkFrame(self, fg_color="transparent")
         addr_frame.pack(fill='x', padx=20)
         self.addr_var = tk.StringVar()
@@ -83,26 +83,26 @@ class AddressTextDialog(BaseDialog):
             addr_frame, textvariable=self.addr_var,
             width=460, height=28, font=self.UI_FONT,
             placeholder_text="搜索地址 / 描述 / 申领人…",
-            fg_color=PNL_BG, border_color=BORDER_ALT)
+            fg_color=ADDR_PANEL_BG, border_color=ADDR_BORDER_STRONG)
         self.addr_entry.pack(side='left')
         ctk.CTkButton(addr_frame, text="刷新", width=80, height=28,
                       font=self.UI_FONT,
                       fg_color="transparent", border_width=1,
-                      border_color=BORDER_ALT, text_color=TEXT_MUTED,
-                      hover_color=HOVER_ALT,
+                      border_color=ADDR_BORDER_STRONG, text_color=ADDR_TEXT_MUTED,
+                      hover_color=ADDR_HOVER,
                       command=self._refresh_registry).pack(side='left', padx=(8, 0))
 
         self.registry_status_var = tk.StringVar(value="正在下载最新注册表……")
         ctk.CTkLabel(self, textvariable=self.registry_status_var,
                      font=ui_fonts.ui_font(10),
-                     text_color=TEXT_MUTED, justify='left', wraplength=640,
+                     text_color=ADDR_TEXT_MUTED, justify='left', wraplength=640,
                      anchor='w').pack(fill='x', padx=20, pady=(2, 0))
 
         self.addr_dropdown = CTkScrollableDropdownFrame(
             attach=self.addr_entry, values=[], height=220, width=460,
             button_height=26, justify="left",
-            font=self.UI_FONT, fg_color=PNL_BG, hover_color=HOVER_ALT,
-            frame_border_color=BORDER_ALT, text_color=TEXT,
+            font=self.UI_FONT, fg_color=ADDR_PANEL_BG, hover_color=ADDR_HOVER,
+            frame_border_color=ADDR_BORDER_STRONG, text_color=ADDR_TEXT,
             command=self._on_addr_pick)
         # 单击即弹开（组件默认对输入框只绑了双击）
         self.addr_entry.bind("<Button-1>", lambda _e: self._open_addr_dropdown(), add="+")
@@ -117,21 +117,21 @@ class AddressTextDialog(BaseDialog):
             row = ctk.CTkFrame(cascade, fg_color="transparent")
             row.pack(fill='x', pady=2)
             ctk.CTkLabel(row, text=LEVEL_LABELS[level], width=64,
-                         font=self.UI_FONT, text_color=TEXT,
+                         font=self.UI_FONT, text_color=ADDR_TEXT,
                          anchor='w').pack(side='left')
             box = ctk.CTkButton(row, text="（下载注册表中…）", width=200, height=28,
                                 font=self.UI_FONT, anchor='w',
-                                fg_color=PNL_BG, border_width=1,
-                                border_color=BORDER_ALT, text_color=TEXT,
-                                hover_color=HOVER_ALT, state="disabled")
+                                fg_color=ADDR_PANEL_BG, border_width=1,
+                                border_color=ADDR_BORDER_STRONG, text_color=ADDR_TEXT,
+                                hover_color=ADDR_HOVER, state="disabled")
             box.pack(side='left', padx=(4, 0))
             self._level_boxes[level] = box
             dropdown = CTkScrollableDropdownFrame(
                 attach=box, values=[], width=220, height=150,
                 button_height=24, justify="left", x=340,
                 frame_border_width=0,
-                font=self.UI_FONT, fg_color=PNL_BG, hover_color=HOVER_ALT,
-                text_color=TEXT,
+                font=self.UI_FONT, fg_color=ADDR_PANEL_BG, hover_color=ADDR_HOVER,
+                text_color=ADDR_TEXT,
                 command=lambda disp, lv=level: self._on_level_pick(lv, disp))
             self._level_dropdowns[level] = dropdown
             # 弹层背景透明：内部滚动区与外层容器都不再自绘底色
@@ -144,21 +144,21 @@ class AddressTextDialog(BaseDialog):
         if prev:
             prev_text += f"\n可读位置：{format_addr_verbose(prev)}"
         self.prev_label = ctk.CTkLabel(
-            self, text=prev_text, font=self.UI_FONT, text_color=TEXT,
+            self, text=prev_text, font=self.UI_FONT, text_color=ADDR_TEXT,
             justify='left', wraplength=640, anchor='w')
         self.prev_label.pack(fill='x', padx=20, pady=(4, 0))
 
         self.status_var = tk.StringVar(value="")
         self.status_label = ctk.CTkLabel(self, textvariable=self.status_var,
                                          font=ui_fonts.ui_font(10),
-                                         text_color=TEXT_MUTED, justify='left',
+                                         text_color=ADDR_TEXT_MUTED, justify='left',
                                          wraplength=640, anchor='w')
         self.status_label.pack(fill='x', padx=20, pady=(4, 0))
 
         self.warn_var = tk.StringVar(value="")
         self.warn_label = ctk.CTkLabel(self, textvariable=self.warn_var,
                                        font=ui_fonts.ui_font(10),
-                                       text_color=STATUS_ERR, justify='left',
+                                       text_color=ADDR_ERR, justify='left',
                                        wraplength=640, anchor='w')
         self.warn_label.pack(fill='x', padx=20, pady=(2, 0))
 
@@ -167,18 +167,18 @@ class AddressTextDialog(BaseDialog):
         ctk.CTkButton(btn_frame, text="确定", width=90, height=28,
                       font=self.UI_FONT, command=self._on_ok,
                       fg_color="transparent", border_width=1,
-                      border_color=STATUS_OK, text_color=STATUS_OK,
-                      hover_color=OK_HOVER).pack(side='left', padx=(0, 8))
+                      border_color=ADDR_OK, text_color=ADDR_OK,
+                      hover_color=ADDR_OK_HOVER).pack(side='left', padx=(0, 8))
         ctk.CTkButton(btn_frame, text="消除", width=90, height=28,
                       font=self.UI_FONT, command=self._clear,
                       fg_color="transparent", border_width=1,
-                      border_color=CLEAR_BORDER, text_color=STATUS_ERR,
-                      hover_color=CLEAR_BG).pack(side='left')
+                      border_color=ADDR_CLEAR_BORDER, text_color=ADDR_ERR,
+                      hover_color=ADDR_CLEAR_HOVER).pack(side='left')
         ctk.CTkButton(btn_frame, text="取消", width=90, height=28,
                       font=self.UI_FONT, command=self._on_close,
                       fg_color="transparent", border_width=1,
-                      border_color=BORDER_ALT, text_color=TEXT_MUTED,
-                      hover_color=HOVER_ALT).pack(side='right')
+                      border_color=ADDR_BORDER_STRONG, text_color=ADDR_TEXT_MUTED,
+                      hover_color=ADDR_HOVER).pack(side='right')
 
         self._refresh_hint()
 
@@ -301,10 +301,10 @@ class AddressTextDialog(BaseDialog):
         text = self._composed_address()
         if not text:
             self.status_var.set("当前：未注册（到处可用，不参与地址规则）。")
-            self.status_label.configure(text_color=TEXT_MUTED)
+            self.status_label.configure(text_color=ADDR_TEXT_MUTED)
         else:
             self.status_var.set(f"当前：{text}\n可读位置：{format_addr_verbose(text)}")
-            self.status_label.configure(text_color=TEXT)
+            self.status_label.configure(text_color=ADDR_TEXT)
         # 地标风格：之前有注册地址而选定了不同新地址 → 提示地标地址将失效
         if self._landmark_style and self._initial and text != self._initial:
             self.warn_var.set(

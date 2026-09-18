@@ -2,7 +2,9 @@ import customtkinter as ctk
 
 from ui.common.dialogs import BaseDialog
 from ui.common import fonts as ui_fonts
-from ui.common.theme import TEXT, HARD_TITLE
+from ui.common.theme import (
+    NEWS_TEXT, NEWS_TITLE,
+)
 from datetime import date
 
 
@@ -16,12 +18,12 @@ class NewsDialog(BaseDialog):
 
         ctk.CTkLabel(
             self, text="早报", font=ui_fonts.ui_font(16, "bold"),
-            text_color=HARD_TITLE
+            text_color=NEWS_TITLE
         ).pack(anchor="w", padx=24, pady=(20, 10))
         ctk.CTkLabel(
             self, text=article.text, wraplength=400, justify="left",
             anchor="w", font=ui_fonts.ui_font(13),
-            text_color=TEXT
+            text_color=NEWS_TEXT
         ).pack(fill="x", padx=24, pady=(0, 18))
         ctk.CTkButton(
             self, text="确定", width=92, height=32,

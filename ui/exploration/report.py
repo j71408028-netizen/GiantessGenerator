@@ -12,10 +12,10 @@ from logic import ALL_PART_NAMES, format_size
 from services.image_service import ImageService
 from models import CharacterSnapshot
 from ui.common.theme import (
-    BORDER_ALT, VIEW_PNL_FG, SOFT, TEXT_MUTED,
-    BORDER, HOVER_ALT, HEADER_BG, GOLD_TITLE,
-    TAG_SEPARATOR, TAG_INTRO, TAG_WILL, TAG_MEASURE, TAG_COMPARE,
-    TAG_QUIP, TAG_CASUALTY, TAG_BODY, PLACEHOLDER,
+    REPORT_PANEL_BG, REPORT_HEADER_BG, REPORT_BORDER, REPORT_BORDER_STRONG,
+    REPORT_HOVER, REPORT_TEXT_MUTED, REPORT_PLACEHOLDER, REPORT_TAG_BODY,
+    REPORT_TAG_CASUALTY, REPORT_TAG_COMPARE, REPORT_TAG_INTRO, REPORT_TAG_MEASURE,
+    REPORT_TAG_QUIP, REPORT_TAG_SEPARATOR, REPORT_TAG_WILL, REPORT_TITLE_GOLD,
 )
 from ui.common import fonts as ui_fonts
 
@@ -26,9 +26,9 @@ class ReportPanel(ctk.CTkFrame):
     """
 
     def __init__(self, parent, app, context, params_panel, host):
-        super().__init__(parent, border_width=1, corner_radius=12,
-                         border_color=BORDER,
-                         fg_color=VIEW_PNL_FG)
+        super().__init__(parent, border_width=1, corner_radius=10,
+                         border_color=REPORT_BORDER,
+                         fg_color=REPORT_PANEL_BG)
         self.app = app
         self.context = context
         self.params_panel = params_panel
@@ -56,11 +56,11 @@ class ReportPanel(ctk.CTkFrame):
         self.rowconfigure(2, weight=1)   # 报告正文
 
         # 报告标题栏（轻度游戏质感）
-        header_frame = ctk.CTkFrame(self, fg_color=HEADER_BG,
+        header_frame = ctk.CTkFrame(self, fg_color=REPORT_HEADER_BG,
                                     corner_radius=8)
         header_frame.grid(row=0, column=0, sticky='ew', padx=4, pady=(5, 0))
         ctk.CTkLabel(header_frame, text="📜 探索报告", font=ui_fonts.ui_font(13, "bold"),
-                     text_color=GOLD_TITLE).pack(side='left', padx=12, pady=4)
+                     text_color=REPORT_TITLE_GOLD).pack(side='left', padx=12, pady=4)
 
         # 保存报告按钮
         self.save_report_btn = ctk.CTkButton(
@@ -68,9 +68,9 @@ class ReportPanel(ctk.CTkFrame):
             font=ui_fonts.ui_font(12),
             width=25, height=20,
             fg_color="transparent",
-            text_color=TEXT_MUTED,
-            hover_color=HOVER_ALT,
-            border_color=BORDER_ALT,
+            text_color=REPORT_TEXT_MUTED,
+            hover_color=REPORT_HOVER,
+            border_color=REPORT_BORDER_STRONG,
             corner_radius=6,
             command=self._save_report
         )
@@ -80,17 +80,17 @@ class ReportPanel(ctk.CTkFrame):
         self.details_toggle = ctk.CTkLabel(
             header_frame, text="显示详细尺寸",
             font=ctk.CTkFont(family=ui_fonts.cjk_family(), size=11, underline=True),
-            text_color=TEXT_MUTED,
+            text_color=REPORT_TEXT_MUTED,
             cursor="hand2"
         )
         self.details_toggle.pack(side='right', padx=(0, 12), pady=4)
         self.details_toggle.bind("<Button-1>", lambda e: self._toggle_details())
 
         def _dt_hover_enter(_e):
-            self.details_toggle.configure(text_color=GOLD_TITLE)
+            self.details_toggle.configure(text_color=REPORT_TITLE_GOLD)
 
         def _dt_hover_leave(_e):
-            self.details_toggle.configure(text_color=TEXT_MUTED)
+            self.details_toggle.configure(text_color=REPORT_TEXT_MUTED)
 
         self.details_toggle.bind("<Enter>", _dt_hover_enter)
         self.details_toggle.bind("<Leave>", _dt_hover_leave)
@@ -120,9 +120,9 @@ class ReportPanel(ctk.CTkFrame):
             _pf, text="‹ 上一页", width=60,
             font=ui_fonts.ui_font(11),
             fg_color="transparent",
-text_color=TEXT_MUTED,
-                hover_color=HOVER_ALT,
-                border_color=BORDER_ALT,
+            text_color=REPORT_TEXT_MUTED,
+            hover_color=REPORT_HOVER,
+            border_color=REPORT_BORDER_STRONG,
             corner_radius=4,
             command=self._prev_details_page
         )
@@ -131,7 +131,7 @@ text_color=TEXT_MUTED,
         self.page_label = ctk.CTkLabel(
             _pf, text="",
             font=ui_fonts.ui_font(11, "bold"),
-            text_color=TEXT_MUTED
+            text_color=REPORT_TEXT_MUTED
         )
         self.page_label.pack(side='left', padx=5, pady=(3, 6))
 
@@ -139,9 +139,9 @@ text_color=TEXT_MUTED,
             _pf, text="下一页 ›", width=60,
             font=ui_fonts.ui_font(11),
             fg_color="transparent",
-text_color=TEXT_MUTED,
-                hover_color=HOVER_ALT,
-                border_color=BORDER_ALT,
+            text_color=REPORT_TEXT_MUTED,
+            hover_color=REPORT_HOVER,
+            border_color=REPORT_BORDER_STRONG,
             corner_radius=4,
             command=self._next_details_page
         )
@@ -269,35 +269,35 @@ text_color=TEXT_MUTED,
             return dark if is_dark else light
 
         # 字体完全遵循设置：斜体描述用 desc_font，其余用 report_font
-        text_widget.tag_configure('title', font=(report_font, 18, "bold"),
-                                  foreground=C(*GOLD_TITLE),
+        text_widget.tag_configure('title', font=(report_font, 15, "bold"),
+                                  foreground=C(*REPORT_TITLE_GOLD),
                                   spacing1=0, spacing3=4)
-        text_widget.tag_configure('separator', font=(report_font, 16),
-                                  foreground=C(*TAG_SEPARATOR),
+        text_widget.tag_configure('separator', font=(report_font, 15),
+                                  foreground=C(*REPORT_TAG_SEPARATOR),
                                   spacing1=0, spacing3=0)
-        text_widget.tag_configure('intro', font=(report_font, 16),
-                                  foreground=C(*TAG_INTRO),
+        text_widget.tag_configure('intro', font=(report_font, 13),
+                                  foreground=C(*REPORT_TAG_INTRO),
                                   spacing1=3, spacing3=3)
-        text_widget.tag_configure('will', font=(report_font, 15, "bold"),
-                                  foreground=C(*TAG_WILL),
+        text_widget.tag_configure('will', font=(report_font, 13, "bold"),
+                                  foreground=C(*REPORT_TAG_WILL),
                                   spacing1=6, spacing3=6)
-        text_widget.tag_configure('measure', font=(report_font, 16, "bold"),
-                                  foreground=C(*TAG_MEASURE),
+        text_widget.tag_configure('measure', font=(report_font, 14, "bold"),
+                                  foreground=C(*REPORT_TAG_MEASURE),
                                   spacing1=7, spacing3=2)
-        text_widget.tag_configure('compare', font=(report_font, 16),
-                                  foreground=C(*TAG_COMPARE),
+        text_widget.tag_configure('compare', font=(report_font, 14),
+                                  foreground=C(*REPORT_TAG_COMPARE),
                                   spacing1=2, spacing3=3)
-        text_widget.tag_configure('quip', font=(desc_font, 16, "italic"),
-                                  foreground=C(*TAG_QUIP),
+        text_widget.tag_configure('quip', font=(desc_font, 14, "italic"),
+                                  foreground=C(*REPORT_TAG_QUIP),
                                   spacing1=4, spacing3=10)
-        text_widget.tag_configure('casualty_sep', font=(report_font, 15),
-                                  foreground=C(*PLACEHOLDER),
+        text_widget.tag_configure('casualty_sep', font=(report_font, 14),
+                                  foreground=C(*REPORT_PLACEHOLDER),
                                   spacing1=6, spacing3=2)
-        text_widget.tag_configure('casualty', font=(report_font, 15, "bold"),
-                                  foreground=C(*TAG_CASUALTY),
+        text_widget.tag_configure('casualty', font=(report_font, 14, "bold"),
+                                  foreground=C(*REPORT_TAG_CASUALTY),
                                   spacing1=2, spacing3=0)
-        text_widget.tag_configure('body', font=(report_font, 15),
-                                  foreground=C(*TAG_BODY))
+        text_widget.tag_configure('body', font=(report_font, 14),
+                                  foreground=C(*REPORT_TAG_BODY))
         text_widget.tag_configure('strikethrough', overstrike=True)
 
         def insert_with_strike(widget, line, base_tag=None):
@@ -432,12 +432,12 @@ text_color=TEXT_MUTED,
 
         tw = self.details_text._textbox
         tw.tag_configure('dl_label',
-            font=(report_font, 16, "bold"),
-            foreground=C(*GOLD_TITLE),
+            font=(report_font, 12, "bold"),
+            foreground=C(*REPORT_TITLE_GOLD),
             spacing1=3, spacing3=3)
         tw.tag_configure('dl_value',
-            font=(report_font, 16),
-            foreground=C(*TAG_BODY))
+            font=(report_font, 12),
+            foreground=C(*REPORT_TAG_BODY))
 
         name = self.last_report.name if self.last_report else ""
         age_str = self._calculate_age()

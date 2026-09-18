@@ -13,7 +13,8 @@ from ui.common.widgets import StyleListBox
 from ui.common import fonts as ui_fonts
 from ui.common import dialogs
 from ui.common.theme import (
-    TEXT, SOFT, HOVER, INPUT_BORDER, STATUS_OK, STATUS_ERR,
+    SETTINGS_DLG_HOVER, SETTINGS_DLG_INPUT_BORDER, SETTINGS_DLG_TEXT, SETTINGS_DLG_TEXT_SOFT,
+    SETTINGS_DLG_OK, SETTINGS_DLG_ERR,
 )
 
 from ai import PROVIDER_DEFAULTS, create_client
@@ -48,7 +49,7 @@ class AIConfigDialog(BaseDialog):
             template_frame.pack(fill='x', pady=(0, 16))
             ctk.CTkLabel(
                 template_frame, text="快速模板：", anchor='w',
-                font=self.UI_FONT, text_color=TEXT
+                font=self.UI_FONT, text_color=SETTINGS_DLG_TEXT
             ).pack(side='left')
 
             for profile_id, defaults in PROVIDER_DEFAULTS.items():
@@ -66,9 +67,9 @@ class AIConfigDialog(BaseDialog):
                 btn = ctk.CTkButton(
                     template_frame, text=template_name, width=80, height=28,
                     command=make_template_command(template_name, template_url, template_model),
-                    fg_color="transparent", text_color=SOFT,
-                    hover_color=HOVER,
-                    border_width=1, border_color=INPUT_BORDER,
+                    fg_color="transparent", text_color=SETTINGS_DLG_TEXT_SOFT,
+                    hover_color=SETTINGS_DLG_HOVER,
+                    border_width=1, border_color=SETTINGS_DLG_INPUT_BORDER,
                     corner_radius=8, font=ui_fonts.ui_font(11)
                 )
                 btn.pack(side='right', padx=(12, 0))
@@ -84,7 +85,7 @@ class AIConfigDialog(BaseDialog):
             row.pack(fill='x', pady=4)
             ctk.CTkLabel(
                 row, text=text, width=76, anchor='w',
-                font=self.UI_FONT, text_color=TEXT
+                font=self.UI_FONT, text_color=SETTINGS_DLG_TEXT
             ).pack(side='left')
             entry = ctk.CTkEntry(
                 row, textvariable=var, width=300, height=28,
@@ -97,7 +98,7 @@ class AIConfigDialog(BaseDialog):
 
         self.test_label = ctk.CTkLabel(
             body, text="", anchor='w', font=self.UI_FONT_SMALL,
-            text_color=SOFT)
+            text_color=SETTINGS_DLG_TEXT_SOFT)
         self.test_label.pack(fill='x', pady=(6, 0))
 
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -109,9 +110,9 @@ class AIConfigDialog(BaseDialog):
             ctk.CTkButton(
                 btn_frame, text="删除配置", width=80, height=30,
                 command=self._delete_config, fg_color="transparent",
-                text_color=STATUS_ERR,
-                hover_color=HOVER,
-                border_width=1, border_color=INPUT_BORDER,
+                text_color=SETTINGS_DLG_ERR,
+                hover_color=SETTINGS_DLG_HOVER,
+                border_width=1, border_color=SETTINGS_DLG_INPUT_BORDER,
                 corner_radius=8, font=ui_fonts.ui_font(13)
             ).pack(side='left', padx=6)
 
@@ -132,12 +133,12 @@ class AIConfigDialog(BaseDialog):
     def _test_connection(self):
         cfg = self._current_config()
         if not cfg["name"]:
-            self.test_label.configure(text="请填写配置名称", text_color=STATUS_ERR)
+            self.test_label.configure(text="请填写配置名称", text_color=SETTINGS_DLG_ERR)
             return
         if not cfg["api_key"]:
-            self.test_label.configure(text="请先填写 API Key", text_color=STATUS_ERR)
+            self.test_label.configure(text="请先填写 API Key", text_color=SETTINGS_DLG_ERR)
             return
-        self.test_label.configure(text="正在测试连接...", text_color=SOFT)
+        self.test_label.configure(text="正在测试连接...", text_color=SETTINGS_DLG_TEXT_SOFT)
         self.test_btn.configure(state="disabled")
         threading.Thread(
             target=self._do_test, args=(self.provider, cfg), daemon=True
@@ -161,15 +162,15 @@ class AIConfigDialog(BaseDialog):
             return
         self.test_btn.configure(state="normal")
         if ok:
-            self.test_label.configure(text="连接成功", text_color=STATUS_OK)
+            self.test_label.configure(text="连接成功", text_color=SETTINGS_DLG_OK)
         else:
             text = msg or "连接失败"
-            self.test_label.configure(text=f"连接失败：{text}", text_color=STATUS_ERR)
+            self.test_label.configure(text=f"连接失败：{text}", text_color=SETTINGS_DLG_ERR)
 
     def _ok(self, _event=None):
         self.result = self._current_config()
         if not self.result["name"]:
-            self.test_label.configure(text="请填写配置名称", text_color=STATUS_ERR)
+            self.test_label.configure(text="请填写配置名称", text_color=SETTINGS_DLG_ERR)
             return
         self._close()
 
@@ -282,7 +283,7 @@ class WorldPackCreateDialog(BaseDialog):
             nonlocal row
             ctk.CTkLabel(
                 parent, text=label_text, anchor='w',
-                font=self.UI_FONT, text_color=TEXT
+                font=self.UI_FONT, text_color=SETTINGS_DLG_TEXT
             ).grid(row=row, column=0, sticky='w', padx=(10, 30), pady=(9,3))
 
             if widget_type == "entry":
@@ -313,7 +314,7 @@ class WorldPackCreateDialog(BaseDialog):
         # 简介行：标签在列0，文本框在列1，并让该行可垂直拉伸
         ctk.CTkLabel(
             parent, text="简介", anchor='nw',
-            font=self.UI_FONT, text_color=TEXT
+            font=self.UI_FONT, text_color=SETTINGS_DLG_TEXT
         ).grid(row=row, column=0, sticky='nw', padx=(10, 30), pady=(15, 3))
 
         self.desc_text = ctk.CTkTextbox(
@@ -330,7 +331,7 @@ class WorldPackCreateDialog(BaseDialog):
 
         self.basic_hint = ctk.CTkLabel(
             parent, text="", anchor='w', font=self.UI_FONT_SMALL,
-            text_color=STATUS_ERR)
+            text_color=SETTINGS_DLG_ERR)
         self.basic_hint.grid(row=row, column=0, columnspan=2, sticky='w', padx=10)
         parent.grid_rowconfigure(row, weight=0)
         row += 1
@@ -350,7 +351,7 @@ class WorldPackCreateDialog(BaseDialog):
         ctk.CTkLabel(
             left_frame, text="配置静态表", anchor='w',
             font=ui_fonts.ui_font(12, "bold"),
-            text_color=SOFT
+            text_color=SETTINGS_DLG_TEXT_SOFT
         ).pack(fill='x', pady=(0, 8))
 
         single_types = [("names", "姓名"),
@@ -369,7 +370,7 @@ class WorldPackCreateDialog(BaseDialog):
             row.pack(fill='x', pady=2)
             ctk.CTkLabel(
                 row, text=label, width=60, anchor='w',
-                font=self.UI_FONT, text_color=TEXT
+                font=self.UI_FONT, text_color=SETTINGS_DLG_TEXT
             ).pack(side='left')
             var = tk.StringVar(value="<不配置>")
             combo = ctk.CTkComboBox(
@@ -395,16 +396,16 @@ class WorldPackCreateDialog(BaseDialog):
         self._multi_label = ctk.CTkLabel(
             header_frame, text="配置资源包", anchor='w',
             font=ui_fonts.ui_font(12, "bold"),
-            text_color=SOFT
+            text_color=SETTINGS_DLG_TEXT_SOFT
         )
         self._multi_label.pack(side='left')
 
         ctk.CTkButton(
             header_frame, text="▶", width=22, height=22,
             command=self._switch_multi_type,
-            fg_color="transparent", text_color=SOFT,
-            hover_color=HOVER,
-            border_width=1, border_color=INPUT_BORDER,
+            fg_color="transparent", text_color=SETTINGS_DLG_TEXT_SOFT,
+            hover_color=SETTINGS_DLG_HOVER,
+            border_width=1, border_color=SETTINGS_DLG_INPUT_BORDER,
             corner_radius=6, font=ui_fonts.ui_font(12)
         ).pack(side='left', padx=8)
 
@@ -425,13 +426,13 @@ class WorldPackCreateDialog(BaseDialog):
                 parent,
                 text="提示：挑战包密钥如需随包共享，请手动把 keys.json 复制到包内 challenges 目录。",
                 anchor='w', wraplength=560, font=self.UI_FONT_SMALL,
-                text_color=SOFT
+                text_color=SETTINGS_DLG_TEXT_SOFT
             ).pack(fill='x', pady=2)
 
         # 汇总标签（放在底部）
         self.res_summary = ctk.CTkLabel(
             parent, text="", anchor='w', font=self.UI_FONT_SMALL,
-            text_color=TEXT
+            text_color=SETTINGS_DLG_TEXT
         )
         self.res_summary.pack(fill='x', pady=2)
 
@@ -553,11 +554,11 @@ class WorldPackCreateDialog(BaseDialog):
         ok = bool(name) and bool(self._WORLD_ID_RE.match(world_id))
         if self._step == "basic" and hasattr(self, "basic_hint"):
             if not name:
-                self.basic_hint.configure(text="请填写世界包名称", text_color=STATUS_ERR)
+                self.basic_hint.configure(text="请填写世界包名称", text_color=SETTINGS_DLG_ERR)
             elif not self._WORLD_ID_RE.match(world_id):
                 self.basic_hint.configure(
                     text="世界 ID 需为字母数字开头、1-64 位的安全名称（可含 . _ -）",
-                    text_color=STATUS_ERR)
+                    text_color=SETTINGS_DLG_ERR)
             else:
                 self.basic_hint.configure(text="")
         return ok
@@ -597,7 +598,7 @@ class WorldPackCreateDialog(BaseDialog):
         self._save_resources_state()
         selected = self._resource_selection or {}
         if not selected:
-            self.res_summary.configure(text="请至少选择一种要打包的资源", text_color=STATUS_ERR)
+            self.res_summary.configure(text="请至少选择一种要打包的资源", text_color=SETTINGS_DLG_ERR)
             return
         self.result = {
             "name": self.name_var.get().strip(),

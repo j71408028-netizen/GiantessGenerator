@@ -64,8 +64,11 @@ def _apply_titlebar_theme(win):
         pass
 
 
-def splash_process(conn, theme_mode, color_theme, title):
+def splash_process(conn, theme_mode, color_theme, title, palette=None):
     """子进程入口（multiprocessing.Process 目标）。
+
+    palette 为界面配色名（assets/theme/<palette>.json）；不传时用默认配色，
+    保证启动屏与随后构建的主界面同色。
 
     协议：
     - 主进程 -> 启动屏: ("progress", value, detail)
@@ -77,6 +80,15 @@ def splash_process(conn, theme_mode, color_theme, title):
     ensure_cwd()
     ctk.set_appearance_mode(theme_mode)
     ctk.set_default_color_theme(color_theme)
+
+    # 启动屏在独立进程里，配色必须在构建 LoadingPage 之前切换，
+    # 否则它会用默认配色的底色渲染。
+    if palette:
+        try:
+            from ui.common.theme import apply_palette
+            apply_palette(palette)
+        except Exception as e:
+            print(f"[Warning] 启动屏应用配色 '{palette}' 失败: {e}")
 
     root = ctk.CTk()
     root.title("巨大娘生成器")

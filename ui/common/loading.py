@@ -6,14 +6,16 @@ import customtkinter as ctk
 
 from paths import icon_dir
 from ui.common import fonts as ui_fonts
-from ui.common.theme import BASE, HARD_LABEL, SOFT
+from ui.common.theme import (
+    LOADING_BG, LOADING_TEXT_SOFT, LOADING_LABEL,
+)
 
 
 class LoadingPage(ctk.CTkFrame):
     """用于初始化和主题切换期间遮挡主界面的加载页。"""
 
     def __init__(self, parent, title="正在加载", **kwargs):
-        super().__init__(parent, corner_radius=0, fg_color=BASE, **kwargs)
+        super().__init__(parent, corner_radius=0, fg_color=LOADING_BG, **kwargs)
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
@@ -23,11 +25,11 @@ class LoadingPage(ctk.CTkFrame):
 
         ctk.CTkLabel(
             body, text="巨大娘生成器", font=ui_fonts.ui_font(26, "bold"),
-            text_color=HARD_LABEL
+            text_color=LOADING_LABEL
         ).pack(pady=(0, 18))
         self.title_label = ctk.CTkLabel(
             body, text=title, font=ui_fonts.ui_font(16),
-            text_color=SOFT
+            text_color=LOADING_TEXT_SOFT
         )
         self.title_label.pack(pady=(0, 10))
         self.progress = ctk.CTkProgressBar(body, width=360, height=10, corner_radius=5)
@@ -35,7 +37,7 @@ class LoadingPage(ctk.CTkFrame):
         self.progress.set(0)
         self.detail_label = ctk.CTkLabel(
             body, text="", font=ui_fonts.ui_font(13),
-            text_color=SOFT
+            text_color=LOADING_TEXT_SOFT
         )
         self.detail_label.pack(pady=(10, 0))
 
@@ -56,16 +58,16 @@ class LoadingPage(ctk.CTkFrame):
             self.grid_rowconfigure(2, weight=0)
             self._error_title = ctk.CTkLabel(
                 self, text=title, font=ui_fonts.ui_font(20, "bold"),
-                text_color=HARD_LABEL)
+                text_color=LOADING_LABEL)
             self._error_title.grid(row=0, column=0, pady=(48, 12))
             self._error_box = ctk.CTkTextbox(
                 self, wrap="word", font=ui_fonts.ui_font(13),
-                fg_color=BASE, text_color=HARD_LABEL)
+                fg_color=LOADING_BG, text_color=LOADING_LABEL)
             self._error_box.grid(
                 row=1, column=0, sticky="nsew", padx=48, pady=(0, 12))
             self._error_hint = ctk.CTkLabel(
                 self, text="初始化失败，可关闭本窗口退出程序。",
-                font=ui_fonts.ui_font(12), text_color=SOFT)
+                font=ui_fonts.ui_font(12), text_color=LOADING_TEXT_SOFT)
             self._error_hint.grid(row=2, column=0, pady=(0, 16))
         else:
             self._error_title.configure(text=title)

@@ -2,10 +2,10 @@ import customtkinter as ctk
 
 from paths import APP_VERSION
 from ui.common.theme import (
-    NAV_BG, NAV_WORLD_BG, NAV_WORLD_GREEN, NAV_TITLE,
-    NAV_SELECTED_BG, NAV_SELECTED_TEXT, NAV_TEXT, NAV_HOVER,
-    NAV_WORLD_TITLE, NAV_WORLD_SELECTED_BG, NAV_WORLD_SELECTED_TEXT,
-    NAV_WORLD_TEXT, NAV_WORLD_HOVER,
+    NAV_BG, NAV_HOVER, NAV_TEXT, NAV_TITLE,
+    NAV_SELECTED_BG, NAV_SELECTED_TEXT, NAV_WORLD_BG, NAV_WORLD_GREEN,
+    NAV_WORLD_HOVER, NAV_WORLD_SELECTED_BG, NAV_WORLD_SELECTED_TEXT, NAV_WORLD_TEXT,
+    NAV_WORLD_TITLE,
 )
 from ui.common import fonts as ui_fonts
 
@@ -26,7 +26,7 @@ class NavigationBar(ctk.CTkFrame):
         self._build()
 
     def _build(self):
-        self._title_label = ctk.CTkLabel(self, text="导航菜单", font=ui_fonts.ui_font(13, "bold"),
+        self._title_label = ctk.CTkLabel(self, text="导航菜单", font=ui_fonts.ui_font(14, "bold"),
                                          text_color=NAV_TITLE)
         self._title_label.pack(pady=(12, 6))
 
@@ -40,11 +40,11 @@ class NavigationBar(ctk.CTkFrame):
 
         for text, key in pages:
             initial_color = NAV_SELECTED_BG if key == "generator" else "transparent"
-            btn = ctk.CTkButton(self, text=text, anchor='w', height=28,
+            btn = ctk.CTkButton(self, text=text, anchor='w', height=32,
                                 fg_color=initial_color,
                                 text_color=NAV_SELECTED_TEXT if key == "generator" else NAV_TEXT,
                                 hover_color=NAV_HOVER,
-                                font=ui_fonts.ui_font(12),
+                                font=ui_fonts.ui_font(13),
                                 command=lambda k=key: self._on_switch(k))
             btn.pack(fill='x', padx=9, pady=3)
             self._buttons[key] = btn
@@ -57,7 +57,7 @@ class NavigationBar(ctk.CTkFrame):
 
         # 底部容器：版本页脚与世界包信息统一收纳，使导航栏底部更紧凑
         self.app_version_label = ctk.CTkLabel(
-            self._frames["app_version"], text=f"生成器版本：v{APP_VERSION}", font=ui_fonts.ui_font(11),
+            self._frames["app_version"], text=f"生成器版本：v{APP_VERSION}", font=ui_fonts.ui_font(12),
             text_color=NAV_TEXT)
         self.app_version_label.pack(side="left", padx=22, pady=(0, 14))
 
