@@ -6,16 +6,18 @@ import customtkinter as ctk
 import ui.common.dialogs
 from dungeon.actions import VISUAL_FILTERS
 from dungeon.chapters import (
-    CHAPTER_COLOR_PRESETS, DEFAULT_SENSITIVITY_ATTR, normalize_chapter,
+    CHAPTER_COLOR_PRESETS, DEFAULT_MAX_PARAGRAPHS, DEFAULT_SENSITIVITY_ATTR,
+    chapter_names, normalize_chapter,
 )
 from ui.common.dialogs import BaseDialog
 from ui.common.theme import (
     CHAPTER_BORDER, CHAPTER_HOVER, CHAPTER_TEXT, CHAPTER_TEXT_SOFT,
     CHAPTER_HINT, CHAPTER_ERR, CHAPTER_ERR_HOVER, CHAPTER_SWATCH_SELECTED_BORDER,
 )
-from ui.scenario.asset_import import import_background_image
+from ui.scenario.asset_import import import_background_image, import_ending_icon
 
 NO_FILTER_LABEL = "（不使用滤镜）"
+OVERFLOW_LEAVE_LABEL = "（离开章节）"
 
 
 class ChapterEditDialog(BaseDialog):
@@ -29,7 +31,7 @@ class ChapterEditDialog(BaseDialog):
                  evolution_attrs=None, all_chapters=None):
         super().__init__(parent)
         self.title("编辑章节")
-        self.geometry("580x620")
+        self.geometry("580x700")
         self.minsize(540, 500)
         self.resizable(True, True)
         self.chapter = chapter if chapter is not None else {}
@@ -93,7 +95,36 @@ class ChapterEditDialog(BaseDialog):
         ctk.CTkEntry(info, textvariable=self.note_var, width=380, height=28,
                      font=self.UI_FONT).grid(row=2, column=1, columnspan=3,
                                              sticky='we', padx=6, pady=3)
+
+        ctk.CTkLabel(info, text="最大段落数:", font=self.UI_FONT).grid(row=3, column=0, sticky='w', pady=3)
+        self.max_paragraphs_var = tk.StringVar(
+            value=str(self.chapter.get("max_paragraphs", DEFAULT_MAX_PARAGRAPHS)))
+        ctk.CTkEntry(info, textvariable=self.max_paragraphs_var, width=80, height=28,
+                     font=self.UI_FONT).grid(row=3, column=1, sticky='w', padx=6, pady=3)
+
+        ctk.CTkLabel(info, text="超限跳转:", font=self.UI_FONT).grid(row=3, column=2, sticky='w', padx=(14, 0), pady=3)
+        self.overflow_var = tk.StringVar(
+            value=self.chapter.get("overflow_target") or OVERFLOW_LEAVE_LABEL)
+        other_chapters = [n for n in chapter_names(self.all_chapters)
+                          if n != self.chapter.get("name")]
+        self.overflow_combo = ctk.CTkComboBox(
+            info, values=[OVERFLOW_LEAVE_LABEL] + other_chapters,
+            variable=self.overflow_var, state="readonly", width=150, height=28,
+            font=self.UI_FONT)
+        self.overflow_combo.grid(row=3, column=3, sticky='w', padx=6, pady=3)
+
+        self.ending_var = tk.BooleanVar(value=bool(self.chapter.get("ending", False)))
+        ctk.CTkCheckBox(info, text="结束章节（段落数耗尽后终止副本并生成结局）",
+                        variable=self.ending_var, font=self.UI_FONT,
+                        text_color=CHAPTER_TEXT, checkbox_width=20, checkbox_height=20,
+                        command=self._toggle_ending_ui).grid(
+                            row=4, column=0, columnspan=4, sticky='w', pady=3)
         info.grid_columnconfigure(3, weight=1)
+
+        # ---------- 结束章节结算（仅勾选结束章节时可编辑）----------
+        self.ending_frame = ctk.CTkFrame(main, fg_color="transparent")
+        self._build_ending_fields(self.ending_frame)
+        self._toggle_ending_ui()
 
         # ---------- 特定背景 ----------
         ctk.CTkLabel(main, text="特定背景（进入本章节时切换）", **section_label).pack(fill='x', pady=(4, 4))
@@ -151,7 +182,8 @@ class ChapterEditDialog(BaseDialog):
 
         ctk.CTkLabel(
             main,
-            text="敏感效果倍率 = 强度 ×（人物敏感值 + 客观影响）；破坏性使用性格重力。\n"
+            text="敏感效果倍率 = 强度 ×（性格值 + 客观影响）：介入度用敏感值，\n"
+                 "破坏性用重力，其余属性用策略值（敏感×(1-归一行动点数)+重力×归一个性强度）。\n"
                  "章节背景与敏感效果由「跳转章节」触发器在进入时应用，离开章节即失效。",
             justify='left', anchor='w', wraplength=520, font=self.UI_FONT_SMALL,
             text_color=CHAPTER_HINT).pack(fill='x', padx=6, pady=(10, 0))
@@ -233,6 +265,62 @@ class ChapterEditDialog(BaseDialog):
         if entry in self.sens_rows:
             self.sens_rows.remove(entry)
 
+    # ---------- 结束章节结算字段 ----------
+    def _build_ending_fields(self, parent):
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill='x', pady=(2, 0))
+        ctk.CTkLabel(row, text="结局结算:", font=self.UI_FONT_BOLD).pack(side='left')
+        ctk.CTkLabel(row, text="介入度增量:", font=self.UI_FONT).pack(side='left', padx=(12, 2))
+        self.ending_intrusion_var = tk.StringVar(value=str(self.chapter.get("intrusion_delta", 0)))
+        ctk.CTkEntry(row, textvariable=self.ending_intrusion_var, width=60, height=28,
+                     font=self.UI_FONT).pack(side='left')
+        ctk.CTkLabel(row, text="破坏性增量:", font=self.UI_FONT).pack(side='left', padx=(12, 2))
+        self.ending_destruction_var = tk.StringVar(value=str(self.chapter.get("destruction_delta", 0)))
+        ctk.CTkEntry(row, textvariable=self.ending_destruction_var, width=60, height=28,
+                     font=self.UI_FONT).pack(side='left')
+        ctk.CTkLabel(row, text="伤亡步进:", font=self.UI_FONT).pack(side='left', padx=(12, 2))
+        self.ending_casualty_var = tk.StringVar(value=str(self.chapter.get("casualty_step", 0)))
+        ctk.CTkEntry(row, textvariable=self.ending_casualty_var, width=60, height=28,
+                     font=self.UI_FONT).pack(side='left')
+        ctk.CTkLabel(row, text="行动点返还:", font=self.UI_FONT).pack(side='left', padx=(12, 2))
+        self.ending_refund_var = tk.StringVar(value=str(self.chapter.get("action_points_refund", 0)))
+        ctk.CTkEntry(row, textvariable=self.ending_refund_var, width=60, height=28,
+                     font=self.UI_FONT).pack(side='left')
+
+        row2 = ctk.CTkFrame(parent, fg_color="transparent")
+        row2.pack(fill='x', pady=(4, 0))
+        ctk.CTkLabel(row2, text="结局图标:", font=self.UI_FONT).pack(side='left')
+        self.ending_icon_var = tk.StringVar(value=self.chapter.get("icon_path", ""))
+        ctk.CTkEntry(row2, textvariable=self.ending_icon_var, height=28,
+                     font=self.UI_FONT).pack(side='left', fill='x', expand=True, padx=(6, 6))
+        ctk.CTkButton(row2, text="选择图标", width=84, height=28, font=self.UI_FONT,
+                      command=self._import_ending_icon).pack(side='left')
+        ctk.CTkButton(row2, text="清除", width=56, height=28, font=self.UI_FONT,
+                      fg_color="transparent", border_width=1, corner_radius=8,
+                      text_color=CHAPTER_ERR, hover_color=CHAPTER_ERR_HOVER,
+                      border_color=CHAPTER_ERR,
+                      command=lambda: self.ending_icon_var.set("")).pack(side='left', padx=(6, 0))
+
+        ctk.CTkLabel(
+            parent, justify='left', anchor='w', wraplength=520,
+            font=self.UI_FONT_SMALL, text_color=CHAPTER_HINT,
+            text="结束章节内的所有段落类型固定为「结局」、步进为 0，"
+                 "触发器不能跳出或弹出选项；段落数耗尽即按上方结算生成结局。").pack(
+            fill='x', pady=(4, 0))
+
+    def _toggle_ending_ui(self):
+        if self.ending_var.get():
+            self.ending_frame.pack(fill='x', padx=6, pady=(4, 0))
+            self.overflow_combo.configure(state="disabled")
+        else:
+            self.ending_frame.pack_forget()
+            self.overflow_combo.configure(state="readonly")
+
+    def _import_ending_icon(self):
+        rel = import_ending_icon(self, self._dungeon_repo, self.dungeon_id)
+        if rel:
+            self.ending_icon_var.set(rel)
+
     # ---------- 确定 ----------
     def _ok(self):
         name = self.name_var.get().strip()
@@ -280,14 +368,51 @@ class ChapterEditDialog(BaseDialog):
                 return
             sensitivity.append({"attr": attr, "strength": strength, "objective": objective})
 
-        self.result = normalize_chapter({
+        try:
+            max_paragraphs = int(float(self.max_paragraphs_var.get()))
+        except ValueError:
+            ui.common.dialogs.showerror("错误", "最大段落数必须是数字")
+            return
+        if max_paragraphs < 1:
+            ui.common.dialogs.showerror("错误", "最大段落数至少为 1")
+            return
+
+        is_ending = bool(self.ending_var.get())
+        overflow_target = "" if is_ending else (
+            "" if self.overflow_var.get() == OVERFLOW_LEAVE_LABEL
+            else self.overflow_var.get())
+
+        result = {
             "name": name,
             "color": color,
             "start": bool(self.start_var.get()),
+            "ending": is_ending,
+            "max_paragraphs": max_paragraphs,
+            "overflow_target": overflow_target,
             "background": background,
             "sensitivity": sensitivity,
             "note": self.note_var.get().strip(),
-        })
+        }
+        if is_ending:
+            delta_fields = {"介入度增量": "intrusion_delta",
+                            "破坏性增量": "destruction_delta",
+                            "伤亡步进": "casualty_step"}
+            for field, var in (("介入度增量", self.ending_intrusion_var),
+                               ("破坏性增量", self.ending_destruction_var),
+                               ("伤亡步进", self.ending_casualty_var)):
+                try:
+                    result[delta_fields[field]] = float(var.get())
+                except ValueError:
+                    ui.common.dialogs.showerror("错误", f"结局结算的{field}必须是数字")
+                    return
+            try:
+                result["action_points_refund"] = int(float(self.ending_refund_var.get()))
+            except ValueError:
+                ui.common.dialogs.showerror("错误", "结局结算的行动点数返还必须是数字")
+                return
+            result["icon_path"] = self.ending_icon_var.get().strip()
+
+        self.result = normalize_chapter(result)
         self.destroy()
 
     def _cancel(self):

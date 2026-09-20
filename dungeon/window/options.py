@@ -4,6 +4,7 @@ import threading
 
 import dearpygui.dearpygui as dpg
 
+from dungeon.coupling import coupling_prompts, normalize_coupling_level
 from dungeon.dispatcher import _dispatch
 
 
@@ -23,15 +24,17 @@ class OptionHandler:
             if not pending:
                 return
             client = getattr(self, "ai_client", None)
+            # 选项文字的生成提示随耦合等级变化：阅读走向 / 行动选项 / 互动选项
+            pack = coupling_prompts(normalize_coupling_level(
+                getattr(self, "coupling_level", None)))
             for opt in pending["options"]:
                 label = (opt.get("text") or "").strip()
                 if not label and client is not None:
                     messages = [
-                        {"role": "system", "content": "你是一位叙事作家，为故事中的角色生成行动选项。"
-                                                      "只输出选项本身，不超过20个字，不要任何解释、引号或序号。"},
-                        {"role": "user", "content": f"情境：{pending.get('prompt', '')}\n"
-                                                    f"选项设定：{opt.get('prompt', '')}\n"
-                                                    "请为这一选项生成一句简短的行动选项文字。"},
+                        {"role": "system", "content": pack["option_system"]},
+                        {"role": "user", "content": pack["option_user"].format(
+                            situation=pending.get('prompt', ''),
+                            option_prompt=opt.get('prompt', ''))},
                     ]
                     try:
                         label = client.generate(messages, temperature=0.9).strip()
@@ -71,7 +74,9 @@ class OptionHandler:
         with dpg.window(tag="option_dialog", modal=True, no_title_bar=True,
                         no_move=True, no_resize=True, no_close=True,
                         width=width, height=height, pos=pos):
-            dpg.add_text("她正在等待你的选择：", wrap=width - 60)
+            dpg.add_text(coupling_prompts(normalize_coupling_level(
+                getattr(self, "coupling_level", None)))["option_dialog_title"],
+                wrap=width - 60)
             for i, label in enumerate(labels):
                 dpg.add_button(label=label, width=width - 80,
                                callback=self._on_option_chosen, user_data=i)
@@ -93,6 +98,12 @@ class OptionHandler:
             "prompt": chosen.get("prompt", ""),
             "text": chosen.get("text", ""),
         }
+        # 确定性关键事件：选项选择常驻提示词
+        summarizer = getattr(self, "story_summary", None)
+        if summarizer is not None:
+            choice_desc = (chosen.get("prompt") or chosen.get("text") or "").strip()
+            if choice_desc:
+                summarizer.record_key_event(f"她选择了：{choice_desc}")
 
         # 把选择写入回放记录：回放时不再弹窗，选择作为一步直接展示
         if self._last_option_record is not None:

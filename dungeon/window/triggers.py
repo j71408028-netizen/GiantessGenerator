@@ -9,7 +9,8 @@ import random
 
 from dungeon.actions import (EMPTY_ACTIONS, LEGACY_ACTIONS, VISUAL_FILTER_KEYS,
                              action_label, normalize_action_type)
-from dungeon.chapters import find_chapter, matches_scope, sensitivity_amount
+from dungeon.chapters import (find_chapter, is_terminating_chapter,
+                              matches_scope, sensitivity_amount)
 from dungeon.dispatcher import _dispatch
 from dungeon.models import DungeonState, DungeonTextType
 from dungeon.rules import TriggerRules
@@ -42,7 +43,8 @@ class TriggerHandler:
             "attr": effect.get("attr", ""),
             "amount": sensitivity_amount(effect.get("strength", 1.0),
                                          effect.get("objective", 0.0),
-                                         effect.get("attr", ""), self.personality),
+                                         effect.get("attr", ""), self.personality,
+                                         action_points=self._current_action_points()),
         }
 
     def _enter_chapter(self, name, record: bool = False, background=None,
@@ -57,6 +59,17 @@ class TriggerHandler:
         if name and chapter is None and not allow_unknown:
             print(f"[Chapter] 章节不存在：{name}")
             return False
+
+        # 离开当前章节：压缩本章剩余段落（作为提示词概要的一部分）
+        summarizer = getattr(self, "story_summary", None)
+        if summarizer is not None and self.current_chapter != (name or None):
+            summarizer.flush_chapter(self.current_chapter or "",
+                                     ai_client=getattr(self, "ai_client", None))
+            # 确定性关键事件：章节进出常驻提示词，保证 AI 对章节流转有感知
+            if self.current_chapter:
+                summarizer.record_key_event(f"离开章节「{self.current_chapter}」")
+            if name:
+                summarizer.record_key_event(f"进入章节「{name}」")
 
         self.current_chapter = name or None
         self.dungeon_state.chapter_steps = 0
@@ -183,6 +196,12 @@ class TriggerHandler:
                     print(f"[Trigger] 已触发: {trigger['name']}，排队插入段落（延迟={delayed}）")
                     self._record_trigger_action(trigger, action_type, action_data)
             elif action_type == "option":
+                # 结束章节：不允许弹出选项
+                if is_terminating_chapter(
+                        find_chapter(self.chapters, self.current_chapter)):
+                    print(f"[Trigger] 选项触发器 {trigger['name']} 位于结束章节内，已跳过")
+                    action_accepted = False
+                    continue
                 options = action_data.get("options") or []
                 if not options:
                     print(f"[Trigger] 选项触发器 {trigger['name']} 未配置选项，已跳过")
@@ -217,6 +236,12 @@ class TriggerHandler:
                     print(f"[Trigger] 已触发: {trigger['name']}，短暂视效 {filter_key}（{duration} 步）")
                     self._record_trigger_action(trigger, action_type, action_data)
             elif action_type == "goto":
+                # 结束章节：不允许通过触发器跳出
+                if is_terminating_chapter(
+                        find_chapter(self.chapters, self.current_chapter)):
+                    print(f"[Trigger] 跳转触发器 {trigger['name']} 位于结束章节内，已跳过")
+                    action_accepted = False
+                    continue
                 target = str(action_data.get("chapter") or "").strip()
                 chapter = find_chapter(self.chapters, target) if target else None
                 if target and chapter is None:
@@ -323,8 +348,6 @@ class TriggerHandler:
                 "prompt": record.get("option_prompt") or chosen.get("prompt", ""),
                 "text": chosen.get("text", ""),
             }
-            if self.view_mode == "game":
-                self.story_history.clear()
             self.story_history.append({"type_str": "【选择】", "text": text, "highlight": True})
             self._update_text_display()
             print(f"[Replay] 复现选项触发器: {name} → 选择 {idx}")
@@ -337,8 +360,6 @@ class TriggerHandler:
                 _dispatch.enqueue(self._update_ending_icon)
             if ending_text:
                 self.ending_text = ending_text
-                if self.view_mode == "game":
-                    self.story_history.clear()
                 self.story_history.append({"type_str": "【结局】", "text": ending_text, "highlight": True})
                 self._update_text_display()
             self.pending_ending = None
@@ -363,16 +384,22 @@ class TriggerHandler:
             text_type = DungeonTextType(item["text_type"])
         except (KeyError, ValueError):
             text_type = DungeonTextType.BACKGROUND
+        # 结束章节：段落类型被覆盖为「结局」，步进为 0
+        in_ending = self._in_terminating_chapter()
+        if in_ending:
+            text_type = DungeonTextType.BACKGROUND
         highlight = bool(item.get("highlight"))
 
-        if self.view_mode == "game":
-            self.story_history.clear()
-        self.story_history.append({
-            "type_str": self._type_prefix(text_type),
-            "text": item["text"],
+        # 插入段同样仿流式输出：先空文本上屏，再逐字增长
+        inserted_text = item["text"]
+        anim_item = {
+            "type_str": self._display_type_prefix(text_type),
+            "text": "",
             "highlight": highlight,
-        })
+        }
+        self.story_history.append(anim_item)
         self._update_text_display()
+        self._animate_reveal(anim_item, inserted_text)
 
         # 与一般段落一样进入对话历史，后续 AI 生成时可见
         self.messages.append({"role": "assistant", "content": item["text"]})
@@ -384,7 +411,9 @@ class TriggerHandler:
             before_state, text_type, 0, self.personality,
             is_interaction_chosen=False, custom_attrs_def=self.evolution_attrs,
             custom_directions={},
-            sensitivity_mods=self._apply_sensitivity_mods()
+            sensitivity_mods=self._apply_sensitivity_mods(),
+            action_points=self._current_action_points(),
+            step_override=0.0 if in_ending else None,
         )
         self.step_num = self.dungeon_state.total_steps
 
@@ -399,5 +428,7 @@ class TriggerHandler:
             "direction": 0,
             "custom_directions": {},
         }
+        if in_ending:
+            step_info["ending_chapter"] = True
 
         self._finish_step(text_type, item["text"], step_info)

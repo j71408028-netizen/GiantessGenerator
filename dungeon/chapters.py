@@ -24,9 +24,13 @@ CHAPTER_COLOR_PRESETS = (
     "#7E22CE", "#0E7490", "#B91C1C", "#4D7C0F", "#4338CA",
 )
 
-# 敏感效果默认作用于哪个属性；破坏性走性格“重力”，其余走“敏感值”
+# 敏感效果默认作用于哪个属性；破坏性走性格“重力”，介入度走“敏感值”，
+# 其余属性走“策略值”（见 Personality.strategy_value）
 DEFAULT_SENSITIVITY_ATTR = "介入度"
 DESTRUCTION_ATTR = "破坏性"
+
+# 章节内最大段落数默认值；超出后自动跳转到 overflow_target（空串=离开章节/终止）
+DEFAULT_MAX_PARAGRAPHS = 99
 
 
 def default_chapter_color(index: int) -> str:
@@ -77,7 +81,25 @@ def normalize_chapter(raw, index: int = 0) -> dict:
     if not chapter.get("color"):
         chapter["color"] = default_chapter_color(index)
     chapter["start"] = bool(chapter.get("start", False))
+    chapter["ending"] = bool(chapter.get("ending", False))
     chapter["note"] = str(chapter.get("note") or "")
+
+    # 最大段落数：超出后自动跳转；结束章节固定走“终止”
+    try:
+        max_paragraphs = int(chapter.get("max_paragraphs", DEFAULT_MAX_PARAGRAPHS))
+    except (TypeError, ValueError):
+        max_paragraphs = DEFAULT_MAX_PARAGRAPHS
+    chapter["max_paragraphs"] = max(1, max_paragraphs)
+    chapter["overflow_target"] = str(chapter.get("overflow_target") or "").strip()
+
+    # 结束章节结算字段（仅在 normalize_chapter 中补全，普通章节忽略）
+    chapter["intrusion_delta"] = chapter.get("intrusion_delta", 0)
+    chapter["destruction_delta"] = chapter.get("destruction_delta", 0)
+    chapter["casualty_step"] = chapter.get("casualty_step", 0)
+    chapter["action_points_refund"] = chapter.get("action_points_refund", 0)
+    custom_deltas = chapter.get("custom_deltas")
+    chapter["custom_deltas"] = dict(custom_deltas) if isinstance(custom_deltas, dict) else {}
+    chapter["icon_path"] = str(chapter.get("icon_path") or "")
 
     background = chapter.get("background")
     if not isinstance(background, dict):
@@ -129,6 +151,38 @@ def find_chapter(chapters, name):
     return None
 
 
+def find_overflow_chapter(chapters, current_name):
+    """查找当前章节配置；找不到返回 None。"""
+    return find_chapter(chapters, current_name)
+
+
+def is_terminating_chapter(chapter) -> bool:
+    """是否为结束章节：超限时终止副本（跳转到无章节并结束）。"""
+    return bool((chapter or {}).get("ending"))
+
+
+def overflow_jump_target(chapter, chapters) -> str:
+    """章节段落数超限后的跳转目标。
+
+    结束章节一律返回 ``""``（终止/离开章节）；普通章节返回配置的
+    ``overflow_target``（空串表示离开章节）。
+    """
+    if is_terminating_chapter(chapter):
+        return ""
+    return str((chapter or {}).get("overflow_target") or "").strip()
+
+
+def chapter_step_override(chapter, text_type):
+    """结束章节内所有段落类型被覆盖为「结局」，且步进为 0。
+
+    返回 (是否覆盖, 覆盖后的步进值)。普通章节返回 (False, None)。
+    """
+    if is_terminating_chapter(chapter):
+        return True, 0.0
+    return False, None
+
+
+
 def scope_label(scope) -> str:
     """触发器 chapter 字段的展示名。"""
     if not scope:
@@ -147,10 +201,12 @@ def matches_scope(scope, current_chapter) -> bool:
     return current_chapter == scope
 
 
-def sensitivity_amount(strength, objective, attr, personality) -> float:
-    """敏感效果倍率 = 强度 ×（性格敏感值/重力 + 客观影响）。
+def sensitivity_amount(strength, objective, attr, personality,
+                       action_points=None) -> float:
+    """敏感效果倍率 = 强度 ×（性格值 + 客观影响）。
 
-    破坏性由性格“重力”调制，其余属性由“敏感值”调制；无性格时基底为 0。
+    破坏性由性格“重力”调制，介入度由“敏感值”调制，其余属性由“策略值”
+    （敏感×(1-归一行动点数) + 重力×归一个性强度）调制；无性格时基底为 0。
     """
     try:
         strength = float(strength)
@@ -164,6 +220,8 @@ def sensitivity_amount(strength, objective, attr, personality) -> float:
         base = 0.0
     elif attr == DESTRUCTION_ATTR:
         base = getattr(personality, "gravity", 0.0)
-    else:
+    elif attr == DEFAULT_SENSITIVITY_ATTR:
         base = getattr(personality, "sensitivity", 0.0)
+    else:
+        base = personality.strategy_value(action_points)
     return strength * (base + objective)

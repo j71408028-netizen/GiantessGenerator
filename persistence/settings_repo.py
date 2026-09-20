@@ -32,6 +32,7 @@ class SettingsRepo:
             "show_casualties": True,
             "auto_save_report": False,
             "auto_save_replay": False,
+            "story_recent_count": 20,
             "save_low_resolution_image": False,
             "use_preview_image_as_avatar": False,
             "blocked_words": []

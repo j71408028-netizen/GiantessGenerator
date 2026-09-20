@@ -182,12 +182,28 @@ class ScriptManager(TreeviewManager):
     def _values(self, row_kind: str, item) -> tuple:
         if row_kind == ROW_CHAPTER:
             name = item.get("name", "未命名")
+            if item.get("ending"):
+                kind = "结束章节"
+            elif item.get("start"):
+                kind = "起始章节"
+            else:
+                kind = "章节"
+            try:
+                max_p = int(item.get("max_paragraphs", 99) or 99)
+            except (TypeError, ValueError):
+                max_p = 99
+            condition_text = f"上限 {max_p} 段"
+            if item.get("ending"):
+                condition_text += "，耗尽即终止"
+            elif item.get("overflow_target"):
+                condition_text += f"→{item.get('overflow_target')}"
             return (
-                f"▌ {name}" + ("  ★" if item.get("start") else ""),
-                "起始章节" if item.get("start") else "章节",
+                f"▌ {name}" + ("  ★" if item.get("start") else "")
+                + ("  ✦" if item.get("ending") else ""),
+                kind,
                 self._format_background(item.get("background") or {}),
                 self._format_sensitivity(item.get("sensitivity") or []),
-                "", "", "", "",
+                condition_text, "", "", "",
             )
         return (
             f"    └ {item.get('name', '未命名')}",
@@ -215,8 +231,9 @@ class ScriptManager(TreeviewManager):
             # 旧版动作已不再支持（运行时直接跳过），列表里标出来供用户删除
             return f"{action_label(action_type)}（旧版·已失效）"
         if action_type == "ending":
+            # 旧配置中的结局触发器仍可运行；新建入口已迁移到「结束章节」
             icon = (trigger.get("action_data") or {}).get("icon_path")
-            return "结局（重要）" if icon else "结局（不重要）"
+            return "结局（重要·旧配置）" if icon else "结局（旧配置）"
         return action_label(action_type)
 
     def _format_background(self, background: dict) -> str:

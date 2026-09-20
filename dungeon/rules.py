@@ -38,43 +38,66 @@ class EvolutionRules:
                           is_interaction_chosen: bool = False,
                           custom_attrs_def: Optional[list[dict]] = None,
                           custom_directions: Optional[dict[str, int]] = None,
-                          sensitivity_mods: Optional[dict[str, float]] = None) -> DungeonState:
+                          sensitivity_mods: Optional[dict[str, float]] = None,
+                          action_points: Optional[float] = None,
+                          step_override: Optional[float] = None) -> DungeonState:
+        """按段落类型演化副本属性。
+
+        ``is_interaction_chosen`` 已废弃（仅为兼容旧签名保留，传入不产生
+        任何效果）：交互选中时不再对坐标做“方向 × 敏感值/重力”的直加，
+        交互对坐标的操作统一由绑定触发器跳转具有敏感效果的章节实现
+        （sensitivity_mods / sensitivity_amount）。
+
+        ``step_override``：覆盖本段步进值（结束章节为 0，即不产生坐标、
+        自定义属性与步长变化，仅累计计数）。
+        """
         new_state = state.clone()
         step = self.step_overrides.get(text_type.value, text_type.step_value)
+        if step_override is not None:
+            step = float(step_override)
         sensitivity_mods = sensitivity_mods or {}
+        frozen = step_override is not None and float(step_override) == 0.0
 
         # 步长演化（演算坐标前）：步长向初始值恢复 0.2*个性强度 的比例差值；
-        # 未初始化的步长（None）沿用性格初始步长，不参与恢复
+        # 未初始化的步长（None）沿用性格初始步长，不参与恢复。
+        # 步进为 0（结束章节）时整套属性演化冻结：坐标、自定义属性与步长均不变。
         si = state.step_intrusion if state.step_intrusion is not None else personality.step_intrusion
         sd = state.step_destruction if state.step_destruction is not None else personality.step_destruction
-        strength = getattr(personality, "skip_base_prob", 3.0)
-        ratio = 0.2 * strength
-        si = si + (personality.step_intrusion - si) * ratio
-        sd = sd + (personality.step_destruction - sd) * ratio
+        if not frozen:
+            strength = getattr(personality, "skip_base_prob", 3.0)
+            ratio = 0.2 * strength
+            si = si + (personality.step_intrusion - si) * ratio
+            sd = sd + (personality.step_destruction - sd) * ratio
 
         intrusion_rate = si
         destruction_rate = sd
         intrusion_delta = (direction + sensitivity_mods.get("介入度", 0.0)) * intrusion_rate * step
         destruction_delta = (direction + sensitivity_mods.get("破坏性", 0.0)) * destruction_rate * step
-        if is_interaction_chosen:
-            intrusion_delta += direction * personality.sensitivity
-            destruction_delta += direction * getattr(personality, "gravity", 0.0)
-        new_state.intrusion = max(0.0, min(5.0, new_state.intrusion + intrusion_delta))
-        new_state.destruction = max(0.0, min(5.0, new_state.destruction + destruction_delta))
+        # 坐标统一夹取 0.5~4.5（与角色坐标边界一致，副本写回不再越界）
+        new_state.intrusion = max(0.5, min(4.5, new_state.intrusion + intrusion_delta))
+        new_state.destruction = max(0.5, min(4.5, new_state.destruction + destruction_delta))
 
         for attr_def in custom_attrs_def or []:
             name = attr_def["name"]
             rate = attr_def.get("rate", 1.0)
-            offset = attr_def.get("random_offset", 0.0)
             attr_direction = (custom_directions or {}).get(name, direction)
             delta = (attr_direction + sensitivity_mods.get(name, 0.0)) * step * rate
-            if is_interaction_chosen:
-                delta += direction * personality.sensitivity * random.uniform(1 - offset, 1 + offset)
             new_state.custom_attrs[name] = new_state.custom_attrs.get(name, 0.0) + delta
 
-        # 步长演化（演算坐标后）：步长 -= 步进 × 敏感/重力
-        new_state.step_intrusion = si - step * personality.sensitivity
-        new_state.step_destruction = sd - step * getattr(personality, "gravity", 0.0)
+        if frozen:
+            new_state.step_intrusion = state.step_intrusion
+            new_state.step_destruction = state.step_destruction
+        else:
+            # 步长演化（演算坐标后）：步长 -= 步进 × 敏感/重力，
+            # 叠加不适应性衰减（坐标达到 0.5/4.5 后步长向 0 收敛）
+            new_state.step_intrusion = si - step * personality.sensitivity
+            new_state.step_destruction = sd - step * getattr(personality, "gravity", 0.0)
+            from services.state_service import StateService
+            new_state.step_intrusion, new_state.step_destruction = \
+                StateService.decay_step_rates(
+                    personality, new_state.step_intrusion, new_state.step_destruction,
+                    step, step,
+                    intrusion=new_state.intrusion, destruction=new_state.destruction)
 
         new_state.total_steps += 1
         new_state.steps_since_trigger += 1

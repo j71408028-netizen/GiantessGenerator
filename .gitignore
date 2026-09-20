@@ -221,3 +221,5 @@ data/user/api_keys.json
 /data/archives/
 data/user/address_registry.json
 /.idea
+/.workbuddy/
+/developer_tools/

@@ -14,12 +14,17 @@ import dearpygui.dearpygui as dpg
 from ai import create_client
 from dungeon.background import DungeonBackground
 from dungeon.chapters import normalize_chapters
+from dungeon.coupling import normalize_coupling_level
 from dungeon.dispatcher import _dispatch
 from dungeon.models import DungeonTextType, DungeonState
 from dungeon.prompts import DungeonPromptBuilder
 from dungeon.rules import EvolutionRules
+from dungeon.summary import DEFAULT_RECENT_COUNT, StorySummarizer
 from logic import get_size_category
 from ui.common.fonts import dungeon_font_default
+
+# 文本区布局样式：旧的「副本窗口视图」设置已移除，统一用保留全历史的故事布局
+LAYOUT_STYLE = "story"
 
 
 class DungeonWindowBase:
@@ -102,6 +107,13 @@ class DungeonWindowBase:
         self.replay_data = []
         # 插入触发器触发后排队的段落（FIFO）
         self.pending_insertions = deque()
+        # 当前逻辑段落（一次 AI 输出）内待揭示的显示段落（内置分句器切分）
+        self._pending_units = []
+        # 进行中的仿流式输出动画状态（揭示句/插入段的逐字上屏）
+        self._text_anim_state = None
+        # 细节探究：AI 在后台提出的想了解细节，下次生成前检索解答并消费
+        self._detail_queries = []
+        self._detail_querying = False
         # 选项触发器状态
         self.trigger_choices = {}      # 触发器名 -> [已选择编号...]
         self.pending_option = None     # 待弹出的选项触发器数据
@@ -123,6 +135,16 @@ class DungeonWindowBase:
         self._launch_error = ""      # 入口选择失败原因，窗口关闭后由调用方提示
         self._launch_choice = None   # 入口阶段的选择结果
 
+        self.story_history = []
+        # 耦合等级：决定副本执行时采用的硬编码 AI 提示词（见 dungeon/coupling.py）。
+        # 必须在会话初始化之前就绪——_init_session 会立刻据此构建系统提示。
+        self.coupling_level = normalize_coupling_level(
+            (dungeon_config or {}).get("coupling_level"))
+        # 显示组件（官方组件库，见 dungeon/components.py）
+        self._components = []
+        self._components_built = False
+        self.layout_style = LAYOUT_STYLE
+
         # 会话内容初始化分为“新开”（可能延迟到入口选择后）与“回放”两种
         if is_replay:
             self._init_replay(replay_data)
@@ -132,15 +154,6 @@ class DungeonWindowBase:
         # 有 dungeon_ids 的探索模式：入口阶段内由 _enter_dungeon_phase() 调用
         # _load_session_config() 延迟初始化会话，避免在用户选择副本方案前创建
         # AI 客户端/提示词
-
-        self.story_history = []
-        # 故事视图保留全部段落，游戏视图只显示当前段落。
-        configured_view_mode = (dungeon_config or {}).get("view_mode", "story")
-        self.view_mode = configured_view_mode if configured_view_mode in ("story", "game") else "story"
-        # 显示组件（官方组件库，见 dungeon/components.py）
-        self._components = []
-        self._components_built = False
-        self.layout_style = configured_view_mode if configured_view_mode in ("story", "game", "bottom") else "story"
 
         import platform
         self._is_windows = platform.system() == "Windows"
@@ -200,6 +213,10 @@ class DungeonWindowBase:
         self._unregister_with_parent()
 
     # ---------------- 会话内容初始化 ----------------
+    def _current_action_points(self):
+        """当前角色的行动点数；挑战模式等无角色场景返回 None（策略值按缺省因子计算）。"""
+        return getattr(self.character, "action_points", None)
+
     def _load_session_config(self, dungeon_id):
         """入口阶段选择副本方案后加载配置并初始化会话。
 
@@ -228,9 +245,7 @@ class DungeonWindowBase:
         self.dungeon_id = dungeon_id
         self.triggers = config.get("triggers", [])
         self.chapters = normalize_chapters(config.get("chapters", []))
-        self.view_mode = config.get("view_mode", "story")
-        if self.view_mode not in ("story", "game"):
-            self.view_mode = "story"
+        self.coupling_level = normalize_coupling_level(config.get("coupling_level"))
         # 迟到初始化：此时才创建 AI 客户端与提示词
         self._init_session(config)
         self._session_initialized = True
@@ -340,6 +355,11 @@ class DungeonWindowBase:
 
         self.size_cat = get_size_category(self.height)
 
+        # 剧情压缩器：提示词始终携带全部压缩概要 + 最近 N 段原文
+        self.story_summary = StorySummarizer(
+            recent_count=self._story_recent_count(),
+            coupling_level=self.coupling_level)
+
         self.prompt_builder = DungeonPromptBuilder(self)
         self.system_prompt = self.prompt_builder.build_system_prompt()
         self.messages = [{"role": "system", "content": self.system_prompt}]
@@ -362,6 +382,17 @@ class DungeonWindowBase:
             )
         self.dungeon_logic = None
         self.current_text_type = None
+        # 回放模式同样维护剧情压缩器（不调用 AI，仅走内部算法压缩）
+        self.story_summary = StorySummarizer(
+            recent_count=self._story_recent_count())
+
+    def _story_recent_count(self) -> int:
+        """提示词中保留的最近段落数（可在设置中调整，默认 20）。"""
+        try:
+            return max(1, int((self.settings or {}).get(
+                "story_recent_count", DEFAULT_RECENT_COUNT)))
+        except (TypeError, ValueError):
+            return DEFAULT_RECENT_COUNT
 
     # ---------------- 入口阶段进入（由 dungeon.launcher.DungeonLaunchStages 提供） ----------------
     # 子类 mixin 会覆盖 _enter_entry_phase / _init_entry_materials：
@@ -488,3 +519,12 @@ class DungeonWindowBase:
             DungeonTextType.INTERACTION: "【互动】",
             DungeonTextType.ACTION: "【行动】",
         }.get(text_type, "【未知】")
+
+    def _display_type_prefix(self, text_type) -> str:
+        """段落前缀：结束章节内所有段落一律显示为「结局」。"""
+        try:
+            if self._in_terminating_chapter():
+                return "【结局】"
+        except Exception:
+            pass
+        return self._type_prefix(text_type)

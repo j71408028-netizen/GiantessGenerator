@@ -102,8 +102,9 @@ class DungeonPersistence:
         casualty_step = _num(effects.get("casualty_step"))
         height = max(1.0, self.height or 1.0)
 
-        self.dungeon_state.intrusion = max(0.0, min(5.0, self.dungeon_state.intrusion + intr_d))
-        self.dungeon_state.destruction = max(0.0, min(5.0, self.dungeon_state.destruction + dest_d))
+        # 坐标统一夹取 0.5~4.5（与角色坐标边界一致）
+        self.dungeon_state.intrusion = max(0.5, min(4.5, self.dungeon_state.intrusion + intr_d))
+        self.dungeon_state.destruction = max(0.5, min(4.5, self.dungeon_state.destruction + dest_d))
         cas_d = compute_casualty(height, casualty_step, self.dungeon_state.destruction,
                                  self.ending_text or "")
         self.dungeon_state.total_casualties += cas_d

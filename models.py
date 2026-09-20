@@ -63,8 +63,8 @@ class Personality:
     step_intrusion: float      # 介入度步长
     init_destruction: float    # 初始破坏性 (0-4)
     step_destruction: float    # 破坏性步长
-    sensitivity: float         # 敏感值 (影响地标切换等对介入度的额外变化)
-    gravity: float = 0.0       # 重力 (影响地标切换等对破坏性的额外变化)
+    sensitivity: float         # 敏感值 (直接作用于介入度：地标切换、介入度步长演化等)
+    gravity: float = 0.0       # 重力 (作用于破坏性：地标切换、破坏性步长演化等)
     description: str = ""
     skip_base_prob: float = 3.0  # 个性强度，推荐 2~4
     weight: float = field(default=1.0, compare=False, repr=False)
@@ -94,6 +94,36 @@ class Personality:
         """从字典构造，忽略残余的未知字段（如历史遗留的 enabled）。"""
         allowed = {f.name for f in fields(cls)}
         return cls(**{k: v for k, v in data.items() if k in allowed})
+
+    # 策略值参数：行动点数归一基准（自然回复上限）、个性强度归一基准
+    STRATEGY_AP_SCALE = 100.0
+    STRATEGY_STRENGTH_SCALE = 5.0
+
+    @property
+    def normalized_strength(self) -> float:
+        """归一个性强度 = skip_base_prob / 5（夹取 0~1）。"""
+        return max(0.0, min(1.0, (getattr(self, "skip_base_prob", 3.0) or 0.0)
+                            / self.STRATEGY_STRENGTH_SCALE))
+
+    def strategy_value(self, action_points: Optional[float] = None) -> float:
+        """策略值 = 敏感值 × (1 - 归一行动点数) + 重力 × 归一个性强度。
+
+        除“直接操作当前介入度”的场景外，其余原先使用敏感值的属性操作
+        （贪婪生成时的身高重映射、副本自定义属性等）均改用本值。
+        注意：负向演化的介入度步进仍由敏感值直接控制，不走策略值。
+
+        - 归一行动点数 = 行动点数 / 100（夹取 0~1）；行动点数未知时
+          (1 - 归一行动点数) 取缺省 0.5；该因子不小于 0（行动点数因
+          返还超过 100 时不产生反向贡献）。
+        - 归一个性强度 = skip_base_prob / 5（夹取 0~1）。
+        """
+        if action_points is None:
+            ap_factor = 0.5
+        else:
+            ap_factor = 1.0 - max(0.0, min(1.0,
+                                           (action_points or 0.0) / self.STRATEGY_AP_SCALE))
+        return (self.sensitivity * ap_factor
+                + getattr(self, "gravity", 0.0) * self.normalized_strength)
 
 
 @dataclass

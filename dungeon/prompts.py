@@ -4,6 +4,10 @@ import re
 
 from logic import ALL_PART_NAMES, format_size, get_comparisons, replace_quip_tags, \
     should_skip_by_part_tags, contains_blocked_word
+from .chapters import find_chapter, is_terminating_chapter
+from .coupling import (COMMON_OUTPUT_RULE, DEFAULT_COUPLING_LEVEL, coupling_prompts,
+                       normalize_coupling_level, section_instruction)
+from .details import search_replay_details
 from .models import DungeonTextType
 
 
@@ -41,13 +45,24 @@ _OTHER_OWNER_RE = re.compile(
 
 
 class DungeonPromptBuilder:
-    """副本提示词构建器。context 只需提供窗口当前使用的同名数据。"""
+    """副本提示词构建器。context 只需提供窗口当前使用的同名数据。
+
+    提示词按副本的耦合等级（Velum / Solea / Bulla）取用 dungeon.coupling 里
+    的硬编码文本：AI 的角色定位、收集职责、段落描写指令、插入衔接与选项走向
+    都随等级变化，输出结构（text / direction / custom_directions）三档一致。
+    """
 
     def __init__(self, context):
         self.context = context
 
+    def coupling_level(self) -> str:
+        """当前会话的耦合等级（缺省回退到 Velum）。"""
+        return normalize_coupling_level(
+            getattr(self.context, "coupling_level", None), DEFAULT_COUPLING_LEVEL)
+
     def build_system_prompt(self) -> str:
         session = self.context
+        pack = coupling_prompts(self.coupling_level())
         height_match = self._get_height_match()
         height_info = f"身高：{height_match}\n" if height_match else ""
         custom_names = [a["name"] for a in session.evolution_attrs if a["type"] == "custom"]
@@ -60,9 +75,10 @@ class DungeonPromptBuilder:
             parse = "如果没有自定义属性，custom_directions 必须为空对象 {}。"
 
         prompt = (
-            f"你是一位细腻的叙事作家，正在讲述一个关于巨大化少女（名字{session.name}，昵称{session.nick}）的故事。\n"
+            f"{pack['role'].format(name=session.name, nick=session.nick)}\n"
             f"性格描述：{session.personality.description or '她有着独特的性格。'}\n{height_info}"
-            "请根据当前故事阶段和提供的信息，生成一段简洁的叙述（一句话，50字以内），并同时输出整体故事氛围方向（direction）和各自定义属性的变化方向（custom_directions）。\n"
+            f"{pack['brief']}\n"
+            f"{COMMON_OUTPUT_RULE}\n"
             "direction 取值范围：-1（消极/挫败），0（中性），1（积极/满足）。\n"
             f"{parse}\n你必须严格按照以下 JSON 格式输出，不要包含任何额外注释或文字：\n"
             "{\n    \"text\": \"叙述内容\",\n    \"direction\": 1,\n"
@@ -79,13 +95,15 @@ class DungeonPromptBuilder:
     def build_user_prompt(self, text_type: DungeonTextType) -> str:
         session = self.context
         session.prompted_parts = set()
-        instructions = {
-            DungeonTextType.BACKGROUND: "描写环境或背景细节，营造氛围。",
-            DungeonTextType.BRANCH: "描述其他角色之间的对话或互动。",
-            DungeonTextType.DIALOG: "描写与她有关的对话（她说话或别人对她说话）。",
-            DungeonTextType.INTERACTION: "描写她与其他人的身体互动（如触摸、踩踏等）。",
-            DungeonTextType.ACTION: "描写她独自做出的行动（如移动、观察、破坏等）。",
-        }
+        level = self.coupling_level()
+        # 段落描写指令按耦合等级取用（见 dungeon.coupling.COUPLING_PROMPTS）
+        type_value = text_type.value if hasattr(text_type, "value") else str(text_type)
+        instruction = section_instruction(level, type_value, "生成一段合适的叙述。")
+        # 结束章节：所有段落类型都被覆盖为「结局」，提示词也要相应改为终章语气
+        if is_terminating_chapter(find_chapter(
+                getattr(session, "chapters", None),
+                getattr(session, "current_chapter", None))):
+            instruction = coupling_prompts(level)["terminating"]
         context_parts = []
         if session.last_ai_text:
             selected = self._select_prompted_part(self._detect_prompted_parts(session.last_ai_text))
@@ -108,15 +126,44 @@ class DungeonPromptBuilder:
                 context_parts.append(f"她刚才选择了：{choice_prompt}")
         reference = ""
         if context_parts:
-            reference = "\n以下信息可作为你叙事的参考，但不代表目前情境：\n" + "\n".join(context_parts)
-        history = "".join(
-            f"[{step['type']}] {step['text'][:100]}...\n"
-            for step in session.replay_data[-3:]
-            if "type" in step and step.get("text")
-        )
-        if history:
-            history = f"最近的故事片段：\n{history}\n"
-        result = f"{history}继续叙述后续情节或描写{instructions.get(text_type, '生成一段合适的叙述。')}\n请严格按系统提示的 JSON 格式输出，不要添加额外解释。{reference}"
+            reference = (f"\n{coupling_prompts(level)['reference_intro']}\n"
+                         + "\n".join(context_parts))
+        # 剧情概要：从开始到此刻的所有压缩段 + 最近 N 段原文（N 可在设置中调整）
+        history = ""
+        summarizer = getattr(session, "story_summary", None)
+        if summarizer is not None:
+            block = summarizer.prompt_block()
+            if block:
+                history = f"{block}\n"
+        if not history:
+            history = "".join(
+                f"[{step['type']}] {step['text'][:100]}...\n"
+                for step in session.replay_data[-3:]
+                if "type" in step and step.get("text")
+            )
+            if history:
+                history = f"最近的故事片段：\n{history}\n"
+        # 当前章节：让 AI 感知自己身处哪一章（备注是设计者的章节意图，一并列出）
+        chapter_line = ""
+        chapter_name = getattr(session, "current_chapter", None)
+        if chapter_name:
+            chapter = find_chapter(getattr(session, "chapters", None), chapter_name)
+            note = str((chapter or {}).get("note") or "").strip()
+            chapter_line = f"当前章节：{chapter_name}" + (f"（{note}）" if note else "") + "\n"
+        # 细节补充：AI 在上一段生成后提出的疑问，从回放缓存检索原文解答
+        detail_block = ""
+        pending_queries = getattr(session, "_detail_queries", None)
+        if pending_queries:
+            hits = search_replay_details(pending_queries,
+                                         getattr(session, "replay_data", None))
+            if hits:
+                detail_block = ("细节补充（AI 此前想了解的细节，检索自过往正文，"
+                                "仅供叙事参考）：\n" + "\n".join(f"- {h}" for h in hits) + "\n")
+            session._detail_queries = []
+        pack = coupling_prompts(level)
+        result = (f"{history}{chapter_line}{detail_block}"
+                  f"{pack['narrate'].format(instruction=instruction)}\n"
+                  f"请严格按系统提示的 JSON 格式输出，不要添加额外解释。{reference}")
 
         # 延迟插入：本段之后将固定插入一段内容，生成时需带上前后衔接限制
         pending = getattr(session, "pending_insertions", None)
@@ -130,12 +177,8 @@ class DungeonPromptBuilder:
                     "interaction": "【互动】",
                     "action": "【行动】",
                 }.get(item.get("text_type", ""), "【未知】")
-                result += (
-                    f"\n\n重要限制：本段生成结束后，下一段将是固定的插入内容："
-                    f"{prefix}{item.get('text', '')}\n"
-                    f"请让本段与这段固定内容自然衔接（结合前文为其铺垫），"
-                    f"但绝不要在本段中提前写出或复述该内容本身。"
-                )
+                result += "\n\n" + pack["insert_notice"].format(
+                    prefix=prefix, text=item.get('text', ''))
 
         # 选项选择：点击选项后 AI 提示词带上所选选项的提示
         option_choice = getattr(session, "option_choice", None)
@@ -143,10 +186,8 @@ class DungeonPromptBuilder:
             choice_prompt = (option_choice.get("prompt") or "").strip() \
                             or (option_choice.get("text") or "").strip()
             if choice_prompt:
-                result += (
-                    f"\n\n当前故事走向（她在选项 {option_choice.get('index', 0)} 中做出的选择）："
-                    f"{choice_prompt}\n请围绕这一走向继续叙述。"
-                )
+                result += "\n\n" + pack["option_notice"].format(
+                    index=option_choice.get('index', 0), prompt=choice_prompt)
         return result
 
     def _get_height_match(self):

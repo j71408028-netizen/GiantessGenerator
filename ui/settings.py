@@ -803,6 +803,13 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.confusion_var = tk.BooleanVar(value=self.enable_confusion)
         self.confusion_switch = self._make_switch(ctrl, self.confusion_var)
 
+        _, ctrl = self._make_row(self.archive_body, row, "副本记忆窗口大小")
+        row += 1
+        self.story_recent_var = tk.StringVar(
+            value=str(self.settings.get("story_recent_count", 20)))
+        self.story_recent_entry = self._make_entry(ctrl, self.story_recent_var, width=64)
+        self.story_recent_entry.pack(side='left')
+
         _, ctrl = self._make_row(self.gen_body, row, "屏蔽词")
         row += 1
         self.blocked_words_var = tk.StringVar(value=", ".join(self.blocked_words))
@@ -899,6 +906,14 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.dungeon_font_var = tk.StringVar(value=self.settings.get("dungeon_font", ui_fonts.dungeon_font_default()))
         self.dungeon_font_entry = self._make_entry(ctrl, self.dungeon_font_var, width=150)
         self.dungeon_font_entry.pack(side='left')
+
+    def _story_recent_count_value(self) -> int:
+        """剧情概要保留的最近段落数（1~200，非法输入回退到原值/20）。"""
+        try:
+            value = int(float(self.story_recent_var.get().strip()))
+        except (ValueError, AttributeError):
+            return int(self.settings.get("story_recent_count", 20) or 20)
+        return max(1, min(200, value))
 
     def _build_archive_block(self):
         self._setup_body_grid(self.archive_body, "archive")
@@ -1304,6 +1319,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             "show_casualties": self.show_casualties_var.get(),
             "auto_save_report": self.auto_save_report_var.get(),
             "auto_save_replay": self.auto_save_replay_var.get(),
+            "story_recent_count": self._story_recent_count_value(),
             "save_low_resolution_image": self.save_low_resolution_var.get(),
             "use_preview_image_as_avatar": self.use_preview_avatar_var.get(),
             "info_update_rate": INFO_UPDATE_OPTIONS.get(self.info_update_var.get(), self.info_update_rate)

@@ -52,10 +52,14 @@ class TriggerEditDialog(BaseDialog):
         "goto": (
             "跳转到章节：进入目标章节，立即应用该章节的特定背景与持续敏感效果。\n"
             "选择“离开章节”表示跳出当前章节，回到无章节状态。\n"
-            "章节本身没有条件，所有进入与离开都由本动作执行。"
+            "章节本身没有条件，所有进入与离开都由本动作执行。\n"
+            "注意：位于「结束章节」内的跳转触发器会被跳过；跳转到结束章节后"
+            "只能等其段落数耗尽终止副本。"
         ),
         "ending": (
-            "触发后副本结束。\n"
+            "（已迁移）本动作已改由「结束章节」承担：在章节编辑里勾选“结束章节”，"
+            "进入后所有段落类型固定为结局、步进为 0，段落数耗尽即终止副本。\n"
+            "此处仅用于兼容旧配置；旧配置中的结局触发器仍可触发并结算。\n"
             "结局结算增量：结束时统一结算一次，可修改介入度、破坏性、伤亡步进、自定义属性和行动点数返还。\n"
             "结局图标：选择 png 图标后视为重要结局，并在首次达成时记入档案；不配置图标则为普通结局。"
         ),
@@ -126,11 +130,12 @@ class TriggerEditDialog(BaseDialog):
         main = ctk.CTkFrame(self, fg_color="transparent")
         main.pack(fill='both', expand=True, padx=14, pady=12)
 
-        # 动作模板按钮：仅新版动作（背景切换/性格敏感化已由章节属性承担，不再提供）
+        # 动作模板按钮：仅新版动作（背景切换/性格敏感化已由章节属性承担，
+        # 结局已迁移为「结束章节」；旧配置中的结局触发器仍可编辑保存）
         template_commands = {
             "insert": self._insert_template, "option": self._option_template,
             "effect": self._effect_template, "goto": self._goto_template,
-            "ending": self._ending_template, "none": self._empty_template,
+            "none": self._empty_template,
         }
         btn_frame = ctk.CTkFrame(main, fg_color="transparent")
         btn_frame.pack(fill='x', pady=(0, 2))
@@ -778,13 +783,14 @@ class TriggerEditDialog(BaseDialog):
                                    "options": [{"id": 0, "prompt": ""}, {"id": 1, "prompt": ""}]})
 
     def _ending_template(self):
-        self._set_action_template("ending", "新结束", {
-            "name": "",
-            "intrusion_delta": 0, "destruction_delta": 0, "casualty_step": 0,
-            "action_points_refund": 0,
-            "custom_deltas": {name: 0 for name in self.ending_custom_delta_vars},
-            "icon_path": "",
-        })
+        # 结局动作已迁移为「结束章节」（chapter_dlg 中勾选“结束章节”），
+        # 不再提供新建入口；保留本方法仅为旧配置的查看兼容
+        ui.common.dialogs.showinfo(
+            "已迁移",
+            "「结局」动作已改由「结束章节」承担：\n"
+            "在章节编辑对话框勾选“结束章节”，即可配置结局结算与图标；\n"
+            "进入结束章节后段落固定为结局类型、步进为 0，"
+            "段落数耗尽即终止副本。")
 
     # ---------- 结局图标 ----------
     def _resolve_ending_icon_abspath(self, icon_path: str) -> str:

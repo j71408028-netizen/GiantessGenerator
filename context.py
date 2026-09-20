@@ -644,17 +644,18 @@ class ExplorationContext:
                     quip_text = re.sub(r'\s*\[summary:.*?\]', '', quip_text)
 
             if quip_text is not None:
-                # 步长演化（演算坐标前）：步长向初始值恢复 0.2*个性强度 的比例差值
-                curr_step_intrusion, curr_step_destruction = self.state_service.evolve_step_rates(
-                    personality_obj, curr_step_intrusion, curr_step_destruction, actual_step)
                 curr_intrusion, curr_destruction = self.state_service.advance_coordinates(
                     personality_obj, curr_intrusion, curr_destruction, actual_step,
                     step_intrusion=curr_step_intrusion,
                     step_destruction=curr_step_destruction)
-                # 步长演化（演算坐标后）：步长 -= 步进 × 敏感/重力
-                curr_step_intrusion = curr_step_intrusion - actual_step * personality_obj.sensitivity
-                curr_step_destruction = curr_step_destruction - actual_step * getattr(
-                    personality_obj, "gravity", 0.0)
+                # 步长演化（演化坐标后）：先按步进扣除 步长 -= 步进 × 敏感/重力，
+                # 再向初始值恢复 0.2*个性强度 的比例差值，并叠加不适应性衰减
+                # （坐标达到 0.5/4.5 后步长向 0 收敛）
+                curr_step_intrusion, curr_step_destruction = \
+                    self.state_service.evolve_step_rates(
+                        personality_obj, curr_step_intrusion, curr_step_destruction,
+                        actual_step,
+                        intrusion=curr_intrusion, destruction=curr_destruction)
 
                 if (4, 4) in locked_coords and curr_intrusion >= 4.0 and curr_destruction >= 4.0:
                     if "涩涩" in selected_tags:

@@ -1,6 +1,8 @@
 """UI 构建、文本显示、布局自适应与事件回调。"""
 
 import os
+import threading
+import time
 
 import dearpygui.dearpygui as dpg
 
@@ -10,6 +12,10 @@ from dungeon.models import DungeonTextType
 
 _TEXT_COLOR = (255, 255, 255, 255)
 _HIGHLIGHT_COLOR = (255, 200, 60, 255)
+
+# 仿流式输出：每次推进的字符数与间隔（约 65 字/秒）
+_ANIM_CHARS_PER_TICK = 2
+_ANIM_TICK_SECONDS = 0.03
 
 
 class DungeonWindowUI:
@@ -82,12 +88,9 @@ class DungeonWindowUI:
             # 透明，其溢出怪癖不可见。
             with dpg.child_window(
                     tag="bg_overlay_child",
-                    pos=[round(40 * self._dpi_scale),
-                         round(40 * self._dpi_scale) if self.view_mode == "story"
-                         else viewport_h - round(230 * self._dpi_scale)],
+                    pos=[round(40 * self._dpi_scale), round(40 * self._dpi_scale)],
                     width=max(1, viewport_w - round(80 * self._dpi_scale)),
-                    height=max(1, viewport_h - round(60 * self._dpi_scale))
-                    if self.view_mode == "story" else round(190 * self._dpi_scale),
+                    height=max(1, viewport_h - round(60 * self._dpi_scale)),
                     no_scrollbar=True, no_scroll_with_mouse=True,
                     border=False,
             ):
@@ -95,12 +98,9 @@ class DungeonWindowUI:
 
             with dpg.child_window(
                     tag="text_container",
-                    pos=[round(40 * self._dpi_scale),
-                         round(40 * self._dpi_scale) if self.view_mode == "story"
-                         else viewport_h - round(230 * self._dpi_scale)],
+                    pos=[round(40 * self._dpi_scale), round(40 * self._dpi_scale)],
                     width=max(1, viewport_w - round(80 * self._dpi_scale)),
-                    height=max(1, viewport_h - round(60 * self._dpi_scale))
-                    if self.view_mode == "story" else round(190 * self._dpi_scale),
+                    height=max(1, viewport_h - round(60 * self._dpi_scale)),
                     horizontal_scrollbar=False,
                     no_scrollbar=False,
                     border=False,
@@ -150,10 +150,8 @@ class DungeonWindowUI:
 
     # ---------- 文本更新（仅主线程调用） ----------
     def _update_text_display(self):
-        if self.view_mode == "game":
-            items = self.story_history[-1:]
-        else:
-            items = self.story_history
+        # 保留全历史：不再区分故事/游戏视图
+        items = self.story_history
         tags = self._text_item_tags
         if len(tags) < len(items):
             for _ in range(len(tags), len(items)):
@@ -172,11 +170,11 @@ class DungeonWindowUI:
                 color=_HIGHLIGHT_COLOR if item.get("highlight") else _TEXT_COLOR,
             )
 
-        if self.view_mode == "story":
-            state = dpg.get_item_state("text_container")
-            max_scroll = state.get("y_scroll_max") if state else None
-            if max_scroll is not None:
-                dpg.set_y_scroll("text_container", max_scroll)
+        # 保留全历史：新段落上屏后自动滚到底部
+        state = dpg.get_item_state("text_container")
+        max_scroll = state.get("y_scroll_max") if state else None
+        if max_scroll is not None:
+            dpg.set_y_scroll("text_container", max_scroll)
 
     def _schedule_text_update(self):
         """合并 AI 流式响应产生的密集刷新，避免挤占 resize 布局任务。"""
@@ -192,11 +190,60 @@ class DungeonWindowUI:
             self._refresh_components()
 
     def _display_text(self, text: str, text_type: DungeonTextType, highlight: bool = False):
-        prefix = self._type_prefix(text_type)
-        if self.view_mode == "game":
-            self.story_history.clear()
+        prefix = self._display_type_prefix(text_type)
         self.story_history.append({"type_str": prefix, "text": text, "highlight": highlight})
         self._update_text_display()
+
+    def _reveal_pending_unit(self):
+        """揭示当前逻辑段落的下一个显示段落（内置分句器切出的后续句）。"""
+        if not self._pending_units:
+            return
+        unit = self._pending_units.pop(0)
+        # 首句已带段落类型前缀，后续句是同一逻辑段落的延续，不再加前缀
+        item = {"type_str": "", "text": ""}
+        self.story_history.append(item)
+        self._update_text_display()
+        self._animate_reveal(item, unit)
+
+    # ---------- 仿流式输出 ----------
+    def _animate_reveal(self, item, text: str):
+        """让新上屏的显示段落逐字增长，模拟 AI 流式输出的节奏。
+
+        动画期间再点击一次由 ``_finish_text_animation`` 立即补完。
+        """
+        self._finish_text_animation()
+        if not text:
+            return
+        state = {"item": item, "text": text, "pos": 0, "active": True}
+        self._text_anim_state = state
+
+        def run():
+            try:
+                while state["active"] and not self._closing:
+                    state["pos"] = min(len(text), state["pos"] + _ANIM_CHARS_PER_TICK)
+                    item["text"] = text[:state["pos"]]
+                    if state["pos"] >= len(text):
+                        break
+                    self._schedule_text_update()
+                    time.sleep(_ANIM_TICK_SECONDS)
+            finally:
+                state["active"] = False
+                if self._text_anim_state is state:
+                    self._text_anim_state = None
+                if not self._closing:
+                    self._schedule_text_update()
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _finish_text_animation(self):
+        """立即补完进行中的仿流式动画（点击跳过逐字过程）。"""
+        state = getattr(self, "_text_anim_state", None)
+        if not state:
+            return
+        state["active"] = False
+        state["item"]["text"] = state["text"]
+        self._text_anim_state = None
+        self._schedule_text_update()
 
     # ---------- 布局自适应 ----------
     def _update_dpi_scale(self):
@@ -250,7 +297,7 @@ class DungeonWindowUI:
         if getattr(self, "_is_entry_phase", False):
             self._relayout_entry_panels(w, h)
         else:
-            # 会话阶段：组件接管布局；未构建组件时回退到旧 view_mode 几何
+            # 会话阶段：组件接管布局；未构建组件时回退到内置几何
             if getattr(self, "_components_built", False):
                 self._relayout_components()
             else:
@@ -258,11 +305,7 @@ class DungeonWindowUI:
                 margin_top = round(40 * self._dpi_scale)
                 margin_bottom = round(20 * self._dpi_scale)
                 cw = max(1, w - 2 * margin_x)
-                if self.view_mode == "story":
-                    cpos, ch = [margin_x, margin_top], h - margin_top - margin_bottom
-                else:
-                    ch = round(190 * self._dpi_scale)
-                    cpos, ch = [margin_x, h - ch - margin_bottom], ch
+                cpos, ch = [margin_x, margin_top], h - margin_top - margin_bottom
                 if dpg.does_item_exist("text_container"):
                     dpg.configure_item("text_container", pos=cpos, width=cw, height=ch)
                 if dpg.does_item_exist("bg_overlay_child"):

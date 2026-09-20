@@ -19,6 +19,7 @@ class ComponentHandler:
     def _init_components(self):
         """初始化组件实例列表与默认布局样式（在 _load_session_config 后调用）。"""
         self._components = []
+        # 旧的「副本窗口视图」已移除，布局样式固定为保留全历史的故事布局
         self.layout_style = "story"
         self._components_built = False
 
@@ -43,10 +44,6 @@ class ComponentHandler:
             import traceback
             traceback.print_exc()
             self._components = []
-        # 布局样式：默认 story；game 模式配置仍保持底部矮栏（历史兼容）
-        config = getattr(self, "dungeon_config", None) or {}
-        view_mode = config.get("view_mode", "story")
-        self.layout_style = view_mode if view_mode in ("story", "game", "bottom") else "story"
         for comp in self._components:
             try:
                 comp.build(self)
@@ -86,7 +83,7 @@ class ComponentHandler:
 
     # ---- 供 UI 层调用的几何布局委托（保持单一入口） ----
     def _layout_text_container(self, style):
-        """按布局样式重排文本容器（与旧 view_mode 几何一致）。"""
+        """按布局样式重排文本容器。"""
         w = getattr(self, "_layout_w", 0) or dpg.get_viewport_client_width()
         h = getattr(self, "_layout_h", 0) or dpg.get_viewport_client_height()
         margin_x = round(40 * getattr(self, "_dpi_scale", 1.0))

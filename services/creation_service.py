@@ -93,9 +93,11 @@ class CreationService:
                 attempt_succeeded = True
             else:
                 # 线性映射 will: [-1.5, 1.5] → [remap_min, remap_max]
+                # 生成时角色尚不存在（无行动点数），策略值按缺省因子 0.5 计算
                 if personality is not None:
-                    remap_min = max(-1.5, -1 - greed / 200 + personality.sensitivity / 20)
-                    remap_max = min(1.5, 1 + greed / 200 - personality.sensitivity / 20)
+                    strategy = personality.strategy_value()
+                    remap_min = max(-1.5, -1 - greed / 200 + strategy / 20)
+                    remap_max = min(1.5, 1 + greed / 200 - strategy / 20)
                     remapped_will = (will + 1.5) / 3.0 * (remap_max - remap_min) + remap_min
                     remap_attempt_prob = greed / 100 * abs(remapped_will)
                     # 第二次贪婪判定

@@ -46,16 +46,22 @@ class EndingHandler:
         if self.dungeon_state.custom_attrs:
             custom = "，".join(f"{k} {v:.2f}" for k, v in self.dungeon_state.custom_attrs.items())
             parts.append(f"自定义属性：{custom}")
-        snippets = []
-        for info in self.replay_data[-limit:]:
-            if not info.get("text"):
-                continue
-            t = str(info["text"])
-            if len(t) > text_limit:
-                t = t[:text_limit] + "..."
-            snippets.append(f"[{info.get('type', '?')}] {t}")
-        if snippets:
-            parts.append("过往故事片段：\n" + "\n".join(snippets))
+        # 优先使用剧情压缩器产出的完整概要，缺失时回退到最近片段
+        summarizer = getattr(self, "story_summary", None)
+        summary = summarizer.summary_only() if summarizer is not None else ""
+        if summary:
+            parts.append("剧情概要：\n" + summary)
+        else:
+            snippets = []
+            for info in self.replay_data[-limit:]:
+                if not info.get("text"):
+                    continue
+                t = str(info["text"])
+                if len(t) > text_limit:
+                    t = t[:text_limit] + "..."
+                snippets.append(f"[{info.get('type', '?')}] {t}")
+            if snippets:
+                parts.append("过往故事片段：\n" + "\n".join(snippets))
         return "\n".join(parts)
 
     def _generate_ending(self):
@@ -67,8 +73,6 @@ class EndingHandler:
             client = getattr(self, "ai_client", None)
             self.ending_effects = pending.get("action_data", {}) or {}
 
-            if self.view_mode == "game":
-                self.story_history.clear()
             current_item = {"type_str": "【结局】", "text": "", "highlight": True}
             self.story_history.append(current_item)
 
@@ -80,22 +84,20 @@ class EndingHandler:
                 return
 
             personality_desc = getattr(self.personality, "description", "") if self.personality else ""
-            system_prompt = (
-                f"你是一位细腻的叙事作家，正在为一段关于巨大化少女（名字{self.name}"
-                f"、昵称{self.nick}）的故事写出结局。\n"
-                f"性格描述：{personality_desc or '她有着独特的性格。'}\n"
-                "请根据给定的结局名称与过往故事，总结这段旅程并写出完整、自然的结局详情：\n"
-                "- 自然衔接前文，交代故事的最终走向与局面\n"
-                "- 以叙述文书写，可分多段，篇幅 100~300 字\n"
-                "- 直接输出结局文字本身，不要输出 JSON、不要添加任何解释"
-            )
-            user_prompt = (
-                f"结局名称：{name}\n"
-                f"故事初始基调与设定：{self.initial_prompt}\n"
-                "故事当前状态：\n"
-                f"{self._build_story_summary()}\n\n"
-                "请写出结局。"
-            )
+            # 结局生成前把尚未压缩的剩余段落全部压缩，保证概要完整
+            summarizer = getattr(self, "story_summary", None)
+            if summarizer is not None:
+                summarizer.flush_chapter(getattr(self, "current_chapter", "") or "",
+                                         ai_client=client)
+            # 结局提示同样按耦合等级取用：旅程收束 / 任务收尾 / 关系结局
+            pack = coupling_prompts(normalize_coupling_level(
+                getattr(self, "coupling_level", None)))
+            system_prompt = pack["ending_system"].format(
+                name=self.name, nick=self.nick,
+                personality=personality_desc or '她有着独特的性格。')
+            user_prompt = pack["ending_user"].format(
+                ending_name=name, initial_prompt=self.initial_prompt,
+                summary=self._build_story_summary())
             messages = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},

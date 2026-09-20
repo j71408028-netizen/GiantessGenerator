@@ -514,7 +514,7 @@ class DungeonLaunchStages:
                 self._exit_from_entry = True
                 self._close_loop()
                 return
-            # 会话 view_mode 由加载的配置决定，需在新布局下重排
+            # 会话配置（含耦合等级）刚加载，需在新布局下重排
             self._init_components()
             self._build_components()
             self._relayout()

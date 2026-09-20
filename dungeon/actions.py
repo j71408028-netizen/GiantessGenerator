@@ -12,10 +12,16 @@
 """
 
 # 新版动作：单步行为 + 章节跳转
-NEW_ACTIONS = ("insert", "option", "effect", "goto", "ending", "none")
-# 旧版动作：已由章节属性承担，读到即跳过（仅为识别保留）
+NEW_ACTIONS = ("insert", "option", "effect", "goto", "none")
+# 旧版动作：已由章节属性承担，读到即跳过（仅为识别保留）。
 LEGACY_ACTIONS = ("background", "sensitivity")
 ALL_ACTIONS = NEW_ACTIONS + LEGACY_ACTIONS
+
+# 「结局」不再是触发器动作：改由「结束章节」承担（章节属性 ``ending=True``）。
+# 运行时仍兼容旧配置中的 ``ending`` 触发器与旧回放记录；仅编辑器不再提供
+# 新建入口（见 ui/scenario/trigger_dlg.py），运行时遭遇结束章节所在作用域的
+# goto/option 触发器时会跳过。
+ENDING_ACTION = "ending"
 
 ACTION_LABELS = {
     "insert": "插入文本",

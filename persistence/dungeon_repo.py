@@ -3,6 +3,7 @@ import os
 import shutil
 
 from dungeon.chapters import normalize_chapters
+from dungeon.coupling import DEFAULT_COUPLING_LEVEL, normalize_coupling_level
 
 
 class DungeonRepo:
@@ -79,7 +80,7 @@ class DungeonRepo:
     def _empty_config(self) -> dict:
         return {
             "initial_prompt": "",
-            "view_mode": "story",
+            "coupling_level": DEFAULT_COUPLING_LEVEL,
             "entry_action_cost": 0,
             "section_prompts": {
                 "background": "", "branch": "", "dialog": "",
@@ -101,7 +102,7 @@ class DungeonRepo:
         new_config = dict(config)
         new_config.update({
             "initial_prompt": config.get("initial_prompt", ""),
-            "view_mode": config.get("view_mode", "story"),
+            "coupling_level": normalize_coupling_level(config.get("coupling_level")),
             "entry_action_cost": max(0, int(config.get("entry_action_cost", 0) or 0)),
             "section_prompts": config.get("section_prompts", {
                 "background": "", "branch": "", "dialog": "",
@@ -115,6 +116,8 @@ class DungeonRepo:
         # 旧配置把进化量写成 custom_attrs，迁移成 evolution_attrs 后移除旧键
         new_config.pop("custom_attrs", None)
         new_config.pop("custom_attrs_def", None)
+        # 旧的「副本窗口视图」已改造为耦合等级，视图字段不再保留
+        new_config.pop("view_mode", None)
 
         if "evolution_attrs" in config:
             new_config["evolution_attrs"] = config["evolution_attrs"]

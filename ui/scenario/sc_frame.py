@@ -4,8 +4,11 @@ import re
 import copy
 import os
 from dungeon.chapters import normalize_chapters
+from dungeon.coupling import (COUPLING_LEVELS, DEFAULT_COUPLING_LEVEL, coupling_initial_prompt,
+                              coupling_label, normalize_coupling_level)
 from dungeon.rules import EvolutionRules
-from ui.common.widgets import CTkScrollableDropdownFrame, CTkSegmentedControl
+from ui.common.widgets import (CTkScrollableDropdownFrame, CTkSegmentedControl,
+                               CycleOptionButton)
 from ui.common.dialogs import BaseDialog, InputDialog
 from ui.scenario.script_mgr import ScriptManager
 from ui.scenario.evolution_attributes import EvolutionAtrrManager
@@ -31,7 +34,7 @@ class ScenarioEditor(ctk.CTkFrame):
         self.current_scenario_id = None
         self.initial_prompt = ""
         self.section_prompts = {}
-        self.view_mode = "story"
+        self.coupling_level = DEFAULT_COUPLING_LEVEL
         self.evolution_attrs = []  # 统一演化量列表
         self.chapters = []  # 章节列表（不含条件，只描述背景与持续敏感效果）
         self.triggers = []
@@ -118,7 +121,7 @@ class ScenarioEditor(ctk.CTkFrame):
         self.evolution_panel.pack_forget()
         self.chapter_trigger_panel.pack_forget()
         self.component_panel.pack_forget()
-        self.prompt_panel.pack(fill='both', expand=True)
+        self.prompt_panel.pack(fill='both', padx=9, expand=True)
 
     def _build_combined_items(self):
         schemes = self._dungeon_repo.list_all()
@@ -206,7 +209,7 @@ class ScenarioEditor(ctk.CTkFrame):
         self.component_panel.pack_forget()
 
         if tab == "通用":
-            self.prompt_panel.pack(fill='both', expand=True)
+            self.prompt_panel.pack(fill='both', padx=9, expand=True)
         elif tab == "演化量":
             self.evolution_panel.pack(fill='both', expand=True)
         elif tab == "动态":
@@ -218,26 +221,25 @@ class ScenarioEditor(ctk.CTkFrame):
 
     # ------------------ 新版通用面板 ------------------
     def _build_prompt_ui(self, parent):
-        """通用面板：副本视图/进入消耗/初始提示/段落分类提示，卡片式布局"""
+        """通用面板：耦合等级/消耗（左栏） + 初始提示（右栏） + 段落分类提示"""
         for child in parent.winfo_children():
             child.destroy()
 
         # 与其他管理页面保持一致的配色
         _CARD_BORDER = SC_BORDER
-        _CARD_BG = "transparent"
+        _CARD_BG = SC_PANEL_BG
         _TITLE = SC_TITLE
         _MUTED = SC_TEXT_SOFT
         _DARK = SC_TEXT
-        _F_TITLE = 14   # 卡片标题
-        _F_BIG = 13     # 表单标签与正文输入
-        _F_SMALL = 11   # 次要说明
+        _F_TITLE = 14
+        _F_BIG = 14     # 表单标签与正文输入
+        _F_SMALL = 13   # 次要说明
 
         def _section_card(master, expand=False):
             card = ctk.CTkFrame(master, fg_color=_CARD_BG,
-                                border_width=1, corner_radius=12,
-                                border_color=_CARD_BORDER)
+                                border_width=0, corner_radius=10)
             card.pack(fill='both' if expand else 'x',
-                      expand=expand, pady=4)
+                      expand=expand, pady=10)
             inner = ctk.CTkFrame(card, fg_color="transparent")
             inner.pack(fill='both' if expand else 'x',
                        expand=expand, padx=12, pady=10)
@@ -245,53 +247,82 @@ class ScenarioEditor(ctk.CTkFrame):
 
         # ---------- 底部按钮 ----------
         bottom_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        bottom_frame.pack(side='bottom', fill='x', pady=(5, 5))
-        ctk.CTkButton(bottom_frame, text="转移设置", width=90,
-                      fg_color="transparent", border_width=1, corner_radius=8,
-                      text_color=_MUTED,
-                      hover_color=SC_HOVER,
-                      border_color=SC_BORDER_STRONG,
-                      font=ui_fonts.ui_font(_F_BIG),
-                      command=lambda: self._edit_transition_matrix(None)).pack(side='left', padx=5)
-        ctk.CTkButton(bottom_frame, text="保存此页面", width=130,
+        bottom_frame.pack(side='bottom', fill='x', pady=(6, 3))
+        ctk.CTkButton(bottom_frame, text="保存此页面",
                       fg_color="transparent", border_width=2, corner_radius=10,
-                      text_color=SC_OK,
+                      height=30, text_color=SC_OK,
                       hover_color=SC_OK_HOVER,
                       border_color=SC_OK,
                       font=ui_fonts.ui_font(_F_BIG, "bold"),
-                      command=self._save_prompts).pack(side='right', padx=5)
+                      command=self._save_prompts).pack(fill='x')
 
-        # ---------- 副本窗口视图 ----------
-        view_inner = _section_card(parent)
-        ctk.CTkLabel(view_inner, text="副本窗口视图:", font=ui_fonts.ui_font(_F_BIG),
+        # ---------- 左右两栏：左=耦合等级/点数消耗/等级初始提示，右=初始提示 ----------
+        columns = ctk.CTkFrame(parent, fg_color="transparent")
+        columns.pack(fill='x', pady=(0, 5))
+        columns.grid_columnconfigure(0, weight=0)   # 左栏按内容宽度
+        columns.grid_columnconfigure(1, weight=1)   # 右栏占满剩余
+
+        # ---- 左栏 ----
+        left_card = ctk.CTkFrame(columns, fg_color=_CARD_BG, border_width=0, corner_radius=10)
+        left_card.grid(row=0, column=0, sticky='nsew', padx=(0, 8))
+        left_inner = ctk.CTkFrame(left_card, fg_color="transparent")
+        left_inner.pack(fill='both', expand=True, padx=12, pady=10)
+
+        head_row = ctk.CTkFrame(left_inner, fg_color="transparent")
+        head_row.pack(fill='x', padx=(0, 20))
+        ctk.CTkLabel(head_row, text="耦合等级", font=ui_fonts.ui_font(_F_BIG),
                      text_color=_TITLE).pack(side='left')
-        self.view_mode_segment = CTkSegmentedControl(
-            view_inner, values=["故事", "Galgame"], command=self._on_view_mode_changed,
-            width=160, height=26, font=ui_fonts.ui_font(_F_BIG)
-        )
-        self.view_mode_segment.pack(side='left', padx=10)
-
-        ctk.CTkLabel(view_inner, text="行动点数消耗:", font=ui_fonts.ui_font(_F_BIG),
-                     text_color=_TITLE).pack(side='left', padx=(100, 10))
+        # 循环切换按钮：复用 widgets.CycleOptionButton（左键下一档、右键上一档，
+        # 到头循环）；档位值用等级显示名，回调里再映射回等级键
+        self.coupling_cycle = CycleOptionButton(
+            head_row, values=[coupling_label(lv) for lv in COUPLING_LEVELS],
+            command=self._on_coupling_cycle,
+            width=110, height=26, corner_radius=8,
+            font=ui_fonts.ui_font(_F_BIG, "bold"),
+            fg_color="transparent", border_color=SC_BORDER_STRONG,
+            hover_color=SC_HOVER, text_color=SC_LINK, marker_color=SC_LINK)
+        self.coupling_cycle.set(coupling_label(self.coupling_level))
+        self.coupling_cycle.pack(side='left', padx=8)
         self.entry_cost_var = ctk.StringVar(value="0")
-        self.entry_cost_entry = ctk.CTkEntry(view_inner, textvariable=self.entry_cost_var,
-                                             width=80, font=ui_fonts.ui_font(_F_BIG),
-                                             text_color=_DARK,
+        self.entry_cost_entry = ctk.CTkEntry(head_row, textvariable=self.entry_cost_var,
+                                             width=64, font=ui_fonts.ui_font(_F_BIG),
+                                             text_color=_DARK, justify='right',
                                              fg_color=SC_PANEL_BG,
                                              border_color=SC_BORDER_STRONG)
-        self.entry_cost_entry.pack(side='left')
+        self.entry_cost_entry.pack(side='right')
+        ctk.CTkLabel(head_row, text="AP 消耗量", font=ui_fonts.ui_font(_F_BIG),
+                     text_color=_TITLE).pack(side='right', padx=(12, 6))
 
-        # ---------- 初始提示 ----------
-        initial_inner = _section_card(parent)
-        ctk.CTkLabel(initial_inner, text="初始提示（角色设定/世界背景）", font=ui_fonts.ui_font(_F_TITLE, "bold"),
+        # 左栏子元素显式定宽：CTkLabel 的自然请求宽度不受 wraplength
+        # 约束，不钉住会把左栏撑得很宽，挤掉右栏的初始提示输入框
+        _LEFT_WIDTH = 365
+
+        ctk.CTkLabel(left_inner, text="系统初始提示",
+                     font=ui_fonts.ui_font(_F_SMALL, "bold"),
+                     text_color=_MUTED, anchor='w').pack(fill='x', pady=(10, 0))
+        # 标签展示：直接读取 coupling.py 中该等级的 initial_prompt（只读）
+        self.coupling_prompt_label = ctk.CTkLabel(
+            left_inner, text=coupling_initial_prompt(self.coupling_level),
+            width=_LEFT_WIDTH, wraplength=_LEFT_WIDTH - 6,
+            font=ui_fonts.ui_font(_F_SMALL), text_color=_MUTED,
+            anchor='w', justify='left')
+        self.coupling_prompt_label.pack(fill='x', pady=(4, 0))
+
+        # ---- 右栏：初始提示 ----
+        right_card = ctk.CTkFrame(columns, fg_color=_CARD_BG, border_width=0, corner_radius=10)
+        right_card.grid(row=0, column=1, sticky='nsew', padx=(8, 0))
+        right_inner = ctk.CTkFrame(right_card, fg_color="transparent")
+        right_inner.pack(fill='both', expand=True, padx=12, pady=10)
+        ctk.CTkLabel(right_inner, text="初始提示（角色设定/世界背景）",
+                     font=ui_fonts.ui_font(_F_TITLE, "bold"),
                      text_color=_TITLE).pack(anchor='w')
-        self.initial_prompt_text = ctk.CTkTextbox(initial_inner, height=110, wrap='word',
+        self.initial_prompt_text = ctk.CTkTextbox(right_inner, height=150, wrap='word',
                                                   font=ui_fonts.ui_font(_F_BIG),
                                                   text_color=_DARK,
                                                   fg_color=SC_PANEL_BG,
                                                   border_width=1,
                                                   border_color=SC_BORDER_STRONG)
-        self.initial_prompt_text.pack(fill='x', pady=(6, 0))
+        self.initial_prompt_text.pack(fill='both', expand=True, pady=(6, 0))
 
         # ---------- 段落分类提示（横向可滚动卡片） ----------
         sections_inner = _section_card(parent, expand=True)
@@ -299,9 +330,13 @@ class ScenarioEditor(ctk.CTkFrame):
         title_row.pack(fill='x')
         ctk.CTkLabel(title_row, text="段落分类提示（针对不同文本类型）", font=ui_fonts.ui_font(_F_TITLE, "bold"),
                      text_color=_TITLE).pack(side='left')
-        ctk.CTkLabel(title_row, text="卡片可横向滚动（Shift + 滚轮或拖动底部滚动条）",
-                     font=ui_fonts.ui_font(_F_SMALL),
-                     text_color=_MUTED).pack(side='right')
+        ctk.CTkButton(title_row, text="转移设置", width=100,
+                      fg_color="transparent", border_width=1, corner_radius=8,
+                      text_color=_MUTED,
+                      hover_color=SC_HOVER,
+                      border_color=SC_BORDER_STRONG,
+                      font=ui_fonts.ui_font(_F_BIG),
+                      command=lambda: self._edit_transition_matrix(None)).pack(side='right')
 
         # ---------- 各分类卡片 ----------
         self.section_frames = {}  # key -> CTkTextbox
@@ -458,7 +493,7 @@ class ScenarioEditor(ctk.CTkFrame):
         """更新所有UI控件（包括步进值）"""
         self.initial_prompt_text.delete("1.0", "end")
         self.initial_prompt_text.insert("1.0", self.initial_prompt)
-        self.view_mode_segment.set("Galgame" if self.view_mode == "game" else "故事")
+        self._refresh_coupling_widgets()
         self.entry_cost_var.set(str(int(self.entry_action_cost)))
 
         for key, box in self.section_frames.items():
@@ -483,9 +518,7 @@ class ScenarioEditor(ctk.CTkFrame):
             return
         self.initial_prompt = config.get("initial_prompt", "")
         self.section_prompts = config.get("section_prompts", {})
-        self.view_mode = config.get("view_mode", "story")
-        if self.view_mode not in ("story", "game"):
-            self.view_mode = "story"
+        self.coupling_level = normalize_coupling_level(config.get("coupling_level"))
         self.evolution_attrs = config.get("evolution_attrs", [])
         self.chapters = normalize_chapters(config.get("chapters", []))
         self.triggers = config.get("triggers", [])
@@ -521,7 +554,7 @@ class ScenarioEditor(ctk.CTkFrame):
             entry_cost = self.entry_action_cost
         return {
             "initial_prompt": self.initial_prompt_text.get("1.0", "end-1c").strip(),
-            "view_mode": self.view_mode,
+            "coupling_level": self.coupling_level,
             "section_prompts": {key: box.get("1.0", "end-1c").strip()
                                 for key, box in self.section_frames.items()},
             "section_steps": {key: var.get() for key, var in self.section_step_vars.items()},
@@ -540,7 +573,7 @@ class ScenarioEditor(ctk.CTkFrame):
         # 更新提示词字段
         prompt_data = self._get_prompt_data_from_ui()
         config["initial_prompt"] = prompt_data["initial_prompt"]
-        config["view_mode"] = prompt_data["view_mode"]
+        config["coupling_level"] = prompt_data["coupling_level"]
         config["section_prompts"] = prompt_data["section_prompts"]
         config["section_steps"] = prompt_data["section_steps"]
         config["transition_matrix"] = prompt_data["transition_matrix"]
@@ -621,6 +654,7 @@ class ScenarioEditor(ctk.CTkFrame):
             return
         empty_config = {
             "initial_prompt": "",
+            "coupling_level": DEFAULT_COUPLING_LEVEL,
             "section_prompts": {k: "" for k in ["background","branch","dialog","interaction","action"]},
             "custom_attrs": [],
             "chapters": [],
@@ -673,7 +707,15 @@ class ScenarioEditor(ctk.CTkFrame):
         self.components = list(self.component_panel.components)
         self.components_params = dict(self.component_panel.components_params)
 
-    def _on_view_mode_changed(self, value):
-        self.view_mode = "game" if value == "Galgame" else "story"
+    def _on_coupling_cycle(self, value):
+        """CycleOptionButton 回调：把轮换控件的档位标签映射回等级并刷新左栏。"""
+        self.coupling_level = normalize_coupling_level(value)
+        self._refresh_coupling_widgets()
+
+    def _refresh_coupling_widgets(self):
+        """把当前耦合等级回显到左栏（轮换档位、说明、等级初始提示标签）。"""
+        self.coupling_cycle.set(coupling_label(self.coupling_level))
+        self.coupling_prompt_label.configure(
+            text=coupling_initial_prompt(self.coupling_level))
 
 
