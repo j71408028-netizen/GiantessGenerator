@@ -10,7 +10,8 @@ from dungeon.rules import EvolutionRules
 from ui.common.widgets import (CTkScrollableDropdownFrame, CTkSegmentedControl,
                                CycleOptionButton)
 from ui.common.dialogs import BaseDialog, InputDialog
-from ui.scenario.script_mgr import ScriptManager
+from ui.scenario.chapter_trigger_mgr import ChapterTriggerManager
+from dungeon.terms import DEFAULT_SCENARIO_ID
 from ui.scenario.evolution_attributes import EvolutionAtrrManager
 from ui.scenario.component_mgr import ComponentManager
 from ui.common.theme import (
@@ -26,9 +27,9 @@ from ui.common import fonts as ui_fonts
 class ScenarioEditor(ctk.CTkFrame):
     """副本编辑器：通用区域 + 两个 TreeviewManager 子面板（属性/触发器）"""
 
-    def __init__(self, parent, dungeon_repo, gui_ref, challenge_mgr=None):
+    def __init__(self, parent, scenario_repo, gui_ref, challenge_mgr=None):
         super().__init__(parent, fg_color="transparent")
-        self._dungeon_repo = dungeon_repo
+        self._scenario_repo = scenario_repo
         self._challenge_mgr = challenge_mgr
         self.gui = gui_ref
         self.current_scenario_id = None
@@ -53,7 +54,7 @@ class ScenarioEditor(ctk.CTkFrame):
 
         self._build_ui()
         self._refresh_scenario_list()
-        self._load_scenario("_default")
+        self._load_scenario(DEFAULT_SCENARIO_ID)
 
     def _build_ui(self):
         toolbar = ctk.CTkFrame(self, fg_color=SC_BG)
@@ -112,10 +113,10 @@ class ScenarioEditor(ctk.CTkFrame):
         self.prompt_panel = ctk.CTkFrame(self.content_frame, fg_color="transparent")
         self._build_prompt_ui(self.prompt_panel)  # 重写 UI 构建
 
-        self.evolution_panel = EvolutionAtrrManager(self.content_frame, self._dungeon_repo, self)
-        self.chapter_trigger_panel = ScriptManager(
-            self.content_frame, self._dungeon_repo, self)
-        self.component_panel = ComponentManager(self.content_frame, self._dungeon_repo, self)
+        self.evolution_panel = EvolutionAtrrManager(self.content_frame, self._scenario_repo, self)
+        self.chapter_trigger_panel = ChapterTriggerManager(
+            self.content_frame, self._scenario_repo, self)
+        self.component_panel = ComponentManager(self.content_frame, self._scenario_repo, self)
 
         # 默认显示通用面板
         self.evolution_panel.pack_forget()
@@ -124,7 +125,7 @@ class ScenarioEditor(ctk.CTkFrame):
         self.prompt_panel.pack(fill='both', padx=9, expand=True)
 
     def _build_combined_items(self):
-        schemes = self._dungeon_repo.list_all()
+        schemes = self._scenario_repo.list_all()
         items = list(schemes)
         text_colors = {}
         self._pack_display_map = {}
@@ -184,20 +185,20 @@ class ScenarioEditor(ctk.CTkFrame):
         data, _, _ = result
         if not data:
             return
-        scenario_config = data.get("dungeon_config", {})
-        scenario_id = data.get("dungeon_id", "")
+        scenario_config = data.get("scenario_config", {})
+        scenario_id = data.get("scenario_id", "")
         if not scenario_config:
-            ui.common.dialogs.showinfo("提示", "该挑战包中没有副本配置")
+            ui.common.dialogs.showinfo("提示", "该挑战包中没有副本方案")
             return
 
-        if self._dungeon_repo.exists(scenario_id):
-            self._dungeon_repo.save_config(scenario_id, scenario_config)
+        if self._scenario_repo.exists(scenario_id):
+            self._scenario_repo.save_config(scenario_id, scenario_config)
         else:
-            self._dungeon_repo.create(scenario_id, scenario_config)
+            self._scenario_repo.create(scenario_id, scenario_config)
 
         self._refresh_scenario_list()
         self._load_scenario(scenario_id)
-        ui.common.dialogs.showinfo("成功", f"已从挑战包加载副本 '{scenario_id}'")
+        ui.common.dialogs.showinfo("成功", f"已从挑战包加载副本方案 '{scenario_id}'")
 
     def _on_scenario_tab_switch(self, value):
         # 分段值可能带装饰空格（如 " 动态 "），统一去掉后再比较
@@ -485,7 +486,7 @@ class ScenarioEditor(ctk.CTkFrame):
         return steps.get(key, 0.1)
 
     def get_scenario_logic(self) -> EvolutionRules:
-        """返回基于当前副本配置的 EvolutionRules 实例"""
+        """返回基于当前副本方案配置的 EvolutionRules 实例"""
         return EvolutionRules(transition_matrix=self.transition_matrix,
                               step_overrides=self.section_steps)
 
@@ -513,7 +514,7 @@ class ScenarioEditor(ctk.CTkFrame):
         self._update_prompt_snapshot()
 
     def _load_scenario(self, scenario_id):
-        config = self._dungeon_repo.load_config(scenario_id)
+        config = self._scenario_repo.load_config(scenario_id)
         if config is None:
             return
         self.initial_prompt = config.get("initial_prompt", "")
@@ -540,7 +541,7 @@ class ScenarioEditor(ctk.CTkFrame):
         if not self.transition_matrix:
             self.transition_matrix = self._default_transition_matrix()
 
-        # 先定位副本 id 再刷新 UI：刷新过程中各子面板的自动保存/同步
+        # 先定位副本方案 id 再刷新 UI：刷新过程中各子面板的自动保存/同步
         # 逻辑依赖 current_scenario_id 指向正在加载的配置
         self.current_scenario_id = scenario_id
         self._refresh_ui_from_config()
@@ -567,7 +568,7 @@ class ScenarioEditor(ctk.CTkFrame):
         if not self.current_scenario_id:
             return
         # 加载现有配置
-        config = self._dungeon_repo.load_config(self.current_scenario_id)
+        config = self._scenario_repo.load_config(self.current_scenario_id)
         if config is None:
             config = {}
         # 更新提示词字段
@@ -584,7 +585,7 @@ class ScenarioEditor(ctk.CTkFrame):
         if "components_params" in config:
             config["components_params"] = self.components_params
         # 保存（保留 evolution_attrs 和 triggers）
-        self._dungeon_repo.save_config(self.current_scenario_id, config)
+        self._scenario_repo.save_config(self.current_scenario_id, config)
         # 更新快照
         self._update_prompt_snapshot()
         ui.common.dialogs.showinfo("成功", "通用设置已保存")
@@ -593,64 +594,64 @@ class ScenarioEditor(ctk.CTkFrame):
         """仅保存演化量、章节与触发器，不修改提示词"""
         if not self.current_scenario_id:
             return
-        config = self._dungeon_repo.load_config(self.current_scenario_id)
+        config = self._scenario_repo.load_config(self.current_scenario_id)
         if config is None:
             config = {}
         config["evolution_attrs"] = self.evolution_attrs
         config["chapters"] = self.chapters
         config["triggers"] = self.triggers
-        self._dungeon_repo.save_config(self.current_scenario_id, config)
+        self._scenario_repo.save_config(self.current_scenario_id, config)
         # 不更新提示词快照
 
     def _rename_scenario(self):
         old_name = self.current_scenario_id
-        if old_name == "_default":
-            ui.common.dialogs.showwarning("警告", "默认副本不可重命名")
+        if old_name == DEFAULT_SCENARIO_ID:
+            ui.common.dialogs.showwarning("警告", "默认副本方案不可重命名")
             return
 
-        dlg = InputDialog(self, title="重命名副本", prompt=f"将 '{old_name}' 重命名为:")
+        dlg = InputDialog(self, title="重命名副本方案", prompt=f"将 '{old_name}' 重命名为:")
         new_name = dlg.get_input()
         if not new_name or not re.match(r'^\w+$', new_name):
             return
 
-        if self._dungeon_repo.exists(new_name):
-            ui.common.dialogs.showerror("错误", "副本名称已存在")
+        if self._scenario_repo.exists(new_name):
+            ui.common.dialogs.showerror("错误", "副本方案名称已存在")
             return
 
         # 加载旧配置并保存为新名称，再删除旧配置
-        config = self._dungeon_repo.load_config(old_name)
+        config = self._scenario_repo.load_config(old_name)
         if config is None:
-            ui.common.dialogs.showerror("错误", f"无法加载副本 '{old_name}'")
+            ui.common.dialogs.showerror("错误", f"无法加载副本方案 '{old_name}'")
             return
 
         try:
-            self._dungeon_repo.save_config(new_name, config)
-            self._dungeon_repo.delete(old_name)
+            self._scenario_repo.save_config(new_name, config)
+            self._scenario_repo.delete(old_name)
             self._refresh_scenario_list()
             self._load_scenario(new_name)
         except Exception as e:
             ui.common.dialogs.showerror("错误", f"重命名失败: {e}")
 
     def _delete_scenario(self):
-        if self.current_scenario_id == "_default":
-            ui.common.dialogs.showwarning("警告", "默认副本不可删除")
+        if self.current_scenario_id == DEFAULT_SCENARIO_ID:
+            ui.common.dialogs.showwarning("警告", "默认副本方案不可删除")
             return
-        if not ui.common.dialogs.askyesno("确认", f"确定删除副本 '{self.current_scenario_id}' 吗？\n此操作不可恢复！"):
+        if not ui.common.dialogs.askyesno("确认", f"确定删除副本方案 '{self.current_scenario_id}' 吗？\n此操作不可恢复！"):
             return
         try:
-            self._dungeon_repo.delete(self.current_scenario_id)
+            self._scenario_repo.delete(self.current_scenario_id)
             self._refresh_scenario_list()
-            self._load_scenario("_default")
+            self._load_scenario(DEFAULT_SCENARIO_ID)
         except Exception as e:
             ui.common.dialogs.showerror("错误", str(e))
 
     def _new_scenario(self):
-        dlg = InputDialog(self, title="新建副本", prompt="请输入新副本名称:")
+        dlg = InputDialog(self, title="新建副本方案", prompt="请输入新副本方案名称:")
         new_id = dlg.get_input()
         if not new_id or not re.match(r'^\w+$', new_id):
             return
-        if self._dungeon_repo.exists(new_id):
-            ui.common.dialogs.showerror("错误", "副本已存在")
+        if self._scenario_repo.exists(new_id):
+            ui.common.dialogs.showerror("错误", "副本方案已存在")
             return
         empty_config = {
             "initial_prompt": "",
@@ -663,7 +664,7 @@ class ScenarioEditor(ctk.CTkFrame):
             "components": ["text"],
             "components_params": {},
         }
-        if self._dungeon_repo.create(new_id, empty_config):
+        if self._scenario_repo.create(new_id, empty_config):
             self._refresh_scenario_list()
             self._load_scenario(new_id)
         else:
@@ -686,11 +687,11 @@ class ScenarioEditor(ctk.CTkFrame):
             if ui.common.dialogs.askyesno("通用设置未保存", "当前通用设置已修改，是否保存？", parent=self):
                 self._save_prompts()
             # 如果用户选择“否”，则放弃修改（快照不变）
-        # 加载新副本
+        # 加载新副本方案
         self._load_scenario(choice)
 
     def _refresh_scenario_list(self):
-        dungeon_list = self._dungeon_repo.list_all()
+        dungeon_list = self._scenario_repo.list_all()
         self._rebuild_dropdown()
         if self.current_scenario_id not in dungeon_list:
             self.current_scenario_id = dungeon_list[0] if dungeon_list else None

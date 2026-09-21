@@ -16,6 +16,8 @@ import shutil
 from dataclasses import asdict
 from typing import Optional, List, Dict, Tuple
 
+from dungeon.terms import scenario_id_of
+
 
 class ChallengeService:
     """
@@ -35,7 +37,7 @@ class ChallengeService:
     # 新格式中每个 HMAC 摘要（32 字节）作为密钥流块使用
     _KS_BLOCK_LEN = 32
 
-    def __init__(self, settings_repo, character_repo=None, landmark_repo=None, quip_repo=None, dungeon_repo=None, data_dir="data", world_state=None):
+    def __init__(self, settings_repo, character_repo=None, landmark_repo=None, quip_repo=None, scenario_repo=None, data_dir="data", world_state=None):
         """
         初始化挑战包管理器
 
@@ -43,7 +45,7 @@ class ChallengeService:
         :param character_repo: 角色仓库，用于加载角色数据
         :param landmark_repo: 地标仓库，用于加载地标数据
         :param quip_repo: 描述风格仓库，用于加载描述数据
-        :param dungeon_repo: 副本仓库，用于加载副本配置
+        :param scenario_repo: 副本仓库，用于加载副本配置
         :param data_dir: 默认数据目录，用于拼接默认存储路径
         :param world_state: 世界包激活状态（None 表示无世界包）
         """
@@ -51,7 +53,7 @@ class ChallengeService:
         self.character_repo = character_repo
         self.landmark_repo = landmark_repo
         self.quip_repo = quip_repo
-        self.dungeon_repo = dungeon_repo
+        self.scenario_repo = scenario_repo
         self.data_dir = data_dir
         self.world_state = world_state
         # 内部缓存存储目录，None 表示从 settings 中读取
@@ -359,7 +361,7 @@ class ChallengeService:
         return payload[len(self.MAGIC):]
 
     def create_challenge(self, character_id: str, landmark_styles: List[str],
-                         quip_styles: List[str], dungeon_id: str,
+                         quip_styles: List[str], scenario_id: str,
                          intro: str, pack_name: str) -> str:
         """
         创建一个新的挑战包
@@ -369,14 +371,14 @@ class ChallengeService:
         :param character_id: 角色ID
         :param landmark_styles: 地标风格组列表
         :param quip_styles: 描述风格组列表
-        :param dungeon_id: 副本方案ID
+        :param scenario_id: 副本方案ID
         :param intro: 挑战包简介
         :param pack_name: 包名（不含扩展名或含扩展名均可）
         :return: 生成的秘钥字符串
         :raises ValueError: 缺少必要仓库、角色或副本加载失败等
         """
         self._ensure_storage_dir()
-        if not all([self.character_repo, self.landmark_repo, self.quip_repo, self.dungeon_repo]):
+        if not all([self.character_repo, self.landmark_repo, self.quip_repo, self.scenario_repo]):
             raise ValueError("创建挑战包需要提供所有仓库实例")
 
         # 生成随机秘钥
@@ -406,9 +408,9 @@ class ChallengeService:
             quip_data[style] = serializable
 
         # 加载副本配置
-        dungeon_config = self.dungeon_repo.load_config(dungeon_id)
-        if not dungeon_config:
-            raise ValueError(f"无法加载副本 '{dungeon_id}'")
+        scenario_config = self.scenario_repo.load_config(scenario_id)
+        if not scenario_config:
+            raise ValueError(f"无法加载副本 '{scenario_id}'")
 
         # 构建挑战包数据字典
         pack_data = {
@@ -420,8 +422,8 @@ class ChallengeService:
             "landmark_data": landmark_data,                    # 地标数据字典
             "quip_styles": quip_styles,
             "quip_data": quip_data,                            # 描述风格数据字典
-            "dungeon_id": dungeon_id,
-            "dungeon_config": dungeon_config,                  # 副本配置字典
+            "scenario_id": scenario_id,
+            "scenario_config": scenario_config,                  # 副本配置字典
             "created_at": datetime.datetime.now().isoformat()
         }
 
@@ -552,7 +554,7 @@ class ChallengeService:
             "bundled": self._is_bundled_path(file_path),
             "intro": data.get("intro", ""),
             "character_name": data.get("character_data", {}).get("name", "未知"),
-            "dungeon_id": data.get("dungeon_id", ""),
+            "scenario_id": scenario_id_of(data),
             "landmark_styles": data.get("landmark_styles", []),
             "quip_styles": data.get("quip_styles", []),
             "created_at": data.get("created_at", "")

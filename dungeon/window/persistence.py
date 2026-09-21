@@ -1,13 +1,14 @@
 """结局结算与副本/回放/报告的持久化。"""
 
 import datetime
-import json
 import os
 
 import ui.common.dialogs
 from paths import data_dir
 from logic import compute_casualty
 from models import CharacterSnapshot
+from persistence.json_store import load_json_with_backup, write_json_atomic, write_text_atomic
+from dungeon.terms import scenario_id_of
 from services.state_service import StateService
 
 
@@ -24,7 +25,7 @@ class DungeonPersistence:
         - 挑战模式：写入 data/user/endings.json 的用户结局索引；
         - 回放模式 / 无图标结局：不记录。
         索引字段（与结局图标一一对应，便于后续以图标展示/悬停/点击查看）：
-        dungeon_id、trigger_index（结局触发器在 triggers 列表中的下标）、name、
+        scenario_id、trigger_index（结局触发器在 triggers 列表中的下标）、name、
         icon_path（相对副本目录）、ending_text、replay_path、achieved_at。
         """
         if self.is_replay:
@@ -36,7 +37,7 @@ class DungeonPersistence:
             return
         now_str = datetime.datetime.now().isoformat()
         record = {
-            "dungeon_id": self.dungeon_id or "",
+            "scenario_id": self.scenario_id or "",
             "trigger_index": idx,
             "name": getattr(self, "_ending_name", "") or "",
             "icon_path": self.ending_icon_path,
@@ -55,7 +56,7 @@ class DungeonPersistence:
         char = self.character
         if char is None:
             return  # 探索模式但未加载角色，不写入
-        if any(ex.get("dungeon_id") == record["dungeon_id"]
+        if any(scenario_id_of(ex) == record["scenario_id"]
                and ex.get("trigger_index") == idx
                for ex in (char.achieved_endings or [])):
             return  # 同一结局只记录首次达成
@@ -145,9 +146,16 @@ class DungeonPersistence:
         print(f"[Ending] 结局增量已结算：介入度{intr_d:+.2f}，破坏性{dest_d:+.2f}，"
               f"伤亡{cas_d:+.2f}，行动点数返还{refund:+d}")
 
-    def _build_dungeon_report_text(self) -> str:
+    def _build_scenario_report_text(self, incomplete: bool = False,
+                                   reason: str = "") -> str:
         lines = [f"{self.name}    副本报告"]
         lines.append("═" * (12 + max(0, len(str(self.name)) * 2)))
+        if incomplete:
+            # 未触发结局就退出：报告仍然落盘，但明确标注本局未走完
+            detail = f"（{reason}）" if reason else ""
+            lines.append("")
+            lines.append(f"【未完成】本次副本未触发结局即结束{detail}。")
+            lines.append("以下为退出时已生成的内容；结局结算与结局索引均未发生。")
         lines.append("")
         lines.append(f"介入度：{self.dungeon_state.intrusion:.2f}")
         lines.append(f"破坏性：{self.dungeon_state.destruction:.2f}")
@@ -194,47 +202,72 @@ class DungeonPersistence:
         char.step_destruction = getattr(self.dungeon_state, "step_destruction", None)
         return char
 
-    def _write_replay_file(self, char) -> str:
+    def _write_replay_file(self, char, incomplete: bool = False) -> str:
+        """写入角色档案目录下的回放；``incomplete`` 时文件名带「未完成」标记。"""
         replay_dir = os.path.join(data_dir(), "archives", char.giantess_id, "回放")
         os.makedirs(replay_dir, exist_ok=True)
         timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-        filename = f"{char.name}_回放_{timestamp}.replay.json"
+        marker = "_未完成" if incomplete else ""
+        filename = f"{char.name}_回放_{timestamp}{marker}.replay.json"
         path = os.path.join(replay_dir, filename)
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(list(self.replay_data), f, ensure_ascii=False, indent=2)
+            # 原子写：半截回放文件不会被读到（后缀仍为 .replay.json，回放加载照旧）
+            write_json_atomic(path, list(self.replay_data), backup=False)
         except Exception as e:
             print(f"[Replay] 回放保存失败: {e}")
             return ""
         return path
 
-    def _write_report_file(self, char) -> str:
+    def _write_report_file(self, char, incomplete: bool = False,
+                           reason: str = "") -> str:
+        """写入角色档案目录下的报告；``incomplete`` 时标注本局未走完。"""
         report_dir = os.path.join(data_dir(), "archives", char.giantess_id, "报告")
         os.makedirs(report_dir, exist_ok=True)
         timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-        filename = f"{char.name}_副本报告_{timestamp}.txt"
+        marker = "_未完成" if incomplete else ""
+        filename = f"{char.name}_副本报告_{timestamp}{marker}.txt"
         path = os.path.join(report_dir, filename)
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(self._build_dungeon_report_text())
+            write_text_atomic(
+                path, self._build_scenario_report_text(incomplete=incomplete, reason=reason),
+                backup=False)
         except Exception as e:
             print(f"[Replay] 报告保存失败: {e}")
             return ""
         return path
 
-    def _write_user_replay_file(self) -> str:
-        """挑战模式：把回放写入 data/user/replays，不创建/更新任何角色。"""
+    def _write_user_replay_file(self, incomplete: bool = False) -> str:
+        """挑战模式/无角色场景：把回放写入 data/user/replays，不创建/更新任何角色。"""
         replay_dir = os.path.join(data_dir(), "user", "replays")
         os.makedirs(replay_dir, exist_ok=True)
         timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-        dungeon_key = (self.dungeon_id or "副本").replace("/", "_").replace("\\", "_")
-        filename = f"{dungeon_key}_回放_{timestamp}.replay.json"
+        scenario_key = (self.scenario_id or "副本").replace("/", "_").replace("\\", "_")
+        marker = "_未完成" if incomplete else ""
+        filename = f"{scenario_key}_回放_{timestamp}{marker}.replay.json"
         path = os.path.join(replay_dir, filename)
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(list(self.replay_data), f, ensure_ascii=False, indent=2)
+            write_json_atomic(path, list(self.replay_data), backup=False)
         except Exception as e:
             print(f"[Replay] 用户回放保存失败: {e}")
+            return ""
+        return path
+
+    def _write_user_report_file(self, incomplete: bool = False,
+                                reason: str = "") -> str:
+        """挑战模式/无角色场景：报告写入 data/user/reports（与回放同层级）。"""
+        report_dir = os.path.join(data_dir(), "user", "reports")
+        os.makedirs(report_dir, exist_ok=True)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        scenario_key = (self.scenario_id or "副本").replace("/", "_").replace("\\", "_")
+        marker = "_未完成" if incomplete else ""
+        filename = f"{scenario_key}_副本报告_{timestamp}{marker}.txt"
+        path = os.path.join(report_dir, filename)
+        try:
+            write_text_atomic(
+                path, self._build_scenario_report_text(incomplete=incomplete, reason=reason),
+                backup=False)
+        except Exception as e:
+            print(f"[Replay] 用户报告保存失败: {e}")
             return ""
         return path
 
@@ -276,16 +309,96 @@ class DungeonPersistence:
                 "保存成功",
                 f"副本回放与报告已保存。\n回放：{replay_path}\n报告：{report_path}")
 
+    # ------------------ 统一收尾 ------------------
+    def _finalize(self, completed: bool, reason: str = ""):
+        """副本收尾的单一入口：正常结局、用户中断、生成异常三条路径共用。
+
+        ``completed=True``（走到结局）：结算结局增量 → 记录重要结局索引 →
+        按设置自动保存回放（与改动前的 `_generate_ending` 收尾等价）。
+
+        ``completed=False``（未触发结局就结束）：**不**结算结局增量、**不**写
+        ``data/user/endings.json``、**不**记挑战达成——没真正走完的一局不能算达成；
+        但已经生成的内容照旧落盘（回放 + 报告，文件名带「未完成」标记），
+        避免整局丢失。
+        """
+        if getattr(self, "_finalized", False):
+            return
+        self._finalized = True
+        self._ending_generating = False
+        if completed:
+            self.dungeon_ended = True
+            # 最后结算一次增量并写入角色
+            self._apply_ending_effects()
+            # 记录本次达成的重要结局索引（探索模式写角色档案，挑战模式写 data/user）
+            self._record_ending_achievement()
+            # 自动保存回放开关
+            if self._auto_replay_enabled():
+                self._save_replay_record(auto=True)
+            return
+
+        detail = reason or "未触发结局"
+        errors = list(getattr(self, "_session_errors", None) or [])
+        if errors:
+            detail += f"；会话中出现 {len(errors)} 次生成异常（最近：{errors[-1]}）"
+        if not self.replay_data and not self.story_history:
+            ui.common.dialogs.showinfo("副本退出", "本次副本还没有生成任何内容，未保存。")
+            return
+        replay_path, report_path = self._save_incomplete_record(detail)
+        if replay_path:
+            ui.common.dialogs.showinfo(
+                "副本未完成",
+                f"未触发结局就退出，已把生成的内容保存为「未完成」回放：\n{replay_path}\n"
+                f"报告：{report_path}")
+        else:
+            ui.common.dialogs.showwarning(
+                "副本退出", "未触发结局就退出，且未完成回放保存失败，本次数据未保存。")
+
+    def _save_incomplete_record(self, reason: str):
+        """未完成退出：把已生成的内容落盘（不创建角色、不做任何结算）。
+
+        有角色（探索模式）写角色档案目录；无角色或挑战模式写 ``data/user``。
+        返回 ``(回放路径, 报告路径)``，写入失败为空串。
+        """
+        char = self.character
+        if char is not None and getattr(self, "mode", "explore") != "challenge":
+            replay_path = self._write_replay_file(char, incomplete=True)
+            report_path = self._write_report_file(char, incomplete=True, reason=reason)
+        else:
+            replay_path = self._write_user_replay_file(incomplete=True)
+            report_path = self._write_user_report_file(incomplete=True, reason=reason)
+        print(f"[Dungeon] 未完成收尾落盘：回放={replay_path or '失败'}，"
+              f"报告={report_path or '失败'}（{reason}）")
+        if replay_path:
+            self._replay_saved = True
+        return replay_path, report_path
+
     def _handle_exit(self):
-        """用户关闭副本窗口后的退出处理（在主线程、DPG 停止后调用）。"""
+        """用户关闭副本窗口后的退出处理（在主线程、DPG 停止后调用）。
+
+        未触发结局：走 ``_finalize(completed=False)``——不结算、不记结局索引，
+        但把已生成的内容保存为「未完成」回放与报告（此前直接丢弃）；
+        结局已触发（含文本仍在生成、join 超时）：按「走到结局」收尾，避免
+        结算与结局索引被误判为未完成而丢失；
+        已触发结局且收尾完毕：``_finalize(completed=True)`` 已在结局生成结束时
+        执行，这里只询问是否保存正式回放。
+        """
         if self.is_replay:
             return
         thread = getattr(self, "_ending_thread", None)
         if thread is not None and thread.is_alive():
             thread.join(timeout=15)
         if not self.dungeon_ended:
-            ui.common.dialogs.showwarning(
-                "副本退出", "副本进程数据将丢失。\n未触发结局就退出，本次副本数据不会保存。")
+            if self.pending_ending is not None:
+                # 结局已触发、文本生成未结束（线程仍在跑）：结局文本兜底为结局名，
+                # 让落盘的回放/报告与后续线程 finally 的写法一致
+                name = (self.pending_ending or {}).get("name", "")
+                if not self.ending_text:
+                    self.ending_text = f"结局：{name}"
+                    if self._last_ending_record is not None:
+                        self._last_ending_record["ending_text"] = self.ending_text
+                self._finalize(completed=True, reason="结局已触发，生成未结束")
+            else:
+                self._finalize(completed=False, reason="未触发结局就退出")
             return
         if self._replay_saved:
             return
@@ -310,30 +423,23 @@ def _user_endings_path() -> str:
 
 
 def _load_user_endings() -> list:
-    path = _user_endings_path()
-    if not os.path.exists(path):
+    data = load_json_with_backup(_user_endings_path())
+    if not isinstance(data, dict):
         return []
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        records = data.get("records", [])
-        return records if isinstance(records, list) else []
-    except Exception:
-        return []
+    records = data.get("records", [])
+    return records if isinstance(records, list) else []
 
 
 def _save_user_endings(records: list):
-    path = _user_endings_path()
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump({"version": 1, "records": records}, f, ensure_ascii=False, indent=2)
+    # 原子写 + .bak：结局索引是玩家的长期收集成果，不能因一次崩溃写坏
+    write_json_atomic(_user_endings_path(), {"version": 1, "records": records})
 
 
 def append_user_ending_record(record: dict) -> dict:
     """把挑战模式达成的重要结局索引追加到 data/user/endings.json（去重）。"""
     records = _load_user_endings()
     for existing in records:
-        if (existing.get("dungeon_id") == record.get("dungeon_id")
+        if (scenario_id_of(existing) == scenario_id_of(record)
                 and existing.get("trigger_index") == record.get("trigger_index")):
             return existing
     records.append(record)
@@ -349,7 +455,7 @@ def update_user_ending_record(updated: dict):
     """保存回放后回填其 replay_path。"""
     records = _load_user_endings()
     for existing in records:
-        if (existing.get("dungeon_id") == updated.get("dungeon_id")
+        if (scenario_id_of(existing) == scenario_id_of(updated)
                 and existing.get("trigger_index") == updated.get("trigger_index")):
             existing["replay_path"] = updated.get("replay_path", "")
             existing["ending_text"] = updated.get("ending_text", existing.get("ending_text", ""))

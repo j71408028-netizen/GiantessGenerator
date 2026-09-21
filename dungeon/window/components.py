@@ -25,7 +25,7 @@ class ComponentHandler:
 
     def _configured_component_ids(self):
         """读取副本配置里的组件 id 列表（默认空 → 由注册表回退到 text）。"""
-        config = getattr(self, "dungeon_config", None) or {}
+        config = getattr(self, "scenario_config", None) or {}
         ids = config.get("components")
         if not isinstance(ids, (list, tuple)):
             return []
@@ -38,7 +38,7 @@ class ComponentHandler:
             return
         try:
             self._components = _components_module.build_components(
-                self, self._configured_component_ids(), self.dungeon_config)
+                self, self._configured_component_ids(), self.scenario_config)
         except Exception as exc:
             print(f"[Components] 构建组件失败: {exc}")
             import traceback

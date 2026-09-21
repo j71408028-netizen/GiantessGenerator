@@ -182,8 +182,8 @@ class DungeonBackground:
         candidates = []
         if os.path.isabs(image_path):
             candidates.append(os.path.normpath(image_path))
-        if owner.dungeon_id and owner.dungeon_repo:
-            candidates.append(os.path.normpath(os.path.join(owner.dungeon_repo.root, owner.dungeon_id, processed)))
+        if owner.scenario_id and owner.scenario_repo:
+            candidates.append(os.path.normpath(os.path.join(owner.scenario_repo.root, owner.scenario_id, processed)))
         candidates.extend([
             os.path.normpath(processed),
             os.path.normpath(os.path.join(os.path.abspath(os.path.dirname(__file__)), "..", processed)),

@@ -20,6 +20,7 @@ import dearpygui.dearpygui as dpg
 from PIL import Image
 
 from dungeon.dispatcher import _dispatch
+from dungeon.terms import scenario_id_of
 _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
 
 # 结局记录里约定：icon_path 为空/缺失 = 该结局不重要，不展示
@@ -38,7 +39,7 @@ _BG_CYCLE_INTERVAL = (6.0, 10.0)
 
 def _free_dungeons_root() -> str:
     from paths import data_dir
-    return os.path.join(data_dir(), "packs", "dungeons")
+    return os.path.join(data_dir(), "packs", "scenarios")
 
 
 def _split_rel(icon_path: str) -> list:
@@ -51,10 +52,10 @@ def _split_rel(icon_path: str) -> list:
     return parts
 
 
-def resolve_ending_icon(dungeon_repo, dungeon_id: str, icon_path: str):
+def resolve_ending_icon(scenario_repo, scenario_id: str, icon_path: str):
     """解析结局图标实际文件路径。
 
-    优先级：绝对路径 → 当前副本根目录 → 自由副本根目录（data/packs/dungeons）。
+    优先级：绝对路径 → 当前副本根目录 → 自由副本根目录（data/packs/scenarios）。
     返回 None 表示找不到文件。
     """
     icon_path = str(icon_path or "").strip()
@@ -64,24 +65,24 @@ def resolve_ending_icon(dungeon_repo, dungeon_id: str, icon_path: str):
     if os.path.isabs(icon_path):
         candidates.append(os.path.normpath(icon_path))
     rel_parts = _split_rel(icon_path)
-    dungeon_id = (dungeon_id or "").strip("/\\")
-    for base in (dungeon_repo.root if dungeon_repo is not None else None,
+    scenario_id = (scenario_id or "").strip("/\\")
+    for base in (scenario_repo.root if scenario_repo is not None else None,
                  _free_dungeons_root()):
-        if not base or not dungeon_id:
+        if not base or not scenario_id:
             continue
-        candidates.append(os.path.normpath(os.path.join(base, dungeon_id, *rel_parts)))
+        candidates.append(os.path.normpath(os.path.join(base, scenario_id, *rel_parts)))
     for path in dict.fromkeys(candidates):
         if os.path.isfile(path):
             return path
     return None
 
 
-def collect_dungeon_images(dungeon_repo) -> list:
+def collect_dungeon_images(scenario_repo) -> list:
     """递归收集各副本目录下的图片文件（含 images 子目录与触发器引用图）。"""
     found = []
     roots = []
-    if dungeon_repo is not None:
-        roots.append(dungeon_repo.root)
+    if scenario_repo is not None:
+        roots.append(scenario_repo.root)
     free_root = _free_dungeons_root()
     if free_root not in roots:
         roots.append(free_root)
@@ -142,7 +143,7 @@ class DungeonLaunchStages:
         self._start_kb_motion()
 
     def _collect_bg_images(self):
-        self._bg_images = collect_dungeon_images(self.dungeon_repo)
+        self._bg_images = collect_dungeon_images(self.scenario_repo)
         random.shuffle(self._bg_images)
         self._bg_index = -1
 
@@ -158,7 +159,7 @@ class DungeonLaunchStages:
             icon_rel = rec.get("icon_path") or ""
             if not icon_rel:
                 continue
-            full = resolve_ending_icon(self.dungeon_repo, rec.get("dungeon_id", ""), icon_rel)
+            full = resolve_ending_icon(self.scenario_repo, scenario_id_of(rec), icon_rel)
             if not full:
                 continue
             try:
@@ -170,7 +171,7 @@ class DungeonLaunchStages:
                 "name": rec.get("name", "未命名结局"),
                 "achieved_at": str(rec.get("achieved_at", ""))[:16].replace("T", " "),
                 "ending_text": rec.get("ending_text", ""),
-                "dungeon_id": rec.get("dungeon_id", ""),
+                "scenario_id": scenario_id_of(rec),
             })
 
     # ------------------ 入口阶段 UI（挂载在同一 viewport） ------------------
@@ -194,12 +195,12 @@ class DungeonLaunchStages:
         dpg.add_text("选择副本方案", tag="ctl_hint", parent="panel_controls",
                      color=(255, 220, 180, 255))
         dpg.add_combo(
-            items=self.dungeon_ids,
-            default_value=self.dungeon_ids[0] if self.dungeon_ids else "",
+            items=self.scenario_ids,
+            default_value=self.scenario_ids[0] if self.scenario_ids else "",
             width=cw - 24, tag="ctl_dungeon", parent="panel_controls",
             callback=self._on_dungeon_changed)
         info_text = "行动点消耗 0 AP"
-        if self.dungeon_ids and self.character is not None:
+        if self.scenario_ids and self.character is not None:
             info_text = (f"行动点消耗 0 AP　|　剩余 "
                          f"{getattr(self.character, 'action_points', 0)} AP")
         dpg.add_text(info_text, tag="ctl_info", parent="panel_controls",
@@ -227,10 +228,10 @@ class DungeonLaunchStages:
 
         self._apply_panel_themes()
 
-        if not self.dungeon_ids:
-            dpg.configure_item("ctl_dungeon", items=["（无可用副本）"])
+        if not self.scenario_ids:
+            dpg.configure_item("ctl_dungeon", items=["（无可用副本方案）"])
             dpg.configure_item("ctl_info", default_value="请先到“副本编辑”创建副本方案")
-            dpg.configure_item("btn_start", label="无可用副本", enabled=False)
+            dpg.configure_item("btn_start", label="无可用副本方案", enabled=False)
 
         # 面板构造完成后统一置为可见
         dpg.show_item("panel_controls")
@@ -377,7 +378,7 @@ class DungeonLaunchStages:
             if dpg.does_item_exist("end_name"):
                 dpg.configure_item("end_name", default_value=item["name"])
             if dpg.does_item_exist("end_time"):
-                dungeon = item.get("dungeon_id") or ""
+                dungeon = item.get("scenario_id") or ""
                 dpg.configure_item(
                     "end_time",
                     default_value=(f"{item['achieved_at']}　{dungeon}"
@@ -538,17 +539,17 @@ class DungeonLaunchStages:
     # ------------------ 入口交互回调 ------------------
     def _on_dungeon_changed(self, sender=None, app_data=None):
         try:
-            if not self.dungeon_ids:
+            if not self.scenario_ids:
                 return
             if not dpg.does_item_exist("ctl_dungeon"):
                 return
             sel = dpg.get_value("ctl_dungeon")
-            if not sel or sel == "（无可用副本）":
+            if not sel or sel == "（无可用副本方案）":
                 return
             config = None
-            if self.dungeon_repo is not None:
+            if self.scenario_repo is not None:
                 try:
-                    config = self.dungeon_repo.load_config(sel)
+                    config = self.scenario_repo.load_config(sel)
                 except Exception:
                     config = None
             cost = 0
@@ -565,10 +566,10 @@ class DungeonLaunchStages:
             print(f"副本信息刷新失败: {e}")
 
     def _on_entry_start(self, sender=None, app_data=None, user_data=None):
-        if not self.dungeon_ids:
+        if not self.scenario_ids:
             return
         sel = dpg.get_value("ctl_dungeon")
-        if not sel or sel == "（无可用副本）":
+        if not sel or sel == "（无可用副本方案）":
             # 无可用副本时“开始副本”按钮已禁用，此分支仅作保险
             return
         self._launch_choice = sel

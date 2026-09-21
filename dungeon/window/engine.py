@@ -150,6 +150,9 @@ class DungeonStoryEngine:
 
             except Exception as e:
                 print(f"流式任务执行异常: {e}")
+                # 异常不再静默：写入会话错误清单（收尾时进「未完成」报告）
+                # 并在故事区提示一行，玩家可再次点击推进重试
+                self._note_session_error(e)
             finally:
                 self._generating = False
                 # 延迟插入：本段为其衔接段，生成成功后插入段晋升为下一段
@@ -388,13 +391,28 @@ class DungeonStoryEngine:
         self._record_story_summary(text_type, text)
         self.current_replay_index += 1
 
-    def _show_ai_error(self):
-        """AI 客户端未配置时在故事区提示错误。"""
+    # ---------- 生成错误 ----------
+    def _note_session_error(self, error) -> None:
+        """记录一次生成异常：会话仍可重试，但异常必须可见。
+
+        此前这里只有一行 ``print``，玩家看到的是"点了没反应"。现在异常写入
+        ``_session_errors``（副本收尾时汇总进「未完成」回放与报告），并在故事区
+        插一行提示；副本不因此自动结束，玩家可再次点击推进重试。
+        """
+        message = f"{type(error).__name__}: {error}"
+        errors = getattr(self, "_session_errors", None)
+        if errors is None:
+            self._session_errors = errors = []
+        errors.append(message)
+        _dispatch.enqueue(lambda: self._show_ai_error(f"生成失败：{message}"))
+
+    def _show_ai_error(self, message: str = ""):
+        """在故事区提示 AI 错误（未配置客户端 / 生成失败）。"""
         if self._closing:
             return
         self.story_history.append({
             "type_str": "【错误】",
-            "text": "未配置 AI 客户端，请到“设置 → 副本AI设置”中完成配置后重试。",
+            "text": message or "未配置 AI 客户端，请到“设置 → 副本AI设置”中完成配置后重试。",
         })
         self._update_text_display()
 

@@ -21,10 +21,10 @@ class TextComponent(DungeonComponent):
     """文本栏组件：管理 text_container 子窗口与动态文本项。
 
     布局样式由 ctx.layout_style 决定：
-      - "story"：文本区占据视口中部（沿用原 story 模式几何）
-      - "game" / "bottom"：文本区为视口底部矮栏（沿用原 game 模式几何）
-    view_mode 的“对话格式”（保留全历史 vs 只留当前段）由数据层控制，
-    不再决定容器几何。
+      - "story"：文本区占据视口中部
+      - "game" / "bottom"：文本区为视口底部矮栏
+    旧的「副本窗口视图」设置已移除，layout_style 恒为 "story"；文本一律保留
+    全历史，不再区分只显示当前段。
     """
 
     id = "text"

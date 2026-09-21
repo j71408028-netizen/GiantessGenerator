@@ -6,6 +6,7 @@ import ui.common.dialogs
 import customtkinter as ctk
 
 from ai import resolve_ai_config
+from dungeon.terms import scenario_config_of, scenario_id_of
 from services.challenge_service import ChallengeService
 from models import Personality, BodyPreset
 from address_model import world_of
@@ -25,7 +26,7 @@ class ChallengeModePanel(ctk.CTkFrame):
         self.gui = gui_ref
         self.challenge_mgr = ChallengeService(
             gui_ref._settings_repo, gui_ref._character_repo,
-            gui_ref._landmark_repo, gui_ref._quip_repo, gui_ref._dungeon_repo,
+            gui_ref._landmark_repo, gui_ref._quip_repo, gui_ref._scenario_repo,
             world_state=getattr(gui_ref, "world_state", None)
         )
 
@@ -100,7 +101,7 @@ class ChallengeModePanel(ctk.CTkFrame):
 
         ctk.CTkLabel(left_col, text="副本方案", font=ui_fonts.ui_font(11, "bold"),
                      text_color=CHAL_TEXT_SOFT).pack(anchor='w', pady=2)
-        dungeons = self.gui._dungeon_repo.list_all()
+        dungeons = self.gui._scenario_repo.list_all()
         self.dungeon_combo = ctk.CTkComboBox(left_col, values=dungeons, state="readonly",
                                              border_width=1, border_color=CHAL_BORDER_STRONG,
                                              fg_color=CHAL_PANEL_BG,
@@ -334,7 +335,7 @@ class ChallengeModePanel(ctk.CTkFrame):
         """世界包状态变化后，刷新地标/描述风格组、副本方案下拉框与挑战包列表。"""
         self._sync_landmark_styles()
         self._sync_quip_styles()
-        dungeons = self.gui._dungeon_repo.list_all()
+        dungeons = self.gui._scenario_repo.list_all()
         self.dungeon_combo.configure(values=dungeons)
         if hasattr(self, '_dungeon_dropdown'):
             self._dungeon_dropdown.configure(values=dungeons)
@@ -552,8 +553,8 @@ class ChallengeModePanel(ctk.CTkFrame):
             finger_gap_ratio=0.02, stride_ratio=0.8
         )
 
-        dungeon_config = data.get("dungeon_config", {})
-        dungeon_id = data.get("dungeon_id", "")
+        scenario_config = scenario_config_of(data)
+        scenario_id = scenario_id_of(data)
 
         gui_settings = self.gui._settings_repo.load()
         ai_config = resolve_ai_config(gui_settings)
@@ -579,13 +580,13 @@ class ChallengeModePanel(ctk.CTkFrame):
             personality=personality, preset=preset,
             original_height=original_height, intro_hidden=intro_hidden,
             intro_visible=intro_visible, tags=tags, uploaded_image=None,
-            dungeon_config=dungeon_config, dungeon_repo=self.gui._dungeon_repo,
+            scenario_config=scenario_config, scenario_repo=self.gui._scenario_repo,
             merged_landmarks=self.gui.context.merged_landmarks, merged_quips=self.gui.context.quips,
             selected_styles=landmark_styles, selected_quip_styles=quip_styles_data,
             detail_pools=self.gui.context.detail_pools, height=height,
             ai_config=ai_config,
             greed=greed, is_replay=False, replay_data=None,
-            dungeon_id=dungeon_id, dungeon_font=dungeon_font, body_parts=body_parts,
+            scenario_id=scenario_id, dungeon_font=dungeon_font, body_parts=body_parts,
             character=None, character_repo=self.gui._character_repo, gui=self.gui,
             mode="challenge"
         )

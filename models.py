@@ -196,7 +196,7 @@ class CharacterSnapshot:
     birthday: str = ""
     size_unlocks: Dict[str, str] = field(default_factory=dict)  # 部位 -> 解锁描述；"MEASURED" 表示已测量无描述；"" 表示未解锁
     # 达成的重要结局索引（仅记录配置了图标的结局）：
-    # 每条含 dungeon_id、trigger_index（结局触发器在副本 triggers 列表中的下标）、
+    # 每条含 scenario_id、trigger_index（结局触发器在副本 triggers 列表中的下标）、
     # name、icon_path（相对副本目录）、ending_text、replay_path、achieved_at。
     # icon_path 为空表示该结局不重要，不会出现在本列表中。
     achieved_endings: List[Dict] = field(default_factory=list)

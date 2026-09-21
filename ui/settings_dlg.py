@@ -207,7 +207,7 @@ class WorldPackCreateDialog(BaseDialog):
         ("quips", "描述风格"),
         ("presets", "身材表"),
         ("personalities", "性格表"),
-        ("dungeons", "副本方案"),
+        ("scenarios", "副本方案"),
         ("challenges", "挑战包"),
         ("names", "姓名表"),
         ("news", "新闻表"),
@@ -215,7 +215,7 @@ class WorldPackCreateDialog(BaseDialog):
     ]
 
     # 风格/副本/挑战包：StyleListBox 多选；静态表：下拉单选（第一项为空）
-    _MULTI_TYPES = ("landmarks", "quips", "dungeons", "challenges")
+    _MULTI_TYPES = ("landmarks", "quips", "scenarios", "challenges")
     _SINGLE_TYPES = ("presets", "personalities", "names", "news", "behaviors")
 
     def __init__(self, parent, available_resources=None):
@@ -239,7 +239,7 @@ class WorldPackCreateDialog(BaseDialog):
         self._description_text = ""
         self._resource_selection = None
 
-        self._multi_types = ["landmarks", "quips", "dungeons", "challenges"]  # 多选类型顺序
+        self._multi_types = ["landmarks", "quips", "scenarios", "challenges"]  # 多选类型顺序
         self._multi_index = 0  # 当前显示的类型索引
         self._multi_selections = {}  # 记录每个多选类型的已选项列表
         self._single_vars = {}  # 静态表下拉框的 StringVar 字典

@@ -9,7 +9,7 @@
     quips/<style>.addr.json     # （可选）描述风格注册地址
     presets/<table>.csv         # 身材表
     personalities/<table>.csv   # 性格表
-    dungeons/<id>/config.json   # 副本方案
+    scenarios/<id>/config.json   # 副本方案
     challenges/<name>.chal      # 附带挑战包（keys.json 记录附带包秘钥）
     names/<table>.csv           # 姓名表
     news/<table>.csv            # 新闻表
@@ -25,6 +25,8 @@ import re
 import zipfile
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
+
+from dungeon.terms import LEGACY_SCENARIO_RESOURCE_KEY, SCENARIO_RESOURCE_KEY
 
 WORLD_PACK_EXT = ".world.zip"
 WORLD_MANIFEST_NAME = "world.json"
@@ -45,14 +47,14 @@ PACK_RESOURCE_PATHS = {
     "quips": "quips",
     "presets": "presets",
     "personalities": "personalities",
-    "dungeons": "dungeons",
+    "scenarios": "scenarios",
     "challenges": "challenges",
     "names": "names",
     "news": "news",
     "behaviors": "behaviors",
 }
 
-LIST_RESOURCE_TYPES = ("landmarks", "quips", "dungeons", "challenges",
+LIST_RESOURCE_TYPES = ("landmarks", "quips", "scenarios", "challenges",
                        "names", "news", "presets", "personalities",
                        "behaviors")
 BOOL_RESOURCE_TYPES = ()
@@ -150,6 +152,11 @@ class WorldPackManifest:
     def from_dict(cls, data: dict) -> "WorldPackManifest":
         if not isinstance(data, dict):
             raise ValueError("world.json 根节点必须是对象")
+        resources = dict(data.get("resources") or {})
+        # 兼容改名前的世界包：resources["dungeons"] 归一化为 "scenarios"
+        legacy = resources.pop(LEGACY_SCENARIO_RESOURCE_KEY, None)
+        if legacy is not None and not resources.get(SCENARIO_RESOURCE_KEY):
+            resources[SCENARIO_RESOURCE_KEY] = legacy
         return cls(
             format_version=data.get("format_version", WORLD_FORMAT_VERSION),
             world_id=data.get("world_id", ""),
@@ -160,7 +167,7 @@ class WorldPackManifest:
             app_min_version=data.get("app_min_version", ""),
             created_at=data.get("created_at", ""),
             settings=dict(data.get("settings") or {}),
-            resources=dict(data.get("resources") or {}),
+            resources=resources,
         )
 
     # ---------- 校验 ----------
@@ -280,7 +287,7 @@ def _missing_members(manifest: WorldPackManifest, members: Set[str]) -> List[str
                 missing.append(rel)
             continue
         for item in manifest.resources.get(rtype, []):
-            if rtype == "dungeons":
+            if rtype == "scenarios":
                 member = f"{rel}/{item}/config.json"
             elif rtype == "challenges":
                 member = f"{rel}/{item}"
@@ -297,6 +304,11 @@ def _missing_members(manifest: WorldPackManifest, members: Set[str]) -> List[str
             else:
                 member = f"{rel}/{item}.csv"
             if member not in members:
+                # 兼容改名前的世界包：方案成员可能仍在 dungeons/ 目录下
+                if rtype == SCENARIO_RESOURCE_KEY:
+                    legacy_member = f"{LEGACY_SCENARIO_RESOURCE_KEY}/{item}/config.json"
+                    if legacy_member in members:
+                        continue
                 missing.append(member)
     return missing
 

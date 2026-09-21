@@ -1,7 +1,7 @@
 """副本显示组件注册表与默认组件包加载。
 
 副本会话窗口的显示组件（文本栏、属性条、伤亡记录等）由组件包提供：
-- 官方组件包位于数据根目录 ``packs/dungeons/_default/components/``（随副本/世界包分发）；
+- 官方组件包位于数据根目录 ``packs/scenarios/_default/components/``（随副本/世界包分发）；
 - 副本在其 ``config.json`` 的 ``components`` 字段中按 id 声明要使用的组件，
   未声明时回退到内置默认 ``["text"]``；
 - 组件类通过约定的 ``build/layout/refresh/destroy`` 生命周期钩子与窗口交互，
@@ -10,6 +10,8 @@
 
 import os
 import traceback
+
+from dungeon.terms import DEFAULT_SCENARIO_ID, SCENARIO_RESOURCE_KEY
 
 DEFAULT_COMPONENT_IDS = ["text"]
 _FALLBACK_IDS = ["text"]
@@ -28,7 +30,8 @@ def _data_roots():
 def find_component_pack_dir():
     """定位默认组件包目录（不存在时返回 None）。"""
     for base in _data_roots():
-        candidate = os.path.join(base, "packs", "dungeons", "_default", "components")
+        candidate = os.path.join(base, "packs", SCENARIO_RESOURCE_KEY,
+                                 DEFAULT_SCENARIO_ID, "components")
         if os.path.isdir(candidate):
             return candidate
     return None

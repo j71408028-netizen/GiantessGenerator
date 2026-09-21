@@ -7,7 +7,7 @@ import tempfile
 from dataclasses import asdict
 from typing import List, Dict, Any, Optional, Union
 
-from persistence import DungeonRepo
+from persistence import ScenarioRepo
 from persistence.name_repo import NameRepo, DEFAULT_NAME_TABLE
 from persistence.landmark_repo import LandmarkRepo, DEFAULT_LANDMARK_STYLE
 from persistence.quip_repo import QuipRepo, DEFAULT_QUIP_STYLE
@@ -40,7 +40,7 @@ class ExplorationContext:
             personality_repo: PersonalityRepo,
             character_repo: CharacterRepo,
             settings_repo: SettingsRepo,
-            dungeon_repo: Optional[DungeonRepo] = None,
+            scenario_repo: Optional[ScenarioRepo] = None,
             world_state=None
     ):
         self.settings = settings
@@ -50,7 +50,7 @@ class ExplorationContext:
         self.personality_repo = personality_repo
         self.character_repo = character_repo
         self.settings_repo = settings_repo
-        self.dungeon_repo = dungeon_repo
+        self.scenario_repo = scenario_repo
         self.world_state = world_state
 
         # ---------- 1. 风格选择（合并来源） ----------

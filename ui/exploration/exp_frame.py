@@ -475,7 +475,7 @@ class ExplorationPanel(ctk.CTkFrame):
         from ui.common.fonts import dungeon_font_default
         dungeon_font = self.app.settings.get("dungeon_font", dungeon_font_default())
 
-        dungeons = self.app._dungeon_repo.list_all()
+        dungeons = self.app._scenario_repo.list_all()
         if not dungeons:
             ui.common.dialogs.showerror("错误", "请先到“副本编辑”创建副本方案")
             return
@@ -491,7 +491,7 @@ class ExplorationPanel(ctk.CTkFrame):
             intro_visible=data.get("intro_visible", ""),
             tags=data.get("selected_tags", []),
             uploaded_image=data.get("uploaded_image"),
-            dungeon_config=None, dungeon_repo=self.app._dungeon_repo,
+            scenario_config=None, scenario_repo=self.app._scenario_repo,
             merged_landmarks=self.context.merged_landmarks,
             merged_quips=self.context.quips,
             selected_styles=self.context.selected_styles,
@@ -504,7 +504,7 @@ class ExplorationPanel(ctk.CTkFrame):
             character=self.current_state,
             character_repo=self.app._character_repo,
             gui=self.app,
-            dungeon_ids=self.app._dungeon_repo.list_all(),
+            scenario_ids=self.app._scenario_repo.list_all(),
         )
 
         # 入口阶段选择失败（配置缺失/行动点数不足）：窗口已关闭，在主线程提示
@@ -529,7 +529,7 @@ class ExplorationPanel(ctk.CTkFrame):
                 intro_visible=data.get("intro_visible", ""),
                 tags=data.get("selected_tags", []),
                 uploaded_image=data.get("uploaded_image"),
-                dungeon_config=None, dungeon_repo=self.app._dungeon_repo,
+                scenario_config=None, scenario_repo=self.app._scenario_repo,
                 merged_landmarks=self.context.merged_landmarks,
                 merged_quips=self.context.quips,
                 selected_styles=self.context.selected_styles,

@@ -10,7 +10,7 @@ from ui.common import fonts as ui_fonts
 from context import ExplorationContext
 from main_window_manager import MainWindowManager
 from persistence import SettingsRepo, LandmarkRepo, PresetRepo, PersonalityRepo
-from persistence import QuipRepo, DungeonRepo, CharacterRepo
+from persistence import QuipRepo, ScenarioRepo, CharacterRepo
 from services.world_service import WorldManager
 from ui.common.loading import LoadingWindow
 from ui.common.splash import splash_process
@@ -23,7 +23,7 @@ def _load_repos(state):
     state["preset_repo"] = PresetRepo(world_state=world_state)
     state["personality_repo"] = PersonalityRepo(world_state=world_state)
     state["quip_repo"] = QuipRepo(world_state=world_state)
-    state["dungeon_repo"] = DungeonRepo(world_state=world_state)
+    state["scenario_repo"] = ScenarioRepo(world_state=world_state)
     state["character_repo"] = CharacterRepo()
 
 
@@ -36,7 +36,7 @@ def _build_context(state, settings, settings_repo):
         personality_repo=state["personality_repo"],
         character_repo=state["character_repo"],
         settings_repo=settings_repo,
-        dungeon_repo=state["dungeon_repo"],
+        scenario_repo=state["scenario_repo"],
         world_state=state.get("world_state")
     )
 

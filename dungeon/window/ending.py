@@ -125,10 +125,6 @@ class EndingHandler:
             if self._last_ending_record is not None:
                 self._last_ending_record["ending_text"] = self.ending_text
                 self._last_ending_record = None
-            # 最后结算一次增量并写入角色
-            self._apply_ending_effects()
-            # 记录本次达成的重要结局索引（探索模式写角色档案，挑战模式写 data/user）
-            self._record_ending_achievement()
-            # 自动保存回放开关
-            if self._auto_replay_enabled():
-                self._save_replay_record(auto=True)
+            # 统一收尾（见 window/persistence.py::_finalize）：
+            # 结算结局增量 → 记录重要结局索引 → 按设置自动保存回放
+            self._finalize(completed=True, reason="触发结局")

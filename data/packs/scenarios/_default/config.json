@@ -1,0 +1,165 @@
+{
+  "initial_prompt": "在故事的开始，她仍然是正常的体型，高考完在家里百无聊赖。她将在故事进行中的提示位置巨大化，成为给定的体型大小。",
+  "coupling_level": "velum",
+  "entry_action_cost": 0,
+  "section_prompts": {
+    "background": "",
+    "branch": "",
+    "dialog": "",
+    "interaction": "",
+    "action": ""
+  },
+  "section_steps": {
+    "background": 0.02,
+    "branch": 0.05,
+    "dialog": 0.1,
+    "interaction": 0.2,
+    "action": 0.3
+  },
+  "transition_matrix": {
+    "background": {
+      "background": 0.4,
+      "branch": 0.3,
+      "dialog": 0.2,
+      "interaction": 0.1,
+      "action": 0.0
+    },
+    "branch": {
+      "background": 0.2,
+      "branch": 0.3,
+      "dialog": 0.3,
+      "interaction": 0.2,
+      "action": 0.0
+    },
+    "dialog": {
+      "background": 0.1,
+      "branch": 0.2,
+      "dialog": 0.3,
+      "interaction": 0.3,
+      "action": 0.1
+    },
+    "interaction": {
+      "background": 0.1,
+      "branch": 0.1,
+      "dialog": 0.2,
+      "interaction": 0.4,
+      "action": 0.2
+    },
+    "action": {
+      "background": 0.2,
+      "branch": 0.1,
+      "dialog": 0.1,
+      "interaction": 0.2,
+      "action": 0.4
+    }
+  },
+  "triggers": [
+    {
+      "name": "新插入",
+      "condition": {
+        "operator": "and",
+        "rules": [
+          {
+            "key": "总计数",
+            "comparator": "==",
+            "value": 2
+          }
+        ]
+      },
+      "precondition_names": [],
+      "action_type": "insert",
+      "action_data": {
+        "type": "insert",
+        "text": "她好像有什么变化了。",
+        "text_type": "background",
+        "highlight": true,
+        "delayed": true
+      },
+      "repeatable": true,
+      "immutable": false,
+      "chapter": ""
+    },
+    {
+      "name": "新选项",
+      "condition": {
+        "operator": "and",
+        "rules": [
+          {
+            "key": "间隔计数",
+            "comparator": ">=",
+            "value": 2
+          },
+          {
+            "key": "总计数",
+            "comparator": "<",
+            "value": 6
+          }
+        ]
+      },
+      "precondition_names": [
+        "新插入"
+      ],
+      "action_type": "option",
+      "action_data": {
+        "type": "option",
+        "options": [
+          {
+            "id": 0,
+            "prompt": "愣在原地"
+          },
+          {
+            "id": 1,
+            "prompt": "展开破坏"
+          }
+        ]
+      },
+      "repeatable": true,
+      "immutable": false,
+      "chapter": ""
+    }
+  ],
+  "evolution_attrs": [
+    {
+      "type": "intrusion",
+      "name": "介入度",
+      "display_state": "show"
+    },
+    {
+      "type": "destruction",
+      "name": "破坏性",
+      "display_state": "show"
+    },
+    {
+      "type": "casualty",
+      "name": "总伤亡",
+      "display_state": "collapse"
+    }
+  ],
+  "components": [
+    "attr_bar",
+    "text"
+  ],
+  "components_params": {
+    "attr_bar": {
+      "title_text": "属性状态",
+      "title_color": [
+        255,
+        225,
+        150,
+        255
+      ],
+      "text_color": [
+        230,
+        235,
+        245,
+        255
+      ],
+      "panel_width": 300,
+      "show_title": true
+    },
+    "text": {
+      "show_overlay": true
+    }
+  },
+  "chapters": []
+}

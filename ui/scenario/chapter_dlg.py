@@ -27,7 +27,7 @@ class ChapterEditDialog(BaseDialog):
     这里只编辑“身处其中时的环境”——特定背景与持续敏感效果，外加编辑器配色。
     """
 
-    def __init__(self, parent, chapter: dict = None, dungeon_repo=None, dungeon_id=None,
+    def __init__(self, parent, chapter: dict = None, scenario_repo=None, scenario_id=None,
                  evolution_attrs=None, all_chapters=None):
         super().__init__(parent)
         self.title("编辑章节")
@@ -35,8 +35,8 @@ class ChapterEditDialog(BaseDialog):
         self.minsize(540, 500)
         self.resizable(True, True)
         self.chapter = chapter if chapter is not None else {}
-        self._dungeon_repo = dungeon_repo
-        self.dungeon_id = dungeon_id
+        self._scenario_repo = scenario_repo
+        self.scenario_id = scenario_id
         self.all_chapters = all_chapters or []
         self.result = None
         self.evolution_attrs = [a for a in (evolution_attrs or []) if isinstance(a, dict)]
@@ -223,7 +223,7 @@ class ChapterEditDialog(BaseDialog):
 
     # ---------- 背景 ----------
     def _import_background(self):
-        rel_path = import_background_image(self, self._dungeon_repo, self.dungeon_id)
+        rel_path = import_background_image(self, self._scenario_repo, self.scenario_id)
         if not rel_path:
             return
         self.background_path_var.set(rel_path)
@@ -317,7 +317,7 @@ class ChapterEditDialog(BaseDialog):
             self.overflow_combo.configure(state="readonly")
 
     def _import_ending_icon(self):
-        rel = import_ending_icon(self, self._dungeon_repo, self.dungeon_id)
+        rel = import_ending_icon(self, self._scenario_repo, self.scenario_id)
         if rel:
             self.ending_icon_var.set(rel)
 

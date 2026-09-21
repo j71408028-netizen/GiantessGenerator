@@ -30,13 +30,13 @@ LAYOUT_STYLE = "story"
 class DungeonWindowBase:
     def __init__(self, parent, name, nick, personality, preset, original_height,
                  intro_hidden, intro_visible, tags, uploaded_image,
-                 dungeon_config, dungeon_repo,
+                 scenario_config, scenario_repo,
                  merged_landmarks, merged_quips,
                  selected_styles, selected_quip_styles, detail_pools, height,
                  ai_config, greed: int,
-                 is_replay=False, replay_data=None, dungeon_id=None, dungeon_font=None,
+                 is_replay=False, replay_data=None, scenario_id=None, dungeon_font=None,
                  body_parts=None, character=None, character_repo=None, gui=None,
-                 mode="explore", dungeon_ids=None):
+                 mode="explore", scenario_ids=None):
         self.parent = parent
         self.name = name
         self.nick = nick
@@ -47,8 +47,8 @@ class DungeonWindowBase:
         self.intro_visible = intro_visible
         self.tags = tags
         self.uploaded_image = uploaded_image
-        self.dungeon_config = dungeon_config
-        self.dungeon_repo = dungeon_repo
+        self.scenario_config = scenario_config
+        self.scenario_repo = scenario_repo
         self.merged_landmarks = merged_landmarks
         self.merged_quips = merged_quips
         self.selected_styles = selected_styles
@@ -59,7 +59,7 @@ class DungeonWindowBase:
         self.greed = greed
         self.is_replay = is_replay
         self.loaded_replay = replay_data
-        self.dungeon_id = dungeon_id
+        self.scenario_id = scenario_id
         self.dungeon_font = dungeon_font or dungeon_font_default()
         self.body_parts = body_parts
         # 副本保存/回放相关
@@ -78,6 +78,10 @@ class DungeonWindowBase:
         self._ending_trigger_index = -1
         self._achievement_record = None
         self._replay_saved = False
+        # 统一收尾标记：_finalize() 只允许执行一次（正常结局/用户中断/生成异常共用）
+        self._finalized = False
+        # 会话内的生成异常（不再只 print：收尾时汇总进「未完成」报告）
+        self._session_errors = []
         self._ending_thread = None
         self._closing = False
         self._text_update_pending = False
@@ -89,13 +93,13 @@ class DungeonWindowBase:
         self._background = DungeonBackground(self)
 
         # 入口阶段（dungeon.launcher.DungeonLaunchStages）与会话阶段共用同一 DPG 生命周期
-        self.dungeon_ids = list(dungeon_ids) if dungeon_ids else []
+        self.scenario_ids = list(scenario_ids) if scenario_ids else []
         self._is_entry_phase = False
 
         # 回放模式相关
         self.current_replay_index = 0
-        self.triggers = (dungeon_config or {}).get("triggers", []) if not is_replay else []
-        self.chapters = normalize_chapters((dungeon_config or {}).get("chapters", []))
+        self.triggers = (scenario_config or {}).get("triggers", []) if not is_replay else []
+        self.chapters = normalize_chapters((scenario_config or {}).get("chapters", []))
         # 章节运行时状态：当前章节、章节持续敏感效果、短暂视效
         self.current_chapter = None
         self.chapter_sensitivity_effects = []
@@ -139,7 +143,7 @@ class DungeonWindowBase:
         # 耦合等级：决定副本执行时采用的硬编码 AI 提示词（见 dungeon/coupling.py）。
         # 必须在会话初始化之前就绪——_init_session 会立刻据此构建系统提示。
         self.coupling_level = normalize_coupling_level(
-            (dungeon_config or {}).get("coupling_level"))
+            (scenario_config or {}).get("coupling_level"))
         # 显示组件（官方组件库，见 dungeon/components.py）
         self._components = []
         self._components_built = False
@@ -148,10 +152,10 @@ class DungeonWindowBase:
         # 会话内容初始化分为“新开”（可能延迟到入口选择后）与“回放”两种
         if is_replay:
             self._init_replay(replay_data)
-        elif not dungeon_ids:
+        elif not scenario_ids:
             # 无入口阶段（挑战模式/直接指定配置）：立即初始化会话
-            self._init_session(dungeon_config)
-        # 有 dungeon_ids 的探索模式：入口阶段内由 _enter_dungeon_phase() 调用
+            self._init_session(scenario_config)
+        # 有 scenario_ids 的探索模式：入口阶段内由 _enter_dungeon_phase() 调用
         # _load_session_config() 延迟初始化会话，避免在用户选择副本方案前创建
         # AI 客户端/提示词
 
@@ -167,7 +171,7 @@ class DungeonWindowBase:
 
         # 入口阶段：与正式副本会话界面共享同一个 viewport，
         # 用户在入口页选择副本方案后由 _enter_dungeon_phase() 切换到会话阶段。
-        if self.dungeon_ids:
+        if self.scenario_ids:
             self._enter_entry_phase()
         else:
             # 无入口阶段（挑战模式/直接指定配置）：会话配置已在 __init__ 初始化，
@@ -204,7 +208,8 @@ class DungeonWindowBase:
                 except Exception:
                     pass
 
-        # 用户关闭副本窗口时进行退出处理（未触发结局则警告数据丢失，触发后询问是否保存回放）
+        # 用户关闭副本窗口时进行退出处理：未触发结局走 _finalize(False) 把已生成内容
+        # 落盘为「未完成」回放；已触发结局则询问是否保存正式回放
         # 入口阶段点“返回”直接关闭窗口，不视为副本会话结束，跳过退出处理
         if self._closing and not getattr(self, "_exit_from_entry", False):
             self._handle_exit()
@@ -217,7 +222,7 @@ class DungeonWindowBase:
         """当前角色的行动点数；挑战模式等无角色场景返回 None（策略值按缺省因子计算）。"""
         return getattr(self.character, "action_points", None)
 
-    def _load_session_config(self, dungeon_id):
+    def _load_session_config(self, scenario_id):
         """入口阶段选择副本方案后加载配置并初始化会话。
 
         在探索模式入口页用户点击“开始副本”时由 _enter_dungeon_phase() 调用：
@@ -225,24 +230,24 @@ class DungeonWindowBase:
         返回 False 表示配置不可用，此时不应进入会话阶段。
         """
         config = None
-        if self.dungeon_repo is not None:
+        if self.scenario_repo is not None:
             try:
-                config = self.dungeon_repo.load_config(dungeon_id)
+                config = self.scenario_repo.load_config(scenario_id)
             except Exception as e:
                 print(f"副本配置加载失败: {e}")
         if config is None:
             # 不在 DPG 循环内弹 Tk 对话框：记录错误，关闭窗口后由调用方提示
-            self._launch_error = f"无法加载副本配置 '{dungeon_id}'"
+            self._launch_error = f"无法加载副本配置 '{scenario_id}'"
             return False
 
         # 扣 AP / 状态刷新：探索模式且有角色时按副本配置扣除行动点数
         on_selected = getattr(self, "_on_dungeon_selected", None)
         if callable(on_selected):
-            if not on_selected(dungeon_id, config):
+            if not on_selected(scenario_id, config):
                 return False
 
-        self.dungeon_config = config
-        self.dungeon_id = dungeon_id
+        self.scenario_config = config
+        self.scenario_id = scenario_id
         self.triggers = config.get("triggers", [])
         self.chapters = normalize_chapters(config.get("chapters", []))
         self.coupling_level = normalize_coupling_level(config.get("coupling_level"))
@@ -251,7 +256,7 @@ class DungeonWindowBase:
         self._session_initialized = True
         return True
 
-    def _on_dungeon_selected(self, dungeon_id, config) -> bool:
+    def _on_dungeon_selected(self, scenario_id, config) -> bool:
         """入口阶段选择副本后扣除行动点数（探索模式且有角色时）。
 
         返回 False 表示行动点数不足或其它原因，不应进入会话阶段。
@@ -303,9 +308,9 @@ class DungeonWindowBase:
         except Exception as e:
             print(f"[Dungeon] 主界面状态同步失败: {e}")
 
-    def _init_session(self, dungeon_config):
+    def _init_session(self, scenario_config):
         """新开副本：初始化 AI 客户端、提示词、演化状态与尺寸类别。"""
-        dungeon_config = dungeon_config or {}
+        scenario_config = scenario_config or {}
         try:
             self.ai_client = create_client(
                 self.ai_config.get("provider"),
@@ -317,9 +322,9 @@ class DungeonWindowBase:
             print(f"AI 客户端初始化失败: {e}")
             self.ai_client = None
 
-        self.initial_prompt = dungeon_config.get("initial_prompt", "")
-        self.section_prompts = dungeon_config.get("section_prompts", {})
-        self.evolution_attrs = dungeon_config.get("evolution_attrs", [])
+        self.initial_prompt = scenario_config.get("initial_prompt", "")
+        self.section_prompts = scenario_config.get("section_prompts", {})
+        self.evolution_attrs = scenario_config.get("evolution_attrs", [])
 
         init_custom = {}
         for attr in self.evolution_attrs:

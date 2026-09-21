@@ -26,7 +26,7 @@ ROW_TRIGGER = "trigger"
 LOOSE_GROUP = "__loose__"
 
 
-class ScriptManager(TreeviewManager):
+class ChapterTriggerManager(TreeviewManager):
     """章节与触发器的一体化编辑面板。
 
     章节行按章节自定义配色着色，其下的触发器紧跟章节行显示；不属于任何章节
@@ -549,8 +549,8 @@ class ScriptManager(TreeviewManager):
             item = {"color": default_chapter_color(len(self._chapter_list()))}
         dlg = ChapterEditDialog(
             self, item,
-            dungeon_repo=self.scenario_editor._dungeon_repo,
-            dungeon_id=self.scenario_editor.current_scenario_id,
+            scenario_repo=self.scenario_editor._scenario_repo,
+            scenario_id=self.scenario_editor.current_scenario_id,
             evolution_attrs=self.scenario_editor.evolution_attrs,
             all_chapters=self._chapter_list(),
         )
@@ -561,8 +561,8 @@ class ScriptManager(TreeviewManager):
                            if attr.get("name")]
         dlg = TriggerEditDialog(
             self, item, evolution_names, self._trigger_list(),
-            dungeon_repo=self.scenario_editor._dungeon_repo,
-            dungeon_id=self.scenario_editor.current_scenario_id,
+            scenario_repo=self.scenario_editor._scenario_repo,
+            scenario_id=self.scenario_editor.current_scenario_id,
             evolution_attrs=self.scenario_editor.evolution_attrs,
             chapters=self._chapter_list(),
         )

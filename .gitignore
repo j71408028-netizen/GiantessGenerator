@@ -223,3 +223,7 @@ data/user/address_registry.json
 /.idea
 /.workbuddy/
 /developer_tools/
+
+# persistence/json_store.py 的原子写临时文件与覆盖前备份
+*.bak
+*.tmp

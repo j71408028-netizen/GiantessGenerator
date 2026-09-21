@@ -19,6 +19,7 @@ from address_model import world_of
 from persistence import PresetRepo, PersonalityRepo
 from persistence.name_repo import NameRepo, DEFAULT_NAME_TABLE
 from persistence.world_pack import list_behavior_packs
+from dungeon.terms import is_default_scenario
 from services.challenge_service import ChallengeService
 from services.character_service.news import DEFAULT_NEWS_TABLE, NewsService
 from ui.common.widgets import (
@@ -565,9 +566,10 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         resources["quips"] = list(self.quip_repo.get_styles())
         resources["presets"] = list(self.preset_repo.get_tables())
         resources["personalities"] = list(self.personality_repo.get_tables())
-        dungeon_repo = getattr(self.gui_ref, "_dungeon_repo", None) if self.gui_ref else None
-        if dungeon_repo is not None:
-            resources["dungeons"] = [d for d in dungeon_repo.list_all() if d != "_default"]
+        scenario_repo = getattr(self.gui_ref, "_scenario_repo", None) if self.gui_ref else None
+        if scenario_repo is not None:
+            resources["scenarios"] = [d for d in scenario_repo.list_all()
+                                  if not is_default_scenario(d)]
         # 挑战包：列出全部自由 .chal（打包不依赖密钥，密钥由用户手动放入包内）
         cm = ChallengeService(self.settings_repo, world_state=self.world_state)
         resources["challenges"] = [
@@ -697,7 +699,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
                     getattr(self.gui_ref, "_character_repo", None) if self.gui_ref else None,
                     self.landmark_repo,
                     self.quip_repo,
-                    getattr(self.gui_ref, "_dungeon_repo", None) if self.gui_ref else None,
+                    getattr(self.gui_ref, "_scenario_repo", None) if self.gui_ref else None,
                 )
                 manifest = self.world_manager.create_from_current(
                     cfg["world_id"], cfg["name"], self.settings,
@@ -705,7 +707,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
                     quip_repo=self.quip_repo,
                     preset_repo=getattr(self.gui_ref, "_preset_repo", None) if self.gui_ref else None,
                     personality_repo=getattr(self.gui_ref, "_personality_repo", None) if self.gui_ref else None,
-                    dungeon_repo=getattr(self.gui_ref, "_dungeon_repo", None) if self.gui_ref else None,
+                    scenario_repo=getattr(self.gui_ref, "_scenario_repo", None) if self.gui_ref else None,
                     name_repo=self.name_repo,
                     news_service=getattr(getattr(self.gui_ref, "context", None),
                                          "news_service", None),
@@ -747,7 +749,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
                 getattr(self.gui_ref, "_character_repo", None) if self.gui_ref else None,
                 self.landmark_repo,
                 self.quip_repo,
-                getattr(self.gui_ref, "_dungeon_repo", None) if self.gui_ref else None,
+                getattr(self.gui_ref, "_scenario_repo", None) if self.gui_ref else None,
             )
             if choice:
                 self.world_manager.dissolve(

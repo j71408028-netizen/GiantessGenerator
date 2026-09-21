@@ -35,7 +35,7 @@ def save_cropped_image(cropped_path: str, dest_path: str):
             pass
 
 
-def import_background_image(parent, dungeon_repo, dungeon_id) -> str:
+def import_background_image(parent, scenario_repo, scenario_id) -> str:
     """选图并裁剪为 16:9 后存入副本 images 目录，返回相对副本目录的路径。
 
     用户取消、裁剪失败或副本目录不可用时返回空字符串；没有副本信息时
@@ -57,10 +57,10 @@ def import_background_image(parent, dungeon_repo, dungeon_id) -> str:
     if not cropped_path:
         return ""  # 用户取消裁剪
 
-    if not (dungeon_id and dungeon_repo):
+    if not (scenario_id and scenario_repo):
         return cropped_path
 
-    dungeon_dir = os.path.join(dungeon_repo.root, dungeon_id)
+    dungeon_dir = os.path.join(scenario_repo.root, scenario_id)
     if not os.path.exists(dungeon_dir):
         ui.common.dialogs.showerror("错误", f"副本目录不存在: {dungeon_dir}")
         return ""
@@ -83,7 +83,7 @@ def import_background_image(parent, dungeon_repo, dungeon_id) -> str:
     return os.path.relpath(dest_path, dungeon_dir)
 
 
-def import_ending_icon(parent, dungeon_repo, dungeon_id) -> str:
+def import_ending_icon(parent, scenario_repo, scenario_id) -> str:
     """选择 png 图标并存入副本 endings 目录，返回相对副本目录的路径（正斜杠）。"""
     file_path = filedialog.askopenfilename(
         title="选择结局图标",
@@ -97,11 +97,11 @@ def import_ending_icon(parent, dungeon_repo, dungeon_id) -> str:
     except Exception as e:
         ui.common.dialogs.showerror("错误", f"图片加载失败: {e}")
         return ""
-    if not (dungeon_id and dungeon_repo):
+    if not (scenario_id and scenario_repo):
         ui.common.dialogs.showerror("错误", "无法解析副本目录，无法保存结局图标")
         return ""
 
-    dungeon_dir = os.path.join(dungeon_repo.root, dungeon_id)
+    dungeon_dir = os.path.join(scenario_repo.root, scenario_id)
     endings_dir = os.path.join(dungeon_dir, "endings")
     os.makedirs(endings_dir, exist_ok=True)
     ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")

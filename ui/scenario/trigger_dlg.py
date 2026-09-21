@@ -72,7 +72,7 @@ class TriggerEditDialog(BaseDialog):
     GOTO_LEAVE_LABEL = "（离开章节）"
 
     def __init__(self, parent, trigger: dict, evolution_names=None, all_triggers=None,
-                 dungeon_repo=None, dungeon_id=None, evolution_attrs=None, chapters=None):
+                 scenario_repo=None, scenario_id=None, evolution_attrs=None, chapters=None):
         if evolution_names is None:
             evolution_names = []
         if all_triggers is None:
@@ -85,8 +85,8 @@ class TriggerEditDialog(BaseDialog):
         self.trigger = trigger if trigger is not None else {}
         self.evolution_names = evolution_names
         self.all_triggers = all_triggers   # 用于校验名称唯一性
-        self._dungeon_repo = dungeon_repo
-        self.dungeon_id = dungeon_id
+        self._scenario_repo = scenario_repo
+        self.scenario_id = scenario_id
         self.result = None
         self.evolution_attrs = [a for a in (evolution_attrs or []) if isinstance(a, dict)]
         # 敏感效果只针对介入度、破坏性与自定义属性，总伤亡不在演化对象内
@@ -799,9 +799,9 @@ class TriggerEditDialog(BaseDialog):
             return ""
         if os.path.isabs(icon_path):
             return icon_path
-        if self.dungeon_id and self._dungeon_repo:
+        if self.scenario_id and self._scenario_repo:
             candidate = os.path.normpath(
-                os.path.join(self._dungeon_repo.root, self.dungeon_id, icon_path))
+                os.path.join(self._scenario_repo.root, self.scenario_id, icon_path))
             if os.path.exists(candidate):
                 return candidate
         return icon_path
@@ -831,7 +831,7 @@ class TriggerEditDialog(BaseDialog):
 
     def _import_ending_icon(self):
         """选择 png 图标并存入副本 endings 目录，路径以相对副本目录保存。"""
-        rel = import_ending_icon(self, self._dungeon_repo, self.dungeon_id)
+        rel = import_ending_icon(self, self._scenario_repo, self.scenario_id)
         if not rel:
             return
         self.ending_icon_var.set(rel)

@@ -2,11 +2,11 @@
 
 面板布局：可用官方组件逐个渲染为一张可展开的卡片，卡片头部是启用开关、
 展示名与说明；启用后卡片展开，内嵌该组件的参数编辑表单
-（text / int / bool / color）。开关切换与参数修改都会**自动保存**到副本
+（text / int / bool / color）。开关切换与参数修改都会**自动保存**到副本方案
 配置（输入类修改带短防抖），无需手动保存按钮。
 
 组件 id 与参数声明来自 dungeon.components.available_component_descriptions()，
-由默认组件包（data/packs/dungeons/_default/components/components.py）提供；
+由默认组件包（data/packs/scenarios/_default/components/components.py）提供；
 展示名与说明文案维护在 _COMPONENT_META，未登记的组件回退为原始 id。
 """
 
@@ -74,7 +74,7 @@ class ComponentManager(ctk.CTkFrame):
     #: 输入类修改的防抖落盘间隔（毫秒）
     _SAVE_DEBOUNCE_MS = 700
 
-    def __init__(self, parent, dungeon_repo, scenario_editor_ref):
+    def __init__(self, parent, scenario_repo, scenario_editor_ref):
         super().__init__(parent, fg_color="transparent")
         self.scenario_editor = scenario_editor_ref
         self.components = []            # 当前配置启用的组件 id 列表
@@ -340,7 +340,7 @@ class ComponentManager(ctk.CTkFrame):
             self._save_job = None
 
     def _flush_save(self):
-        """把当前启用列表与参数写入副本配置（静默），并同步编辑器状态。"""
+        """把当前启用列表与参数写入副本方案配置（静默），并同步编辑器状态。"""
         self._cancel_pending_save()
         editor = self.scenario_editor
         if self._loading or not editor.current_scenario_id:
@@ -348,7 +348,7 @@ class ComponentManager(ctk.CTkFrame):
         if not self.winfo_exists():
             return
         self.components = self._ordered_components()
-        config = editor._dungeon_repo.load_config(editor.current_scenario_id)
+        config = editor._scenario_repo.load_config(editor.current_scenario_id)
         if config is None:
             config = {}
         config["components"] = list(self.components)
@@ -357,7 +357,7 @@ class ComponentManager(ctk.CTkFrame):
         params = dict(self.components_params)
         params.update(self.collect_params())
         config["components_params"] = params
-        editor._dungeon_repo.save_config(editor.current_scenario_id, config)
+        editor._scenario_repo.save_config(editor.current_scenario_id, config)
         self.components_params = params
         editor.components = list(self.components)
         editor.components_params = dict(params)

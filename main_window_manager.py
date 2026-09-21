@@ -11,7 +11,7 @@ import ui.common.dialogs
 import ui.common.ctk_patch  # noqa: F401  模式切换时同步刷新 CTk 控件 Frame 底色，避免几何重排露旧色
 from context import ExplorationContext
 from paths import icon_dir
-from persistence import QuipRepo, DungeonRepo, CharacterRepo
+from persistence import QuipRepo, ScenarioRepo, CharacterRepo
 from persistence import SettingsRepo, LandmarkRepo, PresetRepo, PersonalityRepo
 from services.challenge_service import ChallengeService
 from services.world_service import WorldManager
@@ -56,7 +56,7 @@ class MainWindowManager:
         self._preset_repo: PresetRepo = context.preset_repo
         self._personality_repo: PersonalityRepo = context.personality_repo
         self._quip_repo: QuipRepo = context.quip_repo
-        self._dungeon_repo: DungeonRepo = context.dungeon_repo
+        self._scenario_repo: ScenarioRepo = context.scenario_repo
         self._character_repo: CharacterRepo = context.character_repo
 
         self.settings = context.settings
@@ -150,7 +150,7 @@ class MainWindowManager:
     def _locked_pages(self) -> Dict[str, str]:
         """返回被世界包锁定而不可进入的管理页及其提示。"""
         locked = {}
-        if self._world_locks_resource("dungeons"):
+        if self._world_locks_resource("scenarios"):
             locked["dungeon"] = "世界包附带了副本方案，编辑器已锁定"
         return locked
 
@@ -214,21 +214,21 @@ class MainWindowManager:
 
     # ==================== 副本编辑标签页 ====================
     def create_dungeon_tab(self, parent):
-        self.dungeon_editor = ScenarioEditor(
-            parent, self._dungeon_repo, self,
+        self.scenario_editor = ScenarioEditor(
+            parent, self._scenario_repo, self,
             challenge_mgr=ChallengeService(self._settings_repo, self._character_repo,
-                                           self._landmark_repo, self._quip_repo, self._dungeon_repo,
+                                           self._landmark_repo, self._quip_repo, self._scenario_repo,
                                            world_state=self.world_state)
         )
-        self.dungeon_editor.pack(fill='both', expand=True)
+        self.scenario_editor.pack(fill='both', expand=True)
 
     def refresh_challenge_pack_dropdowns(self):
         if hasattr(self, 'landmark_mgr'):
             self.landmark_mgr._rebuild_dropdown()
         if hasattr(self, 'quip_card_mgr'):
             self.quip_card_mgr._rebuild_dropdown()
-        if hasattr(self, 'dungeon_editor'):
-            self.dungeon_editor._rebuild_dropdown()
+        if hasattr(self, 'scenario_editor'):
+            self.scenario_editor._rebuild_dropdown()
 
     # ==================== 挑战模式标签页 ====================
     def create_challenge_tab(self, parent):
@@ -337,8 +337,8 @@ class MainWindowManager:
             self.quip_card_mgr.set_world_locked(
                 self._world_locks_resource("quips"))
             self.quip_card_mgr.refresh_styles()
-        if hasattr(self, 'dungeon_editor'):
-            self.dungeon_editor._refresh_scenario_list()
+        if hasattr(self, 'scenario_editor'):
+            self.scenario_editor._refresh_scenario_list()
         if hasattr(self, 'settings_panel'):
             self.settings_panel._refresh_world_pack_ui()
 
@@ -349,7 +349,7 @@ class MainWindowManager:
         （LM_LINK / QUIP_LINK / SC_LINK）与挑战卡简介高亮
         （CHAL_INTRO_*）是单色，只能在重建时重新取值。
         """
-        for attr in ("landmark_mgr", "quip_card_mgr", "dungeon_editor"):
+        for attr in ("landmark_mgr", "quip_card_mgr", "scenario_editor"):
             target = getattr(self, attr, None)
             if target is None:
                 continue
@@ -540,9 +540,9 @@ class MainWindowManager:
         if sys.platform.startswith("win"):
             self._apply_titlebar_theme()
             self._apply_app_icon()
-        if hasattr(self, 'dungeon_editor'):
-            self.dungeon_editor.evolution_panel.update_theme(mode)
-            self.dungeon_editor.chapter_trigger_panel.update_theme(mode)
+        if hasattr(self, 'scenario_editor'):
+            self.scenario_editor.evolution_panel.update_theme(mode)
+            self.scenario_editor.chapter_trigger_panel.update_theme(mode)
         if hasattr(self, 'landmark_mgr'):
             self.landmark_mgr.update_theme(mode)
         if hasattr(self, 'quip_card_mgr'):

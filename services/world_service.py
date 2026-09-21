@@ -27,6 +27,8 @@ from persistence.world_pack import (
     validate_archive,
     worlds_dir,
 )
+from dungeon.terms import (LEGACY_SCENARIO_RESOURCE_KEY, SCENARIO_RESOURCE_KEY,
+                           is_default_scenario)
 from behavior_runtime import get_runtime
 
 _MEMBER_TRAVERSAL_RE = re.compile(r"(^|/)\s*\.\.\s*(/|$)")
@@ -324,18 +326,24 @@ class WorldManager:
                     os.path.join(dst_dir, f"{dst}.csv"))
                 if dst != table:
                     manifest.settings["personality_table"] = dst
-        # 枚举包目录（而非仅清单声明），覆盖激活期间在包内新建的方案
-        dungeons_root = os.path.join(installed, "dungeons")
-        if os.path.isdir(dungeons_root):
-            for dungeon_id in sorted(os.listdir(dungeons_root)):
-                if dungeon_id == "_default":
+        # 枚举包目录（而非仅清单声明），覆盖激活期间在包内新建的方案；
+        # 兼容改名前的世界包（方案目录叫 dungeons）
+        scenarios_root = None
+        for name in (SCENARIO_RESOURCE_KEY, LEGACY_SCENARIO_RESOURCE_KEY):
+            candidate = os.path.join(installed, name)
+            if os.path.isdir(candidate):
+                scenarios_root = candidate
+                break
+        if scenarios_root:
+            for scenario_id in sorted(os.listdir(scenarios_root)):
+                if is_default_scenario(scenario_id):
                     continue
-                src = os.path.join(dungeons_root, dungeon_id)
+                src = os.path.join(scenarios_root, scenario_id)
                 if not os.path.isdir(src):
                     continue
-                dst_dir = os.path.join(packs_root, "dungeons")
+                dst_dir = os.path.join(packs_root, SCENARIO_RESOURCE_KEY)
                 os.makedirs(dst_dir, exist_ok=True)
-                dst = self._target_name(dst_dir, dungeon_id, "", manifest)
+                dst = self._target_name(dst_dir, scenario_id, "", manifest)
                 shutil.rmtree(os.path.join(dst_dir, dst), ignore_errors=True)
                 shutil.copytree(src, os.path.join(dst_dir, dst))
         # 附带挑战包：复制到自由挑战目录并注册包内秘钥
@@ -403,7 +411,7 @@ class WorldManager:
             settings: Dict[str, Any],
             landmark_repo=None, quip_repo=None,
             preset_repo=None, personality_repo=None,
-            dungeon_repo=None, name_repo=None, news_service=None,
+            scenario_repo=None, name_repo=None, news_service=None,
             challenge_mgr=None,
             version: str = "1.0", author: str = "", description: str = "",
             selected_resources: Optional[Dict[str, List[str]]] = None,
@@ -423,7 +431,7 @@ class WorldManager:
         try:
             self._collect_resources(manifest, target, settings,
                                     landmark_repo, quip_repo, preset_repo,
-                                    personality_repo, dungeon_repo,
+                                    personality_repo, scenario_repo,
                                     name_repo, news_service,
                                     challenge_mgr,
                                     selected_resources)
@@ -446,7 +454,7 @@ class WorldManager:
     def _collect_resources(self, manifest: WorldPackManifest, target: str,
                            settings: Dict[str, Any],
                            landmark_repo, quip_repo, preset_repo,
-                           personality_repo, dungeon_repo,
+                           personality_repo, scenario_repo,
                            name_repo, news_service,
                            challenge_mgr,
                            selected_resources: Optional[Dict[str, List[str]]] = None) -> None:
@@ -499,15 +507,15 @@ class WorldManager:
                     os.path.join(target, "personalities", f"{table}.csv"),
                     personality_repo.load(table))
             resources["personalities"] = tables
-        dungeon_ids = [d for d in selected.get("dungeons", [])
-                       if d != "_default"
-                       and dungeon_repo is not None and dungeon_repo.exists(d)]
-        if dungeon_ids:
-            for dungeon_id in dungeon_ids:
+        scenario_ids = [d for d in selected.get("scenarios", [])
+                       if not is_default_scenario(d)
+                       and scenario_repo is not None and scenario_repo.exists(d)]
+        if scenario_ids:
+            for scenario_id in scenario_ids:
                 shutil.copytree(
-                    os.path.join(dungeon_repo.root, dungeon_id),
-                    os.path.join(target, "dungeons", dungeon_id))
-            resources["dungeons"] = dungeon_ids
+                    os.path.join(scenario_repo.root, scenario_id),
+                    os.path.join(target, "scenarios", scenario_id))
+            resources["scenarios"] = scenario_ids
         # 附带挑战包：只复制 .chal 文件，默认不携带密钥（如需随包共享，
         # 由用户手动复制 keys.json 到包内 challenges 目录）
         challenge_root = (challenge_mgr.storage_dir if challenge_mgr is not None
