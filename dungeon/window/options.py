@@ -5,7 +5,7 @@ import threading
 import dearpygui.dearpygui as dpg
 
 from dungeon.coupling import coupling_prompts, normalize_coupling_level
-from dungeon.dispatcher import _dispatch
+from dungeon.window.dispatcher import _dispatch
 
 
 class OptionHandler:

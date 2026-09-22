@@ -5,7 +5,7 @@
 （text / int / bool / color）。开关切换与参数修改都会**自动保存**到副本方案
 配置（输入类修改带短防抖），无需手动保存按钮。
 
-组件 id 与参数声明来自 dungeon.components.available_component_descriptions()，
+组件 id 与参数声明来自 dungeon.window.component_registry.available_component_descriptions()，
 由默认组件包（data/packs/scenarios/_default/components/components.py）提供；
 展示名与说明文案维护在 _COMPONENT_META，未登记的组件回退为原始 id。
 """
@@ -98,7 +98,7 @@ class ComponentManager(ctk.CTkFrame):
 
     # ---------------- 描述加载 ----------------
     def _load_descriptions(self):
-        from dungeon.components import available_component_descriptions
+        from dungeon.window.component_registry import available_component_descriptions
         try:
             self._descriptions = available_component_descriptions()
         except Exception as exc:

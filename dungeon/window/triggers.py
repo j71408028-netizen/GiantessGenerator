@@ -7,11 +7,11 @@
 
 import random
 
-from dungeon.actions import (EMPTY_ACTIONS, LEGACY_ACTIONS, VISUAL_FILTER_KEYS,
-                             action_label, normalize_action_type)
+from dungeon.actions import (EMPTY_ACTIONS, VISUAL_FILTER_KEYS,
+                             normalize_action_type)
 from dungeon.chapters import (find_chapter, is_terminating_chapter,
                               matches_scope, sensitivity_amount)
-from dungeon.dispatcher import _dispatch
+from dungeon.window.dispatcher import _dispatch
 from dungeon.models import DungeonState, DungeonTextType
 from dungeon.rules import TriggerRules
 
@@ -172,13 +172,6 @@ class TriggerHandler:
             cond = trigger.get("condition", {})
             if not self.evaluate_condition(cond, self.dungeon_state):
                 continue
-            # 旧版动作（背景切换 / 性格敏感化）已由章节属性承担，读到直接跳过：
-            # 不执行、不记入已触发集合，也不重置间隔计数。判定放在条件之后，
-            # 这样只在“它本来会触发”的时候留一行提示，日志不会被刷屏。
-            if action_type in LEGACY_ACTIONS:
-                print(f"[Trigger] 旧版触发器 {trigger.get('name')}"
-                      f"（{action_label(action_type)}）已跳过")
-                continue
             action_accepted = True
             if action_type == "insert":
                 text = str(action_data.get("text", "")).strip()
@@ -313,10 +306,7 @@ class TriggerHandler:
         action_type = record.get("action_type")
         action_data = record.get("action_data", {}) or {}
         name = record.get("name", "")
-        if action_type in LEGACY_ACTIONS:
-            # 旧版动作不再复现（旧回放里的背景/敏感触发器记录直接忽略）
-            print(f"[Replay] 旧版触发器记录已跳过: {name} [{action_type}]")
-        elif action_type == "goto":
+        if action_type == "goto":
             self._enter_chapter(str(action_data.get("chapter") or ""),
                                 record=False,
                                 background=record.get("chapter_background"),
@@ -409,7 +399,7 @@ class TriggerHandler:
         before_state = self.dungeon_state
         self.dungeon_state = self.dungeon_logic.evolve_attributes(
             before_state, text_type, 0, self.personality,
-            is_interaction_chosen=False, custom_attrs_def=self.evolution_attrs,
+            custom_attrs_def=self.evolution_attrs,
             custom_directions={},
             sensitivity_mods=self._apply_sensitivity_mods(),
             action_points=self._current_action_points(),

@@ -11,7 +11,8 @@ from ui.common.widgets import (CTkScrollableDropdownFrame, CTkSegmentedControl,
                                CycleOptionButton)
 from ui.common.dialogs import BaseDialog, InputDialog
 from ui.scenario.chapter_trigger_mgr import ChapterTriggerManager
-from dungeon.terms import DEFAULT_SCENARIO_ID
+from dungeon.terms import DEFAULT_SCENARIO_ID, scenario_config_of, scenario_id_of
+from dungeon.validate import format_diagnostics, has_errors
 from ui.scenario.evolution_attributes import EvolutionAtrrManager
 from ui.scenario.component_mgr import ComponentManager
 from ui.common.theme import (
@@ -185,8 +186,8 @@ class ScenarioEditor(ctk.CTkFrame):
         data, _, _ = result
         if not data:
             return
-        scenario_config = data.get("scenario_config", {})
-        scenario_id = data.get("scenario_id", "")
+        scenario_config = scenario_config_of(data)
+        scenario_id = scenario_id_of(data)
         if not scenario_config:
             ui.common.dialogs.showinfo("提示", "该挑战包中没有副本方案")
             return
@@ -198,6 +199,7 @@ class ScenarioEditor(ctk.CTkFrame):
 
         self._refresh_scenario_list()
         self._load_scenario(scenario_id)
+        self._notify_validation()
         ui.common.dialogs.showinfo("成功", f"已从挑战包加载副本方案 '{scenario_id}'")
 
     def _on_scenario_tab_switch(self, value):
@@ -485,11 +487,6 @@ class ScenarioEditor(ctk.CTkFrame):
         }
         return steps.get(key, 0.1)
 
-    def get_scenario_logic(self) -> EvolutionRules:
-        """返回基于当前副本方案配置的 EvolutionRules 实例"""
-        return EvolutionRules(transition_matrix=self.transition_matrix,
-                              step_overrides=self.section_steps)
-
     def _refresh_ui_from_config(self):
         """更新所有UI控件（包括步进值）"""
         self.initial_prompt_text.delete("1.0", "end")
@@ -588,6 +585,7 @@ class ScenarioEditor(ctk.CTkFrame):
         self._scenario_repo.save_config(self.current_scenario_id, config)
         # 更新快照
         self._update_prompt_snapshot()
+        self._notify_validation()
         ui.common.dialogs.showinfo("成功", "通用设置已保存")
 
     def _save_evolution_triggers(self):
@@ -601,7 +599,16 @@ class ScenarioEditor(ctk.CTkFrame):
         config["chapters"] = self.chapters
         config["triggers"] = self.triggers
         self._scenario_repo.save_config(self.current_scenario_id, config)
+        self._notify_validation()
         # 不更新提示词快照
+
+    def _notify_validation(self) -> None:
+        """保存后把方案校验结果反馈给作者：有错误级诊断时弹窗汇总，其余仅控制台。"""
+        diagnostics = getattr(self._scenario_repo, "last_diagnostics", None) or []
+        if has_errors(diagnostics):
+            ui.common.dialogs.showwarning(
+                "方案校验发现问题",
+                format_diagnostics(diagnostics, include_info=False))
 
     def _rename_scenario(self):
         old_name = self.current_scenario_id

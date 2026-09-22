@@ -1,6 +1,6 @@
 """默认副本显示组件包：文本栏与属性条。
 
-本文件由 dungeon.components 按注册表导入，暴露 ``REGISTRY``：
+本文件由 dungeon.window.component_registry 按注册表导入，暴露 ``REGISTRY``：
 {组件 id: 组件类}。组件类实现 build/layout/refresh/destroy 生命周期钩子，
 ctx 即副本会话窗口实例（dungeon.window.DungeonSessionWindow 的 mixin 组合）。
 
@@ -10,7 +10,7 @@ ctx 即副本会话窗口实例（dungeon.window.DungeonSessionWindow 的 mixin 
 
 import dearpygui.dearpygui as dpg
 
-from dungeon.components import DungeonComponent
+from dungeon.window.component_registry import DungeonComponent
 
 
 # ---------------------------------------------------------------------------

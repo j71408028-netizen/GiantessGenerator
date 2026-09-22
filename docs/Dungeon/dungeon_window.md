@@ -1,5 +1,8 @@
 # 副本窗口（DearPyGui）逻辑与开发事项
 
+> 总览（分层、领域层/UI 层模块地图、一步数据流、自检脚本）见
+> [副本架构说明](dungeon_architecture.md)。本文只写会话窗口这一层的细节。
+
 副本模式窗口由 Tkinter 主程序宿主、在 Tk 主线程内运行的 DearPyGui（下称 DPG）
 会话组成。本文记录当前实现逻辑、线程模型，以及开发时必须遵守的约束和已踩过
 的坑。改动 `dungeon/` 下任何代码前请先读第 5 节。
@@ -26,7 +29,8 @@
 | `dungeon/rules.py` `dungeon/models.py` | 演化规则、触发器条件规则、状态模型 |
 | `dungeon/actions.py` `dungeon/chapters.py` | 触发器/章节的数据模型与动作类型注册表（见 `docs/dungeon_chapters.md`） |
 | `dungeon/terms.py` | 领域术语与持久化契约常量（方案 vs 一局、`DEFAULT_SCENARIO_ID`、兼容读），见 `docs/domain_terms.md` |
-| `persistence/scenario_repo.py` | 副本**方案**仓库：`data/packs/scenarios/<id>/` 的读写（读写根分离、旧目录自愈迁移、原子写） |
+| `persistence/scenario_repo.py` | 副本**方案**仓库：`data/packs/scenarios/<id>/` 的读写（读写根分离、旧目录自愈迁移、原子写、保存即校验） |
+| `dungeon/schema.py` `dungeon/validate.py` | 方案字段定义单一真相源 + 结构化校验器（编辑器保存时与启动前各跑一次，error 级阻止进入） |
 
 `DungeonSessionWindow` 的 MRO 顺序为
 `DungeonWindowBase, DungeonLaunchStages, DungeonWindowUI, DungeonStoryEngine,
@@ -61,7 +65,8 @@ __init__
 - **进入入口**：`_enter_entry_phase()` 启动三组后台轮播（背景图随机轮播、结局
   图标轮播、Ken Burns 帧级运动），并构建右下角方案面板 + 左下角结局面板。
 - **点“开始副本”**：`_enter_dungeon_phase()` → 冻结背景、销毁入口 UI、
-  `_load_session_config()`（加载配置、扣 AP、`_init_session()` 建 AI 客户端与
+  `_load_session_config()`（加载配置、方案校验（error 级阻止进入）、扣 AP、
+  `_init_session()` 建 AI 客户端与
   提示词）→ 构建组件 → 显示文本容器 → `check_triggers()`。任何一步失败都会
   置 `_launch_error` 并 `_close_loop()` 关窗，由调用方在 Tk 侧弹错误框。
 - **点“加载回放”**：同样冻结背景后关窗，`_launch_choice = REPLAY_MARK`，
@@ -213,6 +218,8 @@ WM_CLOSE，让 DPG 走与点 X 相同的关闭流程（退出回调 `_on_close` 
 **验证方法**：真实应用中 点“进入副本”→“返回”→ 再点“进入副本”，确认
 第二个窗口能打开且进程存活；也可查看 Windows 事件查看器 Application 日志
 Id=1000 是否出现 `_dearpygui.pyd`。
+（`scripts/dungeon_autopilot.py` 已能用脚本代替人手点击跑通窗口生命周期，
+见 `docs/Dungeon/dungeon_window_automation.md`；接上最小 Tk 宿主后这条回归可全自动。）
 
 ### 5.2 构造参数必须保存到 self
 
@@ -280,9 +287,22 @@ Id=1000 是否出现 `_dearpygui.pyd`。
 
 - 涉及关闭路径的改动**必须**在真实应用中手测（最小 DPG 脚本复现不了 Tk 宿主
   + 完整线程栈的组合行为）。
+- `python scripts/dungeon_autopilot.py` 覆盖**真窗口**的生命周期：构造 → 步进 →
+  关闭 → 落盘（入口返回 / 入口进入 / 会话关闭 3 个场景，无人手点击、不联网、
+  不碰真实 `data/`）。改动关闭路径、收尾、入口阶段后先跑它。
+  已知现象：跑完会话后进程会在**退出阶段挂死**（无残留非 daemon 线程），
+  因此自检按子进程输出判定成败、由父进程超时 kill。详见
+  `docs/Dungeon/dungeon_window_automation.md`。
 - `python scripts/check_dungeon_finalize.py` 覆盖收尾路径与原子写
   （无 GUI、不碰真实 `data/`，32 项断言），改 `_finalize` / `json_store` /
   `scenario_repo` 后先跑它。
+- `python scripts/check_scenario_schema.py` 覆盖 schema 单一真相源与校验器
+  （golden 对比、normalize 一致性、42 项规则断言）；`python scripts/validate_scenarios.py`
+  批量校验 `data/packs/scenarios/*`（error 级时退出码 1，可挂 CI）。
+- `python scripts/check_dungeon_layering.py` 守卫分层：AST 扫描 `dungeon/*.py`
+  （包根，不含 `window/`），禁止 import `dearpygui` / `tkinter` / `customtkinter`
+  / `services` / `ui`，也禁止反向依赖 `dungeon.window`，越界即退出码 1。在领域层
+  新增 import 后跑它。
 - 回放结束、入口返回、会话 X 关闭是三条独立路径，改 `_request_close` /
   `_on_close` / `_handle_exit` 时逐一回归。
 - 控制台出现 `流式任务执行异常: '...xxx' object has no attribute ...` 通常是

@@ -4,8 +4,9 @@ from typing import Optional
 import customtkinter as ctk
 
 import ui.common
-from dungeon.actions import (LEGACY_ACTIONS, VISUAL_FILTERS, action_label,
+from dungeon.actions import (VISUAL_FILTERS, action_label,
                              normalize_action_type)
+from dungeon.validate import LEGACY_ACTIONS
 from dungeon.chapters import (
     CHAPTER_ANY, CHAPTER_NONE, CHAPTER_ANY_LABEL, CHAPTER_NONE_LABEL,
     default_chapter_color, shade_for_mode,
@@ -229,7 +230,7 @@ class ChapterTriggerManager(TreeviewManager):
         action_type = normalize_action_type(trigger.get("action_type"), trigger.get("action_data"))
         if action_type in LEGACY_ACTIONS:
             # 旧版动作已不再支持（运行时直接跳过），列表里标出来供用户删除
-            return f"{action_label(action_type)}（旧版·已失效）"
+            return f"{LEGACY_ACTIONS[action_type]}（旧版·已失效）"
         if action_type == "ending":
             # 旧配置中的结局触发器仍可运行；新建入口已迁移到「结束章节」
             icon = (trigger.get("action_data") or {}).get("icon_path")

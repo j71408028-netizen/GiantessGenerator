@@ -1,5 +1,8 @@
 # 副本数据模型：触发器与章节
 
+> 总览（分层、模块地图、一步数据流、收尾与自检脚本）见
+> [副本架构说明](dungeon_architecture.md)。本文只写配置里的玩法数据结构。
+
 副本配置（`data/packs/scenarios/<id>/config.json`）里的玩法结构由**触发器**与
 **章节**两种模型组成。两者的职责边界是本模型的核心约束：
 
@@ -120,10 +123,10 @@
 
 ### 2.2 动作类型
 
-动作注册表在 `dungeon/actions.py`，展示名、集合、旧别名归一化都从那里取，
+动作注册表在 `dungeon/actions.py`，展示名、动作集合、归一化都从那里取，
 编辑器、依赖图、回放导出共用，不再各写一份字符串常量。
 
-**新版动作**（`NEW_ACTIONS`，编辑器主按钮行）：
+**运行时动作**（编辑器主按钮行提供前五种，`ending` 只读兼容）：
 
 | 类型 | 展示名 | `action_data` | 说明 |
 |------|--------|---------------|------|
@@ -134,15 +137,19 @@
 | `ending` | 结局（旧配置） | `name, intrusion_delta, destruction_delta, casualty_step, action_points_refund, custom_deltas, icon_path` | **已迁移为「结束章节」**：编辑器不再提供新建入口，运行时与回放仍兼容旧配置 |
 | `none` | 条件标记 | `{}` | 无动作，只标记条件成立，供其他触发器作前置条件 |
 
-**旧版动作**（`LEGACY_ACTIONS`，**不再兼容**）：`background`（背景切换）与
-`sensitivity`（性格敏感化）。这两项已经是章节自身的属性，运行时**读到就跳过**：
-不执行动作、不记入已触发集合、不重置间隔计数，只打印一行提示。编辑器不再提供
-这两个动作的入口，旧配置里残留的这类触发器在合并面板里显示为「旧版·已失效」，
-用户可自行删除。旧回放里的同类触发器记录同样直接忽略。
+**旧版动作——已完全退场**：`background`（背景切换）与 `sensitivity`（性格敏感化，
+早期拼写 `sensitive`）。这两项早就由章节自身的属性承担（见 §1），因此现在：
+
+- 运行时**不认识**这类动作：它们不在注册表里，也没有专门的跳过分支，直接落入
+  「未知的触发器动作类型」通用路径（不执行、不记入已触发集合、不重置间隔计数，
+  只打印一行提示）；旧回放里的同类记录同样忽略；
+- 触发器列表把它们显示为「旧版·已失效」（没有表单，只能删除）；
+- 校验器（`dungeon/validate.py` 的 `LEGACY_ACTIONS`）在**编辑器保存时与副本
+  启动前**把它们报为专项 warning——作者在校验阶段就能看见残留并处理，而不是
+  被运行时静默吞掉。
 
 `action_data["type"]` 与 `action_type` 冗余存在于旧配置中；`normalize_action_type`
-统一处理 `sensitive → sensitivity`、缺失值回退 `action_data["type"]`，
-`is_legacy_action` 据此判断是否该跳过。
+只做「动作字段缺失时回退 `action_data["type"]`」，不再做任何旧别名转换。
 
 敏感倍率公式（触发器与章节共用 `dungeon.chapters.sensitivity_amount`）：
 
@@ -204,6 +211,27 @@
 
 ## 5. 持久化与兼容
 
+- **schema 单一真相源**：字段/默认值/合法取值定义在 `dungeon/schema.py`；
+  `ScenarioRepo.empty_scenario_config()`（空方案模板）、`dungeon/validate.py`
+  的校验器、后续编辑器表单都从同一份声明取数。
+- **运行时消费方**：`window/base.py::_init_session` 把方案配置的
+  `transition_matrix` 与 `section_steps` 传给 `EvolutionRules`（同时注入不适应性
+  衰减 `StateService.decay_step_rates`）。矩阵按**行覆盖**：配置里出现的行整行
+  替换（行内没写的列按 0 计），没出现的行沿用
+  `EvolutionRules.DEFAULT_TRANSITION_MATRIX`；非数字/负数权重在构造时被丢弃。
+  这两个字段曾一度只在 config.json 里生效、没进运行时，现由
+  `scripts/check_scenario_schema.py` 第 6 节守卫。
+- **校验器**：`validate_scenario_config(config, scenario_dir=None)` 返回结构化诊断
+  （`Diagnostic(level, path, message)`，error/warning/info 三级），覆盖：悬空
+  goto/overflow_target（error）、无/多起始章节（error/warning）、结束章节内的
+  option/goto（warning）、废弃动作与旧版字段（warning）、条件键/比较符/度量
+  合法性（warning）、转移矩阵行缺失与权重越界（warning）、背景图/结局图标
+  资产存在性（warning，需传 `scenario_dir`）。接入点：`ScenarioRepo.save_config`
+  保存即校验（诊断记入 `last_diagnostics`，编辑器弹窗汇总 error）、
+  `window/base.py::_load_session_config` 启动前校验（error 级阻止进入）、
+  `scripts/validate_scenarios.py` 离线批量。
+- **滤镜键单一出处**：`dungeon/actions.py::VISUAL_FILTERS` 是唯一清单；
+  `background.py` 的 PIL 映射在导入时校验键一致（不一致直接报错）。
 - `ScenarioRepo._migrate` 以原配置为底稿补齐字段，未知键（含 `components`）原样保留；
   缺失的 `chapters` 补成 `[]`，每个触发器补 `chapter: ""`；章节由
   `chapters.normalize_chapter` 补齐 `ending` / `max_paragraphs` / `overflow_target`

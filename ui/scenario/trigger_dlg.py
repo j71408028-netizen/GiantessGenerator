@@ -6,12 +6,14 @@ import customtkinter as ctk
 
 import ui.common
 from dungeon.actions import (
-    LEGACY_ACTIONS, NEW_ACTIONS, VISUAL_FILTERS, VISUAL_FILTER_KEYS, action_label,
+    NEW_ACTIONS, VISUAL_FILTERS, VISUAL_FILTER_KEYS, action_label,
     normalize_action_type,
 )
 from dungeon.chapters import (
     CHAPTER_ANY, CHAPTER_ANY_LABEL, CHAPTER_NONE, CHAPTER_NONE_LABEL, chapter_names,
 )
+# 旧版动作清单归校验器所有：这里只借来识别旧配置
+from dungeon.validate import LEGACY_ACTIONS
 from ui.common.dialogs import BaseDialog
 from ui.common.theme import (
     TRIGGER_TEXT, TRIGGER_HINT,

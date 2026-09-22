@@ -1,7 +1,7 @@
 """窗口生命周期与基础属性。
 
 进入副本界面与正式副本会话界面共享同一个 DPG context / viewport / 主窗口：
-切换副本方案发生在同一视口内（dungeon.launcher.DungeonLaunchStages 负责入口阶段），
+切换副本方案发生在同一视口内（dungeon.window.launcher.DungeonLaunchStages 负责入口阶段），
 选择“开始副本 / 加载回放”后由 _enter_dungeon_phase() 切换到会话阶段，
 同一生命周期内不再重建整个 DPG 上下文。
 """
@@ -12,15 +12,17 @@ from collections import deque
 import dearpygui.dearpygui as dpg
 
 from ai import create_client
-from dungeon.background import DungeonBackground
+from dungeon.window.background import DungeonBackground
 from dungeon.chapters import normalize_chapters
 from dungeon.coupling import normalize_coupling_level
-from dungeon.dispatcher import _dispatch
+from dungeon.window.dispatcher import _dispatch
 from dungeon.models import DungeonTextType, DungeonState
 from dungeon.prompts import DungeonPromptBuilder
 from dungeon.rules import EvolutionRules
 from dungeon.summary import DEFAULT_RECENT_COUNT, StorySummarizer
+from dungeon.validate import format_diagnostics, has_errors, validate_scenario_config
 from logic import get_size_category
+from services.state_service import StateService
 from ui.common.fonts import dungeon_font_default
 
 # 文本区布局样式：旧的「副本窗口视图」设置已移除，统一用保留全历史的故事布局
@@ -92,7 +94,7 @@ class DungeonWindowBase:
         self._bg_resize_timer = None
         self._background = DungeonBackground(self)
 
-        # 入口阶段（dungeon.launcher.DungeonLaunchStages）与会话阶段共用同一 DPG 生命周期
+        # 入口阶段（dungeon.window.launcher.DungeonLaunchStages）与会话阶段共用同一 DPG 生命周期
         self.scenario_ids = list(scenario_ids) if scenario_ids else []
         self._is_entry_phase = False
 
@@ -126,8 +128,6 @@ class DungeonWindowBase:
         # 回放记录引用：选择/结局生成完成后把结果写回对应记录
         self._last_option_record = None
         self._last_ending_record = None
-        # 敏感触发器效果：{"attr": 属性名, "amount": 倍率改变量, "remaining": 剩余步数}
-        self.sensitivity_effects = []
         # 结局触发器状态
         self.pending_ending = None    # 待生成结局 {"name": 结局名称}
         self.dungeon_ended = False    # 结局已生成，故事结束
@@ -138,13 +138,15 @@ class DungeonWindowBase:
         self._exit_from_entry = False
         self._launch_error = ""      # 入口选择失败原因，窗口关闭后由调用方提示
         self._launch_choice = None   # 入口阶段的选择结果
+        # 最近一次方案校验的诊断（入口加载时填充；为空表示干净）
+        self.scenario_diagnostics = []
 
         self.story_history = []
         # 耦合等级：决定副本执行时采用的硬编码 AI 提示词（见 dungeon/coupling.py）。
         # 必须在会话初始化之前就绪——_init_session 会立刻据此构建系统提示。
         self.coupling_level = normalize_coupling_level(
             (scenario_config or {}).get("coupling_level"))
-        # 显示组件（官方组件库，见 dungeon/components.py）
+        # 显示组件（官方组件库，见 dungeon/window/components.py）
         self._components = []
         self._components_built = False
         self.layout_style = LAYOUT_STYLE
@@ -240,6 +242,19 @@ class DungeonWindowBase:
             self._launch_error = f"无法加载副本配置 '{scenario_id}'"
             return False
 
+        # S2：启动前校验——错误级问题阻止进入，诊断经 _launch_error 交给调用方提示
+        if self.scenario_repo is not None:
+            self.scenario_diagnostics = validate_scenario_config(
+                config, scenario_dir=self.scenario_repo.scenario_dir(scenario_id))
+            if has_errors(self.scenario_diagnostics):
+                self._launch_error = (
+                    f"副本方案「{scenario_id}」存在无法运行的问题，已阻止进入：\n\n"
+                    + format_diagnostics(self.scenario_diagnostics))
+                return False
+            if self.scenario_diagnostics:
+                print(f"[Scenario] 方案「{scenario_id}」校验提示：\n"
+                      + format_diagnostics(self.scenario_diagnostics))
+
         # 扣 AP / 状态刷新：探索模式且有角色时按副本配置扣除行动点数
         on_selected = getattr(self, "_on_dungeon_selected", None)
         if callable(on_selected):
@@ -270,7 +285,6 @@ class DungeonWindowBase:
             if entry_cost > 0:
                 state_service = getattr(self.gui, "context", None)
                 state_service = getattr(state_service, "state_service", None) if state_service else None
-                from services.state_service import StateService
                 consume = (state_service.consume_action_points(character, entry_cost)
                            if state_service is not None
                            else StateService.consume_action_points(character, entry_cost))
@@ -345,7 +359,12 @@ class DungeonWindowBase:
         )
         self.dungeon_state.total_steps = 0
         self.dungeon_state.steps_since_trigger = 0
-        self.dungeon_logic = EvolutionRules()
+        # 段落演化规则取自副本方案配置的转移矩阵与分节步长（未配置的部分
+        # 沿用内置默认）；不适应性衰减由服务层注入（dungeon 领域层不依赖 services）
+        self.dungeon_logic = EvolutionRules(
+            transition_matrix=scenario_config.get("transition_matrix"),
+            step_overrides=scenario_config.get("section_steps"),
+            step_decay=StateService.decay_step_rates)
         self.current_text_type = None
         self.last_ai_text = ""
         self._generating = False
@@ -399,7 +418,7 @@ class DungeonWindowBase:
         except (TypeError, ValueError):
             return DEFAULT_RECENT_COUNT
 
-    # ---------------- 入口阶段进入（由 dungeon.launcher.DungeonLaunchStages 提供） ----------------
+    # ---------------- 入口阶段进入（由 dungeon.window.launcher.DungeonLaunchStages 提供） ----------------
     # 子类 mixin 会覆盖 _enter_entry_phase / _init_entry_materials：
     # base 只负责在 _build_ui() 后调用统一的 enter 钩子进入入口阶段。
     def _request_close(self):

@@ -1,6 +1,6 @@
 """副本显示组件生命周期（混入）。
 
-组件包由 dungeon.components 提供注册表；本 mixin 负责按副本配置
+组件包由 dungeon.window.component_registry 提供注册表；本 mixin 负责按副本配置
 （config.json 的 ``components`` 字段）在会话阶段构建组件实例，并把这些
 实例接入窗口现有的更新链：
 - _relayout() → 各组件 layout(ctx)
@@ -12,7 +12,7 @@
 
 import dearpygui.dearpygui as dpg
 
-from dungeon import components as _components_module
+from dungeon.window import component_registry as _components_module
 
 
 class ComponentHandler:

@@ -16,26 +16,90 @@ class EvolutionRules:
     }
 
     def __init__(self, transition_matrix: Optional[dict] = None,
-                 step_overrides: Optional[dict] = None):
-        self.transition_matrix = transition_matrix or {
+                 step_overrides: Optional[dict] = None,
+                 step_decay: Optional[object] = None):
+        """``transition_matrix`` / ``step_overrides`` 直接来自副本方案配置。
+
+        两者都是**部分覆盖**：配置里出现的行整行替换（行内没写的列按 0 处理，
+        作者显式改动一行就意味着这一行要按他的写法走），完全没有的行沿用内置
+        默认——这样改一行也不会让其余段落退化成均匀随机。
+
+        ``step_decay``：不适应性衰减函数，由调用方注入。签名与
+        ``services.state_service.StateService.decay_step_rates`` 一致
+        （``(personality, step_intrusion, step_destruction, step_intr, step_destr,
+        intrusion=..., destruction=...) -> (si, sd)``）。领域层不依赖 services 层：
+        副本窗口（``window/base.py``）显式注入；未注入时不做边界衰减
+        （纯数值模拟可忽略，正式会话必须注入）。
+        """
+        self.transition_matrix = {
             key: value.copy() for key, value in self.DEFAULT_TRANSITION_MATRIX.items()
         }
-        self.step_overrides = (step_overrides or {}).copy()
+        self.step_overrides = {}
+        if transition_matrix:
+            self._merge_transition_matrix(transition_matrix)
+        if step_overrides:
+            self._merge_step_overrides(step_overrides)
         for text_type in DungeonTextType:
             self.step_overrides.setdefault(text_type.value, text_type.step_value)
+        self.step_decay = step_decay
+
+    def _merge_transition_matrix(self, matrix) -> None:
+        """用配置矩阵覆盖默认矩阵：出现的行整行替换，没出现的行保持默认。
+
+        权重统一转 float（手工编辑 JSON 时可能写成字符串），负值按 0 处理；
+        未知的行列键跳过——它们已经在校验阶段报过 warning，运行时不应崩溃。
+        一整行都没解析出有效权重时保留默认行，避免配置写坏就退化成乱跳。
+        """
+        known = {text_type.value for text_type in DungeonTextType}
+        for row_key, row in matrix.items():
+            if not isinstance(row, dict):
+                continue
+            merged = {}
+            for col_key, weight in row.items():
+                if col_key not in known:
+                    continue
+                try:
+                    value = float(weight)
+                except (TypeError, ValueError):
+                    continue
+                merged[col_key] = max(0.0, value)
+            if merged:
+                self.transition_matrix[row_key] = merged
+
+    def _merge_step_overrides(self, overrides) -> None:
+        """分节步长同样按需覆盖：只接受正数与已知段落类型。"""
+        known = {text_type.value for text_type in DungeonTextType}
+        for key, value in overrides.items():
+            if key not in known:
+                continue
+            try:
+                step = float(value)
+            except (TypeError, ValueError):
+                continue
+            if step > 0:
+                self.step_overrides[key] = step
 
     def get_next_text_type(self, current_type: Optional[DungeonTextType]) -> DungeonTextType:
         if current_type is None:
             return random.choice(list(DungeonTextType))
-        probabilities = self.transition_matrix.get(current_type.value)
-        if not probabilities:
+        row = self.transition_matrix.get(current_type.value) or {}
+        types = []
+        weights = []
+        for member in DungeonTextType:
+            try:
+                weight = float(row.get(member.value, 0.0))
+            except (TypeError, ValueError):
+                continue
+            if weight > 0:
+                types.append(member)
+                weights.append(weight)
+        # 整行权重都为 0（或该行缺失）时没有可选后继，回退均匀随机
+        if not types:
             return random.choice(list(DungeonTextType))
-        types = [DungeonTextType(value) for value in probabilities]
-        return random.choices(types, weights=list(probabilities.values()))[0]
+        return random.choices(types, weights=weights)[0]
 
     def evolve_attributes(self, state: DungeonState, text_type: DungeonTextType,
                           direction: int, personality,
-                          is_interaction_chosen: bool = False,
                           custom_attrs_def: Optional[list[dict]] = None,
                           custom_directions: Optional[dict[str, int]] = None,
                           sensitivity_mods: Optional[dict[str, float]] = None,
@@ -43,8 +107,6 @@ class EvolutionRules:
                           step_override: Optional[float] = None) -> DungeonState:
         """按段落类型演化副本属性。
 
-        ``is_interaction_chosen`` 已废弃（仅为兼容旧签名保留，传入不产生
-        任何效果）：交互选中时不再对坐标做“方向 × 敏感值/重力”的直加，
         交互对坐标的操作统一由绑定触发器跳转具有敏感效果的章节实现
         （sensitivity_mods / sensitivity_amount）。
 
@@ -92,49 +154,17 @@ class EvolutionRules:
             # 叠加不适应性衰减（坐标达到 0.5/4.5 后步长向 0 收敛）
             new_state.step_intrusion = si - step * personality.sensitivity
             new_state.step_destruction = sd - step * getattr(personality, "gravity", 0.0)
-            from services.state_service import StateService
-            new_state.step_intrusion, new_state.step_destruction = \
-                StateService.decay_step_rates(
-                    personality, new_state.step_intrusion, new_state.step_destruction,
-                    step, step,
-                    intrusion=new_state.intrusion, destruction=new_state.destruction)
+            if self.step_decay is not None:
+                new_state.step_intrusion, new_state.step_destruction = \
+                    self.step_decay(
+                        personality, new_state.step_intrusion, new_state.step_destruction,
+                        step, step,
+                        intrusion=new_state.intrusion, destruction=new_state.destruction)
 
         new_state.total_steps += 1
         new_state.steps_since_trigger += 1
         new_state.chapter_steps += 1
         return new_state
-
-    @staticmethod
-    def evaluate_condition(condition: dict, state: DungeonState) -> bool:
-        rules = condition.get("rules", []) if condition else []
-        if not rules:
-            return True
-        fixed_values = {
-            "介入度": state.intrusion,
-            "破坏性": state.destruction,
-            "总伤亡": state.total_casualties,
-            "总计数": state.total_steps,
-            "间隔计数": state.steps_since_trigger,
-            "节内计数": state.chapter_steps,
-        }
-        results = []
-        for rule in rules:
-            key = rule.get("key")
-            current = fixed_values.get(key, state.custom_attrs.get(key, 0.0))
-            expected = rule.get("value", 0)
-            results.append({
-                ">=": current >= expected,
-                "<=": current <= expected,
-                ">": current > expected,
-                "<": current < expected,
-                "==": current == expected,
-                "!=": current != expected,
-            }.get(rule.get("comparator", ">="), False))
-        if condition.get("operator", "and") == "and":
-            return all(results)
-        if condition.get("operator") == "or":
-            return any(results)
-        return False
 
 
 class TriggerRules:

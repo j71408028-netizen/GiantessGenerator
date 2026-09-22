@@ -1,7 +1,7 @@
 """副本会话窗口（由职责拆分后的 mixin 组装）。
 
 进入副本界面与正式副本会话界面共享同一个 DPG 生命周期：
-dungeon.launcher.DungeonLaunchStages 提供入口阶段（动态背景 + 方案选择），
+dungeon.window.launcher.DungeonLaunchStages 提供入口阶段（动态背景 + 方案选择），
 在 base.DungeonWindowBase.__init__ 构建正式会话 UI 后进入入口阶段，
 用户选择后由 _enter_dungeon_phase() 切换到会话阶段。
 """
@@ -14,7 +14,7 @@ from .options import OptionHandler
 from .persistence import DungeonPersistence
 from .triggers import TriggerHandler
 from .ui import DungeonWindowUI
-from dungeon.launcher import DungeonLaunchStages
+from dungeon.window.launcher import DungeonLaunchStages
 
 
 class DungeonSessionWindow(DungeonWindowBase, DungeonLaunchStages, DungeonWindowUI,

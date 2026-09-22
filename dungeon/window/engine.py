@@ -7,7 +7,7 @@ import dearpygui.dearpygui as dpg
 
 from dungeon.chapters import find_chapter, is_terminating_chapter, overflow_jump_target
 from dungeon.details import build_detail_query_prompt, parse_detail_queries
-from dungeon.dispatcher import _dispatch
+from dungeon.window.dispatcher import _dispatch
 from dungeon.models import DungeonTextType
 from dungeon.response import extract_stream_text, parse_final_json
 from dungeon.splitter import split_full_text, split_stream_units
@@ -119,7 +119,7 @@ class DungeonStoryEngine:
                 step_override = 0.0 if self._in_terminating_chapter() else None
                 self.dungeon_state = self.dungeon_logic.evolve_attributes(
                     before_state, next_type, direction, self.personality,
-                    is_interaction_chosen=False, custom_attrs_def=self.evolution_attrs,
+                    custom_attrs_def=self.evolution_attrs,
                     custom_directions=custom_directions,
                     sensitivity_mods=self._apply_sensitivity_mods(),
                     action_points=self._current_action_points(),
@@ -295,8 +295,7 @@ class DungeonStoryEngine:
         self._start_ending_generation()
 
     def _finish_step(self, text_type, text, step_info, check_unlock: bool = False):
-        """步进收尾：结算敏感衰减、短暂视效与伤亡、写入回放，并检查解锁与触发器。"""
-        self._decay_sensitivity_effects()
+        """步进收尾：结算短暂视效与伤亡、写入回放，并检查解锁与触发器。"""
         self._apply_visual_effects()
         casualty_increase = self._record_casualties(text_type, text)
 

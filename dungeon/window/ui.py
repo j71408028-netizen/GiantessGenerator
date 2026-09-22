@@ -6,7 +6,7 @@ import time
 
 import dearpygui.dearpygui as dpg
 
-from dungeon.dispatcher import _dispatch
+from dungeon.window.dispatcher import _dispatch
 from dungeon.models import DungeonTextType
 
 

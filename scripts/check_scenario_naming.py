@@ -184,6 +184,48 @@ check("缺成员仍会被发现",
       _missing(legacy_manifest, {"world.json", "landmarks/L1.json"}) ==
       ["scenarios/gamma/config.json"])
 
+# ---------------- 5. 分层守卫（S4）：dungeon/ 根目录必须是纯领域层 ----------------
+
+FORBIDDEN_IMPORT_ROOTS = ("dearpygui", "services", "ui")
+
+
+def scan_layering():
+    """dungeon/ 根目录（不含 window/）不得导入 UI 框架、服务层或 ui 包。
+
+    S4 之前 ``rules.py`` 在函数内 ``import services.state_service``（领域层反向依赖
+    服务层），``background/dispatcher/launcher/components`` 四个 DPG 模块混在
+    根目录里。现在：根目录 = 纯领域，``dungeon/window/`` = DPG 会话层。
+    """
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    domain_dir = os.path.join(root, "dungeon")
+    hits = {}
+    for name in sorted(os.listdir(domain_dir)):
+        if not name.endswith(".py"):
+            continue
+        path = os.path.join(domain_dir, name)
+        rel = os.path.relpath(path, root).replace("\\", "/")
+        with open(path, "r", encoding="utf-8") as f:
+            tree = ast.parse(f.read(), filename=rel)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                # from .x import ... 是包内导入（domain 层内部），不算越界
+                if node.level:
+                    continue
+                modules = [node.module or ""]
+            else:
+                continue
+            for module in modules:
+                if module and module.split(".")[0] in FORBIDDEN_IMPORT_ROOTS:
+                    hits.setdefault(rel, []).append((node.lineno, module))
+    return hits
+
+
+layer_hits = scan_layering()
+check("dungeon/ 根目录无 UI/服务层依赖", not layer_hits,
+      "; ".join(f"{k}:{v}" for k, v in list(layer_hits.items())[:5]))
+
 # ---------------- 结论 ----------------
 _log.flush()
 sys.stdout = sys.__stdout__

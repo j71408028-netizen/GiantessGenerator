@@ -19,7 +19,7 @@ import time
 import dearpygui.dearpygui as dpg
 from PIL import Image
 
-from dungeon.dispatcher import _dispatch
+from dungeon.window.dispatcher import _dispatch
 from dungeon.terms import scenario_id_of
 _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
 

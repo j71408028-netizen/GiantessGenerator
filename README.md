@@ -98,6 +98,10 @@ data/
 
 ## 相关文档
 
+- [副本架构说明](docs/dungeon_architecture.md)：`dungeon/` 的分层、模块地图、一次步进的数据流、收尾与自检脚本
+- [副本数据模型](docs/dungeon_chapters.md)：章节 / 触发器 / 动作的配置结构
+- [副本窗口开发事项](docs/dungeon_window.md)：DearPyGui 会话窗口的生命周期、线程模型与已知坑
+- [副本领域术语表](docs/domain_terms.md)：方案（Scenario）与一局（Run）的区分与命名约定
 - [地址系统操作说明](docs/address_system.md)：地标 / 描述风格的地址申领、注册与匹配规则
 - [世界包行为包开发指南](docs/world_pack_behaviors.md)：行为包的开发流程、注册 API 与可覆盖目标
 

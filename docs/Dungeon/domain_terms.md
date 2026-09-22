@@ -1,5 +1,7 @@
 # 副本领域术语表（Scenario vs Run）
 
+> 全局架构见 [副本架构说明](dungeon_architecture.md)。
+
 本仓库有两个共用"副本"这个词、但层次完全不同的概念。**S1.5 之前两者混用
 `dungeon` 一个词根**——`DungeonRepo` 实际持久化的是方案定义，`dungeon_id`
 在编辑器里又叫 `scenario_id`，同一值在一次调用链里换名。现已拆分如下。
@@ -42,4 +44,7 @@
   `endings.json` / 角色档案 / 世界包里的旧字段一次性改写为 `scenario_id`
   （幂等、原子写 + `.bak`）。`.chal` 挑战包是加密格式，不做改写，读取侧兼容。
 - **守卫**：`python scripts/check_scenario_naming.py`（AST 扫描旧标识符残留
-  + 兼容行为自检）；`python scripts/check_dungeon_finalize.py`（收尾路径回归）。
+  + 兼容行为自检）；`python scripts/check_dungeon_finalize.py`（收尾路径回归）；
+  `python scripts/check_scenario_schema.py`（schema 单一真相源 + 校验器规则自检）；
+  `python scripts/check_dungeon_layering.py`（领域层不得依赖 UI/服务层的分层守卫）；
+  `python scripts/validate_scenarios.py`（离线批量校验所有方案）。

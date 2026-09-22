@@ -7,10 +7,25 @@ from PIL import Image
 from PIL import ImageFilter
 import dearpygui.dearpygui as dpg
 
+from dungeon.actions import VISUAL_FILTER_KEYS
 from .dispatcher import _dispatch
 
 
 _BYTE_TO_FLOAT = [value / 255.0 for value in range(256)]
+
+# 滤镜键单一出处：清单（键+展示名）定义在 dungeon/actions.py::VISUAL_FILTERS，
+# 这里只提供键 → PIL 滤镜的映射；键不一致在导入时直接报错，不再靠注释手工同步
+_PIL_FILTERS = {
+    "blur": ImageFilter.BLUR, "contour": ImageFilter.CONTOUR,
+    "detail": ImageFilter.DETAIL, "edge_enhance": ImageFilter.EDGE_ENHANCE,
+    "edge_enhance_more": ImageFilter.EDGE_ENHANCE_MORE, "emboss": ImageFilter.EMBOSS,
+    "find_edges": ImageFilter.FIND_EDGES, "sharpen": ImageFilter.SHARPEN,
+    "smooth": ImageFilter.SMOOTH, "smooth_more": ImageFilter.SMOOTH_MORE,
+}
+if set(_PIL_FILTERS) != set(VISUAL_FILTER_KEYS):
+    raise RuntimeError(
+        "滤镜键不一致：dungeon/actions.py 的 VISUAL_FILTERS 与 "
+        "dungeon/background.py 的 _PIL_FILTERS 需要同步")
 
 
 def _rotate_safe(image, angle):
@@ -195,14 +210,8 @@ class DungeonBackground:
 
     @staticmethod
     def apply_filter(image, filter_effect):
-        filters = {
-            "blur": ImageFilter.BLUR, "contour": ImageFilter.CONTOUR,
-            "detail": ImageFilter.DETAIL, "edge_enhance": ImageFilter.EDGE_ENHANCE,
-            "edge_enhance_more": ImageFilter.EDGE_ENHANCE_MORE, "emboss": ImageFilter.EMBOSS,
-            "find_edges": ImageFilter.FIND_EDGES, "sharpen": ImageFilter.SHARPEN,
-            "smooth": ImageFilter.SMOOTH, "smooth_more": ImageFilter.SMOOTH_MORE,
-        }
-        return image.filter(filters[filter_effect.lower()]) if filter_effect.lower() in filters else image
+        return image.filter(_PIL_FILTERS[filter_effect.lower()]) \
+            if filter_effect.lower() in _PIL_FILTERS else image
 
     @staticmethod
     def crop_and_resize(image, width, height):

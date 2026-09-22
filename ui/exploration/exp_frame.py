@@ -515,7 +515,7 @@ class ExplorationPanel(ctk.CTkFrame):
 
         # 入口阶段点“加载回放”：窗口已关闭，回到 Tk 主线程弹回放文件选择
         choice = getattr(window, "_launch_choice", None)
-        from dungeon.launcher import REPLAY_MARK
+        from dungeon.window.launcher import REPLAY_MARK
         if choice == REPLAY_MARK:
             replay_data = self._load_replay_file()
             if replay_data is None:

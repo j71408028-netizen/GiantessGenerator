@@ -17,7 +17,9 @@ import os
 import shutil
 
 from dungeon.chapters import normalize_chapters
-from dungeon.coupling import DEFAULT_COUPLING_LEVEL, normalize_coupling_level
+from dungeon.coupling import normalize_coupling_level
+from dungeon.schema import empty_scenario_config
+from dungeon.validate import format_diagnostics, validate_scenario_config
 from dungeon.terms import (DEFAULT_SCENARIO_ID, LEGACY_SCENARIO_RESOURCE_KEY,
                            SCENARIO_CONFIG_NAME, SCENARIO_RESOURCE_KEY,
                            is_default_scenario)
@@ -29,6 +31,8 @@ class ScenarioRepo:
         self._data_dir = data_dir
         self._world_state = world_state
         self._write_root = os.path.join(data_dir, "packs", SCENARIO_RESOURCE_KEY)
+        # 最近一次 save_config 的校验诊断（编辑器/启动流程各取所需）
+        self.last_diagnostics = []
         self._migrate_legacy_root()
         os.makedirs(self._write_root, exist_ok=True)
         self._ensure_default()
@@ -117,6 +121,13 @@ class ScenarioRepo:
         return self._migrate(config)
 
     def save_config(self, scenario_id: str, config: dict):
+        # S2：保存即校验（不阻断写入——编辑器的增量自动保存可能经过中间态；
+        # 诊断记入 last_diagnostics，由编辑器/启动流程决定如何展示）
+        self.last_diagnostics = validate_scenario_config(
+            config, scenario_dir=self.scenario_dir(scenario_id))
+        if self.last_diagnostics:
+            print(f"[ScenarioRepo] 方案「{scenario_id}」校验提示：\n"
+                  + format_diagnostics(self.last_diagnostics))
         scenario_dir = os.path.join(self._write_root, scenario_id)
         os.makedirs(scenario_dir, exist_ok=True)
         # 原子写 + 覆盖前留 .bak：编辑器保存方案时崩溃/断电不会把配置截断清零
@@ -173,22 +184,8 @@ class ScenarioRepo:
                   f"已迁移 {moved} 个方案到 packs/{SCENARIO_RESOURCE_KEY}")
 
     def _empty_config(self) -> dict:
-        return {
-            "initial_prompt": "",
-            "coupling_level": DEFAULT_COUPLING_LEVEL,
-            "entry_action_cost": 0,
-            "section_prompts": {
-                "background": "", "branch": "", "dialog": "",
-                "interaction": "", "action": ""
-            },
-            "evolution_attrs": [
-                {"type": "intrusion", "name": "介入度", "display_state": "collapse"},
-                {"type": "destruction", "name": "破坏性", "display_state": "collapse"},
-                {"type": "casualty", "name": "总伤亡", "display_state": "collapse"},
-            ],
-            "chapters": [],
-            "triggers": []
-        }
+        """空方案模板：字段与默认值以 ``dungeon/schema.py`` 的声明为准（单一真相源）。"""
+        return empty_scenario_config()
 
     @staticmethod
     def _migrate(config: dict) -> dict:
