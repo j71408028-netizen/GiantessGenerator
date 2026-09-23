@@ -2,7 +2,7 @@
 
 本文档汇总角色演化模型的完整设计：参与的量、每类行为的演化公式（与当前
 代码一致）、以及模拟验证已确认的动态特性。各机制的代码入口见
-`docs/world_pack_behaviors.md` 的行为钩子表；副本侧见 `docs/dungeon_chapters.md`。
+`docs/world_pack_behaviors.md` 的行为钩子表；副本侧见 `docs/Dungeon/dungeon_chapters.md`。
 
 ## 1. 参与的量
 

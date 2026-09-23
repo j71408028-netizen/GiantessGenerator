@@ -2,8 +2,6 @@
 
 import threading
 
-from dungeon.window.dispatcher import _dispatch
-
 
 class EndingHandler:
     # ------------------ 敏感效果汇总 ------------------
@@ -25,7 +23,7 @@ class EndingHandler:
         # 结局图标：配置了图标才算重要结局，结局生成时一起显示
         self.ending_icon_path = (pending.get("action_data") or {}).get("icon_path", "") or ""
         if self.ending_icon_path:
-            _dispatch.enqueue(self._update_ending_icon)
+            self._frame.call(self._update_ending_icon)
         self._ending_thread = threading.Thread(target=self._generate_ending, daemon=True)
         self._ending_thread.start()
 

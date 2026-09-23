@@ -1,12 +1,9 @@
 """UI 构建、文本显示、布局自适应与事件回调。"""
 
 import os
-import threading
-import time
 
 import dearpygui.dearpygui as dpg
 
-from dungeon.window.dispatcher import _dispatch
 from dungeon.models import DungeonTextType
 
 
@@ -16,6 +13,8 @@ _HIGHLIGHT_COLOR = (255, 200, 60, 255)
 # 仿流式输出：每次推进的字符数与间隔（约 65 字/秒）
 _ANIM_CHARS_PER_TICK = 2
 _ANIM_TICK_SECONDS = 0.03
+#: 仿流式动画的帧任务 key（同一时刻只有一条动画，新的顶掉旧的）
+_TEXT_ANIM_TASK = "text:anim"
 
 
 class DungeonWindowUI:
@@ -139,7 +138,9 @@ class DungeonWindowUI:
             dpg.add_key_press_handler(key=dpg.mvKey_F11, callback=self._toggle_fullscreen)
 
         dpg.set_viewport_resize_callback(self._on_viewport_resize)
-        dpg.set_exit_callback(self._on_close)
+        # 不注册 set_exit_callback：手动渲染模式下它在 destroy_context() 内部才
+        # 触发（太晚，清理已无从下手）。关闭改由帧循环的 is_dearpygui_running()
+        # 判定，并在退出分支里调用 _on_close（见 base._run_frame_loop）。
 
         dpg.setup_dearpygui()
         dpg.show_viewport()
@@ -181,7 +182,7 @@ class DungeonWindowUI:
         if self._text_update_pending or self._closing:
             return
         self._text_update_pending = True
-        _dispatch.enqueue(self._flush_text_update)
+        self._frame.call(self._flush_text_update)
 
     def _flush_text_update(self):
         self._text_update_pending = False
@@ -209,40 +210,41 @@ class DungeonWindowUI:
     def _animate_reveal(self, item, text: str):
         """让新上屏的显示段落逐字增长，模拟 AI 流式输出的节奏。
 
+        动画由帧时钟驱动（L3）：一条 repeating 帧任务每 ``_ANIM_TICK_SECONDS``
+        推进两个字，取代过去"每句话新起一条线程 + ``sleep`` 轮询 ``_closing``"。
         动画期间再点击一次由 ``_finish_text_animation`` 立即补完。
         """
         self._finish_text_animation()
         if not text:
             return
-        state = {"item": item, "text": text, "pos": 0, "active": True}
+        state = {"item": item, "text": text, "pos": 0}
         self._text_anim_state = state
 
-        def run():
-            try:
-                while state["active"] and not self._closing:
-                    state["pos"] = min(len(text), state["pos"] + _ANIM_CHARS_PER_TICK)
-                    item["text"] = text[:state["pos"]]
-                    if state["pos"] >= len(text):
-                        break
-                    self._schedule_text_update()
-                    time.sleep(_ANIM_TICK_SECONDS)
-            finally:
-                state["active"] = False
-                if self._text_anim_state is state:
-                    self._text_anim_state = None
-                if not self._closing:
-                    self._schedule_text_update()
+        def step():
+            # 会话关闭 / 已被后续动画或跳过接管：收摊
+            if self._closing or self._text_anim_state is not state:
+                self._frame.cancel(_TEXT_ANIM_TASK)
+                return
+            state["pos"] = min(len(text), state["pos"] + _ANIM_CHARS_PER_TICK)
+            item["text"] = text[:state["pos"]]
+            if state["pos"] >= len(text):
+                self._text_anim_state = None
+                self._frame.cancel(_TEXT_ANIM_TASK)
+            # _schedule_text_update 经帧队列投递，本帧末尾就会上屏
+            self._schedule_text_update()
 
-        threading.Thread(target=run, daemon=True).start()
+        self._frame.every(_ANIM_TICK_SECONDS, step, key=_TEXT_ANIM_TASK)
 
     def _finish_text_animation(self):
         """立即补完进行中的仿流式动画（点击跳过逐字过程）。"""
         state = getattr(self, "_text_anim_state", None)
         if not state:
             return
-        state["active"] = False
         state["item"]["text"] = state["text"]
         self._text_anim_state = None
+        frame = getattr(self, "_frame", None)
+        if frame is not None:
+            frame.cancel(_TEXT_ANIM_TASK)
         self._schedule_text_update()
 
     # ---------- 布局自适应 ----------
@@ -268,7 +270,7 @@ class DungeonWindowUI:
         if getattr(self, "_relayout_pending", False):
             return
         self._relayout_pending = True
-        _dispatch.enqueue(self._flush_relayout)
+        self._frame.call(self._flush_relayout)
 
     def _flush_relayout(self):
         self._relayout_pending = False

@@ -5,7 +5,6 @@ import threading
 import dearpygui.dearpygui as dpg
 
 from dungeon.coupling import coupling_prompts, normalize_coupling_level
-from dungeon.window.dispatcher import _dispatch
 
 
 class OptionHandler:
@@ -50,7 +49,7 @@ class OptionHandler:
         finally:
             self._option_generating = False
             if not self._closing:
-                _dispatch.enqueue(self._open_option_dialog, labels)
+                self._frame.call(self._open_option_dialog, labels)
 
     def _open_option_dialog(self, labels):
         """在主线程弹出选项弹窗（modal），点击任意选项后继续。"""

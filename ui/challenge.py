@@ -573,7 +573,9 @@ class ChallengeModePanel(ctk.CTkFrame):
         self.gui.selected_styles = self.gui.context.selected_styles
         self.gui.selected_quip_styles = self.gui.context.selected_quip_styles
 
+        # L4：run() 返回结果对象（挑战模式无入口阶段，暂无需要处理的分支）
         from dungeon.window import DungeonSessionWindow
+        from ui.common.tk_host import TkHost
         DungeonSessionWindow(
             self.gui.root,
             name=name, nick=nick,
@@ -588,8 +590,8 @@ class ChallengeModePanel(ctk.CTkFrame):
             greed=greed, is_replay=False, replay_data=None,
             scenario_id=scenario_id, dungeon_font=dungeon_font, body_parts=body_parts,
             character=None, character_repo=self.gui._character_repo, gui=self.gui,
-            mode="challenge"
-        )
+            mode="challenge", host=TkHost(self.gui.root)
+        ).run()
 
         self.gui.context.selected_styles = saved_styles
         self.gui.context.selected_quip_styles = saved_quip

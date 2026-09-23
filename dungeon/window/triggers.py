@@ -11,7 +11,6 @@ from dungeon.actions import (EMPTY_ACTIONS, VISUAL_FILTER_KEYS,
                              normalize_action_type)
 from dungeon.chapters import (find_chapter, is_terminating_chapter,
                               matches_scope, sensitivity_amount)
-from dungeon.window.dispatcher import _dispatch
 from dungeon.models import DungeonState, DungeonTextType
 from dungeon.rules import TriggerRules
 
@@ -347,7 +346,7 @@ class TriggerHandler:
             icon_path = (action_data or {}).get("icon_path", "") or ""
             if icon_path:
                 self.ending_icon_path = icon_path
-                _dispatch.enqueue(self._update_ending_icon)
+                self._frame.call(self._update_ending_icon)
             if ending_text:
                 self.ending_text = ending_text
                 self.story_history.append({"type_str": "【结局】", "text": ending_text, "highlight": True})

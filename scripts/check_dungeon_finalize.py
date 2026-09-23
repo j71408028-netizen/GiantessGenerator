@@ -71,13 +71,27 @@ with open(config_path, "w", encoding="utf-8") as f:
 check("repo 自愈读取 .bak", repo.load_config("_default")["initial_prompt"] == "v1")
 
 # ---------------- 3. _finalize 三态 ----------------
-import ui.common.dialogs as dialogs  # noqa: E402
 import dungeon.window.persistence as persp  # noqa: E402
+from dungeon.window.host import DIALOG_ASK, HostPort  # noqa: E402
 
-dialog_calls = []
-dialogs.showinfo = lambda *a, **k: dialog_calls.append(("info", a))
-dialogs.showwarning = lambda *a, **k: dialog_calls.append(("warn", a))
-dialogs.askyesno = lambda *a, **k: (dialog_calls.append(("ask", a)), False)[1]
+
+class RecordingHost(HostPort):
+    """记录收尾弹框；询问类一律回答「否」。
+
+    L2 之后 window 层只经宿主端口弹框（``dungeon/window/host.py``），
+    自检因此改为注入一个记录宿主，不再打桩 ``ui.common.dialogs`` 模块。
+    """
+
+    def __init__(self):
+        self.calls = []   # [(kind, title, message), ...]
+
+    def dialog(self, kind, title, message):
+        self.calls.append((kind, title, message))
+        return False if kind == DIALOG_ASK else None
+
+
+HOST = RecordingHost()
+dialog_calls = HOST.calls
 
 # 所有落盘都改到临时目录，绝不碰真实 data/
 session_root = os.path.join(tmp, "session_data")
@@ -101,6 +115,7 @@ class StubSession(persp.DungeonPersistence):
     """最小会话替身：只补齐 _finalize 依赖的状态字段。"""
 
     def __init__(self, with_character=True, mode="explore", errors=()):
+        self.host = HOST
         self.is_replay = False
         self.mode = mode
         self.scenario_id = "unit_test"
@@ -144,7 +159,7 @@ check("未完成报告已落盘且标注未完成",
 check("未完成不写 endings.json",
       not os.path.exists(os.path.join(session_root, "user", "endings.json")))
 check("未完成不记结局索引", stub._achievement_record is None)
-check("未完成退出有提示", any(c[0] == "info" and "未完成" in c[1][0] for c in dialog_calls))
+check("未完成退出有提示", any(c[0] == "info" and "未完成" in c[1] for c in dialog_calls))
 check("未完成标记已记录（避免重复落盘）", stub._replay_saved and stub._finalized)
 
 # 3.2 幂等：再次调用不产生第二份文件
@@ -169,7 +184,7 @@ stub3.replay_data = []
 stub3.story_history = []
 stub3._finalize(completed=False, reason="未触发结局就退出")
 check("空会话不落盘", len(os.listdir(replay_dir)) == 1, os.listdir(replay_dir))
-check("空会话有提示", any(c[0] == "info" and "没有生成任何内容" in c[1][1] for c in dialog_calls))
+check("空会话有提示", any(c[0] == "info" and "没有生成任何内容" in c[2] for c in dialog_calls))
 
 # 3.5 会话异常汇总进未完成报告
 stub4 = StubSession(errors=["ValueError: 模型返回空", "TimeoutError: 超时"])

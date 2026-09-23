@@ -7,6 +7,7 @@
 """
 
 import random
+import time
 from collections import deque
 
 import dearpygui.dearpygui as dpg
@@ -15,7 +16,11 @@ from ai import create_client
 from dungeon.window.background import DungeonBackground
 from dungeon.chapters import normalize_chapters
 from dungeon.coupling import normalize_coupling_level
-from dungeon.window.dispatcher import _dispatch
+from dungeon.window.frame import FrameScheduler
+from dungeon.window.host import HostPort
+from dungeon.window.result import (REASON_ALREADY_RUNNING, REASON_ENTRY_CANCELLED,
+                                   REASON_LAUNCH_FAILED, REASON_SESSION_ENDED,
+                                   SessionResult)
 from dungeon.models import DungeonTextType, DungeonState
 from dungeon.prompts import DungeonPromptBuilder
 from dungeon.rules import EvolutionRules
@@ -23,13 +28,42 @@ from dungeon.summary import DEFAULT_RECENT_COUNT, StorySummarizer
 from dungeon.validate import format_diagnostics, has_errors, validate_scenario_config
 from logic import get_size_category
 from services.state_service import StateService
-from ui.common.fonts import dungeon_font_default
 
 # 文本区布局样式：旧的「副本窗口视图」设置已移除，统一用保留全历史的故事布局
 LAYOUT_STYLE = "story"
 
 
 class DungeonWindowBase:
+    """副本窗口的生命周期：构造（``__init__``）与运行（``run``）分离。
+
+    驱动方式（L0）：不再调用 ``dpg.start_dearpygui()`` 把调用方的主循环堵死，
+    改由 :meth:`_run_frame_loop` 手动渲染——每帧 drain 一次调度队列、渲染一帧、
+    再让宿主处理一次事件。由此带来三点：
+
+    - 关闭只需 ``dpg.stop_dearpygui()``（跨平台），不再需要按窗口标题
+      ``FindWindowW`` + ``WM_CLOSE`` 的平台 hack；
+    - 关闭用 ``dpg.is_dearpygui_running()`` 检测（``is_viewport_ok()`` 关闭后
+      仍返回 True，不能用来判定）；
+    - ``set_exit_callback`` 在手动模式下只在 ``destroy_context()`` 内部触发，
+      太晚，因此清理前移到帧循环"已停止"分支（见 ``engine.DungeonStoryEngine._on_close``）。
+
+    帧时钟（L3）：窗口自带一个 :class:`~dungeon.window.frame.FrameScheduler`
+    （``self._frame``），背景轮播、结局图标翻页、Ken Burns、仿流式动画与背景防抖
+    都挂在它上面，它是本层的唯一时间源；会话结束随之 stop。
+
+    结果（L4）：:meth:`run` 返回 :class:`~dungeon.window.result.SessionResult`，
+    调用方不再读窗口的私有属性。
+    """
+
+    #: 手动渲染的帧间隔（秒）。渲染本身不阻塞，间隔决定上限帧率。
+    FRAME_INTERVAL = 1.0 / 60.0
+    #: 帧循环期间是否泵宿主事件（Tk 的 ``update()``）：开启后主窗口在副本
+    #: 运行期间仍可响应/重绘，不再"假死"。宿主不提供 ``update()`` 时自动跳过。
+    PUMP_HOST_EVENTS = True
+    #: 同一进程内只允许一个会话在跑。宿主事件泵会把调用方的回调重新放回
+    #: 主线程，若不挡住就可能嵌套创建第二个 DPG context（DPG 上下文是全局单例）。
+    _session_running = False
+
     def __init__(self, parent, name, nick, personality, preset, original_height,
                  intro_hidden, intro_visible, tags, uploaded_image,
                  scenario_config, scenario_repo,
@@ -38,7 +72,10 @@ class DungeonWindowBase:
                  ai_config, greed: int,
                  is_replay=False, replay_data=None, scenario_id=None, dungeon_font=None,
                  body_parts=None, character=None, character_repo=None, gui=None,
-                 mode="explore", scenario_ids=None):
+                 mode="explore", scenario_ids=None, host=None):
+        # 宿主端口（L2）：尺寸/DPI、显隐、事件泵、弹框、活动窗口登记、字体
+        # 全部经此取得。未传时用无宿主缺省实现（自检脚本、无人值守）。
+        self.host = host if host is not None else HostPort()
         self.parent = parent
         self.name = name
         self.nick = nick
@@ -62,7 +99,7 @@ class DungeonWindowBase:
         self.is_replay = is_replay
         self.loaded_replay = replay_data
         self.scenario_id = scenario_id
-        self.dungeon_font = dungeon_font or dungeon_font_default()
+        self.dungeon_font = dungeon_font or self.host.default_font()
         self.body_parts = body_parts
         # 副本保存/回放相关
         self.character = character
@@ -80,6 +117,9 @@ class DungeonWindowBase:
         self._ending_trigger_index = -1
         self._achievement_record = None
         self._replay_saved = False
+        # 本局落盘的产物路径（L4：由 SessionResult 交给调用方）
+        self.replay_path = ""
+        self.report_path = ""
         # 统一收尾标记：_finalize() 只允许执行一次（正常结局/用户中断/生成异常共用）
         self._finalized = False
         # 会话内的生成异常（不再只 print：收尾时汇总进「未完成」报告）
@@ -88,10 +128,12 @@ class DungeonWindowBase:
         self._closing = False
         self._text_update_pending = False
         self._text_item_tags = []
+        # 帧时钟（L3）：时机在这里，重活在外面。取代原先的模块级单例 _dispatch：
+        # 每帧 tick 一次（先跑到期任务，再 drain 主线程更新队列），会话结束 stop。
+        self._frame = FrameScheduler()
         self._bg_pil_full = None
         self._bg_pil_original = None
         self._bg_revision = 0
-        self._bg_resize_timer = None
         self._background = DungeonBackground(self)
 
         # 入口阶段（dungeon.window.launcher.DungeonLaunchStages）与会话阶段共用同一 DPG 生命周期
@@ -166,49 +208,136 @@ class DungeonWindowBase:
         self._real_title = f"副本模式 - {self.name}" if not self.is_replay else f"回放模式 - {self.name}"
         self._temp_title = f"DungeonSession" if self._is_windows else self._real_title
 
+        # 帧循环统计（自检/调试用）
+        self.frames_rendered = 0
+
+    # ---------------- 生命周期：构造之后显式 run() ----------------
+    def run(self) -> SessionResult:
+        """建 UI → 驱动帧循环 → 收尾，返回这一局的结果对象（L4）。
+
+        调用方只看返回值就知道发生了什么（``result.failed`` / ``result.cancelled``
+        / ``result.succeeded``），不必再摸 ``window._launch_error`` 这类私有属性；
+        需要细看窗口状态时也可以自己留着实例引用（自检脚本就是这么做的）。
+
+        重入由 ``_session_running`` 挡住：宿主事件泵会把调用方的回调重新放回
+        主线程，若不挡住就可能嵌套创建第二个 DPG 上下文。
+        """
+        cls = type(self)
+        if cls._session_running:
+            print("[Dungeon] 已有副本会话在运行，忽略本次启动")
+            return SessionResult(REASON_ALREADY_RUNNING,
+                                 scenario_id=self.scenario_id or "")
+        cls._session_running = True
+        try:
+            self._start_session()
+        finally:
+            cls._session_running = False
+        return self._build_result()
+
+    def _build_result(self) -> SessionResult:
+        """把这一局的结果打包成 :class:`SessionResult`。"""
+        frames = self.frames_rendered
+        # 入口选择失败：窗口已经关了，错误由调用方在主线程提示
+        if self._launch_error:
+            return SessionResult(REASON_LAUNCH_FAILED,
+                                 launch_error=self._launch_error,
+                                 launch_choice=self._launch_choice,
+                                 scenario_id=self.scenario_id or "",
+                                 frames_rendered=frames)
+        # 入口页直接返回：没进过会话，不应有任何内容
+        if getattr(self, "_exit_from_entry", False):
+            return SessionResult(REASON_ENTRY_CANCELLED,
+                                 launch_choice=self._launch_choice,
+                                 scenario_id=self.scenario_id or "",
+                                 frames_rendered=frames)
+        return SessionResult(REASON_SESSION_ENDED,
+                             launch_choice=self._launch_choice,
+                             scenario_id=self.scenario_id or "",
+                             ended=bool(self.dungeon_ended),
+                             is_replay=bool(self.is_replay),
+                             replay_path=getattr(self, "replay_path", "") or "",
+                             report_path=getattr(self, "report_path", "") or "",
+                             frames_rendered=frames)
+
+    def _start_session(self):
         # 向主窗口注册自身，以便关闭时能通知 DPG 退出
         self._register_with_parent()
+        try:
+            self._build_ui()
 
-        self._build_ui()
+            # 入口阶段：与正式副本会话界面共享同一个 viewport，
+            # 用户在入口页选择副本方案后由 _enter_dungeon_phase() 切换到会话阶段。
+            if self.scenario_ids:
+                self._enter_entry_phase()
+            else:
+                # 无入口阶段（挑战模式/直接指定配置）：会话配置已在 __init__ 初始化，
+                # 立即构建显示组件。
+                self._init_components()
+                self._build_components()
+                self._enter_start_chapter()
 
-        # 入口阶段：与正式副本会话界面共享同一个 viewport，
-        # 用户在入口页选择副本方案后由 _enter_dungeon_phase() 切换到会话阶段。
-        if self.scenario_ids:
-            self._enter_entry_phase()
-        else:
-            # 无入口阶段（挑战模式/直接指定配置）：会话配置已在 __init__ 初始化，
-            # 立即构建显示组件。
-            self._init_components()
-            self._build_components()
-            self._enter_start_chapter()
+            # 藏起宿主：DPG 视口是独立顶层窗口，不藏会两个窗口同时占屏
+            self.host.hide_window()
 
-        if self.parent and hasattr(self.parent, 'withdraw'):
-            self.parent.withdraw()
+            # 标题修正放到首帧：此时原生窗口已创建，按标题 FindWindowW 才找得到
+            self._frame.call(self._fix_windows_title)
 
-        # 经调度器在首帧执行标题修正，避免与调度器自身的 frame callback 链冲突
-        _dispatch.enqueue(self._fix_windows_title)
-        _dispatch.install()
+            self._run_frame_loop()
+        finally:
+            self._finish_session()
 
-        dpg.start_dearpygui()
+    def _run_frame_loop(self):
+        """手动驱动 DPG 渲染：泵宿主 → tick 帧时钟 → 检测关闭 → 渲染一帧 → 让位。
 
-        _dispatch.stop()
+        每帧的顺序很关键：先 tick（跑到期的帧任务，再执行后台线程投递的 UI 更新），
+        再判定是否已停止，最后渲染；反过来会让"关闭前最后一次更新"永远执行不到。
+
+        ``self._frame.tick()`` 是整层的**唯一时间源**（L3）：轮播、图标翻页、Ken
+        Burns、仿流式动画、背景防抖都挂在它上面，因此不再有并行的时间线。
+        """
+        while True:
+            self._pump_host_events()
+            self._frame.tick()
+            if not dpg.is_dearpygui_running():
+                # 用户点 X 或程序 stop：走与退出回调等价的清理
+                self._on_close()
+                break
+            dpg.render_dearpygui_frame()
+            self.frames_rendered += 1
+            time.sleep(self.FRAME_INTERVAL)
+
+    def _pump_host_events(self):
+        """让宿主处理一次挂起事件，避免主窗口在副本运行期间"假死"。
+
+        经宿主端口调用（``TkHost`` 映射到 ``widget.update()``）；没有宿主或
+        宿主不支持时静默跳过。重入由 ``_session_running`` 兜住：宿主回调里
+        再次启动副本会被 :meth:`run` 忽略，不会嵌套出第二个 DPG 上下文。
+        """
+        if not self.PUMP_HOST_EVENTS:
+            return
+        try:
+            self.host.pump_events()
+        except Exception:
+            pass
+
+    def _finish_session(self):
+        """帧循环结束后的收尾（无论正常关闭还是异常都执行）。"""
+        # 帧时钟先停：此后后台线程投递的界面更新与未跑的帧任务一律丢弃，
+        # 不会再碰到即将销毁的 DPG 上下文（L3 之后它由会话独占，无需再 install）。
+        self._frame.stop()
+        # 背景像素工作者：会话内的全部重采样/混合任务都在这里排队，收工时一并结束
+        self._background.shutdown()
 
         # 先恢复主窗口，便于退出提示/保存回放对话框正确显示
-        if self.parent and hasattr(self.parent, 'deiconify'):
+        self.host.show_window()
+
+        # 等待后台 AI 线程退出（结局生成；未启动时跳过）
+        thread = getattr(self, "_ending_thread", None)
+        if thread is not None:
             try:
-                self.parent.deiconify()
-                self.parent.lift()
+                thread.join(timeout=0.5)
             except Exception:
                 pass
-
-        # 等待入口阶段后台线程退出（未启动时跳过）
-        for attr in ("_bg_thread", "_ending_thread"):
-            thread = getattr(self, attr, None)
-            if thread is not None:
-                try:
-                    thread.join(timeout=0.5)
-                except Exception:
-                    pass
 
         # 用户关闭副本窗口时进行退出处理：未触发结局走 _finalize(False) 把已生成内容
         # 落盘为「未完成」回放；已触发结局则询问是否保存正式回放
@@ -216,8 +345,13 @@ class DungeonWindowBase:
         if self._closing and not getattr(self, "_exit_from_entry", False):
             self._handle_exit()
 
-        dpg.destroy_context()
-        self._unregister_with_parent()
+        try:
+            dpg.destroy_context()
+        except Exception as e:
+            # 建 UI 阶段就抛异常时上下文可能根本没建起来，这里不能连累收尾
+            print(f"[Dungeon] 销毁 DPG 上下文失败: {e}")
+        finally:
+            self._unregister_with_parent()
 
     # ---------------- 会话内容初始化 ----------------
     def _current_action_points(self):
@@ -422,26 +556,14 @@ class DungeonWindowBase:
     # 子类 mixin 会覆盖 _enter_entry_phase / _init_entry_materials：
     # base 只负责在 _build_ui() 后调用统一的 enter 钩子进入入口阶段。
     def _request_close(self):
-        """请求退出 DPG 渲染循环（可在任意回调内安全调用）。
+        """请求退出帧循环（可在任意回调内安全调用）。
 
-        在控件/帧回调内直接调用 dpg.stop_dearpygui() 会让渲染帧中途停止，
-        随后的 destroy_context() 因 DPG 内部状态未正常收尾而破坏堆——
-        Windows 上表现为窗口关闭后进程在 Tk 主循环中于 _dearpygui.pyd
-        内崩溃退出。改为向视口窗口投递 WM_CLOSE，让 DPG 走与用户点窗口
-        X 按钮相同的原生关闭路径（在消息轮询阶段帧间停止），实测稳定。
-        非 Windows 平台回退为直接 stop。
+        L0 之后渲染由 :meth:`_run_frame_loop` 手动驱动，一帧只在两帧之间
+        的间隙被调用，因此直接 ``stop_dearpygui()`` 不会再打断渲染帧——
+        帧循环下一轮检测到 ``is_dearpygui_running() == False`` 就走正常收尾。
+        旧的 ``FindWindowW(标题) + PostMessageW(WM_CLOSE)`` 是 Windows 专有
+        hack（靠临时/真实两套窗口标题找句柄），已随手动渲染一并删除。
         """
-        if self._is_windows:
-            try:
-                import ctypes
-                hwnd = ctypes.windll.user32.FindWindowW(None, self._temp_title)
-                if not hwnd:
-                    hwnd = ctypes.windll.user32.FindWindowW(None, self._real_title)
-                if hwnd:
-                    ctypes.windll.user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
-                    return
-            except Exception as e:
-                print(f"副本窗口关闭请求失败: {e}")
         try:
             dpg.stop_dearpygui()
         except Exception:
@@ -450,55 +572,24 @@ class DungeonWindowBase:
     def _close_loop(self):
         """入口阶段选择“返回”时关闭窗口。
 
-        不在此处直接 stop 渲染循环（见 _request_close 的说明）；退出回调
-        _on_close 会在最后一帧完成标记清理（_closing/_exit_from_entry、
-        停调度器），后台线程的 join 由 __init__ 在循环退出后执行。
+        只置标记并请求停止；清理（_closing/_exit_from_entry、停调度器）由
+        帧循环退出分支的 _on_close 完成，后台线程 join 与退出处理由
+        _finish_session 完成。
         """
         self._closing = True
-        if self._bg_resize_timer is not None:
-            try:
-                self._bg_resize_timer.cancel()
-            except Exception:
-                pass
+        # 挂起的重采样帧任务不再需要：窗口正在退出，让它跑只会白算一张新背景
+        self._background.cancel_pending_refresh()
         self._request_close()
 
     # ---------- 视口尺寸（与正式副本会话窗口一致） ----------
     def _get_initial_viewport_size(self):
-        """返回 (视口初始宽, 高, dpi_scale, 主窗口客户区宽, 高)。"""
-        scale = 1.0
-        main_cw = main_ch = 0
-        if self.parent is not None and hasattr(self.parent, "winfo_toplevel"):
-            try:
-                root = self.parent.winfo_toplevel()
-                root.update_idletasks()
-                if self._is_windows:
-                    import ctypes
-                    from ctypes import wintypes
-                    hwnd = ctypes.windll.user32.GetAncestor(root.winfo_id(), 2)  # GA_ROOT
-                    dpi = ctypes.windll.user32.GetDpiForWindow(hwnd)
-                    if dpi:
-                        scale = dpi / 96.0
-                    rect = wintypes.RECT()
-                    if ctypes.windll.user32.GetClientRect(hwnd, ctypes.byref(rect)):
-                        if rect.right > 0 and rect.bottom > 0:
-                            main_cw, main_ch = rect.right, rect.bottom
-                if main_cw <= 0:
-                    scale = float(root.winfo_fpixels("1i")) / 96.0
-                    main_cw = root.winfo_width()
-                    main_ch = root.winfo_height()
-            except Exception:
-                pass
-        elif self._is_windows:
-            try:
-                import ctypes
-                scale = ctypes.windll.user32.GetDpiForSystem() / 96.0
-            except Exception:
-                pass
-        scale = max(0.5, scale)
-        if main_cw <= 0 or main_ch <= 0:
-            main_cw, main_ch = round(1280 * scale), round(720 * scale)
-        return (main_cw + round(16 * scale), main_ch + round(39 * scale),
-                scale, main_cw, main_ch)
+        """返回 (视口初始宽, 高, dpi_scale, 主窗口客户区宽, 高)。
+
+        尺寸与 DPI 全部来自宿主端口：Tk 的 ``winfo_*`` 与 Windows 的
+        ``GetDpiForWindow``/``GetClientRect`` 都在 ``ui.common.tk_host.TkHost``
+        里，window 层不直接碰宿主 API。
+        """
+        return self.host.viewport_metrics()
 
     def _correct_viewport_size_to_main(self):
         try:
@@ -510,22 +601,22 @@ class DungeonWindowBase:
             print(f"视口尺寸校正失败: {e}")
 
     def _register_with_parent(self):
-        """在父对象上注册自身，以便关闭时协调退出。"""
-        obj = self.parent
-        while obj is not None:
-            if hasattr(obj, '_active_dungeon_window') and hasattr(obj, '_closing'):
-                obj._active_dungeon_window = self
-                break
-            obj = getattr(obj, 'master', None) or getattr(obj, 'parent', None)
+        """在宿主上登记自身，以便宿主整体退出时能协调停止本窗口。
+
+        原先沿 ``master/parent`` 链用 ``hasattr`` 摸宿主（Tk 结构知识），
+        现在收进宿主适配器（``TkHost.register_active_window``）。
+        """
+        try:
+            self.host.register_active_window(self)
+        except Exception as e:
+            print(f"[Dungeon] 活动窗口登记失败: {e}")
 
     def _unregister_with_parent(self):
-        """从父对象解除注册。"""
-        obj = self.parent
-        while obj is not None:
-            if hasattr(obj, '_active_dungeon_window') and obj._active_dungeon_window is self:
-                obj._active_dungeon_window = None
-                break
-            obj = getattr(obj, 'master', None) or getattr(obj, 'parent', None)
+        """解除在宿主上的登记。"""
+        try:
+            self.host.unregister_active_window(self)
+        except Exception as e:
+            print(f"[Dungeon] 活动窗口注销失败: {e}")
 
     def _fix_windows_title(self):
         if self._is_windows:

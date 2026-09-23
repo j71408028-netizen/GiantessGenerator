@@ -7,7 +7,6 @@ import dearpygui.dearpygui as dpg
 
 from dungeon.chapters import find_chapter, is_terminating_chapter, overflow_jump_target
 from dungeon.details import build_detail_query_prompt, parse_detail_queries
-from dungeon.window.dispatcher import _dispatch
 from dungeon.models import DungeonTextType
 from dungeon.response import extract_stream_text, parse_final_json
 from dungeon.splitter import split_full_text, split_stream_units
@@ -62,7 +61,7 @@ class DungeonStoryEngine:
             success = False
             try:
                 if getattr(self, "ai_client", None) is None:
-                    _dispatch.enqueue(self._show_ai_error)
+                    self._frame.call(self._show_ai_error)
                     return
                 next_type = self.dungeon_logic.get_next_text_type(self.current_text_type)
                 # 结束章节：所有段落类型被覆盖为「结局」，步进为 0
@@ -403,7 +402,7 @@ class DungeonStoryEngine:
         if errors is None:
             self._session_errors = errors = []
         errors.append(message)
-        _dispatch.enqueue(lambda: self._show_ai_error(f"生成失败：{message}"))
+        self._frame.call(lambda: self._show_ai_error(f"生成失败：{message}"))
 
     def _show_ai_error(self, message: str = ""):
         """在故事区提示 AI 错误（未配置客户端 / 生成失败）。"""
@@ -421,10 +420,9 @@ class DungeonStoryEngine:
         # 不触发会话退出处理（未触发结局的数据丢失警告只对会话阶段有意义）
         if getattr(self, "_is_entry_phase", False):
             self._exit_from_entry = True
-        if self._bg_resize_timer is not None:
-            self._bg_resize_timer.cancel()
+        # 挂起的重采样任务不必再跑：帧时钟会在 _finish_session 里连同其余任务一起丢掉
+        self._background.cancel_pending_refresh()
         self._unregister_with_parent()
-        _dispatch.stop()
         dpg.stop_dearpygui()
 
     # ---------- 辅助方法 ----------

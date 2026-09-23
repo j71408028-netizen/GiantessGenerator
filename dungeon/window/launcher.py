@@ -13,14 +13,13 @@ import math
 import os
 import random
 import re
-import threading
-import time
 
 import dearpygui.dearpygui as dpg
 from PIL import Image
 
-from dungeon.window.dispatcher import _dispatch
+from dungeon.chapters import normalize_chapters
 from dungeon.terms import scenario_id_of
+
 _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
 
 # 结局记录里约定：icon_path 为空/缺失 = 该结局不重要，不展示
@@ -31,6 +30,13 @@ _ROTATE_RANGE = (-8, 8)
 _BLUR_RANGE = (1.2, 3.0)
 # 轮播间隔（秒）
 _BG_CYCLE_INTERVAL = (6.0, 10.0)
+# 结局图标轮播间隔（秒）
+_ENDING_CYCLE_SECONDS = 3.2
+
+# 帧任务 key：同一时刻各只有一条，新的顶掉旧的
+_BG_CYCLE_TASK = "entry:bg-cycle"
+_ENDING_CYCLE_TASK = "entry:ending-cycle"
+_KB_TASK = "entry:ken-burns"
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +116,11 @@ class DungeonLaunchStages:
 
     base.DungeonWindowBase.__init__ 在 _build_ui() 后调用 self._enter_entry_phase()
     进入入口阶段；用户选择后由 _enter_dungeon_phase() 切换回会话阶段。
-    所有 DPG 主线程操作均经 _dispatch 调度，后台线程只负责淡入淡出/轮播跳转。
+
+    入口阶段的动态部分（背景轮播、结局图标轮播、Ken Burns 运动）全部挂在窗口的
+    帧时钟 ``self._frame`` 上（L3）：它们本质上都只是"每隔 N 秒/每帧动一下"，
+    跟着帧循环生、跟着收尾死，不再需要各自的线程轮询 ``_closing`` 与 join。
+    只有真正吃 CPU 的重采样/淡入淡出由 ``DungeonBackground`` 的单一像素工作者承担。
     """
 
     # ------------------ 入口阶段 ------------------
@@ -119,8 +129,6 @@ class DungeonLaunchStages:
         self._is_entry_phase = True
         self._entry_started = False   # 已完成一次进入选择
         self._launch_choice = None
-        self._bg_thread = None
-        self._ending_thread = None
         # Ken Burns 持续运动状态（图片切换间隙背景缓慢缩放/平移，增强动态感）
         self._kb_scale = 1.0
         self._kb_dx = 0.0
@@ -151,7 +159,6 @@ class DungeonLaunchStages:
     def _collect_ending_icons(self):
         self._ending_items = []
         self._ending_index = 0
-        self._ending_hold = time.time()
         records = list(getattr(self.character, "achieved_endings", None) or [])
         for rec in records:
             if not isinstance(rec, dict):
@@ -348,23 +355,21 @@ class DungeonLaunchStages:
             self._ending_textures.append("end_tex_0")
 
     def _start_ending_cycle(self):
+        """结局图标轮播：每 3.2s 翻一页（帧任务，取代原先的休眠线程）。"""
         if not self._ending_items:
             return
         self._ending_index = 0
-        self._ending_hold = time.time()
 
-        def cycle():
-            n = len(self._ending_items)
-            while not self._closing and self._is_entry_phase:
-                time.sleep(3.2)
-                if self._closing or not self._is_entry_phase:
-                    break
-                idx = (self._ending_index + 1) % n
-                self._ending_index = idx
-                _dispatch.enqueue(self._update_ending_display, idx)
+        def advance():
+            # 帧任务随 entry 阶段一起取消：进入会话/关闭都不必再 join 线程
+            if self._closing or not self._is_entry_phase:
+                self._frame.cancel(_ENDING_CYCLE_TASK)
+                return
+            self._ending_index = (self._ending_index + 1) % len(self._ending_items)
+            # 已在主线程（帧任务由帧循环调用），直接更新即可
+            self._update_ending_display(self._ending_index)
 
-        self._ending_thread = threading.Thread(target=cycle, daemon=True)
-        self._ending_thread.start()
+        self._frame.every(_ENDING_CYCLE_SECONDS, advance, key=_ENDING_CYCLE_TASK)
 
     def _update_ending_display(self, idx):
         if self._closing or not self._is_entry_phase or not self._ending_items:
@@ -402,39 +407,45 @@ class DungeonLaunchStages:
             print(f"副本入口背景加载失败: {e}")
 
     def _start_background_cycle(self):
+        """背景轮播：随机 6~10s 换一张（帧任务自续链，取代原先的休眠线程）。"""
         if not self._bg_images:
             return
+        self._bg_index = 0
 
-        def cycle():
+        def switch():
+            if self._closing or not self._is_entry_phase:
+                self._frame.cancel(_BG_CYCLE_TASK)
+                return
             n = len(self._bg_images)
-            while not self._closing and self._is_entry_phase:
-                time.sleep(random.uniform(*_BG_CYCLE_INTERVAL))
-                if self._closing or not self._is_entry_phase:
-                    break
-                # 只有一张图时 randrange 会因 low>=high 抛异常，直接保持不动
-                if n > 1:
-                    self._bg_index = (self._bg_index + random.randint(1, n - 1)) % n
-                    path = self._bg_images[self._bg_index]
-                else:
-                    path = self._bg_images[0]
-                angle = random.uniform(*_ROTATE_RANGE)
-                blur = random.uniform(*_BLUR_RANGE)
-                _dispatch.enqueue(self._switch_background, path, angle, blur)
+            # 只有一张图时保持不动（多张时才重新抽一张，避免抽到当前这张）
+            if n > 1:
+                self._bg_index = (self._bg_index + random.randint(1, n - 1)) % n
+            path = self._bg_images[self._bg_index]
+            angle = random.uniform(*_ROTATE_RANGE)
+            blur = random.uniform(*_BLUR_RANGE)
+            self._switch_background(path, angle, blur)
+            schedule_next()
 
-        self._bg_thread = threading.Thread(target=cycle, daemon=True)
-        self._bg_thread.start()
+        def schedule_next():
+            # 每次重新抽间隔：同 key 顶掉上一条，天然只有一条等待
+            self._frame.after(random.uniform(*_BG_CYCLE_INTERVAL), switch,
+                              key=_BG_CYCLE_TASK)
+
+        schedule_next()
 
     # ------------------ Ken Burns 持续运动（帧级） ------------------
     def _start_kb_motion(self):
-        """注册 DPG 帧回调：背景在图片切换间隙持续缓慢缩放/平移。
+        """Ken Burns 持续运动：背景在图片切换间隙缓慢缩放/平移。
 
-        不追求严格 60fps：帧回调每 tick 微调 draw_image 的 pmin/pmax，
-        只触发重绘不重建纹理，开销很小。
+        L3 之前走 DPG 的 ``set_frame_callback``（每 2 帧一跳），是独立于帧循环的
+        第二条时间线；现在统一挂到帧时钟上，每帧一跳——行为一致，但整层只剩一个
+        时间源，入口阶段结束时随 key 一并取消。
         """
-        dpg.set_frame_callback(dpg.get_frame_count() + 2, callback=self._kb_tick)
+        self._frame.every(0.0, self._kb_tick, key=_KB_TASK)
 
     def _kb_tick(self, *args):
         if self._closing or not self._is_entry_phase:
+            self._frame.cancel(_KB_TASK)
             return
         try:
             self._kb_phase += self._kb_speed
@@ -442,7 +453,6 @@ class DungeonLaunchStages:
             self._kb_scale = scale
             w, h = self._layout_w, self._layout_h
             if w <= 1 or h <= 1:
-                dpg.set_frame_callback(dpg.get_frame_count() + 2, callback=self._kb_tick)
                 return
             # 以图中心为基准缓慢缩放 + 缓慢左右漂移，形成轻微“呼吸感”
             cw, chh = w * scale, h * scale
@@ -455,9 +465,6 @@ class DungeonLaunchStages:
         except Exception as e:
             if not isinstance(e, SystemError):
                 print(f"背景运动更新失败: {e}")
-        finally:
-            if not self._closing and self._is_entry_phase:
-                dpg.set_frame_callback(dpg.get_frame_count() + 2, callback=self._kb_tick)
 
     def _switch_background(self, path, angle=0.0, blur=2.0):
         """主线程内切换到指定背景（淡入淡出，带旋转/模糊）。"""
@@ -469,27 +476,53 @@ class DungeonLaunchStages:
         except Exception as e:
             print(f"副本入口背景切换失败: {e}")
 
+    # ------------------ 窗口内切换回放（L4） ------------------
+    def _pick_replay_file(self):
+        """让宿主弹文件选择框并读取回放数据；取消/宿主不支持返回 None。"""
+        picker = getattr(self.host, "open_replay_file", None)
+        if not callable(picker):
+            return []
+        try:
+            return picker()
+        except Exception as e:
+            print(f"[Replay] 读取回放文件失败: {e}")
+            return []
+
+    def _enter_replay_phase(self, replay_data):
+        """入口页直接切到回放：**同一个窗口、同一个 DPG 上下文**。
+
+        L4 之前入口页选"加载回放"只能把窗口关掉，把 choice 交给调用方，再由调用
+        方 ``new`` 第二个 ``DungeonSessionWindow(is_replay=True)``——一次完整的
+        create/destroy 生命周期。现在只需把 is_replay 切上、初始化回放会话，
+        然后走和"开始副本"完全相同的 :meth:`_enter_dungeon_phase`。
+        """
+        self.is_replay = True
+        self.loaded_replay = list(replay_data or [])
+        self.current_replay_index = 0
+        self.replay_data = []
+        self.pending_insertions.clear()
+        self.triggers = []
+        self.chapters = normalize_chapters([])
+        self._init_replay(self.loaded_replay)
+        # 标题随之改为回放模式并在原生窗口上生效（已在主线程内，可直接修正）
+        self._real_title = f"回放模式 - {self.name}"
+        try:
+            self._fix_windows_title()
+        except Exception:
+            pass
+        self._enter_dungeon_phase()
+
     # ------------------ 阶段切换 ------------------
     def _freeze_background(self):
-        """停止随机轮播并冻结当前背景（淡入淡出任务被 revision 检查自然丢弃）。"""
-        if self._bg_thread is not None:
-            try:
-                self._bg_thread.join(timeout=0.3)
-            except Exception:
-                pass
-            self._bg_thread = None
-        if self._ending_thread is not None:
-            try:
-                self._ending_thread.join(timeout=0.3)
-            except Exception:
-                pass
-            self._ending_thread = None
-        # 取消挂起的 resize 定时器，避免其覆盖冻结画面
-        if self._bg_resize_timer is not None:
-            try:
-                self._bg_resize_timer.cancel()
-            except Exception:
-                pass
+        """停止随机轮播并冻结当前背景（入口阶段的帧任务一并取消）。
+
+        轮播/图标翻页/Ken Burns 都是帧任务：这里只需按 key 取消，不再需要
+        ``join(timeout=0.3)`` 去等休眠线程醒来。淡入淡出被 revision 检查自然丢弃。
+        """
+        for key in (_BG_CYCLE_TASK, _ENDING_CYCLE_TASK, _KB_TASK):
+            self._frame.cancel(key)
+        # 取消挂起的重采样/淡入淡出任务，避免其覆盖冻结画面
+        self._background.cancel_pending_refresh()
         # 以当前显示的冻结帧为基准：后续 relayout 重新裁切时沿用冻结画面，
         # 而不是退回入口阶段最早启用的那张原图
         if self._bg_pil_original is not None:
@@ -576,8 +609,17 @@ class DungeonLaunchStages:
         self._enter_dungeon_phase()
 
     def _on_entry_replay(self, sender=None, app_data=None, user_data=None):
+        """入口页"加载回放"：在同一窗口内切换到回放，不再让调用方重开窗口。
+
+        用户取消选择时不关闭入口页——以前是把窗口关掉再让 UI 层判断，代价是整段
+        DPG 生命周期；现在只是"什么都没发生"。
+        """
         self._launch_choice = REPLAY_MARK
-        self._enter_dungeon_phase()
+        replay_data = self._pick_replay_file()
+        if not replay_data:
+            self._launch_choice = None
+            return
+        self._enter_replay_phase(replay_data)
 
     def _on_entry_cancel(self, sender=None, app_data=None, user_data=None):
         self._launch_choice = None

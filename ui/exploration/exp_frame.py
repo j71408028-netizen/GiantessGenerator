@@ -1,10 +1,7 @@
 # ui/exploration/exp_frame.py
-import json
 import math
-from tkinter import filedialog
 
 import ui.common.dialogs
-from typing import Optional, List
 
 import customtkinter as ctk
 
@@ -473,7 +470,10 @@ class ExplorationPanel(ctk.CTkFrame):
     def _launch_dungeon_with_data(self, data: dict):
         ai_config = resolve_ai_config(self.app.settings)
         from ui.common.fonts import dungeon_font_default
+        from ui.common.tk_host import TkHost
         dungeon_font = self.app.settings.get("dungeon_font", dungeon_font_default())
+        # 宿主适配器：副本窗口只通过端口取尺寸/DPI、显隐宿主、弹收尾提示
+        host = TkHost(self)
 
         dungeons = self.app._scenario_repo.list_all()
         if not dungeons:
@@ -482,6 +482,8 @@ class ExplorationPanel(ctk.CTkFrame):
 
         # 探索模式：入口阶段在 DungeonSessionWindow 内部完成副本方案选择，
         # 与正式副本会话界面共享同一个 DPG 生命周期，不再创建独立窗口。
+        # L4：run() 返回结果对象，调用方不再读窗口私有属性；入口页选「加载回放」
+        # 也在窗口内部切 is_replay 完成，无需在这里 new 第二个窗口。
         window = DungeonSessionWindow(
             self, name=data["name"], nick=data.get("nick", ""),
             height=data["height"], personality=data["personality_obj"],
@@ -505,62 +507,16 @@ class ExplorationPanel(ctk.CTkFrame):
             character_repo=self.app._character_repo,
             gui=self.app,
             scenario_ids=self.app._scenario_repo.list_all(),
+            host=host,
         )
+        result = window.run()
 
-        # 入口阶段选择失败（配置缺失/行动点数不足）：窗口已关闭，在主线程提示
-        launch_error = getattr(window, "_launch_error", "")
-        if launch_error:
-            ui.common.dialogs.showerror("错误", launch_error)
+        # 入口阶段失败（配置缺失/行动点数不足/校验错误）：窗口已关闭，在主线程提示
+        if result.failed:
+            ui.common.dialogs.showerror("错误", result.launch_error)
             return
-
-        # 入口阶段点“加载回放”：窗口已关闭，回到 Tk 主线程弹回放文件选择
-        choice = getattr(window, "_launch_choice", None)
-        from dungeon.window.launcher import REPLAY_MARK
-        if choice == REPLAY_MARK:
-            replay_data = self._load_replay_file()
-            if replay_data is None:
-                return
-            DungeonSessionWindow(
-                self, name=data["name"], nick=data.get("nick", ""),
-                height=data["height"], personality=data["personality_obj"],
-                preset=data.get("preset_obj"), greed=data.get("greed", 0),
-                original_height=data.get("original_height", 1.6),
-                intro_hidden=data.get("intro_hidden", ""),
-                intro_visible=data.get("intro_visible", ""),
-                tags=data.get("selected_tags", []),
-                uploaded_image=data.get("uploaded_image"),
-                scenario_config=None, scenario_repo=self.app._scenario_repo,
-                merged_landmarks=self.context.merged_landmarks,
-                merged_quips=self.context.quips,
-                selected_styles=self.context.selected_styles,
-                selected_quip_styles=self.context.selected_quip_styles,
-                detail_pools=self.context.detail_pools,
-                ai_config=ai_config,
-                is_replay=True, replay_data=replay_data,
-                dungeon_font=dungeon_font,
-                body_parts=data.get("body_parts", {}),
-                character=self.current_state,
-                character_repo=self.app._character_repo,
-                gui=self.app
-            )
-
-    def _load_replay_file(self) -> Optional[List[dict]]:
-        """读取用户选择的回放文件（入口页触发后回到 Tk 主线程弹出文件选择）。"""
-        file_path = filedialog.askopenfilename(
-            title="选择回放文件",
-            filetypes=[("副本回放", "*.replay.json"), ("所有文件", "*.*")]
-        )
-        if not file_path:
-            return None
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            if not isinstance(data, list) or not data:
-                raise ValueError("回放文件格式错误")
-            return data
-        except Exception as e:
-            ui.common.dialogs.showerror("错误", f"加载回放失败：{e}")
-            return None
+        # 其余结果（入口返回 / 正常会话 / 回放）窗口内部已处理完，无需 UI 层介入
+        return
 
     # ---------- 面板辅助 ----------
     def update_theme(self, mode=None):

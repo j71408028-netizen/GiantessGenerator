@@ -3,7 +3,8 @@
 import datetime
 import os
 
-import ui.common.dialogs
+from dungeon.window.host import (DIALOG_ASK, DIALOG_INFO, DIALOG_WARNING,
+                                 HostPort)
 from paths import data_dir
 from logic import compute_casualty
 from models import CharacterSnapshot
@@ -13,6 +14,29 @@ from services.state_service import StateService
 
 
 class DungeonPersistence:
+    # ------------------ 收尾提示（经宿主端口，window 层不 import ui） ------------------
+    # 兜底宿主：给不带 host 的替身/旧调用用（无宿主时提示打到标准输出）。
+    _fallback_host = None
+
+    def _host_port(self):
+        host = getattr(self, "host", None)
+        if host is not None:
+            return host
+        if DungeonPersistence._fallback_host is None:
+            DungeonPersistence._fallback_host = HostPort()
+        return DungeonPersistence._fallback_host
+
+    def _dialog_info(self, title, message):
+        """提示类弹框。无宿主时由端口打到标准输出。"""
+        return self._host_port().dialog(DIALOG_INFO, title, message)
+
+    def _dialog_warning(self, title, message):
+        return self._host_port().dialog(DIALOG_WARNING, title, message)
+
+    def _dialog_ask(self, title, message) -> bool:
+        """询问类弹框；无宿主（自检）时按端口缺省回答。"""
+        return bool(self._host_port().dialog(DIALOG_ASK, title, message))
+
     # ------------------ 结局结算与保存 ------------------
     def _auto_replay_enabled(self) -> bool:
         return bool((self.settings or {}).get("auto_save_replay", False))
@@ -281,16 +305,17 @@ class DungeonPersistence:
             self._replay_saved = True
             if replay_path:
                 self._backfill_replay_path(replay_path)
+            self.replay_path = replay_path
             if not auto and replay_path:
-                ui.common.dialogs.showinfo(
+                self._dialog_info(
                     "保存成功", f"挑战包回放已保存。\n回放：{replay_path}")
             return
         char = self.character
         if char is None:
             if not auto:
-                if not ui.common.dialogs.askyesno(
+                if not self._dialog_ask(
                         "创建角色", "保存副本回放需要角色。\n是否现在创建角色？"):
-                    ui.common.dialogs.showwarning("未保存", "未创建角色，本次副本回放未保存。")
+                    self._dialog_warning("未保存", "未创建角色，本次副本回放未保存。")
                     return
             char = self._create_character_from_session()
             self.character = char
@@ -304,8 +329,10 @@ class DungeonPersistence:
         self._replay_saved = True
         if replay_path:
             self._backfill_replay_path(replay_path)
+        self.replay_path = replay_path
+        self.report_path = report_path
         if not auto and replay_path:
-            ui.common.dialogs.showinfo(
+            self._dialog_info(
                 "保存成功",
                 f"副本回放与报告已保存。\n回放：{replay_path}\n报告：{report_path}")
 
@@ -341,16 +368,16 @@ class DungeonPersistence:
         if errors:
             detail += f"；会话中出现 {len(errors)} 次生成异常（最近：{errors[-1]}）"
         if not self.replay_data and not self.story_history:
-            ui.common.dialogs.showinfo("副本退出", "本次副本还没有生成任何内容，未保存。")
+            self._dialog_info("副本退出", "本次副本还没有生成任何内容，未保存。")
             return
         replay_path, report_path = self._save_incomplete_record(detail)
         if replay_path:
-            ui.common.dialogs.showinfo(
+            self._dialog_info(
                 "副本未完成",
                 f"未触发结局就退出，已把生成的内容保存为「未完成」回放：\n{replay_path}\n"
                 f"报告：{report_path}")
         else:
-            ui.common.dialogs.showwarning(
+            self._dialog_warning(
                 "副本退出", "未触发结局就退出，且未完成回放保存失败，本次数据未保存。")
 
     def _save_incomplete_record(self, reason: str):
@@ -366,6 +393,9 @@ class DungeonPersistence:
         else:
             replay_path = self._write_user_replay_file(incomplete=True)
             report_path = self._write_user_report_file(incomplete=True, reason=reason)
+        # 记下来交给 SessionResult（L4）：调用方不必再自己去翻目录
+        self.replay_path = replay_path
+        self.report_path = report_path
         print(f"[Dungeon] 未完成收尾落盘：回放={replay_path or '失败'}，"
               f"报告={report_path or '失败'}（{reason}）")
         if replay_path:
@@ -404,11 +434,11 @@ class DungeonPersistence:
             return
         if getattr(self, "mode", "explore") == "challenge":
             # 挑战模式：不涉及角色，仅询问是否保存回放到 data/user
-            if ui.common.dialogs.askyesno(
+            if self._dialog_ask(
                     "保存回放", "结局已达成。\n是否保存本次挑战的回放？"):
                 self._save_replay_record(auto=False)
             return
-        if ui.common.dialogs.askyesno(
+        if self._dialog_ask(
                 "保存回放", "结局已达成。\n是否保存本次副本回放？\n"
                             "（保存回放需要角色，或现在创建角色）"):
             self._save_replay_record(auto=False)

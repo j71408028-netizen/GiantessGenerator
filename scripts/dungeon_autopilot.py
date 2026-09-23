@@ -6,8 +6,8 @@
 用法::
 
     python scripts/dungeon_autopilot.py                  # 全部场景（默认，每场景一个子进程）
-    python scripts/dungeon_autopilot.py --scene session-close
-    python scripts/dungeon_autopilot.py --repeat 10      # 连续开关窗口 10 次
+    python scripts/dungeon_autopilot.py --scene session-close --isolate
+    python scripts/dungeon_autopilot.py --repeat 10 --isolate   # 连续开关窗口 10 次
     python scripts/dungeon_autopilot.py --in-process     # 当前进程内依次跑（快，但崩溃会带走全部）
 
 场景：
@@ -16,7 +16,15 @@
 session-close    挑战模式直进会话 → 步进若干 → 点 X 关闭（走「未完成」收尾）
 entry-cancel     探索模式入口页 → 点「返回」（入口退出，不应落盘）
 entry-start      探索模式入口页 → 点「开始副本」→ 步进 → 点 X 关闭
+entry-replay     入口页点「加载回放」→ 先取消一次 → 再选文件 → 在**同一窗口内**切回放
+tk-host          parent 换成真 Tk 根窗口 → 心跳计数证明宿主事件循环未被冻结
 ===============  ==========================================================
+
+``entry-replay`` 覆盖 L4：回放不再让调用方 ``new`` 第二个窗口，而是在同一个 DPG
+生命周期里切 ``is_replay``——因此本场景断言"整段回放只跑了一次窗口生命周期"。
+
+L3 的验收是帧时钟：每个场景结束后，窗口自有的 ``FrameScheduler`` 应已停止、
+``DungeonBackground`` 的像素工作者应收工，会话里不该留下自己的线程。
 
 输出：控制台一行 ASCII 结论 + UTF-8 报告文件路径（报告在临时目录，含全部明细）。
 
@@ -55,7 +63,7 @@ def check(name, ok, extra=""):
 
 
 # ---------------------------------------------------------------------------
-# 隔离：数据目录改到临时目录；对话框换成记录器（真实对话框需要 Tk 根窗口）
+# 隔离：数据目录改到临时目录（真实数据不动）、宿主换成脚本宿主
 # 必须在 import dungeon.window.* 之前打补丁——那些模块用
 # ``from paths import data_dir`` 在导入时绑定函数对象。
 # ---------------------------------------------------------------------------
@@ -64,15 +72,6 @@ import paths  # noqa: E402
 _DATA_ROOT = os.path.join(tempfile.mkdtemp(prefix="dungeon_autopilot_data_"), "data")
 os.makedirs(os.path.join(_DATA_ROOT, "user"), exist_ok=True)
 paths.data_dir = lambda: _DATA_ROOT
-
-import ui.common.dialogs as dialogs  # noqa: E402
-
-dialog_calls = []
-dialogs.showinfo = lambda *a, **k: dialog_calls.append(("info", str(a)[:200]))
-dialogs.showwarning = lambda *a, **k: dialog_calls.append(("warn", str(a)[:200]))
-dialogs.showerror = lambda *a, **k: dialog_calls.append(("error", str(a)[:200]))
-dialogs.askyesno = lambda *a, **k: False
-
 
 # ---------------------------------------------------------------------------
 # 假 AI：不联网、不花钱、可确定性复现
@@ -120,13 +119,69 @@ wbase.create_client = lambda *a, **k: _AI
 
 
 # ---------------------------------------------------------------------------
-# 自动驾驶窗口：在 UI 建好后起一个驾驶员线程，所有操作都经 _dispatch 回到主线程
+# 自检宿主：记录收尾弹框，不做任何窗口操作
+#    L2 之后 window 层只经宿主端口要东西（不再 import ui.common.dialogs），
+#    所以自检不需要再打桩对话框模块——换掉宿主就够了。
+# ---------------------------------------------------------------------------
+from dungeon.window.host import DIALOG_ASK, HostPort  # noqa: E402
+
+
+class ScriptedHost(HostPort):
+    """把弹框收进 ``calls``，询问类一律按 ``answer`` 回答（默认「否」）。
+
+    另外提供 ``replay_payload``：给 :meth:`open_replay_file` 用。置 None 表示
+    "用户在文件选择框里点了取消"（L4 自检要覆盖这条分支）。
+    """
+
+    def __init__(self, widget=None, answer=False, replay_payload=None):
+        self.widget = widget
+        self.answer = answer
+        self.calls = []
+        self.replay_payload = replay_payload
+        self.replay_calls = 0
+
+    def dialog(self, kind, title, message):
+        self.calls.append((kind, title, message))   # [(kind, title, message), ...]
+        if kind == DIALOG_ASK:
+            return bool(self.answer)
+        return None
+
+    def open_replay_file(self):
+        self.replay_calls += 1
+        return self.replay_payload
+
+
+_HOST = ScriptedHost()
+
+#: 结论行出现后等待子进程自行退出的宽限（秒）。正常子进程约 0.1s 退完；
+#: 超过这个时间还在才算"退出阶段挂死"（见 _run_isolated 的说明）。
+EXIT_GRACE = 5.0
+
+#: 真 Tk 宿主：尺寸/DPI/显隐/事件泵全走适配器，只有弹框被换成记录器
+#: ——自检里弹真模态框会一直等用户点确定（`scene_tk_host` 曾因此挂死）。
+from ui.common.tk_host import TkHost  # noqa: E402
+
+
+class RecordingTkHost(TkHost):
+    def __init__(self, widget):
+        super().__init__(widget)
+        self.calls = []
+
+    def dialog(self, kind, title, message):
+        self.calls.append((kind, title, message))
+        return False if kind == DIALOG_ASK else None
+
+
+# ---------------------------------------------------------------------------
+# 自动驾驶窗口：在 UI 建好后起一个驾驶员线程，所有操作都经窗口自己的帧时钟回到主线程
 # ---------------------------------------------------------------------------
 from dungeon.window import DungeonSessionWindow  # noqa: E402
-from dungeon.window.dispatcher import _dispatch  # noqa: E402
+from dungeon.window.launcher import REPLAY_MARK  # noqa: E402
 
 CLICK_GAP = 0.6      # 与 _on_next_step 的 0.4s 节流保持一致
 _MINIMIZE = False    # 是否最小化视口（默认否，见 _build_ui 注释）
+#: 自检里创建的 Tk 根窗口（不销毁：会话结束后碰 Tk 会崩，见 scene_tk_host）
+_KEEP_ALIVE_ROOTS = []
 
 
 class AutopilotWindow(DungeonSessionWindow):
@@ -137,11 +192,14 @@ class AutopilotWindow(DungeonSessionWindow):
       ("click", 次数)   等价于玩家点击/空格（每次间隔 CLICK_GAP）
       ("enter", None)   入口页点「开始副本」
       ("cancel", None)  入口页点「返回」
-      ("close", None)   关闭窗口（走 _close_loop → WM_CLOSE）
+      ("replay", 值)    入口页点「加载回放」：值为 "cancel" 时宿主不返回文件
+      ("close", None)   关闭窗口（走 _close_loop → dpg.stop_dearpygui）
     """
 
     def __init__(self, *args, script=None, **kwargs):
         self._script = list(script or [])
+        #: 每个脚本动作执行后的状态快照，供场景断言"那一刻"的情形
+        self._snapshots = {}
         super().__init__(*args, **kwargs)
 
     def _build_ui(self):
@@ -166,21 +224,34 @@ class AutopilotWindow(DungeonSessionWindow):
                     time.sleep(value)
                 elif action == "click":
                     for _ in range(int(value)):
-                        _dispatch.enqueue(self._on_next_step)
+                        self._frame.call(self._on_next_step)
                         time.sleep(CLICK_GAP)
                 elif action == "enter":
-                    _dispatch.enqueue(self._enter_start)
+                    self._frame.call(self._enter_start)
                     time.sleep(1.0)
                 elif action == "cancel":
-                    _dispatch.enqueue(self._on_entry_cancel)
+                    self._frame.call(self._on_entry_cancel)
+                    time.sleep(1.0)
+                elif action == "replay":
+                    # L4：取消时应留在入口页；返回数据时应切到回放（仍在同一窗口）
+                    self.host.replay_payload = (
+                        None if value == "cancel" else _replay_fixture())
+                    self._frame.call(self._on_entry_replay)
                     time.sleep(1.0)
                 elif action == "close":
-                    _dispatch.enqueue(self._close_loop)
+                    self._frame.call(self._close_loop)
                     time.sleep(1.0)
+                # 每个动作之后留一张快照，场景可以断言"那一刻"的情形
+                self._snapshots[(action, str(value))] = {
+                    "closing": bool(self._closing),
+                    "replay": bool(self.is_replay),
+                    "entry": bool(getattr(self, "_is_entry_phase", False)),
+                    "history": len(self.story_history),
+                }
         except Exception as exc:
             print(f"[autopilot] 脚本执行异常: {exc}")
             traceback.print_exc()
-            _dispatch.enqueue(self._close_loop)
+            self._frame.call(self._close_loop)
 
     def _enter_start(self):
         """入口页点「开始副本」：经真实控件取值，顺便覆盖 combo 读取路径。"""
@@ -217,6 +288,26 @@ def _scenario_config():
     return cfg
 
 
+def _replay_fixture():
+    """回放 fixture：两条步进记录。
+
+    字段按窗口回放路径的需要给全：``_init_replay`` 读第一条的 *_before，
+    ``_replay_next_step`` 读每条的 type/text/*_after。
+    """
+    return [
+        {"step": 1, "kind": None, "type": "background",
+         "text": "回放第一段：街道在脚下震颤。",
+         "intrusion_before": 1.0, "destruction_before": 1.0,
+         "intrusion_after": 1.2, "destruction_after": 1.1,
+         "casualty_increase": 0.0, "total_casualties_after": 0.0},
+        {"step": 2, "kind": None, "type": "dialog",
+         "text": "回放第二段：有人尖叫着后退。",
+         "intrusion_before": 1.2, "destruction_before": 1.1,
+         "intrusion_after": 1.4, "destruction_after": 1.2,
+         "casualty_increase": 0.0, "total_casualties_after": 0.0},
+    ]
+
+
 def _scenario_repo():
     from persistence.scenario_repo import ScenarioRepo
     repo = ScenarioRepo(data_dir=_DATA_ROOT)
@@ -224,11 +315,16 @@ def _scenario_repo():
     return repo
 
 
-def _make_window(script, explore=False):
-    """构造一个自动驾驶窗口；parent=None（不需要 Tk 主窗口）。"""
+def _make_window(script, explore=False, parent=None, host=None):
+    """构造并运行一个自动驾驶窗口（默认用 ScriptedHost，不需要 Tk 主窗口）。
+
+    L1 之后构造与运行分离；L4 之后 ``run()`` 返回 :class:`SessionResult` 而不是
+    ``self``——需要检查窗口内部状态时把实例一起返回（``win, result``）。
+    L2 之后宿主能力全部经 ``host`` 端口注入，自检因此不再打桩对话框模块。
+    """
     repo = _scenario_repo() if explore else None
-    return AutopilotWindow(
-        None, name="自检角色", nick="", height=100.0, personality=_Personality(),
+    win = AutopilotWindow(
+        parent, name="自检角色", nick="", height=100.0, personality=_Personality(),
         preset=None, greed=0, original_height=1.6, intro_hidden="", intro_visible="",
         tags=[], uploaded_image=None,
         scenario_config=None if explore else _scenario_config(),
@@ -240,8 +336,10 @@ def _make_window(script, explore=False):
         body_parts={}, character=None, character_repo=None, gui=None,
         mode="explore" if explore else "challenge",
         scenario_ids=["_default"] if explore else None,
+        host=host if host is not None else _HOST,
         script=script,
     )
+    return win, win.run()
 
 
 def _written_files():
@@ -260,7 +358,8 @@ def _written_files():
 # ---------------------------------------------------------------------------
 def scene_session_close():
     """挑战模式直进会话 → 步进 → 关闭：应落「未完成」回放与报告。"""
-    win = _make_window([("click", 4), ("close", None)], explore=False)
+    win, result = _make_window([("click", 4), ("close", None)], explore=False)
+    check("会话：宿主为脚本宿主", win.host is _HOST)
     check("会话：窗口已关闭", win._closing is True)
     check("会话：生成了段落", len(win.story_history) > 0, len(win.story_history))
     check("会话：调用了 AI", _AI.stream_calls > 0, _AI.stream_calls)
@@ -271,37 +370,139 @@ def scene_session_close():
     check("会话：落盘了报告", bool(reports), reports)
     check("会话：未写 endings.json",
           not os.path.exists(os.path.join(_DATA_ROOT, "user", "endings.json")))
-    check("会话：退出时给出提示", any(c[0] == "info" for c in dialog_calls), dialog_calls)
+    check("会话：退出时给出提示", any(c[0] == "info" for c in _HOST.calls), _HOST.calls)
+    # ---- L4：结果对象 ----
+    check("会话：结果为 session-ended", result.reason == "session-ended", result)
+    check("会话：结果 succeeded", result.succeeded and not result.failed
+          and not result.cancelled, result)
+    check("会话：结果带回访/报告路径", bool(result.replay_path and result.report_path),
+          (result.replay_path, result.report_path))
+    check("会话：结果带了渲染帧数", result.frames_rendered > 0, result.frames_rendered)
+    # ---- L3：帧时钟随会话收摊 ----
+    check("会话：帧时钟已停止", win._frame.running is False)
+    check("会话：帧任务已清空", win._frame.task_count() == 0, win._frame.task_count())
+    check("会话：帧时钟跑过任务", win._frame.task_runs > 0, win._frame.task_runs)
+    check("会话：像素工作者已收工", win._background.worker_alive is False)
 
 
 def scene_entry_cancel():
     """入口页点「返回」：入口退出，不应落任何盘。"""
     files_before = _written_files()
-    win = _make_window([("cancel", None)], explore=True)
+    win, result = _make_window([("cancel", None)], explore=True)
     check("入口返回：窗口已关闭", win._closing is True)
     check("入口返回：标记为入口退出", win._exit_from_entry is True)
     check("入口返回：未生成内容", len(win.story_history) == 0, len(win.story_history))
     check("入口返回：不落盘", _written_files() == files_before,
           set(_written_files()) - set(files_before))
+    check("入口返回：结果为 entry-cancelled",
+          result.reason == "entry-cancelled" and result.cancelled, result)
+    check("入口返回：帧时钟已停止", win._frame.running is False)
+    check("入口返回：像素工作者已收工", win._background.worker_alive is False)
 
 
 def scene_entry_start():
     """入口页点「开始副本」→ 步进 → 关闭：应进入会话并落盘。"""
-    win = _make_window([("enter", None), ("click", 3), ("close", None)], explore=True)
-    check("入口进入：无启动错误", not getattr(win, "_launch_error", ""),
-          getattr(win, "_launch_error", ""))
+    win, result = _make_window([("enter", None), ("click", 3), ("close", None)],
+                               explore=True)
+    check("入口进入：无启动错误", not result.launch_error, result.launch_error)
     check("入口进入：已初始化会话", win._session_initialized is True)
     check("入口进入：生成了段落", len(win.story_history) > 0, len(win.story_history))
     check("入口进入：窗口已关闭", win._closing is True)
     files = _written_files()
     replays = [f for f in files if f.startswith(os.path.join("user", "replays"))]
     check("入口进入：落盘了回放", bool(replays), files)
+    check("入口进入：结果 scenario_id 正确", result.scenario_id == "_default",
+          result.scenario_id)
+    check("入口进入：结果为 session-ended", result.succeeded, result)
+    check("入口进入：像素工作者已收工", win._background.worker_alive is False)
+
+
+def scene_entry_replay():
+    """入口页「加载回放」：取消一次不应关窗，选到文件应在**同一窗口内**切回放。
+
+    L4 之前这段控制流在调用方（关掉窗口 → 由 ``ui/exploration/exp_frame.py``
+    new 出第二个 ``DungeonSessionWindow(is_replay=True)``）。现在窗口自己通过
+    宿主端口的 ``open_replay_file()`` 拿到数据后原地切换，因此：
+
+    - 取消选择时**不关窗**（那一刻 ``_closing`` 仍为 False，入口页继续可用）；
+    - 拿到数据后 ``is_replay`` 为真，回放到尾部时自行关闭；
+    - 全程只有一个窗口生命周期，也就不该产生回放/报告输出（回放不落盘）。
+    """
+    files_before = _written_files()
+    _HOST.replay_payload = None
+    script = [("replay", "cancel"), ("sleep", 0.5), ("replay", "ok"), ("click", 4)]
+    win, result = _make_window(script, explore=True)
+
+    check("回放：宿主被问过两次文件", _HOST.replay_calls == 2, _HOST.replay_calls)
+    # 「取消」那一刻：仍停在入口页，没关窗、没切回放
+    snap = win._snapshots.get(("replay", "cancel"), {})
+    check("回放：取消选择时不关窗", snap.get("closing") is False, snap)
+    check("回放：取消选择时不切回放", snap.get("replay") is False, snap)
+    check("回放：窗口已切到回放模式", win.is_replay is True)
+    check("回放：入口选择记录为回放标记", win._launch_choice == REPLAY_MARK,
+          win._launch_choice)
+    check("回放：渲染过帧", win.frames_rendered > 0, win.frames_rendered)
+    texts = "".join(item.get("text", "") for item in win.story_history)
+    check("回放：放出了 fixture 的正文", "回放第一段" in texts, texts[:120])
+    check("回放：结果为 session-ended",
+          result.reason == "session-ended" and result.is_replay, result)
+    check("回放：不落盘（回放不是新的副本）", _written_files() == files_before,
+          set(_written_files()) - set(files_before))
+    check("回放：像素工作者已收工", win._background.worker_alive is False)
+
+
+def scene_tk_host():
+    """最小 Tk 宿主：副本运行期间宿主事件循环仍在跑（L0 的核心收益）。
+
+    手动渲染后帧由窗口自己的循环驱动，每帧顺带泵一次宿主事件；因此副本跑
+    在 Tk 主窗口里时，主窗口不再"假死"。用 100ms 心跳计数验证：心跳只在
+    宿主的事件循环被处理过之后才会增长。
+
+    **故意不在会话结束后碰 Tk**：实测（新旧两种驱动都一样）在
+    ``destroy_context()`` 之后再调用任何 Tk API（``update()``/``destroy()``）
+    会以 0xC0000005 崩掉进程。真应用不受影响——它的 Tk 对话框都在
+    ``destroy_context()`` 之前（见 base._finish_session 的顺序）。
+    """
+    import tkinter as tk
+    root = tk.Tk()
+    root.geometry("2x2+-4000+-4000")   # 挪到屏幕外，避免测试时闪窗
+    root.withdraw()
+    try:
+        root.attributes("-alpha", 0.0)
+    except Exception:
+        pass
+
+    beats = {"n": 0}
+
+    def beat():
+        beats["n"] += 1
+        root.after(100, beat)
+
+    root.after(100, beat)
+
+    # 真宿主适配器：尺寸/DPI/显隐/事件泵全部走 ui.common.tk_host.TkHost，
+    # 只有弹框换成记录器——自检里弹真模态框会一直等人点（挂死）。
+    host = RecordingTkHost(root)
+    win, _result = _make_window([("click", 3), ("close", None)], explore=False,
+                                parent=root, host=host)
+
+    check("Tk宿主：窗口已关闭", win._closing is True)
+    check("Tk宿主：渲染过帧", win.frames_rendered > 0, win.frames_rendered)
+    check("Tk宿主：帧时钟跑过任务的帧", win._frame.ticks > 0, win._frame.ticks)
+    check("Tk宿主：宿主事件循环未被冻结", beats["n"] > 0, beats["n"])
+    check("Tk宿主：视口尺寸取自宿主", win._main_client_w > 0, win._main_client_w)
+    check("Tk宿主：宿主就是注入的适配器", win.host is host)
+    check("Tk宿主：收尾提示经宿主端口", bool(host.calls), host.calls)
+    # 留给 GC：主动销毁 Tk 根窗口会触发上面那条 0xC0000005
+    _KEEP_ALIVE_ROOTS.append(root)
 
 
 SCENES = {
     "session-close": scene_session_close,
     "entry-cancel": scene_entry_cancel,
     "entry-start": scene_entry_start,
+    "entry-replay": scene_entry_replay,
+    "tk-host": scene_tk_host,
 }
 
 
@@ -334,20 +535,29 @@ def _watchdog(seconds):
     _watchdog_timer.start()
 
 
-def _run_isolated(names, timeout):
+def _run_isolated(names, timeout, repeat=1):
     """每个场景一个子进程：崩溃/挂死只影响子进程，主进程能定位到具体场景。
 
-    判定用子进程打印的结论行而不是退出码——实测跑完会话后进程会在**退出阶段**
-    挂死（DPG 上下文销毁后的 native 收尾），此时结论已经打印完毕；外层在看到
-    结论行后直接 kill，按结论判定成败。
+    判定用子进程打印的结论行而不是退出码——历史上确实出现过"跑完会话后进程在
+    **退出阶段**挂死"（`os._exit` 都绕不过，见 window_host.md
+    §5.3/§5.4：那是长时会话累积出来的 OS/驱动级状态问题，重启即消失）。
+    但**不要**看到结论行就立刻断定挂死：实测正常子进程在结论行之后 0.1s 内就
+    自行退出，立即 `poll()` 会把正常退出误判成挂死（2026-09-23 修正为宽限
+    ``EXIT_GRACE`` 秒）。只有宽限过后仍未退出才算挂死，此时按结论判定成败。
+
+    ``repeat > 1`` 时把重复次数交给子进程内联执行——同一进程里连续开关窗口
+    才是"重开副本"的回归形状（上一轮 stop 掉的调度队列必须重新启用）。
     """
     import subprocess
     for name in names:
+        cmd = [sys.executable, os.path.abspath(__file__), "--scene", name]
+        if repeat > 1:
+            cmd += ["--repeat", str(repeat)]
         proc = subprocess.Popen(
-            [sys.executable, os.path.abspath(__file__), "--scene", name],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            encoding="utf-8", errors="replace")
         buf = []
-        deadline = time.time() + timeout
+        deadline = time.time() + timeout * (repeat if repeat > 1 else 1)
         while time.time() < deadline:
             line = proc.stdout.readline()
             if line:
@@ -357,12 +567,19 @@ def _run_isolated(names, timeout):
             if any("report:" in b for b in buf):   # 结论已输出
                 break
         out = "".join(buf)
+        # 结论行出现后给一小段退出宽限：正常子进程 0.1s 内就退出了，
+        # 立即 poll 会把正常退出误判成挂死（2026-09-23 修正）。
+        grace_deadline = time.time() + EXIT_GRACE
+        while time.time() < grace_deadline and proc.poll() is None:
+            time.sleep(0.05)
         hung = proc.poll() is None
         if hung:
             proc.kill()
         print(f"  [{name}] 输出: {out.strip()[-400:]}")
         if hung:
-            print(f"  [{name}] 进程在退出阶段挂死（已知现象），已强制结束")
+            print(f"  [{name}] 进程在退出阶段挂死（已知环境现象），已强制结束")
+        else:
+            print(f"  [{name}] 子进程自行退出 rc={proc.returncode}")
         check(f"场景 {name} 在 {timeout}s 内给出结论", "[dungeon_autopilot] report:" in out,
               out[-300:])
         check(f"场景 {name} 断言全过", "[dungeon_autopilot] PASSED" in out, out[-300:])
@@ -374,15 +591,17 @@ def main():
     parser.add_argument("--repeat", type=int, default=1,
                         help="每个场景重复次数（>1 用于回归开关窗口的关闭路径）")
     parser.add_argument("--in-process", action="store_true",
-                        help="不开子进程、在当前进程内依次跑场景（默认每个场景一个子进程）")
+                        help="不开子进程、在当前进程内依次跑场景（默认：全部场景时才开子进程）")
+    parser.add_argument("--isolate", action="store_true",
+                        help="强制在子进程里跑（单场景也能用）：进程退出挂死时由父进程超时 kill")
     parser.add_argument("--timeout", type=int, default=40,
                         help="硬看门狗秒数：超时即自杀，避免窗口卡在屏幕上")
     args = parser.parse_args()
 
     names = sorted(SCENES) if args.scene == "all" else [args.scene]
-    # 只有跑全部场景时才默认开子进程；显式指定单个场景就在本进程跑（否则会递归）
-    if args.scene == "all" and not args.in_process:
-        _run_isolated(names, args.timeout)
+    # 全部场景默认开子进程；单场景想在子进程里跑（推荐：退出挂死由父进程兜底）用 --isolate
+    if args.isolate or (args.scene == "all" and not args.in_process):
+        _run_isolated(names, args.timeout, args.repeat)
     else:
         for _ in range(args.repeat):
             for name in names:
