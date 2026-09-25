@@ -150,8 +150,20 @@ class DungeonWindowUI:
         self._update_text_display()
 
     # ---------- 文本更新（仅主线程调用） ----------
+    def _text_owned_by_component(self) -> bool:
+        """是否有组件接管文本显示（owns_text_display，如底部渐变式文本栏）。
+
+        接管期间内置 text_container 管线整体跳过，显示由组件 refresh 完成。
+        """
+        return (getattr(self, "_components_built", False)
+                and any(getattr(c, "owns_text_display", False)
+                        for c in getattr(self, "_components", [])))
+
     def _update_text_display(self):
-        # 保留全历史：不再区分故事/游戏视图
+        # 组件接管文本显示：转调组件刷新链后返回（不维护 text_container）
+        if self._text_owned_by_component():
+            self._refresh_components()
+            return
         items = self.story_history
         tags = self._text_item_tags
         if len(tags) < len(items):
@@ -164,9 +176,12 @@ class DungeonWindowUI:
 
         wrap_width = getattr(self, "_text_wrap_width", 0) or 1160
         for tag, item in zip(tags, items):
+            speaker = item.get("speaker")
             dpg.configure_item(
                 tag,
-                default_value=item["type_str"] + item["text"] + "\n\n",
+                default_value=(item["type_str"]
+                               + (f"【{speaker}】" if speaker else "")
+                               + item["text"] + "\n\n"),
                 wrap=wrap_width,
                 color=_HIGHLIGHT_COLOR if item.get("highlight") else _TEXT_COLOR,
             )
@@ -176,6 +191,7 @@ class DungeonWindowUI:
         max_scroll = state.get("y_scroll_max") if state else None
         if max_scroll is not None:
             dpg.set_y_scroll("text_container", max_scroll)
+        self._refresh_components()
 
     def _schedule_text_update(self):
         """合并 AI 流式响应产生的密集刷新，避免挤占 resize 布局任务。"""
@@ -187,12 +203,14 @@ class DungeonWindowUI:
     def _flush_text_update(self):
         self._text_update_pending = False
         if not self._closing:
+            # 两条分支（组件接管 / 内置容器）都会转调 _refresh_components
             self._update_text_display()
-            self._refresh_components()
 
-    def _display_text(self, text: str, text_type: DungeonTextType, highlight: bool = False):
+    def _display_text(self, text: str, text_type: DungeonTextType, highlight: bool = False,
+                      speaker: str = None):
         prefix = self._display_type_prefix(text_type)
-        self.story_history.append({"type_str": prefix, "text": text, "highlight": highlight})
+        self.story_history.append({"type_str": prefix, "text": text,
+                                   "highlight": highlight, "speaker": speaker})
         self._update_text_display()
 
     def _reveal_pending_unit(self):
@@ -200,11 +218,12 @@ class DungeonWindowUI:
         if not self._pending_units:
             return
         unit = self._pending_units.pop(0)
-        # 首句已带段落类型前缀，后续句是同一逻辑段落的延续，不再加前缀
-        item = {"type_str": "", "text": ""}
+        # 首句已带段落类型前缀，后续句是同一逻辑段落的延续，不再加前缀；
+        # 说话人按单元携带的标记解析结果（Solea/Bulla 对话分支）
+        item = {"type_str": "", "text": unit.text, "speaker": unit.speaker}
         self.story_history.append(item)
         self._update_text_display()
-        self._animate_reveal(item, unit)
+        self._animate_reveal(item, unit.text)
 
     # ---------- 仿流式输出 ----------
     def _animate_reveal(self, item, text: str):
@@ -417,5 +436,13 @@ class DungeonWindowUI:
             tag="ending_icon_texture", parent="dungeon_texture_registry")
         if dpg.does_item_exist("ending_icon_item"):
             dpg.delete_item("ending_icon_item")
+        # 文本组件接管显示时 text_container 隐藏：图标挂到接管组件的容器，
+        # 否则维持挂在内置文本容器
+        if dpg.does_item_exist("text_gradient_box"):
+            parent = "text_gradient_box"
+        elif dpg.does_item_exist("text_nvl_overlay"):
+            parent = "text_nvl_overlay"
+        else:
+            parent = "text_container"
         dpg.add_image(texture_tag="ending_icon_texture", tag="ending_icon_item",
-                      parent="text_container")
+                      parent=parent)

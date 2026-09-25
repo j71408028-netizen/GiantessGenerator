@@ -553,11 +553,13 @@ class DungeonLaunchStages:
             self._build_components()
             self._relayout()
 
-        # 显示正式会话界面（文本容器/衬底），背景沿用冻结的入口图
-        if dpg.does_item_exist("text_container"):
-            dpg.show_item("text_container")
-        if dpg.does_item_exist("bg_overlay_child"):
-            dpg.show_item("bg_overlay_child")
+        # 显示正式会话界面（文本容器/衬底），背景沿用冻结的入口图；
+        # 组件接管文本显示时（owns_text_display）可见性由组件自管，不再强制显示
+        if not self._text_owned_by_component():
+            if dpg.does_item_exist("text_container"):
+                dpg.show_item("text_container")
+            if dpg.does_item_exist("bg_overlay_child"):
+                dpg.show_item("bg_overlay_child")
 
         if self.is_replay:
             self._init_components()

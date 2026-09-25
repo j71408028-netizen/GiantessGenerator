@@ -18,6 +18,7 @@ entry-cancel     探索模式入口页 → 点「返回」（入口退出，不�
 entry-start      探索模式入口页 → 点「开始副本」→ 步进 → 点 X 关闭
 entry-replay     入口页点「加载回放」→ 先取消一次 → 再选文件 → 在**同一窗口内**切回放
 tk-host          parent 换成真 Tk 根窗口 → 心跳计数证明宿主事件循环未被冻结
+native-close     用原生关闭键（WM_CLOSE）关视口 → 队列里不得残留 WM_QUIT（§5-C12）
 ===============  ==========================================================
 
 ``entry-replay`` 覆盖 L4：回放不再让调用方 ``new`` 第二个窗口，而是在同一个 DPG
@@ -72,6 +73,16 @@ import paths  # noqa: E402
 _DATA_ROOT = os.path.join(tempfile.mkdtemp(prefix="dungeon_autopilot_data_"), "data")
 os.makedirs(os.path.join(_DATA_ROOT, "user"), exist_ok=True)
 paths.data_dir = lambda: _DATA_ROOT
+
+# 官方组件包随 data_dir 重定向会定位不到（临时 data/ 下没有 packs/）：
+# 显式把注册表指向仓库内的组件包，组件冒烟场景才有东西可建
+from dungeon.window import component_registry as _component_registry  # noqa: E402
+
+_REPO_PACK_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "data", "packs", "scenarios", "_default", "components")
+_component_registry._registry = _component_registry.ComponentRegistry(
+    pack_dir=_REPO_PACK_DIR)
 
 # ---------------------------------------------------------------------------
 # 假 AI：不联网、不花钱、可确定性复现
@@ -183,6 +194,42 @@ _MINIMIZE = False    # 是否最小化视口（默认否，见 _build_ui 注释�
 #: 自检里创建的 Tk 根窗口（不销毁：会话结束后碰 Tk 会崩，见 scene_tk_host）
 _KEEP_ALIVE_ROOTS = []
 
+_WM_CLOSE = 0x0010   #: 投给视口原生窗口 = 用户点关闭键
+_WM_QUIT = 0x0012    #: GLFW 销毁原生窗口后 Windows 记下的「退出进程」消息
+
+
+def _post_viewport_native_close() -> bool:
+    """向 DPG 原生视口窗口投一条 ``WM_CLOSE``（= 用户点关闭键），成功返回 True。
+
+    这是唯一能触发「原生关闭」路径的手段，也只有它会往本线程队列里留一条
+    ``WM_QUIT``（见窗口文档 §5-C12）。按**窗口类名**找：DPG 用创建视口时的标题
+    （``DungeonSession``）注册窗口类，之后 ``_fix_windows_title`` 改标题不影响类名。
+    """
+    if not sys.platform.startswith("win"):
+        return False
+    import ctypes
+    hwnd = ctypes.windll.user32.FindWindowW("DungeonSession", None)
+    if not hwnd:
+        return False
+    ctypes.windll.user32.PostMessageW(hwnd, _WM_CLOSE, 0, 0)
+    return True
+
+
+def _pending_quit() -> int:
+    """线程消息队列里是否压着 ``WM_QUIT``（1/0；非 Windows 恒为 0）。
+
+    **只看不取**：它留在队列里才是症状（Tk 与 Windows 都不管它，却让 ``WM_TIMER``
+    不再合成 → 计时器与模态对话框全停摆）。
+    """
+    if not sys.platform.startswith("win"):
+        return 0
+    import ctypes
+    from ctypes import wintypes
+    msg = wintypes.MSG()
+    found = ctypes.windll.user32.PeekMessageW(
+        ctypes.byref(msg), None, _WM_QUIT, _WM_QUIT, 0)
+    return 1 if found else 0
+
 
 class AutopilotWindow(DungeonSessionWindow):
     """按脚本自动操作的会话窗口。
@@ -193,6 +240,8 @@ class AutopilotWindow(DungeonSessionWindow):
       ("enter", None)   入口页点「开始副本」
       ("cancel", None)  入口页点「返回」
       ("replay", 值)    入口页点「加载回放」：值为 "cancel" 时宿主不返回文件
+      ("check", fn)     会话中途在主线程（DPG 存活时）执行 fn(win)，断言失败记入
+                        _check_results（run() 结束后场景据此判定）
       ("close", None)   关闭窗口（走 _close_loop → dpg.stop_dearpygui）
     """
 
@@ -200,6 +249,10 @@ class AutopilotWindow(DungeonSessionWindow):
         self._script = list(script or [])
         #: 每个脚本动作执行后的状态快照，供场景断言"那一刻"的情形
         self._snapshots = {}
+        #: ("check", fn) 动作的断言结果 [("ok"|"fail", 说明), ...]
+        self._check_results = []
+        #: ``native-close`` 动作是否真的把 WM_CLOSE 投给了视口原生窗口
+        self._native_close_posted = False
         super().__init__(*args, **kwargs)
 
     def _build_ui(self):
@@ -238,8 +291,30 @@ class AutopilotWindow(DungeonSessionWindow):
                         None if value == "cancel" else _replay_fixture())
                     self._frame.call(self._on_entry_replay)
                     time.sleep(1.0)
+                elif action == "check":
+                    # 断言必须在主线程执行（DPG 单线程约束）；Event 等它真正跑完，
+                    # 后续动作与快照才有意义
+                    done = threading.Event()
+
+                    def _run_check(fn=value, win_ref=self, done=done):
+                        name = getattr(fn, "__name__", "?")
+                        try:
+                            fn(win_ref)
+                            win_ref._check_results.append(("ok", name))
+                        except Exception as exc:
+                            win_ref._check_results.append(
+                                ("fail", f"{name}: {type(exc).__name__}: {exc}"))
+                        finally:
+                            done.set()
+
+                    self._frame.call(_run_check)
+                    done.wait(timeout=10.0)
                 elif action == "close":
                     self._frame.call(self._close_loop)
+                    time.sleep(1.0)
+                elif action == "native-close":
+                    # 模拟用户点视口关闭键（X）：只有这条路径会在队列里留下 WM_QUIT
+                    self._native_close_posted = _post_viewport_native_close()
                     time.sleep(1.0)
                 # 每个动作之后留一张快照，场景可以断言"那一刻"的情形
                 self._snapshots[(action, str(value))] = {
@@ -315,19 +390,24 @@ def _scenario_repo():
     return repo
 
 
-def _make_window(script, explore=False, parent=None, host=None):
+def _make_window(script, explore=False, parent=None, host=None,
+                 config_overrides=None):
     """构造并运行一个自动驾驶窗口（默认用 ScriptedHost，不需要 Tk 主窗口）。
 
     L1 之后构造与运行分离；L4 之后 ``run()`` 返回 :class:`SessionResult` 而不是
     ``self``——需要检查窗口内部状态时把实例一起返回（``win, result``）。
     L2 之后宿主能力全部经 ``host`` 端口注入，自检因此不再打桩对话框模块。
+    ``config_overrides`` 直接覆盖 ``_scenario_config()`` 的字段（组件冒烟用）。
     """
     repo = _scenario_repo() if explore else None
+    cfg = _scenario_config()
+    if config_overrides:
+        cfg.update(config_overrides)
     win = AutopilotWindow(
         parent, name="自检角色", nick="", height=100.0, personality=_Personality(),
         preset=None, greed=0, original_height=1.6, intro_hidden="", intro_visible="",
         tags=[], uploaded_image=None,
-        scenario_config=None if explore else _scenario_config(),
+        scenario_config=None if explore else cfg,
         scenario_repo=repo,
         merged_landmarks=[], merged_quips={},
         selected_styles=[], selected_quip_styles=[], detail_pools={},
@@ -497,12 +577,152 @@ def scene_tk_host():
     _KEEP_ALIVE_ROOTS.append(root)
 
 
+class NativeCloseTkHost(RecordingTkHost):
+    """真 Tk 宿主，弹框换成记录器；额外记录「弹框时队列里是否压着 WM_QUIT」。"""
+
+    def __init__(self, widget):
+        super().__init__(widget)
+        self.pending_quit_at_dialog = []
+
+    def dialog(self, kind, title, message):
+        self.pending_quit_at_dialog.append(_pending_quit())
+        return super().dialog(kind, title, message)
+
+
+def scene_native_close():
+    """视口用**原生关闭键（X）**退出：收尾提示与宿主计时器都不得被拖死（§5-C12）。
+
+    这是唯一一条会往主线程队列里留 ``WM_QUIT`` 的关闭路径——GLFW 销毁自己的原生
+    窗口时，Windows 的 ``DefWindowProc(WM_DESTROY)`` 记下这条「退出进程」消息。
+    Tk 不会吃掉它，但 Windows 从此不再合成 ``WM_TIMER``：收尾提示框的 ``tkwait``
+    与主窗口的 ``after`` 计时器全部停摆，表现为「提示框弹出来，主窗口卡死」。
+    三条断言锁住它：弹框那一刻队列里没有残留、会话结束后宿主计时器仍在跑、
+    未完成回放照常落盘。
+    """
+    if not sys.platform.startswith("win"):
+        print("  SKIP native-close：WM_QUIT 是 Win32 专有，非 Windows 不适用")
+        return
+    import tkinter as tk
+    root = tk.Tk()
+    root.geometry("2x2+-4000+-4000")   # 挪到屏幕外，避免测试时闪窗
+    root.withdraw()
+    try:
+        root.attributes("-alpha", 0.0)
+    except Exception:
+        pass
+
+    beats = {"n": 0}
+
+    def beat():
+        beats["n"] += 1
+        root.after(100, beat)
+
+    root.after(100, beat)
+
+    host = NativeCloseTkHost(root)
+    win, result = _make_window([("click", 3), ("native-close", None)], explore=False,
+                               parent=root, host=host)
+
+    check("原生关闭：确实把 WM_CLOSE 投给了视口", win._native_close_posted is True)
+    check("原生关闭：窗口已关闭", win._closing is True)
+    check("原生关闭：收尾提示弹出时队列里没有残留 WM_QUIT",
+          bool(host.pending_quit_at_dialog) and not any(host.pending_quit_at_dialog),
+          host.pending_quit_at_dialog)
+    check("原生关闭：会话结束后队列里也没有 WM_QUIT", _pending_quit() == 0)
+    files = _written_files()
+    replays = [f for f in files if f.startswith(os.path.join("user", "replays"))]
+    check("原生关闭：落盘了未完成回放", any("_未完成" in f for f in replays), replays)
+    check("原生关闭：结果为 session-ended 且 succeeded",
+          result.reason == "session-ended" and result.succeeded, result)
+    # 用户可见的症状就是「宿主计时器不再跳」：这里真的泵一段事件循环去验证
+    before = beats["n"]
+    deadline = time.time() + 0.8
+    while time.time() < deadline:
+        root.update()
+        time.sleep(0.02)
+    check("原生关闭：会话结束后宿主计时器仍在跑", beats["n"] > before,
+          (before, beats["n"]))
+    # 留给 GC：主动销毁 Tk 根窗口会触发 destroy_context 之后的 0xC0000005
+    _KEEP_ALIVE_ROOTS.append(root)
+
+
+def _check_owned_display(cid):
+    """会话中途（主线程）验证组件接管文本显示的可见状态。
+
+    DPG 上下文在 run() 返回后销毁，接管/隐藏这类「那一帧」的状态只能在这里断言。
+    child_window 的 item state 不含 ``visible``，用 configuration 的 ``show`` 判断。
+    """
+    _OWN_TAG = {"text": "text_gradient_back", "text_card": "text_card_box",
+                "text_nvl": "text_nvl_overlay"}
+
+    def _shown(tag):
+        import dearpygui.dearpygui as dpg
+        return dpg.get_item_configuration(tag).get("show", True)
+
+    def _probe(win):
+        import dearpygui.dearpygui as dpg
+        comps = {c.id: c for c in win._components}
+        assert cid in comps, f"组件未构建: {list(comps)}"
+        assert getattr(comps[cid], "owns_text_display", False), "应声明接管文本显示"
+        assert not _shown("text_container"), "内置文本容器应被接管隐藏"
+        tag = _OWN_TAG[cid]
+        assert dpg.does_item_exist(tag) and _shown(tag), \
+            f"接管容器 {tag} 应存在且可见"
+        comp = comps[cid]
+        if cid == "text_nvl":
+            # 全屏 NVL 全历史堆叠：行对池应与历史条目一一对应
+            assert len(comp._line_tags) == len(win.story_history), \
+                (len(comp._line_tags), len(win.story_history))
+        else:
+            assert len(comp._line_tags) >= 1, "行对池未创建"
+
+    _probe.__name__ = f"owned-display:{cid}"
+    return _probe
+
+
+def _check_family_mutex(win):
+    import dearpygui.dearpygui as dpg
+    ids = [c.id for c in win._components]
+    assert ids == ["text"], f"互斥失败，实际构建: {ids}"
+    assert dpg.does_item_exist("text_gradient_back"), "text 组件应已构建"
+    assert not dpg.does_item_exist("text_card_box"), "互斥后 text_card 不应构建"
+
+_check_family_mutex.__name__ = "family-mutex"
+
+
+def scene_text_components():
+    """文本组件家族冒烟：text_card / text_nvl 接管显示 + 家族互斥。"""
+    for cid in ("text_card", "text_nvl"):
+        win, result = _make_window(
+            [("click", 3), ("sleep", 0.5), ("check", _check_owned_display(cid)),
+             ("close", None)],
+            explore=False,
+            config_overrides={"components": [cid], "components_params": {}})
+        check(f"{cid}：结果 succeeded", result.succeeded and not result.failed, result)
+        check(f"{cid}：退出时组件已销毁", win._components == [], win._components)
+        failures = [d for s, d in win._check_results if s != "ok"]
+        check(f"{cid}：会话中途接管断言通过", bool(win._check_results) and not failures,
+              failures)
+
+    # 家族互斥：text 与 text_card 同时配置，只保留 text（会话中途断言）
+    win, result = _make_window(
+        [("click", 2), ("check", _check_family_mutex), ("close", None)],
+        explore=False,
+        config_overrides={"components": ["text", "text_card"],
+                          "components_params": {}})
+    check("互斥：会话中断言通过",
+          bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
+          win._check_results)
+
+
 SCENES = {
     "session-close": scene_session_close,
     "entry-cancel": scene_entry_cancel,
     "entry-start": scene_entry_start,
     "entry-replay": scene_entry_replay,
     "tk-host": scene_tk_host,
+    "native-close": scene_native_close,
+    "text-components": scene_text_components,
 }
 
 

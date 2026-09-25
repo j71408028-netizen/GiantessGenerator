@@ -195,6 +195,7 @@ class ScenarioRepo:
         new_config.update({
             "initial_prompt": config.get("initial_prompt", ""),
             "coupling_level": normalize_coupling_level(config.get("coupling_level")),
+            "protagonist_title": str(config.get("protagonist_title", "") or "").strip(),
             "entry_action_cost": max(0, int(config.get("entry_action_cost", 0) or 0)),
             "section_prompts": config.get("section_prompts", {
                 "background": "", "branch": "", "dialog": "",

@@ -60,6 +60,11 @@ class DungeonPromptBuilder:
         return normalize_coupling_level(
             getattr(self.context, "coupling_level", None), DEFAULT_COUPLING_LEVEL)
 
+    def protagonist_title(self) -> str:
+        """主角称呼（方案配置 protagonist_title，留空回退「主角」）。"""
+        title = str(getattr(self.context, "protagonist_title", "") or "").strip()
+        return title or "主角"
+
     def build_system_prompt(self) -> str:
         session = self.context
         pack = coupling_prompts(self.coupling_level())
@@ -164,6 +169,16 @@ class DungeonPromptBuilder:
         result = (f"{history}{chapter_line}{detail_block}"
                   f"{pack['narrate'].format(instruction=instruction)}\n"
                   f"请严格按系统提示的 JSON 格式输出，不要添加额外解释。{reference}")
+        # Solea/Bulla 的对话分支：要求 AI 用 @说话人@ 行内标记区分说话人与台词，
+        # 分句器解析后供 UI 组件渲染名牌（见 dungeon/splitter.py）
+        speaker_rule = pack.get("speaker_rule")
+        if (speaker_rule and not is_terminating_chapter(find_chapter(
+                getattr(session, "chapters", None),
+                getattr(session, "current_chapter", None)))
+                and type_value in ("dialog", "branch")):
+            result += "\n\n" + speaker_rule.format(
+                name=session.name, nick=session.nick,
+                protagonist=self.protagonist_title())
 
         # 延迟插入：本段之后将固定插入一段内容，生成时需带上前后衔接限制
         pending = getattr(session, "pending_insertions", None)

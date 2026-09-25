@@ -4,7 +4,8 @@
 （config.json 的 ``components`` 字段）在会话阶段构建组件实例，并把这些
 实例接入窗口现有的更新链：
 - _relayout() → 各组件 layout(ctx)
-- _schedule_text_update() / _flush_text_update() → 各组件 refresh(ctx)
+- _update_text_display() → 有组件声明 ``owns_text_display`` 时转调各组件
+  refresh(ctx)（如底部渐变式文本栏接管显示），否则走内置 text_container 管线
 - 会话退出 _handle_exit() 前 → 各组件 destroy(ctx) + 注册表丢弃
 
 组件的根对象 ctx 即窗口实例本身，组件只读窗口现有状态，不反向写状态。

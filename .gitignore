@@ -219,7 +219,7 @@ __marimo__/
 
 data/user/api_keys.json
 /data/archives/
-data/user/address_registry.json
+/data/user/
 /.idea
 /.workbuddy/
 /developer_tools/

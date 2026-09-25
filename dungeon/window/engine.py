@@ -9,7 +9,7 @@ from dungeon.chapters import find_chapter, is_terminating_chapter, overflow_jump
 from dungeon.details import build_detail_query_prompt, parse_detail_queries
 from dungeon.models import DungeonTextType
 from dungeon.response import extract_stream_text, parse_final_json
-from dungeon.splitter import split_full_text, split_stream_units
+from dungeon.splitter import split_full_text, split_stream_units, strip_speaker_markers
 from logic import apply_size_unlock_updates, compute_casualty
 
 
@@ -76,7 +76,7 @@ class DungeonStoryEngine:
                 prefix = self._display_type_prefix(next_type)
 
                 self._pending_units = []
-                current_item = {"type_str": prefix, "text": ""}
+                current_item = {"type_str": prefix, "text": "", "speaker": None}
                 self.story_history.append(current_item)
 
                 full_response_buffer = ""
@@ -104,16 +104,23 @@ class DungeonStoryEngine:
 
                 ai_text, direction, custom_directions = self._parse_final_json(full_response_buffer)
 
-                # 最终切分：整段正文按内置分句器定格，首句已显示，其余排队
+                # 最终切分：整段正文按内置分句器定格，首句已显示，其余排队。
+                # 说话人标记（@X@）在切分时解析进显示单元，落盘与下游一律用净文本
                 final_units = split_full_text(ai_text)
                 self._pending_units = final_units[1:]
-                current_item["text"] = final_units[0] if final_units else ai_text
+                if final_units:
+                    current_item["speaker"] = final_units[0].speaker
+                    current_item["text"] = final_units[0].text
+                else:
+                    current_item["text"] = strip_speaker_markers(ai_text)
                 self._schedule_text_update()
 
                 self.messages.append({"role": "assistant", "content": full_response_buffer})
                 if len(self.messages) > 21:
                     self.messages = [self.messages[0]] + self.messages[-20:]
 
+                # 落盘与结算链统一用剥离说话人标记后的净文本
+                clean_text = strip_speaker_markers(ai_text)
                 before_state = self.dungeon_state
                 step_override = 0.0 if self._in_terminating_chapter() else None
                 self.dungeon_state = self.dungeon_logic.evolve_attributes(
@@ -129,7 +136,7 @@ class DungeonStoryEngine:
                 step_info = {
                     "step": self.step_num,
                     "type": next_type.value,
-                    "text": ai_text,
+                    "text": clean_text,
                     "intrusion_before": before_state.intrusion,
                     "destruction_before": before_state.destruction,
                     "step_intrusion_before": before_state.step_intrusion,
@@ -141,10 +148,10 @@ class DungeonStoryEngine:
                 if step_override is not None:
                     step_info["ending_chapter"] = True
 
-                self._apply_prompted_unlocks(ai_text)
-                self._finish_step(next_type, ai_text, step_info, check_unlock=True)
+                self._apply_prompted_unlocks(clean_text)
+                self._finish_step(next_type, clean_text, step_info, check_unlock=True)
                 # 细节探究：立即在后台询问 AI 想了解的细节，下次生成前解答
-                self._start_detail_query(ai_text)
+                self._start_detail_query(clean_text)
                 success = True
 
             except Exception as e:
@@ -202,9 +209,15 @@ class DungeonStoryEngine:
 
         后续已完成的句不直接上屏，排队到 ``_pending_units``，等用户点击后
         由 ``_reveal_pending_unit`` 逐句揭示。同一文本整体重算，天然幂等。
+        显示单元携带说话人（``@说话人@`` 标记解析，见 dungeon/splitter.py）。
         """
         units, tail = split_stream_units(partial_text)
-        current_item["text"] = units[0] if units else tail
+        if units:
+            current_item["speaker"] = units[0].speaker
+            current_item["text"] = units[0].text
+        else:
+            current_item["speaker"] = None
+            current_item["text"] = tail
         self._pending_units = list(units[1:])
 
     def _apply_prompted_unlocks(self, text: str):
@@ -411,6 +424,7 @@ class DungeonStoryEngine:
         self.story_history.append({
             "type_str": "【错误】",
             "text": message or "未配置 AI 客户端，请到“设置 → 副本AI设置”中完成配置后重试。",
+            "speaker": None,
         })
         self._update_text_display()
 

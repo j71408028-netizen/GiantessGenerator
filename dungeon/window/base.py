@@ -325,8 +325,18 @@ class DungeonWindowBase:
         # 帧时钟先停：此后后台线程投递的界面更新与未跑的帧任务一律丢弃，
         # 不会再碰到即将销毁的 DPG 上下文（L3 之后它由会话独占，无需再 install）。
         self._frame.stop()
+        # 显示组件销毁：删各自的 DPG 控件并丢弃实例缓存（DPG 上下文仍存活，
+        # 必须赶在 destroy_context 之前）；帧任务已随 stop() 清空，组件 destroy
+        # 里的 cancel 只是幂等兜底
+        self._destroy_components()
         # 背景像素工作者：会话内的全部重采样/混合任务都在这里排队，收工时一并结束
         self._background.shutdown()
+
+        # 用户点视口关闭键（X）退出时，GLFW 销毁原生窗口会往本线程队列里留一条
+        # WM_QUIT；它不会危害 DPG，却会让 Tk 的计时器与模态对话框（tkwait）
+        # 从此收不到事件——收尾提示框弹出来就"卡死"。所以任何 Tk 交互之前先清掉，
+        # 详见 window.md §5-C12 与 host.HostPort.discard_pending_quit()。
+        self._discard_pending_quit()
 
         # 先恢复主窗口，便于退出提示/保存回放对话框正确显示
         self.host.show_window()
@@ -471,6 +481,10 @@ class DungeonWindowBase:
             self.ai_client = None
 
         self.initial_prompt = scenario_config.get("initial_prompt", "")
+        # 主角称呼：Solea/Bulla 对话分支里主角台词的说话人标注
+        # （提示词构建器读取，留空回退「主角」；Velum 不使用）
+        self.protagonist_title = str(
+            scenario_config.get("protagonist_title", "") or "").strip()
         self.section_prompts = scenario_config.get("section_prompts", {})
         self.evolution_attrs = scenario_config.get("evolution_attrs", [])
 
@@ -617,6 +631,20 @@ class DungeonWindowBase:
             self.host.unregister_active_window(self)
         except Exception as e:
             print(f"[Dungeon] 活动窗口注销失败: {e}")
+
+    def _discard_pending_quit(self):
+        """让宿主丢掉「原生关闭键关掉视口」留下的退出类残留消息（见 §5-C12）。
+
+        实现全在宿主适配器里（Tk 侧清的是线程队列里的 ``WM_QUIT``）：window 层
+        不认识 Win32，只按端口索要这一个能力。
+        """
+        try:
+            removed = self.host.discard_pending_quit()
+        except Exception as e:
+            print(f"[Dungeon] 清理宿主残留退出消息失败: {e}")
+            return
+        if removed:
+            print(f"[Dungeon] 已丢弃宿主队列里 {removed} 条残留退出消息（原生关闭）")
 
     def _fix_windows_title(self):
         if self._is_windows:

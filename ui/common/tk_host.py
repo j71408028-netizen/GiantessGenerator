@@ -24,6 +24,12 @@ from ui.common.fonts import dungeon_font_default
 
 _IS_WINDOWS = sys.platform.startswith("win")
 
+#: ``discard_pending_quit()`` 用到的 Win32 常量
+_WM_QUIT = 0x0012          #: DefWindowProc(WM_DESTROY) 投递的「退出进程」消息
+_PM_REMOVE = 0x0001        #: PeekMessage 取出消息（不是只看一眼）
+_MAX_PENDING_QUIT_DRAIN = 16   #: 一次最多清几条（正常只会有一条）
+
+
 
 class TkHost(HostPort):
     """宿主端口在 Tk 上的实现。``widget`` 为任意 Tk 控件（通常是调用方的父控件）。"""
@@ -113,6 +119,28 @@ class TkHost(HostPort):
             update()
         except Exception:
             pass
+
+    # ---------------- 原生关闭后的残留消息 ----------------
+    def discard_pending_quit(self) -> int:
+        """丢掉线程消息队列里残留的 ``WM_QUIT``，返回丢弃条数。
+
+        见 ``dungeon/window/host.py`` 同名方法与窗口文档 §5-C12：用户点副本视口的
+        关闭键（X）时 GLFW 会销毁自己的原生窗口，``DefWindowProc(WM_DESTROY)``
+        随之往本线程投一条 ``WM_QUIT``。这条消息不会被 Tk 取走，却会让 Windows
+        停止合成 ``WM_TIMER``——于是 Tk 的 ``after`` 计时器与模态对话框的
+        ``tkwait``（就是收尾提示框本身）全部拿不到事件，主窗口看起来"卡死"。
+        它本来只针对那个已销毁的 GLFW 窗口，与 Tk 主循环无关，故在此丢弃。
+        """
+        if not sys.platform.startswith("win"):
+            return 0
+        removed = 0
+        msg = wintypes.MSG()
+        while ctypes.windll.user32.PeekMessageW(
+                ctypes.byref(msg), None, _WM_QUIT, _WM_QUIT, _PM_REMOVE):
+            removed += 1
+            if removed >= _MAX_PENDING_QUIT_DRAIN:
+                break
+        return removed
 
     # ---------------- 弹框 ----------------
     def dialog(self, kind, title, message):

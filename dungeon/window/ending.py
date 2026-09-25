@@ -61,7 +61,8 @@ class EndingHandler:
             client = getattr(self, "ai_client", None)
             self.ending_effects = pending.get("action_data", {}) or {}
 
-            current_item = {"type_str": "【结局】", "text": "", "highlight": True}
+            current_item = {"type_str": "【结局】", "text": "", "highlight": True,
+                            "speaker": None}
             self.story_history.append(current_item)
 
             if client is None:

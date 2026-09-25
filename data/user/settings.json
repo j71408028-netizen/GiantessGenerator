@@ -1,12 +1,13 @@
 {
-  "comparison_count": 5,
-  "comparison_order": "match",
+  "comparison_count": 3,
+  "comparison_order": "size_asc",
   "world_setting": "appear",
   "name_table": "default",
   "news_table": "default",
   "seed": 98694495,
   "selected_styles": [
-    "ChineseMix"
+    "ChineseMix",
+    "Extension"
   ],
   "selected_quip_styles": [
     "Events"
@@ -24,10 +25,10 @@
   "show_all_details": false,
   "enable_confusion": false,
   "report_font": "仿宋",
-  "desc_font": "Consolas",
+  "desc_font": "宋体",
   "dungeon_font": "Microsoft YaHei",
   "quip_rate_factor": 1.0,
-  "info_update_rate": 0.5,
+  "info_update_rate": 0.75,
   "selected_parts": [
     "身高",
     "步长",
@@ -46,5 +47,7 @@
     "指纹宽度"
   ],
   "reverse_details_order": false,
-  "blocked_words": []
+  "blocked_words": [],
+  "theme_palette": "Slate",
+  "story_recent_count": 20
 }

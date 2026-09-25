@@ -50,6 +50,17 @@ COMMON_OUTPUT_RULE = (
     "和各自定义属性的变化方向（custom_directions）。"
 )
 
+# Solea/Bulla 对话分支（dialog/branch）的说话人标注规则：
+# 对话句句首用 @说话人@ 行内标记，分句器据此把每个显示段落解析出说话人
+# 供 UI 组件渲染名牌；Velum（读者模式）不注入本规则，正文格式不变。
+SPEAKER_MARKER_RULE = (
+    "本段涉及对话，请把每一句对话单独成句，并在句首用「@说话人@」标注说话人，"
+    "格式为：@说话人@对话内容。例如：@李队长@“桥还没塌，先撤居民。”\n"
+    "说话人的写法：她的台词用「{name}」或「{nick}」；主角的台词用「{protagonist}」；"
+    "其他角色用其身份或现场的称呼（如「居民」「军官」「店主」）。\n"
+    "叙述性描写不加标记；标记只能出现在句子开头，一句话内不要重复标记。"
+)
+
 COUPLING_PROMPTS = {
     VELUM: {
         "role": "你是一位细腻的叙事作家，正在以旁观者的视角阅读并讲述一个关于巨大化少女"
@@ -120,6 +131,7 @@ COUPLING_PROMPTS = {
                          "局面写清楚。",
         "reference_intro": "以下信息可作为你推进任务的参考，但不代表目前情境：",
         "narrate": "继续推进当前任务或接触进程，{instruction}",
+        "speaker_rule": SPEAKER_MARKER_RULE,
         "sections": {
             "background": "交代任务现场的环境与条件（地形、人群、可通行处、危险区），"
                           "点明对当前任务有利或不利的因素。",
@@ -174,6 +186,7 @@ COUPLING_PROMPTS = {
                          "被简单地顺从。",
         "reference_intro": "以下信息可作为你描写她的参考，但不代表目前情境：",
         "narrate": "继续这一段与她的个体互动，{instruction}",
+        "speaker_rule": SPEAKER_MARKER_RULE,
         "sections": {
             "background": "描写围绕她与主角这一对个体的近身环境（她身体的局部、"
                           "她占据的空间、两人当前的位置关系）。",

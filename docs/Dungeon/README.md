@@ -51,6 +51,7 @@
 |---|---|---|
 | `check_dungeon_layering.py` | 分层守卫：领域层禁 import GUI/服务层/反向依赖 window；`window/` 禁 import `tkinter`/`customtkinter`/`ui` | `python scripts/check_dungeon_layering.py` |
 | `check_scenario_schema.py` | schema 单一真相源（空模板 golden、字段漂移）+ 校验器规则 + 演化配置链路 | `python scripts/check_scenario_schema.py` |
+| `check_splitter.py` | 内置分句器：断点切分、流式幂等、`@说话人@` 标记解析与落盘净化 | `python scripts/check_splitter.py` |
 | `check_dungeon_finalize.py` | 原子写 / `.bak` / 损坏回退 + `_finalize` 完成与未完成两条路径 | `python scripts/check_dungeon_finalize.py` |
 | `check_scenario_naming.py` | 命名守卫（旧标识符残留）+ 兼容读与迁移行为 | `python scripts/check_scenario_naming.py` |
 | `validate_scenarios.py` | 离线批量校验所有 / 单个方案，有 error 时退出码 1 | `python scripts/validate_scenarios.py --errors-only` |
@@ -60,7 +61,7 @@
 
 | 脚本 | 覆盖 | 命令 |
 |---|---|---|
-| `dungeon_autopilot.py` | 真窗口生命周期：构造 → `run()` → 步进 → 关闭 → 落盘（5 场景 48 项断言） | `python scripts/dungeon_autopilot.py` |
+| `dungeon_autopilot.py` | 真窗口生命周期：构造 → `run()` → 步进 → 关闭 → 落盘（7 场景 62 项断言，含文本组件接管冒烟） | `python scripts/dungeon_autopilot.py` |
 
 判定方式详见 [调试自动化](window_automation.md) §4：**看结论行，不看退出码**。
 

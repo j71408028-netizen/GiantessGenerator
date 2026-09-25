@@ -337,7 +337,8 @@ class TriggerHandler:
                 "prompt": record.get("option_prompt") or chosen.get("prompt", ""),
                 "text": chosen.get("text", ""),
             }
-            self.story_history.append({"type_str": "【选择】", "text": text, "highlight": True})
+            self.story_history.append({"type_str": "【选择】", "text": text,
+                                       "highlight": True, "speaker": None})
             self._update_text_display()
             print(f"[Replay] 复现选项触发器: {name} → 选择 {idx}")
         elif action_type == "ending":
@@ -349,7 +350,8 @@ class TriggerHandler:
                 self._frame.call(self._update_ending_icon)
             if ending_text:
                 self.ending_text = ending_text
-                self.story_history.append({"type_str": "【结局】", "text": ending_text, "highlight": True})
+                self.story_history.append({"type_str": "【结局】", "text": ending_text,
+                                           "highlight": True, "speaker": None})
                 self._update_text_display()
             self.pending_ending = None
             self.dungeon_ended = True
@@ -385,6 +387,7 @@ class TriggerHandler:
             "type_str": self._display_type_prefix(text_type),
             "text": "",
             "highlight": highlight,
+            "speaker": None,
         }
         self.story_history.append(anim_item)
         self._update_text_display()

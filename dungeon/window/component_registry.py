@@ -6,7 +6,14 @@
   未声明时回退到内置默认 ``["text"]``；
 - 组件类通过约定的 ``build/layout/refresh/destroy`` 生命周期钩子与窗口交互，
   根对象（ctx）即会话窗口实例，只读窗口现有状态（dungeon_state / story_history 等）。
-"""
+- 文本组件的数据源是 ``ctx.story_history``：条目为
+  ``{"type_str": 类型前缀, "text": 正文, "highlight": 高亮, "speaker": 说话人|None}``。
+  ``speaker`` 由 Solea/Bulla 对话分支的 ``@说话人@`` 标记解析而来（见
+  dungeon/splitter.py），None 表示叙述句；galgame 式组件可用它渲染名牌，
+  并回退到 ``type_str``。
+- 文本显示家族（``TEXT_FAMILY_IDS``：text / text_card / text_nvl）互斥，
+  方案配置同时出现多个时保留第一个（见 ``resolve_ids``）。
+ """
 
 import os
 import traceback
@@ -15,6 +22,10 @@ from dungeon.terms import DEFAULT_SCENARIO_ID, SCENARIO_RESOURCE_KEY
 
 DEFAULT_COMPONENT_IDS = ["text"]
 _FALLBACK_IDS = ["text"]
+
+# 文本显示家族：三种 galgame 式文本组件互斥（都声明 owns_text_display 接管
+# 文本显示），方案配置同时出现多个时保留第一个、其余跳过并警告
+TEXT_FAMILY_IDS = frozenset({"text", "text_card", "text_nvl"})
 
 # 组件包内的入口文件名（官方包只含此文件，避免 import 同目录其它 py）
 _PACK_ENTRY = "components.py"
@@ -133,8 +144,9 @@ class ComponentRegistry:
         registry = _load_pack_directory(self._pack_dir)
         if registry:
             self._classes = {cid: cls for cid, cls in registry.items() if cls}
-        if "text" not in self._classes:
-            print("[Components] 组件包缺少 text 组件，会话将无文本栏")
+        if not set(self._classes) & TEXT_FAMILY_IDS:
+            print("[Components] 组件包缺少文本组件（text/text_card/text_nvl），"
+                  "会话将无文本栏")
         self._instances = {}
 
     @property
@@ -144,17 +156,25 @@ class ComponentRegistry:
     def resolve_ids(self, ids):
         """把配置里的组件 id 列表解析为可实例化且去重的 id 列表。
 
-        空/非法配置回退到默认组件；未知 id 记录警告并跳过。
+        空/非法配置回退到默认组件；未知 id 记录警告并跳过。文本显示家族
+        （TEXT_FAMILY_IDS）互斥：同时出现多个时保留第一个。
         """
         if not ids:
             return list(DEFAULT_COMPONENT_IDS)
         valid = []
+        family_seen = None
         for cid in ids:
-            if cid in self._classes:
-                if cid not in valid:
-                    valid.append(cid)
-            else:
+            if cid not in self._classes:
                 print(f"[Components] 未知组件 {cid}，已跳过")
+                continue
+            if cid in TEXT_FAMILY_IDS:
+                if family_seen is not None:
+                    print(f"[Components] 文本组件互斥：{family_seen} 与 {cid} "
+                          f"同时配置，保留 {family_seen}")
+                    continue
+                family_seen = cid
+            if cid not in valid:
+                valid.append(cid)
         if not valid:
             return list(_FALLBACK_IDS)
         return valid

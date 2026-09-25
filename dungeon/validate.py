@@ -21,7 +21,7 @@ from dungeon import schema
 from dungeon.actions import (ENDING_ACTION, VISUAL_FILTER_KEYS,
                              normalize_action_type)
 from dungeon.chapters import CHAPTER_NONE, normalize_chapters
-from dungeon.coupling import COUPLING_LEVELS
+from dungeon.coupling import COUPLING_LEVELS, VELUM
 
 LEVEL_LABELS = {"error": "错误", "warning": "警告", "info": "提示"}
 _LEVEL_ORDER = {"error": 0, "warning": 1, "info": 2}
@@ -137,6 +137,12 @@ def _validate_top_level(config: dict, add) -> None:
     if config.get("coupling_level") not in COUPLING_LEVELS:
         add("warning", "coupling_level",
             f"耦合等级「{config.get('coupling_level')}」无效，运行时回退为默认值")
+    title = config.get("protagonist_title", "")
+    if not isinstance(title, str):
+        add("warning", "protagonist_title", "主角称呼必须是字符串")
+    elif title.strip() and config.get("coupling_level") == VELUM:
+        add("info", "protagonist_title",
+            "耦合等级为 Velum（读者模式）时对话段落不标注说话人，主角称呼不会使用")
     cost = config.get("entry_action_cost", 0)
     if not _is_number(cost) or cost < 0:
         add("warning", "entry_action_cost", "进入所需行动点数必须是非负数字")

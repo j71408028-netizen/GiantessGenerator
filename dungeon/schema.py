@@ -41,6 +41,8 @@ class FieldSpec:
 SCENARIO_FIELDS = (
     FieldSpec("initial_prompt", "text", "故事基调与设定", "", note="留空表示无开局设定"),
     FieldSpec("coupling_level", "enum", "耦合等级", DEFAULT_COUPLING_LEVEL, choices=COUPLING_LEVELS),
+    FieldSpec("protagonist_title", "str", "主角称呼", "",
+              note="对话段落里主角台词的说话人标注；仅 Solea/Bulla 使用，留空回退「主角」"),
     FieldSpec("entry_action_cost", "int", "进入所需行动点数", 0, note="0 表示免费"),
     FieldSpec("section_prompts", "dict", "分节提示词"),
     FieldSpec("section_steps", "dict", "分节步长", None,
@@ -140,6 +142,7 @@ def empty_scenario_config() -> dict:
     return {
         "initial_prompt": "",
         "coupling_level": DEFAULT_COUPLING_LEVEL,
+        "protagonist_title": "",
         "entry_action_cost": 0,
         "section_prompts": {key: "" for key in TEXT_TYPE_KEYS},
         "evolution_attrs": [

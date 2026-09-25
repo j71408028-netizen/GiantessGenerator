@@ -4,7 +4,8 @@ import re
 import copy
 import os
 from dungeon.chapters import normalize_chapters
-from dungeon.coupling import (COUPLING_LEVELS, DEFAULT_COUPLING_LEVEL, coupling_initial_prompt,
+from dungeon.coupling import (COUPLING_LEVELS, DEFAULT_COUPLING_LEVEL, VELUM,
+                              coupling_initial_prompt,
                               coupling_label, normalize_coupling_level)
 from dungeon.rules import EvolutionRules
 from ui.common.widgets import (CTkScrollableDropdownFrame, CTkSegmentedControl,
@@ -37,6 +38,7 @@ class ScenarioEditor(ctk.CTkFrame):
         self.initial_prompt = ""
         self.section_prompts = {}
         self.coupling_level = DEFAULT_COUPLING_LEVEL
+        self.protagonist_title = ""
         self.evolution_attrs = []  # 统一演化量列表
         self.chapters = []  # 章节列表（不含条件，只描述背景与持续敏感效果）
         self.triggers = []
@@ -300,6 +302,25 @@ class ScenarioEditor(ctk.CTkFrame):
         # 约束，不钉住会把左栏撑得很宽，挤掉右栏的初始提示输入框
         _LEFT_WIDTH = 365
 
+        # 主角称呼：Solea/Bulla 对话分支里主角台词的说话人标注（Velum 不适用）
+        protagonist_row = ctk.CTkFrame(left_inner, fg_color="transparent")
+        protagonist_row.pack(fill='x', padx=(0, 20), pady=(10, 0))
+        ctk.CTkLabel(protagonist_row, text="主角称呼", font=ui_fonts.ui_font(_F_BIG),
+                     text_color=_TITLE).pack(side='left')
+        self.protagonist_var = ctk.StringVar()
+        self.protagonist_entry = ctk.CTkEntry(
+            protagonist_row, textvariable=self.protagonist_var,
+            width=120, font=ui_fonts.ui_font(_F_BIG),
+            text_color=_DARK, placeholder_text="主角",
+            fg_color=SC_PANEL_BG, border_color=SC_BORDER_STRONG)
+        self.protagonist_entry.pack(side='right')
+        self.protagonist_hint = ctk.CTkLabel(
+            left_inner, text="仅 Solea / Bulla 使用：对话段落中主角台词的说话人标注，"
+                             "留空按「主角」处理",
+            font=ui_fonts.ui_font(_F_SMALL), text_color=_MUTED,
+            anchor='w', justify='left', wraplength=_LEFT_WIDTH - 6)
+        self.protagonist_hint.pack(fill='x', pady=(2, 0))
+
         ctk.CTkLabel(left_inner, text="系统初始提示",
                      font=ui_fonts.ui_font(_F_SMALL, "bold"),
                      text_color=_MUTED, anchor='w').pack(fill='x', pady=(10, 0))
@@ -493,6 +514,7 @@ class ScenarioEditor(ctk.CTkFrame):
         self.initial_prompt_text.insert("1.0", self.initial_prompt)
         self._refresh_coupling_widgets()
         self.entry_cost_var.set(str(int(self.entry_action_cost)))
+        self.protagonist_var.set(self.protagonist_title)
 
         for key, box in self.section_frames.items():
             box.delete("1.0", "end")
@@ -517,6 +539,7 @@ class ScenarioEditor(ctk.CTkFrame):
         self.initial_prompt = config.get("initial_prompt", "")
         self.section_prompts = config.get("section_prompts", {})
         self.coupling_level = normalize_coupling_level(config.get("coupling_level"))
+        self.protagonist_title = str(config.get("protagonist_title", "") or "").strip()
         self.evolution_attrs = config.get("evolution_attrs", [])
         self.chapters = normalize_chapters(config.get("chapters", []))
         self.triggers = config.get("triggers", [])
@@ -553,6 +576,7 @@ class ScenarioEditor(ctk.CTkFrame):
         return {
             "initial_prompt": self.initial_prompt_text.get("1.0", "end-1c").strip(),
             "coupling_level": self.coupling_level,
+            "protagonist_title": self.protagonist_var.get().strip(),
             "section_prompts": {key: box.get("1.0", "end-1c").strip()
                                 for key, box in self.section_frames.items()},
             "section_steps": {key: var.get() for key, var in self.section_step_vars.items()},
@@ -572,6 +596,7 @@ class ScenarioEditor(ctk.CTkFrame):
         prompt_data = self._get_prompt_data_from_ui()
         config["initial_prompt"] = prompt_data["initial_prompt"]
         config["coupling_level"] = prompt_data["coupling_level"]
+        config["protagonist_title"] = prompt_data["protagonist_title"]
         config["section_prompts"] = prompt_data["section_prompts"]
         config["section_steps"] = prompt_data["section_steps"]
         config["transition_matrix"] = prompt_data["transition_matrix"]
@@ -663,6 +688,7 @@ class ScenarioEditor(ctk.CTkFrame):
         empty_config = {
             "initial_prompt": "",
             "coupling_level": DEFAULT_COUPLING_LEVEL,
+            "protagonist_title": "",
             "section_prompts": {k: "" for k in ["background","branch","dialog","interaction","action"]},
             "custom_attrs": [],
             "chapters": [],
@@ -725,5 +751,8 @@ class ScenarioEditor(ctk.CTkFrame):
         self.coupling_cycle.set(coupling_label(self.coupling_level))
         self.coupling_prompt_label.configure(
             text=coupling_initial_prompt(self.coupling_level))
+        # 主角称呼仅在 Solea/Bulla 生效：Velum 时置灰提示
+        state = "disabled" if self.coupling_level == VELUM else "normal"
+        self.protagonist_entry.configure(state=state)
 
 

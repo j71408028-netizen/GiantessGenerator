@@ -46,6 +46,7 @@ from dungeon.validate import (  # noqa: E402
 GOLDEN_EMPTY = {
     "initial_prompt": "",
     "coupling_level": "velum",
+    "protagonist_title": "",
     "entry_action_cost": 0,
     "section_prompts": {"background": "", "branch": "", "dialog": "",
                         "interaction": "", "action": ""},
@@ -80,6 +81,7 @@ def _bad_config():
     return {
         "initial_prompt": 123,
         "coupling_level": "nope",
+        "protagonist_title": 123,
         "entry_action_cost": -5,
         "view_mode": "game",
         "typo_key": 1,
@@ -142,6 +144,7 @@ _expect("warning", "triggers[5].action_data.name", "结局未填名称")
 _expect("error", "chapters[0].overflow_target", "超限跳转悬空（error）")
 _expect("warning", "initial_prompt", "initial_prompt 非字符串")
 _expect("warning", "coupling_level", "耦合等级无效")
+_expect("warning", "protagonist_title", "主角称呼非字符串")
 _expect("warning", "entry_action_cost", "进入点数非法")
 _expect("warning", "view_mode", "废弃顶层字段")
 _expect("info", "typo_key", "未知顶层字段")
