@@ -33,13 +33,13 @@
 | `entry-replay` | 入口页「加载回放」→ 取消一次 → 再选文件 → **同一窗口内**切回放（L4 回归） | 10 项 | ~7s |
 | `tk-host` | 宿主换成真 Tk 根窗口（`TkHost` 适配器）：会话期间宿主心跳照跑（L0 回归） | 7 项 | ~6s |
 | `native-close` | 视口通过原生关闭键（X / `WM_CLOSE`）关闭：队列不得残留 `WM_QUIT`、收尾提示与宿主计时器不卡死（§5-C12） | 7 项 | ~7s |
-| `text-components` | 文本组件家族（`text_card` / `text_nvl`）接管显示的会话中途可见状态 + 家族互斥；`("check", fn)` 脚本动作在 DPG 存活时断言 | 7 项 | ~15s |
+| `text-components` | 文本组件家族（`text_card` / `text_nvl`）接管显示的会话中途可见状态 + `text_component` 字段三选一与旧写法提升 + 覆盖层服务面（调出/阅读模态挂起/关闭恢复/兄弟组件只读访问）；`("check", fn)` 脚本动作在 DPG 存活时断言 | 9 项 | ~20s |
 
-七个场景共 **62 项断言全绿**。每个场景结束还会断言 **会话内无残留非 daemon 线程**
+七个场景共 **63 项断言全绿**。每个场景结束还会断言 **会话内无残留非 daemon 线程**
 （`threading.enumerate()` 为空）——这是 L3 帧时钟 + `PixelWorker` 的验收条件。
 
 注意：组件包定位随 data_dir 重定向会落空，autopilot 在隔离头部把注册表显式指到
-仓库内 `data/packs/scenarios/_default/components/`（见脚本开头 `_component_registry` 注入）。
+仓库内 `assets/components/`（组件包在 assets，本就不随 data_dir 重定向；见脚本开头 `_component_registry` 注入）。
 
 L2 之后注入点更干净：宿主能力（尺寸/DPI、显隐、事件泵、收尾弹框、回放文件选择）全部经
 `dungeon.window.host.HostPort` 注入，**不用再打桩 `ui.common.dialogs`**——

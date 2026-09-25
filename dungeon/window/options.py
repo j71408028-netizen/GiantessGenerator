@@ -4,6 +4,7 @@ import threading
 
 import dearpygui.dearpygui as dpg
 
+from dungeon import process_log
 from dungeon.coupling import coupling_prompts, normalize_coupling_level
 
 
@@ -38,14 +39,14 @@ class OptionHandler:
                     try:
                         label = client.generate(messages, temperature=0.9).strip()
                     except Exception as e:
-                        print(f"选项文字生成失败: {e}")
+                        process_log.log(f"选项文字生成失败: {e}")
                 if not label:
                     label = opt.get("prompt") or f"选项 {opt.get('id', 0)}"
                 if len(label) > 28:
                     label = label[:28] + "…"
                 labels.append(label)
         except Exception as e:
-            print(f"选项生成任务异常: {e}")
+            process_log.log(f"选项生成任务异常: {e}")
         finally:
             self._option_generating = False
             if not self._closing:
@@ -122,5 +123,8 @@ class OptionHandler:
 
         # 可再次触发的选项触发器在选择后仍可被重新检查触发
         self.check_triggers()
-        print(f"[Option] {pending['name']} 选择了编号 {idx}，"
+        # 选择后下一次点击必然生成：立即补射预生成（check_triggers 排队的
+        # 插入段/结局会使其自动跳过，改由相应路径补射）
+        self._maybe_pregen_next()
+        process_log.log(f"[Option] {pending['name']} 选择了编号 {idx}，"
               f"选择记录: {self.trigger_choices.get(pending['name'])}")

@@ -1,9 +1,10 @@
-"""副本显示组件注册表与默认组件包加载。
+"""副本显示组件注册表与官方组件包加载。
 
 副本会话窗口的显示组件（文本栏、属性条、伤亡记录等）由组件包提供：
-- 官方组件包位于数据根目录 ``packs/scenarios/_default/components/``（随副本/世界包分发）；
-- 副本在其 ``config.json`` 的 ``components`` 字段中按 id 声明要使用的组件，
-  未声明时回退到内置默认 ``["text"]``；
+- 官方组件包位于 assets 下的 ``components/``（随应用分发的只读资源，经
+  ``paths.dungeon_components_dir()`` 定位，打包后随应用升级，不进用户数据区）；
+- 文本主组件由方案配置的 ``text_component`` 字段三选一声明（text / text_card /
+  text_nvl，见 dungeon.schema），``components`` 列表只放其余组件；
 - 组件类通过约定的 ``build/layout/refresh/destroy`` 生命周期钩子与窗口交互，
   根对象（ctx）即会话窗口实例，只读窗口现有状态（dungeon_state / story_history 等）。
 - 文本组件的数据源是 ``ctx.story_history``：条目为
@@ -11,40 +12,31 @@
   ``speaker`` 由 Solea/Bulla 对话分支的 ``@说话人@`` 标记解析而来（见
   dungeon/splitter.py），None 表示叙述句；galgame 式组件可用它渲染名牌，
   并回退到 ``type_str``。
-- 文本显示家族（``TEXT_FAMILY_IDS``：text / text_card / text_nvl）互斥，
-  方案配置同时出现多个时保留第一个（见 ``resolve_ids``）。
  """
 
 import os
 import traceback
 
-from dungeon.terms import DEFAULT_SCENARIO_ID, SCENARIO_RESOURCE_KEY
+from dungeon import process_log
+from dungeon.schema import (DEFAULT_TEXT_COMPONENT, TEXT_COMPONENT_IDS)
 
-DEFAULT_COMPONENT_IDS = ["text"]
-_FALLBACK_IDS = ["text"]
+DEFAULT_COMPONENT_IDS = [DEFAULT_TEXT_COMPONENT]
+_FALLBACK_IDS = [DEFAULT_TEXT_COMPONENT]
 
-# 文本显示家族：三种 galgame 式文本组件互斥（都声明 owns_text_display 接管
-# 文本显示），方案配置同时出现多个时保留第一个、其余跳过并警告
-TEXT_FAMILY_IDS = frozenset({"text", "text_card", "text_nvl"})
+# 文本显示家族（主组件层）：与 schema.TEXT_COMPONENT_IDS 同源，都声明
+# owns_text_display 接管文本显示；配置层级的三选一由 text_component 字段承担
+TEXT_FAMILY_IDS = frozenset(TEXT_COMPONENT_IDS)
 
 # 组件包内的入口文件名（官方包只含此文件，避免 import 同目录其它 py）
 _PACK_ENTRY = "components.py"
 
 
-def _data_roots():
-    """返回按优先级排列的数据根目录列表（高优先级在前）。"""
-    from paths import data_dir
-    root = data_dir()
-    return [root]
-
-
 def find_component_pack_dir():
-    """定位默认组件包目录（不存在时返回 None）。"""
-    for base in _data_roots():
-        candidate = os.path.join(base, "packs", SCENARIO_RESOURCE_KEY,
-                                 DEFAULT_SCENARIO_ID, "components")
-        if os.path.isdir(candidate):
-            return candidate
+    """定位官方组件包目录（assets 随包分发；不存在时返回 None）。"""
+    from paths import dungeon_components_dir
+    candidate = dungeon_components_dir()
+    if os.path.isdir(candidate):
+        return candidate
     return None
 
 
@@ -67,8 +59,8 @@ def _load_pack_directory(pack_dir):
             registry = {}
         return registry
     except Exception as exc:
-        print(f"[Components] 加载组件包失败: {pack_dir}: {exc}")
-        traceback.print_exc()
+        process_log.log(f"[Components] 加载组件包失败: {pack_dir}: {exc}\n"
+                        f"{traceback.format_exc()}")
         return None
 
 
@@ -83,6 +75,13 @@ class DungeonComponent:
              "default": (255, 225, 150, 255)},
             {"key": "width", "label": "宽度", "type": "int", "default": 300},
         ]
+
+    服务面：文本主组件（text_component 三选一）可经 ctx 调用窗口的
+    覆盖层与查询服务（见 dungeon/window/overlay.py）——
+    ``ctx.toggle_overlay("log")`` 调出/关闭对话记录、``ctx.close_overlay()``
+    强制关闭、``ctx.overlay_open()`` 查询、``ctx.component(cid)`` 只读访问
+    兄弟组件实例。覆盖层打开期间窗口进入阅读模态（点击只关闭覆盖层，
+    剧情推进挂起）；组件不得自行构建/销毁兄弟组件或直接推进剧情。
     """
 
     id = ""  # 组件唯一 id（子类必须设置）
@@ -145,7 +144,7 @@ class ComponentRegistry:
         if registry:
             self._classes = {cid: cls for cid, cls in registry.items() if cls}
         if not set(self._classes) & TEXT_FAMILY_IDS:
-            print("[Components] 组件包缺少文本组件（text/text_card/text_nvl），"
+            process_log.log("[Components] 组件包缺少文本组件（text/text_card/text_nvl），"
                   "会话将无文本栏")
         self._instances = {}
 
@@ -156,27 +155,28 @@ class ComponentRegistry:
     def resolve_ids(self, ids):
         """把配置里的组件 id 列表解析为可实例化且去重的 id 列表。
 
-        空/非法配置回退到默认组件；未知 id 记录警告并跳过。文本显示家族
-        （TEXT_FAMILY_IDS）互斥：同时出现多个时保留第一个。
+        调用方保证首位是文本主组件 id（``text_component`` 字段，见窗口侧
+        ``_configured_component_ids``）。未知 id 记录警告并跳过；解析结果里
+        若没有任何文本主组件（配置的 id 不可用等），回退到默认文本组件——
+        文本显示必须三选其一。
         """
-        if not ids:
-            return list(DEFAULT_COMPONENT_IDS)
         valid = []
-        family_seen = None
         for cid in ids:
             if cid not in self._classes:
-                print(f"[Components] 未知组件 {cid}，已跳过")
+                process_log.log(f"[Components] 未知组件 {cid}，已跳过")
                 continue
-            if cid in TEXT_FAMILY_IDS:
-                if family_seen is not None:
-                    print(f"[Components] 文本组件互斥：{family_seen} 与 {cid} "
-                          f"同时配置，保留 {family_seen}")
-                    continue
-                family_seen = cid
             if cid not in valid:
                 valid.append(cid)
-        if not valid:
-            return list(_FALLBACK_IDS)
+        if not any(cid in TEXT_FAMILY_IDS for cid in valid):
+            fallback = next((c for c in TEXT_COMPONENT_IDS if c in self._classes), None)
+            if fallback is None:
+                process_log.log("[Components] 组件包缺少文本组件，会话将无文本栏")
+            else:
+                configured = str(ids[0]) if ids else ""
+                if configured and configured != fallback:
+                    process_log.log(f"[Components] 文本组件「{configured}」不可用，"
+                                    f"回退为 {fallback}")
+                valid.insert(0, fallback)
         return valid
 
     def instantiate(self, ctx, cid, config=None):
@@ -198,8 +198,8 @@ class ComponentRegistry:
                 component.params = resolve_configured_params(cls, config)
                 instance[cid] = component
             except Exception as exc:
-                print(f"[Components] 实例化组件 {cid} 失败: {exc}")
-                traceback.print_exc()
+                process_log.log(f"[Components] 实例化组件 {cid} 失败: {exc}\n"
+                                f"{traceback.format_exc()}")
                 instance[cid] = None
         return instance[cid]
 

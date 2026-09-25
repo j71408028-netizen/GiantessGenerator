@@ -13,6 +13,7 @@ from collections import deque
 import dearpygui.dearpygui as dpg
 
 from ai import create_client
+from dungeon import process_log
 from dungeon.window.background import DungeonBackground
 from dungeon.chapters import normalize_chapters
 from dungeon.coupling import normalize_coupling_level
@@ -24,7 +25,7 @@ from dungeon.window.result import (REASON_ALREADY_RUNNING, REASON_ENTRY_CANCELLE
 from dungeon.models import DungeonTextType, DungeonState
 from dungeon.prompts import DungeonPromptBuilder
 from dungeon.rules import EvolutionRules
-from dungeon.summary import DEFAULT_RECENT_COUNT, StorySummarizer
+from dungeon.summary import StorySummarizer
 from dungeon.validate import format_diagnostics, has_errors, validate_scenario_config
 from logic import get_size_category
 from services.state_service import StateService
@@ -162,6 +163,10 @@ class DungeonWindowBase:
         # 细节探究：AI 在后台提出的想了解细节，下次生成前检索解答并消费
         self._detail_queries = []
         self._detail_querying = False
+        # 预演化：下一步的预生成结果（玩家点击前提前发出的生成调用）。
+        # _pregen = {"user_prompt", "messages", "response", "text_type"}
+        self._pregen = None
+        self._pregen_inflight = False
         # 选项触发器状态
         self.trigger_choices = {}      # 触发器名 -> [已选择编号...]
         self.pending_option = None     # 待弹出的选项触发器数据
@@ -224,7 +229,7 @@ class DungeonWindowBase:
         """
         cls = type(self)
         if cls._session_running:
-            print("[Dungeon] 已有副本会话在运行，忽略本次启动")
+            process_log.log("[Dungeon] 已有副本会话在运行，忽略本次启动")
             return SessionResult(REASON_ALREADY_RUNNING,
                                  scenario_id=self.scenario_id or "")
         cls._session_running = True
@@ -329,6 +334,8 @@ class DungeonWindowBase:
         # 必须赶在 destroy_context 之前）；帧任务已随 stop() 清空，组件 destroy
         # 里的 cancel 只是幂等兜底
         self._destroy_components()
+        # 覆盖层（对话记录等）同批清理，并复位阅读模态标记
+        self._destroy_overlays()
         # 背景像素工作者：会话内的全部重采样/混合任务都在这里排队，收工时一并结束
         self._background.shutdown()
 
@@ -359,7 +366,7 @@ class DungeonWindowBase:
             dpg.destroy_context()
         except Exception as e:
             # 建 UI 阶段就抛异常时上下文可能根本没建起来，这里不能连累收尾
-            print(f"[Dungeon] 销毁 DPG 上下文失败: {e}")
+            process_log.log(f"[Dungeon] 销毁 DPG 上下文失败: {e}")
         finally:
             self._unregister_with_parent()
 
@@ -380,7 +387,7 @@ class DungeonWindowBase:
             try:
                 config = self.scenario_repo.load_config(scenario_id)
             except Exception as e:
-                print(f"副本配置加载失败: {e}")
+                process_log.log(f"副本配置加载失败: {e}")
         if config is None:
             # 不在 DPG 循环内弹 Tk 对话框：记录错误，关闭窗口后由调用方提示
             self._launch_error = f"无法加载副本配置 '{scenario_id}'"
@@ -396,7 +403,7 @@ class DungeonWindowBase:
                     + format_diagnostics(self.scenario_diagnostics))
                 return False
             if self.scenario_diagnostics:
-                print(f"[Scenario] 方案「{scenario_id}」校验提示：\n"
+                process_log.log(f"[Scenario] 方案「{scenario_id}」校验提示：\n"
                       + format_diagnostics(self.scenario_diagnostics))
 
         # 扣 AP / 状态刷新：探索模式且有角色时按副本配置扣除行动点数
@@ -442,7 +449,7 @@ class DungeonWindowBase:
                     try:
                         self.character_repo.save(character)
                     except Exception as e:
-                        print(f"[Dungeon] 角色保存失败: {e}")
+                        process_log.log(f"[Dungeon] 角色保存失败: {e}")
                 # 同步刷新主界面状态面板
                 self._refresh_external_state()
         return True
@@ -464,7 +471,7 @@ class DungeonWindowBase:
             if exploration is not None and hasattr(exploration, "_update_report_cost_label"):
                 exploration._update_report_cost_label()
         except Exception as e:
-            print(f"[Dungeon] 主界面状态同步失败: {e}")
+            process_log.log(f"[Dungeon] 主界面状态同步失败: {e}")
 
     def _init_session(self, scenario_config):
         """新开副本：初始化 AI 客户端、提示词、演化状态与尺寸类别。"""
@@ -477,7 +484,7 @@ class DungeonWindowBase:
                 model=self.ai_config.get("model") or None,
             )
         except Exception as e:
-            print(f"AI 客户端初始化失败: {e}")
+            process_log.log(f"AI 客户端初始化失败: {e}")
             self.ai_client = None
 
         self.initial_prompt = scenario_config.get("initial_prompt", "")
@@ -527,9 +534,9 @@ class DungeonWindowBase:
 
         self.size_cat = get_size_category(self.height)
 
-        # 剧情压缩器：提示词始终携带全部压缩概要 + 最近 N 段原文
+        # 剧情压缩器：提示词携带全部压缩概要 + 事实卡 + 关键事件
+        # （近期原文由对话历史携带，窗口大小见 _message_window_size）
         self.story_summary = StorySummarizer(
-            recent_count=self._story_recent_count(),
             coupling_level=self.coupling_level)
 
         self.prompt_builder = DungeonPromptBuilder(self)
@@ -555,16 +562,19 @@ class DungeonWindowBase:
         self.dungeon_logic = None
         self.current_text_type = None
         # 回放模式同样维护剧情压缩器（不调用 AI，仅走内部算法压缩）
-        self.story_summary = StorySummarizer(
-            recent_count=self._story_recent_count())
+        self.story_summary = StorySummarizer()
 
-    def _story_recent_count(self) -> int:
-        """提示词中保留的最近段落数（可在设置中调整，默认 20）。"""
+    def _message_window_size(self) -> int:
+        """对话历史保留的消息条数（不含系统提示；可在设置中调整，默认 20）。
+
+        ``story_recent_count``（设置页「副本记忆窗口大小」）原先控制提示词里
+        的最近段落原文数；近期原文改由对话历史携带后，该设置转义为历史窗口
+        大小，语义不变——仍决定 AI 能逐字看到多少近期剧情。
+        """
         try:
-            return max(1, int((self.settings or {}).get(
-                "story_recent_count", DEFAULT_RECENT_COUNT)))
+            return max(2, int((self.settings or {}).get("story_recent_count", 20)))
         except (TypeError, ValueError):
-            return DEFAULT_RECENT_COUNT
+            return 20
 
     # ---------------- 入口阶段进入（由 dungeon.window.launcher.DungeonLaunchStages 提供） ----------------
     # 子类 mixin 会覆盖 _enter_entry_phase / _init_entry_materials：
@@ -612,7 +622,7 @@ class DungeonWindowBase:
             dpg.set_viewport_width(self._main_client_w + delta_w)
             dpg.set_viewport_height(self._main_client_h + delta_h)
         except Exception as e:
-            print(f"视口尺寸校正失败: {e}")
+            process_log.log(f"视口尺寸校正失败: {e}")
 
     def _register_with_parent(self):
         """在宿主上登记自身，以便宿主整体退出时能协调停止本窗口。
@@ -623,14 +633,14 @@ class DungeonWindowBase:
         try:
             self.host.register_active_window(self)
         except Exception as e:
-            print(f"[Dungeon] 活动窗口登记失败: {e}")
+            process_log.log(f"[Dungeon] 活动窗口登记失败: {e}")
 
     def _unregister_with_parent(self):
         """解除在宿主上的登记。"""
         try:
             self.host.unregister_active_window(self)
         except Exception as e:
-            print(f"[Dungeon] 活动窗口注销失败: {e}")
+            process_log.log(f"[Dungeon] 活动窗口注销失败: {e}")
 
     def _discard_pending_quit(self):
         """让宿主丢掉「原生关闭键关掉视口」留下的退出类残留消息（见 §5-C12）。
@@ -641,10 +651,10 @@ class DungeonWindowBase:
         try:
             removed = self.host.discard_pending_quit()
         except Exception as e:
-            print(f"[Dungeon] 清理宿主残留退出消息失败: {e}")
+            process_log.log(f"[Dungeon] 清理宿主残留退出消息失败: {e}")
             return
         if removed:
-            print(f"[Dungeon] 已丢弃宿主队列里 {removed} 条残留退出消息（原生关闭）")
+            process_log.log(f"[Dungeon] 已丢弃宿主队列里 {removed} 条残留退出消息（原生关闭）")
 
     def _fix_windows_title(self):
         if self._is_windows:

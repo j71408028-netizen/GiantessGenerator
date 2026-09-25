@@ -59,6 +59,11 @@ def template_dir() -> str:
     return os.path.join(assets_dir(), "templates")
 
 
+def dungeon_components_dir() -> str:
+    """返回官方副本显示组件包目录（assets 下的随包只读资源，非用户数据）。"""
+    return os.path.join(assets_dir(), "components")
+
+
 def names_dir() -> str:
     """返回静态姓名表目录（默认为 <数据目录>/static/names）。"""
     return os.path.join(data_dir(), "static", "names")

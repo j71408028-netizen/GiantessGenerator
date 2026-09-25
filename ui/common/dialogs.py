@@ -34,6 +34,14 @@ _BUTTON_NO = "否"
 _BUTTON_CANCEL = "取消"
 
 
+def _mode_color(token):
+    """把主题色取为单色，供不支持亮暗成对取值的普通 tkinter 控件使用。"""
+    if isinstance(token, (list, tuple)):
+        idx = 1 if ctk.get_appearance_mode().lower() == "dark" else 0
+        return token[min(idx, len(token) - 1)]
+    return token
+
+
 def _resolve_parent(parent):
     """将 parent 解析为顶层窗口；未指定时使用默认根窗口。"""
     if parent is not None:
@@ -539,6 +547,7 @@ class ImageCropDialog(BaseDialog):
         rx, ry, rw, rh = self._calc_crop_rect()
 
         overlay_color = DLG_OVERLAY
+        crop_outline = _mode_color(DLG_CROP_OUTLINE)
         if ry > 0:
             self._canvas.create_rectangle(0, 0, dw, ry, fill=overlay_color,
                                           stipple='gray25', tag='overlay', outline='')
@@ -553,7 +562,7 @@ class ImageCropDialog(BaseDialog):
                                           stipple='gray25', tag='overlay', outline='')
 
         self._canvas.create_rectangle(rx, ry, rx + rw, ry + rh,
-                                      outline=DLG_CROP_OUTLINE, width=2, dash=(6, 3),
+                                      outline=crop_outline, width=2, dash=(6, 3),
                                       tag='overlay')
 
         # 更新横向与纵向比例提示标签（横向保留 2 位小数）

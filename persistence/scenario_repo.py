@@ -18,7 +18,8 @@ import shutil
 
 from dungeon.chapters import normalize_chapters
 from dungeon.coupling import normalize_coupling_level
-from dungeon.schema import empty_scenario_config
+from dungeon.schema import (empty_scenario_config, normalize_text_component,
+                            TEXT_COMPONENT_IDS)
 from dungeon.validate import format_diagnostics, validate_scenario_config
 from dungeon.terms import (DEFAULT_SCENARIO_ID, LEGACY_SCENARIO_RESOURCE_KEY,
                            SCENARIO_CONFIG_NAME, SCENARIO_RESOURCE_KEY,
@@ -211,6 +212,19 @@ class ScenarioRepo:
         new_config.pop("custom_attrs_def", None)
         # 旧的「副本窗口视图」已改造为耦合等级，视图字段不再保留
         new_config.pop("view_mode", None)
+
+        # 文本组件三选一：旧写法把家族成员放在 components 列表里，提升到
+        # text_component 字段并从列表移除（text_component 缺失或无效时取第一个）
+        components = new_config.get("components")
+        components = components if isinstance(components, list) else []
+        family = [c for c in components
+                  if isinstance(c, str) and c in TEXT_COMPONENT_IDS]
+        if "text_component" not in config and family:
+            new_config["text_component"] = normalize_text_component(family[0])
+        new_config["text_component"] = normalize_text_component(
+            new_config.get("text_component"))
+        new_config["components"] = [c for c in components
+                                    if c not in TEXT_COMPONENT_IDS]
 
         if "evolution_attrs" in config:
             new_config["evolution_attrs"] = config["evolution_attrs"]

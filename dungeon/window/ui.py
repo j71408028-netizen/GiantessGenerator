@@ -10,6 +10,12 @@ from dungeon.models import DungeonTextType
 _TEXT_COLOR = (255, 255, 255, 255)
 _HIGHLIGHT_COLOR = (255, 200, 60, 255)
 
+# ---------- 通知窗（窗口级常驻，不受组件配置影响） ----------
+_NOTIFY_WIDTH = 420
+_NOTIFY_MARGIN = 8
+_NOTIFY_DURATION = 3.0
+_NOTIFY_COLOR = (245, 240, 225, 255)
+
 # 仿流式输出：每次推进的字符数与间隔（约 65 字/秒）
 _ANIM_CHARS_PER_TICK = 2
 _ANIM_TICK_SECONDS = 0.03
@@ -106,6 +112,9 @@ class DungeonWindowUI:
             ):
                 pass
 
+            # 通知窗：窗口级常驻（_notify 显示数秒自动隐藏），不受组件配置影响
+            self._build_notification(viewport_w)
+
         dpg.set_primary_window("main_window", True)
 
         # DPG 2.3.1 兼容：创建窗口时传入 no_scrollbar/no_scroll_with_mouse 不生效，
@@ -136,6 +145,11 @@ class DungeonWindowUI:
             dpg.add_key_press_handler(key=dpg.mvKey_Return, callback=self._on_key_down)
             dpg.add_key_press_handler(key=dpg.mvKey_NumPadEnter, callback=self._on_key_down)
             dpg.add_key_press_handler(key=dpg.mvKey_F11, callback=self._toggle_fullscreen)
+            # F12：过程日志面板开关（proc_log 组件未配置时给禁用通知）
+            dpg.add_key_press_handler(key=dpg.mvKey_F12, callback=self._on_proc_log_hotkey)
+            # H：对话记录覆盖层开关；ESC：关闭已打开的覆盖层（overlay.py 服务面）
+            dpg.add_key_press_handler(key=dpg.mvKey_H, callback=self._on_log_key)
+            dpg.add_key_press_handler(key=dpg.mvKey_Escape, callback=self._on_escape_key)
 
         dpg.set_viewport_resize_callback(self._on_viewport_resize)
         # 不注册 set_exit_callback：手动渲染模式下它在 destroy_context() 内部才
@@ -148,6 +162,70 @@ class DungeonWindowUI:
         self._correct_viewport_size_to_main()
         self._relayout()
         self._update_text_display()
+
+    # ---------- 通知窗（窗口级常驻，不受组件配置影响） ----------
+    def _build_notification(self, viewport_w):
+        """顶部居中的轻通知条：_notify(text) 显示数秒后自动隐藏。"""
+        s = self._dpi_scale
+        margin = round(_NOTIFY_MARGIN * s)
+        self._notify_width = min(round(_NOTIFY_WIDTH * s),
+                                 max(1, viewport_w - 2 * margin))
+        with dpg.child_window(
+                tag="notify_panel", parent="main_window",
+                pos=[max(0, (viewport_w - self._notify_width) // 2), margin],
+                width=self._notify_width, height=round(40 * s),
+                show=False, no_scrollbar=True, no_scroll_with_mouse=True,
+                border=False):
+            dpg.add_text(tag="notify_text", default_value="",
+                         color=_NOTIFY_COLOR, wrap=max(1, self._notify_width - 2 * round(8 * s)))
+
+        with dpg.theme() as notify_theme:
+            with dpg.theme_component(dpg.mvAll):
+                dpg.add_theme_color(dpg.mvThemeCol_ChildBg, (30, 26, 18, 215))
+                pad = round(8 * s)
+                dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, pad, pad)
+        dpg.bind_item_theme("notify_panel", notify_theme)
+
+    def _notify(self, text):
+        """显示一条轻通知（仅主线程调用），约 3 秒后自动隐藏。
+
+        重复调用覆盖前一条文字并重置隐藏计时（``after`` 的同 key 任务互斥）。
+        """
+        if not dpg.does_item_exist("notify_panel"):
+            return
+        dpg.configure_item("notify_text", default_value=str(text))
+        dpg.configure_item("notify_panel", show=True)
+        self._frame.after(_NOTIFY_DURATION, self._hide_notification,
+                          key="notify:autohide")
+
+    def _hide_notification(self):
+        if dpg.does_item_exist("notify_panel"):
+            dpg.configure_item("notify_panel", show=False)
+
+    def _layout_notification(self, w):
+        """视口重排时让通知条回到顶部居中。"""
+        if not dpg.does_item_exist("notify_panel"):
+            return
+        dpg.configure_item(
+            "notify_panel",
+            pos=[max(0, (w - self._notify_width) // 2),
+                 round(_NOTIFY_MARGIN * self._dpi_scale)])
+
+    # ---------- 过程日志开关（F12） ----------
+    def _proc_log_component(self):
+        """当前会话已构建的 proc_log 组件；方案未配置时返回 None。"""
+        for comp in getattr(self, "_components", []):
+            if getattr(comp, "id", "") == "proc_log":
+                return comp
+        return None
+
+    def _on_proc_log_hotkey(self, sender=None, app_data=None):
+        """F12：切换过程日志面板；日志组件未配置时给出禁用通知。"""
+        comp = self._proc_log_component()
+        if comp is None:
+            self._notify("日志查看已禁用")
+            return
+        comp.toggle(self)
 
     # ---------- 文本更新（仅主线程调用） ----------
     def _text_owned_by_component(self) -> bool:
@@ -337,6 +415,8 @@ class DungeonWindowUI:
                     if dpg.does_item_exist(tag):
                         dpg.configure_item(tag, wrap=self._text_wrap_width)
 
+        self._layout_notification(w)
+        self._relayout_overlays()
         self._refresh_background()
         self._schedule_text_update()
 
@@ -366,6 +446,10 @@ class DungeonWindowUI:
     # ---------- 事件回调 ----------
     def _on_mouse_click(self, sender, app_data):
         if getattr(self, "_is_entry_phase", False):
+            return
+        if self.overlay_open():
+            # 阅读模态：点击只关闭覆盖层，不推进剧情
+            self.close_overlay()
             return
         self._on_next_step()
 
@@ -411,7 +495,7 @@ class DungeonWindowUI:
             return
         full_path = self._background.resolve_path(icon_path)
         if not full_path or not os.path.exists(full_path):
-            print(f"[Ending] 结局图标文件不存在: {icon_path}")
+            process_log.log(f"[Ending] 结局图标文件不存在: {icon_path}")
             return
         try:
             from PIL import Image
@@ -425,7 +509,7 @@ class DungeonWindowUI:
             data = list(img.tobytes())
             data = [v / 255.0 for v in data]
         except Exception as e:
-            print(f"[Ending] 结局图标加载失败: {e}")
+            process_log.log(f"[Ending] 结局图标加载失败: {e}")
             return
         if dpg.does_alias_exist("ending_icon_texture"):
             dpg.remove_alias("ending_icon_texture")

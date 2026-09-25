@@ -3,6 +3,7 @@
 import datetime
 import os
 
+from dungeon import process_log
 from dungeon.window.host import (DIALOG_ASK, DIALOG_INFO, DIALOG_WARNING,
                                  HostPort)
 from paths import data_dir
@@ -90,7 +91,7 @@ class DungeonPersistence:
             try:
                 self.character_repo.save(char)
             except Exception as e:
-                print(f"[Ending] 结局索引写入角色档案失败: {e}")
+                process_log.log(f"[Ending] 结局索引写入角色档案失败: {e}")
 
     def _backfill_replay_path(self, replay_path: str):
         """保存回放后，把回放路径回填到本次达成的结局索引记录。"""
@@ -105,7 +106,7 @@ class DungeonPersistence:
             try:
                 self.character_repo.save(self.character)
             except Exception as e:
-                print(f"[Ending] 结局索引回填角色档案失败: {e}")
+                process_log.log(f"[Ending] 结局索引回填角色档案失败: {e}")
 
     # ------------------ 结局结算 ------------------
 
@@ -165,9 +166,9 @@ class DungeonPersistence:
                 try:
                     self.character_repo.save(char)
                 except Exception as e:
-                    print(f"[Ending] 角色数据保存失败: {e}")
+                    process_log.log(f"[Ending] 角色数据保存失败: {e}")
 
-        print(f"[Ending] 结局增量已结算：介入度{intr_d:+.2f}，破坏性{dest_d:+.2f}，"
+        process_log.log(f"[Ending] 结局增量已结算：介入度{intr_d:+.2f}，破坏性{dest_d:+.2f}，"
               f"伤亡{cas_d:+.2f}，行动点数返还{refund:+d}")
 
     def _build_scenario_report_text(self, incomplete: bool = False,
@@ -238,7 +239,7 @@ class DungeonPersistence:
             # 原子写：半截回放文件不会被读到（后缀仍为 .replay.json，回放加载照旧）
             write_json_atomic(path, list(self.replay_data), backup=False)
         except Exception as e:
-            print(f"[Replay] 回放保存失败: {e}")
+            process_log.log(f"[Replay] 回放保存失败: {e}")
             return ""
         return path
 
@@ -256,7 +257,7 @@ class DungeonPersistence:
                 path, self._build_scenario_report_text(incomplete=incomplete, reason=reason),
                 backup=False)
         except Exception as e:
-            print(f"[Replay] 报告保存失败: {e}")
+            process_log.log(f"[Replay] 报告保存失败: {e}")
             return ""
         return path
 
@@ -272,7 +273,7 @@ class DungeonPersistence:
         try:
             write_json_atomic(path, list(self.replay_data), backup=False)
         except Exception as e:
-            print(f"[Replay] 用户回放保存失败: {e}")
+            process_log.log(f"[Replay] 用户回放保存失败: {e}")
             return ""
         return path
 
@@ -291,7 +292,7 @@ class DungeonPersistence:
                 path, self._build_scenario_report_text(incomplete=incomplete, reason=reason),
                 backup=False)
         except Exception as e:
-            print(f"[Replay] 用户报告保存失败: {e}")
+            process_log.log(f"[Replay] 用户报告保存失败: {e}")
             return ""
         return path
 
@@ -323,7 +324,7 @@ class DungeonPersistence:
             try:
                 self.character_repo.save(char)
             except Exception as e:
-                print(f"[Replay] 角色保存失败: {e}")
+                process_log.log(f"[Replay] 角色保存失败: {e}")
         replay_path = self._write_replay_file(char)
         report_path = self._write_report_file(char)
         self._replay_saved = True
@@ -396,7 +397,7 @@ class DungeonPersistence:
         # 记下来交给 SessionResult（L4）：调用方不必再自己去翻目录
         self.replay_path = replay_path
         self.report_path = report_path
-        print(f"[Dungeon] 未完成收尾落盘：回放={replay_path or '失败'}，"
+        process_log.log(f"[Dungeon] 未完成收尾落盘：回放={replay_path or '失败'}，"
               f"报告={report_path or '失败'}（{reason}）")
         if replay_path:
             self._replay_saved = True
@@ -476,7 +477,7 @@ def append_user_ending_record(record: dict) -> dict:
     try:
         _save_user_endings(records)
     except Exception as e:
-        print(f"[Ending] 用户结局索引写入失败: {e}")
+        process_log.log(f"[Ending] 用户结局索引写入失败: {e}")
         return None
     return record
 
@@ -493,4 +494,4 @@ def update_user_ending_record(updated: dict):
     try:
         _save_user_endings(records)
     except Exception as e:
-        print(f"[Ending] 用户结局索引回填失败: {e}")
+        process_log.log(f"[Ending] 用户结局索引回填失败: {e}")

@@ -8,6 +8,7 @@ from dungeon.coupling import (COUPLING_LEVELS, DEFAULT_COUPLING_LEVEL, VELUM,
                               coupling_initial_prompt,
                               coupling_label, normalize_coupling_level)
 from dungeon.rules import EvolutionRules
+from dungeon.schema import DEFAULT_TEXT_COMPONENT, normalize_text_component
 from ui.common.widgets import (CTkScrollableDropdownFrame, CTkSegmentedControl,
                                CycleOptionButton)
 from ui.common.dialogs import BaseDialog, InputDialog
@@ -39,10 +40,11 @@ class ScenarioEditor(ctk.CTkFrame):
         self.section_prompts = {}
         self.coupling_level = DEFAULT_COUPLING_LEVEL
         self.protagonist_title = ""
+        self.text_component = DEFAULT_TEXT_COMPONENT  # 文本主组件三选一
         self.evolution_attrs = []  # 统一演化量列表
         self.chapters = []  # 章节列表（不含条件，只描述背景与持续敏感效果）
         self.triggers = []
-        self.components = []  # 显示组件 id 列表
+        self.components = []  # 显示组件 id 列表（不含文本主组件）
         self.components_params = {}  # {组件id: {参数: 值}}
         self._modified = False
         self._saved_prompt_snapshot = {}  # 用于检测提示词是否被修改
@@ -544,7 +546,9 @@ class ScenarioEditor(ctk.CTkFrame):
         self.chapters = normalize_chapters(config.get("chapters", []))
         self.triggers = config.get("triggers", [])
         self.entry_action_cost = max(0, int(config.get("entry_action_cost", 0) or 0))
-        self.components = config.get("components", [])
+        self.text_component = normalize_text_component(config.get("text_component"))
+        self.components = [c for c in config.get("components", [])
+                           if c not in ("text", "text_card", "text_nvl")]
         if not isinstance(self.components, list):
             self.components = []
         self.components_params = config.get("components_params", {})
@@ -602,6 +606,8 @@ class ScenarioEditor(ctk.CTkFrame):
         config["transition_matrix"] = prompt_data["transition_matrix"]
         config["entry_action_cost"] = prompt_data["entry_action_cost"]
         # 保留组件选择与参数（组件面板独立保存，这里不覆盖已保存值）
+        if "text_component" in config:
+            config["text_component"] = self.text_component
         if "components" in config:
             config["components"] = self.components
         if "components_params" in config:
@@ -689,12 +695,13 @@ class ScenarioEditor(ctk.CTkFrame):
             "initial_prompt": "",
             "coupling_level": DEFAULT_COUPLING_LEVEL,
             "protagonist_title": "",
+            "text_component": DEFAULT_TEXT_COMPONENT,
             "section_prompts": {k: "" for k in ["background","branch","dialog","interaction","action"]},
             "custom_attrs": [],
             "chapters": [],
             "triggers": [],
             "entry_action_cost": 0,
-            "components": ["text"],
+            "components": ["attr_bar"],
             "components_params": {},
         }
         if self._scenario_repo.create(new_id, empty_config):
@@ -737,7 +744,8 @@ class ScenarioEditor(ctk.CTkFrame):
         pass
 
     def refresh_list_for_components(self):
-        """组件面板保存后同步编辑器的 components/components_params（保持一致性）。"""
+        """组件面板保存后同步编辑器的 text_component/components/components_params。"""
+        self.text_component = self.component_panel.text_component
         self.components = list(self.component_panel.components)
         self.components_params = dict(self.component_panel.components_params)
 

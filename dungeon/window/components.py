@@ -1,8 +1,8 @@
 """副本显示组件生命周期（混入）。
 
 组件包由 dungeon.window.component_registry 提供注册表；本 mixin 负责按副本配置
-（config.json 的 ``components`` 字段）在会话阶段构建组件实例，并把这些
-实例接入窗口现有的更新链：
+（``text_component`` 三选一 + ``components`` 列表）在会话阶段构建组件实例，并把
+这些实例接入窗口现有的更新链：
 - _relayout() → 各组件 layout(ctx)
 - _update_text_display() → 有组件声明 ``owns_text_display`` 时转调各组件
   refresh(ctx)（如底部渐变式文本栏接管显示），否则走内置 text_container 管线
@@ -11,8 +11,11 @@
 组件的根对象 ctx 即窗口实例本身，组件只读窗口现有状态，不反向写状态。
 """
 
+import traceback
+
 import dearpygui.dearpygui as dpg
 
+from dungeon import process_log
 from dungeon.window import component_registry as _components_module
 
 
@@ -25,12 +28,30 @@ class ComponentHandler:
         self._components_built = False
 
     def _configured_component_ids(self):
-        """读取副本配置里的组件 id 列表（默认空 → 由注册表回退到 text）。"""
+        """把副本配置解析成组件 id 列表（首位恒为文本主组件）。
+
+        文本主组件取 ``text_component`` 字段（三选一，见 dungeon.schema）；
+        未写该字段的旧配置从 ``components`` 列表里的家族成员提升（读侧兼容，
+        落盘归一由 scenario_repo._migrate 承担）。其余组件按配置顺序跟在
+        主组件之后——主组件先建、z 序在底。
+        """
+        from dungeon.schema import (DEFAULT_TEXT_COMPONENT,
+                                    normalize_text_component, TEXT_COMPONENT_IDS)
         config = getattr(self, "scenario_config", None) or {}
+        text_cid = normalize_text_component(config.get("text_component"))
         ids = config.get("components")
-        if not isinstance(ids, (list, tuple)):
-            return []
-        return [str(i) for i in ids if str(i).strip()]
+        others = []
+        for cid in (ids if isinstance(ids, (list, tuple)) else []):
+            cid = str(cid).strip()
+            if not cid:
+                continue
+            if cid in TEXT_COMPONENT_IDS:
+                # 旧写法残留：text_component 缺失时以列表里的家族成员为准
+                if "text_component" not in config:
+                    text_cid = normalize_text_component(cid)
+                continue
+            others.append(cid)
+        return [text_cid or DEFAULT_TEXT_COMPONENT] + others
 
     def _build_components(self):
         """按配置构建组件实例（主线程，会话阶段进入时调用）。"""
@@ -41,15 +62,13 @@ class ComponentHandler:
             self._components = _components_module.build_components(
                 self, self._configured_component_ids(), self.scenario_config)
         except Exception as exc:
-            print(f"[Components] 构建组件失败: {exc}")
-            import traceback
-            traceback.print_exc()
+            process_log.log(f"[Components] 构建组件失败: {exc}\n{traceback.format_exc()}")
             self._components = []
         for comp in self._components:
             try:
                 comp.build(self)
             except Exception as exc:
-                print(f"[Components] 组件 build 失败 ({getattr(comp, 'id', '?')}): {exc}")
+                process_log.log(f"[Components] 组件 build 失败 ({getattr(comp, 'id', '?')}): {exc}")
         self._components_built = True
 
     def _relayout_components(self):
@@ -58,7 +77,7 @@ class ComponentHandler:
             try:
                 comp.layout(self)
             except Exception as exc:
-                print(f"[Components] 组件 layout 失败 ({getattr(comp, 'id', '?')}): {exc}")
+                process_log.log(f"[Components] 组件 layout 失败 ({getattr(comp, 'id', '?')}): {exc}")
 
     def _refresh_components(self):
         """状态更新后调用各组件 refresh（主线程，经调度器）。"""
@@ -66,7 +85,7 @@ class ComponentHandler:
             try:
                 comp.refresh(self)
             except Exception as exc:
-                print(f"[Components] 组件 refresh 失败 ({getattr(comp, 'id', '?')}): {exc}")
+                process_log.log(f"[Components] 组件 refresh 失败 ({getattr(comp, 'id', '?')}): {exc}")
 
     def _destroy_components(self):
         """会话退出时清理组件（主线程，_handle_exit 前调用）。"""
@@ -74,7 +93,7 @@ class ComponentHandler:
             try:
                 comp.destroy(self)
             except Exception as exc:
-                print(f"[Components] 组件 destroy 失败 ({getattr(comp, 'id', '?')}): {exc}")
+                process_log.log(f"[Components] 组件 destroy 失败 ({getattr(comp, 'id', '?')}): {exc}")
         self._components = []
         self._components_built = False
         try:

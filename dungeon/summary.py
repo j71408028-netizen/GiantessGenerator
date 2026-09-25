@@ -1,13 +1,14 @@
 """副本剧情压缩器。
 
-把冗长的段落历史压缩成可注入提示词的“剧情概要”，并始终保留最近 N 段原文
-（默认 20，可在设置中调整）。
+把冗长的段落历史压缩成可注入提示词的“剧情概要”。
 
 - ``record``：每一步结束后登记段落文本与所在章节；
 - 每当 ``total_steps`` 达到 ``block_size`` 的倍数、或即将离开当前章节
   （``flush_chapter``）时，对上一块/上一章节的剩余段落做一次压缩；
 - ``prompt_block``：返回给 ``DungeonPromptBuilder`` 的概要文本，包含
-  全部压缩段（从开始到现在）与最近 N 段原文。
+  全部压缩段、事实卡与关键事件。近期原文不再注入——对话历史
+  （窗口大小见 ``story_recent_count`` 设置）已逐字携带最近剧情，
+  重复注入只会推高 prefill 与首字延迟。
 
 压缩优先使用 AI 客户端生成概要并抽取事实卡；AI 不可用或失败时回退到
 内部算法（截取首末句与高频词拼接），保证提示词始终有概要可用。
@@ -23,10 +24,10 @@ from __future__ import annotations
 import json
 from typing import Iterable
 
+from . import process_log
 from .coupling import coupling_prompts
 
 DEFAULT_BLOCK_SIZE = 20
-DEFAULT_RECENT_COUNT = 20
 MAX_SUMMARY_CHARS = 120
 MAX_KEY_EVENTS = 12      # 常驻提示词的确定性关键事件上限
 MAX_FACTS = 12           # 常驻提示词的关键事实（事实卡）上限
@@ -42,9 +43,7 @@ def _clip(text: str, limit: int = MAX_SUMMARY_CHARS) -> str:
 class StorySummarizer:
     """按块压缩剧情，并向提示词构建器提供“概要 + 最近段落”。"""
 
-    def __init__(self, recent_count: int = DEFAULT_RECENT_COUNT,
-                 block_size: int = DEFAULT_BLOCK_SIZE, coupling_level: str = None):
-        self.recent_count = max(1, int(recent_count))
+    def __init__(self, block_size: int = DEFAULT_BLOCK_SIZE, coupling_level: str = None):
         self.block_size = max(1, int(block_size))
         # 概要与事实卡的收集口径随耦合等级变化（见 dungeon.coupling）
         self.coupling_level = coupling_level
@@ -56,8 +55,6 @@ class StorySummarizer:
         self.key_events: list[str] = []
         # 尚未压缩的缓冲：[(text_type_value, text, chapter_name), ...]
         self._buffer: list[tuple[str, str, str]] = []
-        # 最近 N 段原文（含当前未压缩段）
-        self._recent: list[tuple[str, str]] = []
 
     # ---------------- 写入 ----------------
     def record(self, text_type_value: str, text: str, chapter_name: str = ""):
@@ -65,11 +62,7 @@ class StorySummarizer:
         text = str(text or "").strip()
         if not text:
             return
-        chapter_name = chapter_name or ""
-        self._buffer.append((text_type_value, text, chapter_name))
-        self._recent.append((text_type_value, text))
-        if len(self._recent) > self.recent_count:
-            self._recent = self._recent[-self.recent_count:]
+        self._buffer.append((text_type_value, text, chapter_name or ""))
 
     def flush_chapter(self, chapter_name: str, ai_client=None):
         """离开章节时强制压缩本章缓冲（不满一个块也压缩）。"""
@@ -143,7 +136,7 @@ class StorySummarizer:
                 if summary:
                     return summary, facts
             except Exception as e:
-                print(f"[Summary] AI 压缩失败，改用内部算法: {e}")
+                process_log.log(f"[Summary] AI 压缩失败，改用内部算法: {e}")
         return self._fallback_summary(texts), []
 
     @staticmethod
@@ -205,7 +198,7 @@ class StorySummarizer:
         return lines
 
     def prompt_block(self) -> str:
-        """注入提示词的剧情块：压缩概要 + 常驻记忆 + 最近 N 段原文。"""
+        """注入提示词的剧情块：压缩概要 + 常驻记忆（近期原文由对话历史携带）。"""
         lines = []
         if self.summaries:
             lines.append("剧情概要（按时间顺序）：")
@@ -213,10 +206,6 @@ class StorySummarizer:
                 prefix = f"{i}. " + (f"【{chapter}】" if chapter else "")
                 lines.append(prefix + summary)
         lines.extend(self._memory_lines())
-        if self._recent:
-            lines.append(f"最近 {len(self._recent)} 段剧情（原文）：")
-            for type_value, text in self._recent:
-                lines.append(f"[{type_value}] {text}")
         return "\n".join(lines)
 
     def summary_only(self) -> str:

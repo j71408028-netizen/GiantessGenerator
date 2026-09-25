@@ -212,7 +212,7 @@
 
 | 项 | 行为 |
 |---|---|
-| `ScenarioRepo._migrate` | 以原配置为底稿补齐字段，未知键（含 `components`）原样保留；缺失的 `chapters` 补成 `[]`，每个触发器补 `chapter: ""` |
+| `ScenarioRepo._migrate` | 以原配置为底稿补齐字段，未知键（含 `components`）原样保留；缺失的 `chapters` 补成 `[]`，每个触发器补 `chapter: ""`；旧写法 `components` 列表里的文本家族成员提升到 `text_component` 字段并从列表移除 |
 | `chapters.normalize_chapter` | 补齐 `ending` / `max_paragraphs` / `overflow_target` 与结束章节结算字段（旧章节默认 `ending=false`、上限 99、超限离开章节） |
 | 旧配置行为 | 迁移后所有既有触发器都是「任意章节」，也不自动创建章节 |
 | 旧版 `background` / `sensitivity` 动作 | **不再执行**，配置本身不被改写，需要清理时在编辑器里删除 |

@@ -22,6 +22,17 @@ from dungeon.models import DungeonTextType
 
 TEXT_TYPE_KEYS = tuple(t.value for t in DungeonTextType)
 
+# 文本显示组件：主组件层三选一（区别于 components 列表里的普通组件）。
+# 三者都声明 owns_text_display 接管窗口文本显示，见 dungeon/window/component_registry。
+TEXT_COMPONENT_IDS = ("text", "text_card", "text_nvl")
+DEFAULT_TEXT_COMPONENT = "text"
+
+
+def normalize_text_component(value, default: str = DEFAULT_TEXT_COMPONENT) -> str:
+    """把任意来源的值归一化为合法文本组件 id；无法识别时返回 default。"""
+    text = str(value or "").strip().lower()
+    return text if text in TEXT_COMPONENT_IDS else default
+
 
 @dataclass(frozen=True)
 class FieldSpec:
@@ -43,6 +54,9 @@ SCENARIO_FIELDS = (
     FieldSpec("coupling_level", "enum", "耦合等级", DEFAULT_COUPLING_LEVEL, choices=COUPLING_LEVELS),
     FieldSpec("protagonist_title", "str", "主角称呼", "",
               note="对话段落里主角台词的说话人标注；仅 Solea/Bulla 使用，留空回退「主角」"),
+    FieldSpec("text_component", "enum", "文本组件", DEFAULT_TEXT_COMPONENT,
+              choices=TEXT_COMPONENT_IDS,
+              note="文本主组件三选一：text=底部渐变、text_card=底部卡片、text_nvl=全屏NVL"),
     FieldSpec("entry_action_cost", "int", "进入所需行动点数", 0, note="0 表示免费"),
     FieldSpec("section_prompts", "dict", "分节提示词"),
     FieldSpec("section_steps", "dict", "分节步长", None,
@@ -52,7 +66,8 @@ SCENARIO_FIELDS = (
     FieldSpec("evolution_attrs", "list", "演化属性"),
     FieldSpec("chapters", "list", "章节"),
     FieldSpec("triggers", "list", "触发器"),
-    FieldSpec("components", "list", "启用的显示组件"),
+    FieldSpec("components", "list", "启用的显示组件", None,
+              note="文本主组件之外的组件（如属性条）；文本组件写在这里会被忽略"),
     FieldSpec("components_params", "dict", "显示组件参数"),
 )
 
@@ -143,6 +158,7 @@ def empty_scenario_config() -> dict:
         "initial_prompt": "",
         "coupling_level": DEFAULT_COUPLING_LEVEL,
         "protagonist_title": "",
+        "text_component": DEFAULT_TEXT_COMPONENT,
         "entry_action_cost": 0,
         "section_prompts": {key: "" for key in TEXT_TYPE_KEYS},
         "evolution_attrs": [

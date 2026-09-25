@@ -5,6 +5,7 @@ import time
 
 import dearpygui.dearpygui as dpg
 
+from dungeon import process_log
 from dungeon.chapters import find_chapter, is_terminating_chapter, overflow_jump_target
 from dungeon.details import build_detail_query_prompt, parse_detail_queries
 from dungeon.models import DungeonTextType
@@ -16,6 +17,10 @@ from logic import apply_size_unlock_updates, compute_casualty
 class DungeonStoryEngine:
     # ---------- 核心逻辑 ----------
     def _on_next_step(self):
+        # 覆盖层（对话记录等）打开时进入阅读模态：键盘推进也挂起
+        # （鼠标点击由 _on_mouse_click 处理为「关闭覆盖层」）
+        if self.overlay_open():
+            return
         if self.is_replay:
             self._replay_next_step()
             return
@@ -63,15 +68,24 @@ class DungeonStoryEngine:
                 if getattr(self, "ai_client", None) is None:
                     self._frame.call(self._show_ai_error)
                     return
-                next_type = self.dungeon_logic.get_next_text_type(self.current_text_type)
-                # 结束章节：所有段落类型被覆盖为「结局」，步进为 0
-                if self._in_terminating_chapter():
-                    next_type = DungeonTextType.BACKGROUND
-                user_prompt = self.prompt_builder.build_user_prompt(next_type)
+                # 预演化收养：优先使用提前生成好的下一段（在途则等待完成）
+                pregen = self._take_pregen_for_next()
+                if pregen is not None:
+                    next_type = pregen["text_type"]
+                    user_prompt = pregen["user_prompt"]
+                    self.messages = list(pregen["messages"])   # 已含本次 user 消息
+                    full_response_buffer = pregen["response"]
+                else:
+                    next_type = self.dungeon_logic.get_next_text_type(self.current_text_type)
+                    # 结束章节：所有段落类型被覆盖为「结局」，步进为 0
+                    if self._in_terminating_chapter():
+                        next_type = DungeonTextType.BACKGROUND
+                    user_prompt = self.prompt_builder.build_user_prompt(next_type)
+                    self.messages.append({"role": "user", "content": user_prompt})
+                    full_response_buffer = ""
                 # 本段是延迟插入的衔接段：生成成功后插入段晋升为下一段
                 delayed_insert_pending = bool(self.pending_insertions
                                               and self.pending_insertions[0].get("delayed"))
-                self.messages.append({"role": "user", "content": user_prompt})
 
                 prefix = self._display_type_prefix(next_type)
 
@@ -79,28 +93,27 @@ class DungeonStoryEngine:
                 current_item = {"type_str": prefix, "text": "", "speaker": None}
                 self.story_history.append(current_item)
 
-                full_response_buffer = ""
+                if pregen is None:
+                    stream_generator = self.ai_client.generate_stream(self.messages, temperature=0.8)
 
-                stream_generator = self.ai_client.generate_stream(self.messages, temperature=0.8)
+                    for chunk in stream_generator:
+                        if self._closing:
+                            return
+                        full_response_buffer += chunk
 
-                for chunk in stream_generator:
+                        partial_text = extract_stream_text(full_response_buffer)
+                        if partial_text is not None:
+                            # 内置分句器：首句流式显示，完整即定格；后续完成句排队待点击
+                            self._update_stream_units(current_item, partial_text)
+                        else:
+                            cleaned_buf = full_response_buffer.replace("```json", "").replace("```", "").strip()
+                            if not cleaned_buf.startswith("{"):
+                                current_item["text"] = cleaned_buf
+
+                        self._schedule_text_update()
+
                     if self._closing:
                         return
-                    full_response_buffer += chunk
-
-                    partial_text = extract_stream_text(full_response_buffer)
-                    if partial_text is not None:
-                        # 内置分句器：首句流式显示，完整即定格；后续完成句排队待点击
-                        self._update_stream_units(current_item, partial_text)
-                    else:
-                        cleaned_buf = full_response_buffer.replace("```json", "").replace("```", "").strip()
-                        if not cleaned_buf.startswith("{"):
-                            current_item["text"] = cleaned_buf
-
-                    self._schedule_text_update()
-
-                if self._closing:
-                    return
 
                 ai_text, direction, custom_directions = self._parse_final_json(full_response_buffer)
 
@@ -114,10 +127,14 @@ class DungeonStoryEngine:
                 else:
                     current_item["text"] = strip_speaker_markers(ai_text)
                 self._schedule_text_update()
+                if pregen is not None and current_item["text"]:
+                    # 预生成整段就绪：首句仿流式揭示，与实时流式的节奏一致
+                    self._animate_reveal(current_item, current_item["text"])
 
                 self.messages.append({"role": "assistant", "content": full_response_buffer})
-                if len(self.messages) > 21:
-                    self.messages = [self.messages[0]] + self.messages[-20:]
+                window = self._message_window_size()
+                if len(self.messages) > window + 1:
+                    self.messages = [self.messages[0]] + self.messages[-window:]
 
                 # 落盘与结算链统一用剥离说话人标记后的净文本
                 clean_text = strip_speaker_markers(ai_text)
@@ -155,7 +172,7 @@ class DungeonStoryEngine:
                 success = True
 
             except Exception as e:
-                print(f"流式任务执行异常: {e}")
+                process_log.log(f"流式任务执行异常: {e}")
                 # 异常不再静默：写入会话错误清单（收尾时进「未完成」报告）
                 # 并在故事区提示一行，玩家可再次点击推进重试
                 self._note_session_error(e)
@@ -165,6 +182,9 @@ class DungeonStoryEngine:
                 if success and delayed_insert_pending:
                     if self.pending_insertions and self.pending_insertions[0].get("delayed"):
                         self.pending_insertions[0]["delayed"] = False
+                # 预演化：下一次点击必然触发生成时，立即后台预生成下一段
+                if success:
+                    self._maybe_pregen_next()
 
         threading.Thread(target=task, daemon=True).start()
 
@@ -196,13 +216,88 @@ class DungeonStoryEngine:
                 if not self._closing:
                     self._detail_queries = queries
                     if queries:
-                        print(f"[DetailQuery] 想了解的细节: {queries}")
+                        process_log.log(f"[DetailQuery] 想了解的细节: {queries}")
             except Exception as e:
-                print(f"[DetailQuery] 细节提问失败: {e}")
+                process_log.log(f"[DetailQuery] 细节提问失败: {e}")
             finally:
                 self._detail_querying = False
 
         threading.Thread(target=run, daemon=True).start()
+
+    # ---------- 预演化 ----------
+    def _maybe_pregen_next(self):
+        """下一次点击必然触发生成时，立即在后台预生成下一段（消除首字延迟）。
+
+        预生成只在「世界状态已定、点击不可能转向」的时机发起：选项弹窗、
+        插入段排队、结局待生成期间一律跳过（这些路径在各自收尾处补射）。
+        生成的调用次数不变——只是把下一次的请求提前发出。
+        """
+        if getattr(self, "is_replay", False) or self._closing:
+            return
+        if self.dungeon_ended or self.pending_ending is not None:
+            return
+        if self.pending_option is not None or self.pending_insertions:
+            return
+        if getattr(self, "_pregen", None) is not None or getattr(self, "_pregen_inflight", False):
+            return
+        if getattr(self, "ai_client", None) is None:
+            return
+        self._start_pregen()
+
+    def _start_pregen(self):
+        """后台预生成下一段：缓存 (user_prompt, messages快照, 原始响应, 段落类型)。"""
+        try:
+            next_type = self.dungeon_logic.get_next_text_type(self.current_text_type)
+            # 结束章节：所有段落类型被覆盖为「结局」，步进为 0
+            if self._in_terminating_chapter():
+                next_type = DungeonTextType.BACKGROUND
+            # build_user_prompt 会把「被注意到的部位」标记为已提示；快照，
+            # 预生成失败（走实时路径重建提示词）时还原，避免误标
+            snapshot_given = set(self.keyword_match_given)
+            user_prompt = self.prompt_builder.build_user_prompt(next_type)
+        except Exception as e:
+            process_log.log(f"[Pregen] 组装预生成提示词失败: {e}")
+            return
+        pre_messages = self.messages + [{"role": "user", "content": user_prompt}]
+        self._pregen_inflight = True
+
+        def run():
+            response = ""
+            try:
+                for chunk in self.ai_client.generate_stream(pre_messages, temperature=0.8):
+                    if self._closing:
+                        return
+                    response += chunk
+            except Exception as e:
+                process_log.log(f"[Pregen] 预生成失败，改回实时路径: {e}")
+                self.keyword_match_given = snapshot_given
+                return
+            finally:
+                self._pregen_inflight = False
+            if not self._closing and response.strip():
+                self._pregen = {
+                    "user_prompt": user_prompt,
+                    "messages": pre_messages,
+                    "response": response,
+                    "text_type": next_type,
+                }
+                process_log.log("[Pregen] 下一段已预生成")
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _take_pregen_for_next(self):
+        """取用预生成结果；仍在途则等待完成（收养，不重复发请求）。
+
+        预生成后、点击前世界状态不会变化（选项/插入/结局存在时不会预生成），
+        因此无需校验有效性。失败或无预生成返回 None，走实时请求路径。
+        """
+        pregen = getattr(self, "_pregen", None)
+        if pregen is None and getattr(self, "_pregen_inflight", False):
+            while self._pregen_inflight and not self._closing:
+                time.sleep(0.05)
+            pregen = getattr(self, "_pregen", None)
+        self._pregen = None
+        return pregen
 
     def _update_stream_units(self, current_item, partial_text):
         """流式中用内置分句器更新显示：首句（未完句尾）流式展示，完整即定格。
@@ -279,10 +374,10 @@ class DungeonStoryEngine:
             return
         target = overflow_jump_target(chapter, self.chapters)
         if is_terminating_chapter(chapter):
-            print(f"[Chapter] 结束章节「{chapter.get('name')}」达到最大段落数（{limit}），终止副本")
+            process_log.log(f"[Chapter] 结束章节「{chapter.get('name')}」达到最大段落数（{limit}），终止副本")
             self._terminate_from_ending_chapter(chapter)
         else:
-            print(f"[Chapter] 章节「{chapter.get('name')}」达到最大段落数（{limit}），"
+            process_log.log(f"[Chapter] 章节「{chapter.get('name')}」达到最大段落数（{limit}），"
                   f"跳转到「{target or '离开章节'}」")
             self._enter_chapter(target, record=True)
 
@@ -364,11 +459,11 @@ class DungeonStoryEngine:
 
     def _replay_next_step(self):
         if self.dungeon_ended:
-            print("回放结束")
+            process_log.log("回放结束")
             self._request_close()
             return
         if self.current_replay_index >= len(self.loaded_replay):
-            print("回放结束")
+            process_log.log("回放结束")
             self._request_close()
             return
         entry = self.loaded_replay[self.current_replay_index]

@@ -1,12 +1,13 @@
-"""副本显示组件管理面板（卡片式启用 + 参数自动保存）。
+"""副本显示组件管理面板（文本主组件三选一 + 卡片式启用 + 参数自动保存）。
 
-面板布局：可用官方组件逐个渲染为一张可展开的卡片，卡片头部是启用开关、
-展示名与说明；启用后卡片展开，内嵌该组件的参数编辑表单
-（text / int / bool / color）。开关切换与参数修改都会**自动保存**到副本方案
-配置（输入类修改带短防抖），无需手动保存按钮。
+面板布局：顶部是**文本主组件**三选一控件（text / text_card / text_nvl，
+主组件层，见 dungeon.schema.TEXT_COMPONENT_IDS），其参数表单随选中项常驻；
+下方是其余可用组件的可展开卡片，卡片头部是启用开关、展示名与说明，
+启用后展开参数编辑表单（text / int / bool / color）。所有修改都会**自动
+保存**到副本方案配置（输入类修改带短防抖），无需手动保存按钮。
 
 组件 id 与参数声明来自 dungeon.window.component_registry.available_component_descriptions()，
-由默认组件包（data/packs/scenarios/_default/components/components.py）提供；
+由官方组件包（assets/components/components.py）提供；
 展示名与说明文案维护在 _COMPONENT_META，未登记的组件回退为原始 id。
 """
 
@@ -15,20 +16,40 @@ from tkinter import colorchooser
 
 import customtkinter as ctk
 
+from dungeon.schema import DEFAULT_TEXT_COMPONENT, TEXT_COMPONENT_IDS
 from ui.common.theme import (
     SC_BORDER, SC_BORDER_STRONG, SC_TEXT_SOFT, SC_TITLE,
 )
 from ui.common import fonts as ui_fonts
 
+#: 文本主组件三选一控件的档位（值 → 展示名）
+_TEXT_COMPONENT_CHOICES = [
+    ("text", "底部渐变"),
+    ("text_card", "底部卡片"),
+    ("text_nvl", "全屏 NVL"),
+]
+
 #: 组件展示名与说明（未登记的组件回退为原始 id，无说明文案）
 _COMPONENT_META = {
     "text": {
-        "label": "文本栏",
-        "desc": "故事正文的显示容器：故事视图占视口中部，游戏视图为底部矮栏。",
+        "label": "底部渐变式文本栏",
+        "desc": "视口底部向上淡出的深色渐变衬底上显示最近几句正文（ADV 风格）。",
+    },
+    "text_card": {
+        "label": "底部卡片式文本栏",
+        "desc": "底部居中的圆角半透明卡片上浮现最近几句正文。",
+    },
+    "text_nvl": {
+        "label": "全屏 NVL 文本栏",
+        "desc": "全屏半透明覆盖层上堆叠全部历史段落，可滚轮回看（阅读模式）。",
     },
     "attr_bar": {
         "label": "属性条",
         "desc": "在窗口左上角实时显示演化属性数值与总伤亡。",
+    },
+    "proc_log": {
+        "label": "过程日志",
+        "desc": "右上角面板显示运行消息（F12 切换展开/收起，默认收起）。",
     },
 }
 
@@ -77,7 +98,8 @@ class ComponentManager(ctk.CTkFrame):
     def __init__(self, parent, scenario_repo, scenario_editor_ref):
         super().__init__(parent, fg_color="transparent")
         self.scenario_editor = scenario_editor_ref
-        self.components = []            # 当前配置启用的组件 id 列表
+        self.text_component = DEFAULT_TEXT_COMPONENT  # 文本主组件三选一
+        self.components = []            # 当前配置启用的组件 id 列表（不含文本主组件）
         self.components_params = {}     # {组件 id: {参数key: 值}}
         self._descriptions = []
         self._param_widgets = {}        # {组件 id: {参数key: 控件/变量}}
@@ -88,9 +110,9 @@ class ComponentManager(ctk.CTkFrame):
         self._card_chrome = {}          # {组件 id: (卡片, 标题标签)}
         self._save_job = None           # 挂起的防抖保存 after id
         self._loading = False           # 重建卡片期间抑制自动保存
-        # 最近一次落盘的 (启用列表, 参数)；refresh_list 用它与编辑器传入
-        # 状态比对，一致时不重建卡片（保留挂起的防抖保存）
-        self._saved_snapshot = (None, None)
+        # 最近一次落盘的 (文本主组件, 启用列表, 参数)；refresh_list 用它与
+        # 编辑器传入状态比对，一致时不重建卡片（保留挂起的防抖保存）
+        self._saved_snapshot = (None, None, None)
 
         self._load_descriptions()
         self._build_ui()
@@ -123,11 +145,34 @@ class ComponentManager(ctk.CTkFrame):
                      font=ui_fonts.ui_font(11),
                      text_color=SC_TEXT_SOFT).pack(side='left', padx=8)
 
+        # 文本主组件三选一（主组件层，独立于下方组件开关）
+        selector = ctk.CTkFrame(self, fg_color="transparent")
+        selector.pack(fill='x', padx=10, pady=(0, 4))
+        ctk.CTkLabel(selector, text="文本组件（三选一）：",
+                     font=ui_fonts.ui_font(13, "bold"),
+                     text_color=SC_TITLE).pack(side='left', padx=5)
+        self._text_segment = ctk.CTkSegmentedButton(
+            selector, values=[label for _, label in _TEXT_COMPONENT_CHOICES],
+            font=ui_fonts.ui_font(12), height=28,
+            command=self._on_text_component_changed)
+        self._text_segment.pack(side='left', padx=8)
+
         self.cards_scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
         self.cards_scroll.pack(fill='both', expand=True, padx=10, pady=(0, 10))
 
+    def _on_text_component_changed(self, label):
+        """三选一控件回调：档位展示名映射回组件 id 并自动保存。"""
+        if self._loading:
+            return
+        for cid, choice_label in _TEXT_COMPONENT_CHOICES:
+            if choice_label == label:
+                self.text_component = cid
+                break
+        self._rebuild_cards()
+        self._flush_save()
+
     def _rebuild_cards(self):
-        """按组件描述重建全部卡片（加载副本/切页时调用）。"""
+        """按组件描述重建选择器与全部卡片（加载副本/切页时调用）。"""
         self._loading = True
         try:
             for child in self.cards_scroll.winfo_children():
@@ -145,29 +190,48 @@ class ComponentManager(ctk.CTkFrame):
                              text_color=SC_TEXT_SOFT).pack(anchor='w', padx=6, pady=8)
                 return
 
+            self._text_segment.set(self._text_choice_label())
+            available = {d["id"] for d in self._descriptions}
+            if self.text_component not in available:
+                self.text_component = DEFAULT_TEXT_COMPONENT
+            # 文本主组件：选中项的参数表单常驻（无启用开关）
+            selected = self._desc_by_id(self.text_component)
+            if selected is not None:
+                self._build_component_card(selected, toggleable=False)
+            # 其余组件：开关卡片
             for desc in self._descriptions:
+                if desc["id"] in TEXT_COMPONENT_IDS:
+                    continue
                 self._build_component_card(desc)
         finally:
             self._loading = False
 
-    def _build_component_card(self, desc):
+    def _text_choice_label(self):
+        for cid, label in _TEXT_COMPONENT_CHOICES:
+            if cid == self.text_component:
+                return label
+        return self.text_component
+
+    def _build_component_card(self, desc, toggleable=True):
         cid = desc["id"]
         label, blurb = self._meta_by_id(cid)
-        enabled = cid in self.components
+        enabled = toggleable and cid in self.components
 
+        active = enabled or not toggleable
         card = ctk.CTkFrame(self.cards_scroll, fg_color="transparent",
                             border_width=1, corner_radius=12,
-                            border_color=SC_BORDER_STRONG if enabled else SC_BORDER)
+                            border_color=SC_BORDER_STRONG if active else SC_BORDER)
         card.pack(fill='x', pady=5)
 
         head = ctk.CTkFrame(card, fg_color="transparent")
         head.pack(fill='x', padx=12, pady=(10, 4))
 
-        switch_var = tk.BooleanVar(value=enabled)
-        ctk.CTkSwitch(head, text="启用", variable=switch_var, width=64,
-                      font=ui_fonts.ui_font(11),
-                      command=lambda c=cid: self._apply_card_state(c)).pack(side='left', padx=(0, 12))
-        self._switch_vars[cid] = switch_var
+        if toggleable:
+            switch_var = tk.BooleanVar(value=enabled)
+            ctk.CTkSwitch(head, text="启用", variable=switch_var, width=64,
+                          font=ui_fonts.ui_font(11),
+                          command=lambda c=cid: self._apply_card_state(c)).pack(side='left', padx=(0, 12))
+            self._switch_vars[cid] = switch_var
 
         text_column = ctk.CTkFrame(head, fg_color="transparent")
         text_column.pack(side='left', fill='x', expand=True)
@@ -175,7 +239,7 @@ class ComponentManager(ctk.CTkFrame):
         title_row.pack(fill='x')
         title_label = ctk.CTkLabel(title_row, text=label,
                                    font=ui_fonts.ui_font(14, "bold"),
-                                   text_color=SC_TITLE if enabled else SC_TEXT_SOFT)
+                                   text_color=SC_TITLE if active else SC_TEXT_SOFT)
         title_label.pack(side='left')
         ctk.CTkLabel(title_row, text=cid, font=ui_fonts.ui_font(11),
                      text_color=SC_TEXT_SOFT).pack(side='left', padx=(8, 0))
@@ -187,7 +251,7 @@ class ComponentManager(ctk.CTkFrame):
         body = ctk.CTkFrame(card, fg_color="transparent")
         self._card_bodies[cid] = body
         self._card_chrome[cid] = (card, title_label)
-        if enabled:
+        if active:
             body.pack(fill='x', padx=(34, 12), pady=(0, 10))
             self._build_param_rows(cid, desc, body)
 
@@ -351,28 +415,35 @@ class ComponentManager(ctk.CTkFrame):
         config = editor._scenario_repo.load_config(editor.current_scenario_id)
         if config is None:
             config = {}
+        config["text_component"] = self.text_component
         config["components"] = list(self.components)
         # 已禁用组件的参数保留在配置里（临时关闭不丢自定义参数），
-        # 启用中的组件以表单当前值为准
+        # 启用中的组件以表单当前值为准（含文本主组件）
         params = dict(self.components_params)
         params.update(self.collect_params())
         config["components_params"] = params
         editor._scenario_repo.save_config(editor.current_scenario_id, config)
         self.components_params = params
+        editor.text_component = self.text_component
         editor.components = list(self.components)
         editor.components_params = dict(params)
-        self._saved_snapshot = (list(self.components), dict(params))
+        self._saved_snapshot = (self.text_component, list(self.components),
+                                dict(params))
 
     # ---------------- 保存 ----------------
     def _ordered_components(self):
-        """按描述顺序归一化启用列表，保证配置顺序稳定。"""
-        known = [d["id"] for d in self._descriptions]
+        """按描述顺序归一化启用列表（不含文本主组件），保证配置顺序稳定。"""
+        known = [d["id"] for d in self._descriptions
+                 if d["id"] not in TEXT_COMPONENT_IDS]
         return [cid for cid in known if cid in self.components]
 
     def collect_params(self) -> dict:
-        """从表单控件收集各已启用组件的参数覆盖（仅记录被修改/非默认的）。"""
+        """从表单控件收集各已启用组件的参数覆盖（含文本主组件）。"""
+        collected_ids = list(self.components)
+        if self.text_component not in collected_ids:
+            collected_ids.append(self.text_component)
         result = {}
-        for cid in self.components:
+        for cid in collected_ids:
             widgets = self._param_widgets.get(cid, {})
             desc = self._desc_by_id(cid)
             specs = (desc or {}).get("param_specs", []) or []
@@ -406,15 +477,17 @@ class ComponentManager(ctk.CTkFrame):
         配置被外部修改，取消防抖并按传入状态整体重建。
         """
         editor = self.scenario_editor
-        incoming = (list(getattr(editor, "components", []) or []),
+        incoming = (getattr(editor, "text_component", DEFAULT_TEXT_COMPONENT),
+                    list(getattr(editor, "components", []) or []),
                     dict(getattr(editor, "components_params", {}) or {}))
         if incoming == self._saved_snapshot:
             return
         self._cancel_pending_save()
-        self.components, self.components_params = incoming
+        self.text_component, self.components, self.components_params = incoming
         self._rebuild_cards()
         # 重建后卡片展示的正是传入状态，落快照供下次比对
-        self._saved_snapshot = (list(self.components), dict(self.components_params))
+        self._saved_snapshot = (self.text_component, list(self.components),
+                                dict(self.components_params))
 
 
 __all__ = ["ComponentManager"]

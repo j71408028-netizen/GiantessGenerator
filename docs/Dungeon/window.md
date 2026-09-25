@@ -31,7 +31,7 @@
 | `dungeon/window/base.py` | 构造（`__init__` 只存参数 + 会话初始化）与运行（`run()` 建 UI、帧循环 `_run_frame_loop`、收尾 `_finish_session`）、入口 / 会话阶段切换、关闭路径、视口尺寸（取自宿主端口） |
 | `dungeon/window/host.py` | **宿主端口** `HostPort`（含无宿主缺省实现）：尺寸/DPI、宿主显隐、事件泵、收尾弹框、活动窗口登记、缺省字体、回放文件选择 |
 | `ui/common/tk_host.py` | 宿主端口的 Tk/CTk 适配器 `TkHost`——**window 层唯一的 Tk 细节所在地** |
-| `dungeon/window/ui.py` | DPG 上下文 / 视口 / 主窗口构建、文本显示、布局自适应（`_relayout`）、输入事件 |
+| `dungeon/window/ui.py` | DPG 上下文 / 视口 / 主窗口构建、文本显示、布局自适应（`_relayout`）、输入事件、**F12 过程日志开关** 与 **顶部轻通知窗**（`_notify`，窗口级常驻） |
 | `dungeon/window/engine.py` | 推进核心：AI 流式生成、JSON 解析、伤亡结算、回放步进、关闭回调 `_on_close` |
 | `dungeon/window/triggers.py` | 触发器判定（所在章节 / 前置 / 条件）、章节进入、短暂视效、插入段落 |
 | `dungeon/window/options.py` | 选项触发器：后台生成选项文字并弹出选择弹窗 |
@@ -43,18 +43,20 @@
 | `dungeon/window/frame.py` | 帧时钟 `FrameScheduler`（窗口实例成员 `self._frame`）：`every` / `after` / `cancel` / `call` / `tick` / `drain` / `stop`——window 层唯一的时间源 |
 | `dungeon/window/result.py` | `SessionResult` 与原因常量：`run()` 的返回值，替代「读窗口私有属性」 |
 | `dungeon/window/component_registry.py` | 显示组件注册表与官方组件包加载 |
+| `dungeon/window/overlay.py` | **覆盖层服务面**（OverlayHandler）：`toggle_overlay / close_overlay / overlay_open / component`——文本主组件经 ctx 调出对话记录等模态浮层；打开期间进入阅读模态（点击只关闭浮层、剧情推进挂起），H 调出 / ESC 关闭 |
 
 被本层消费的领域模块：
 
 | 模块 | 用途 |
 |---|---|
 | `dungeon/prompts.py` | `DungeonPromptBuilder`：系统 / 用户提示词构建 |
-| `dungeon/summary.py` | `StorySummarizer`：剧情压缩（概要 + 最近 N 段）注入提示词 |
+| `dungeon/summary.py` | `StorySummarizer`：剧情压缩（概要 + 事实卡 + 关键事件）注入提示词 |
 | `dungeon/details.py` | 细节探究提问与回放检索 |
 | `dungeon/rules.py` `dungeon/models.py` | 演化规则、触发器条件规则、状态模型 |
 | `dungeon/actions.py` `dungeon/chapters.py` | 触发器 / 章节数据模型与动作注册表（见 [数据模型](script.md)） |
 | `dungeon/terms.py` | 领域术语与持久化契约常量（见 [术语表](domain_terms.md)） |
 | `dungeon/schema.py` `dungeon/validate.py` | 方案字段单一真相源 + 结构化校验器 |
+| `dungeon/process_log.py` | 过程日志：副本各处的过程消息（章节 / 触发器 / 预生成 / 收尾落盘……）经 `process_log.log()` 进入线程安全环形缓冲，窗口订阅后经帧时钟投递到「过程日志」面板；**副本层禁止再直接 `print`**（`host.py` 的无宿主弹框桩除外） |
 | `persistence/scenario_repo.py` | 方案仓库：`data/packs/scenarios/<id>/` 的读写（读写根分离、旧目录自愈迁移、原子写、保存即校验） |
 
 MRO 顺序：`DungeonWindowBase, DungeonLaunchStages, DungeonWindowUI, DungeonStoryEngine,
@@ -161,7 +163,8 @@ run() → SessionResult
 ├─ 逻辑段落切出的显示段落未揭示完 → 揭示下一句（_reveal_pending_unit）
 ├─ 有非延迟插入段 → 直接消费显示
 └─ _generate_next_text()：后台线程
-   ├─ prompt_builder.build_user_prompt → messages 追加
+   ├─ _take_pregen_for_next：有预生成结果（或在途则等待）→ 直接采用，
+   │     否则 prompt_builder.build_user_prompt → messages 追加
    ├─ ai_client.generate_stream → 逐块 extract_stream_text → split_stream_units
    │     首句流式上屏、完整即定格；后续完成句排队到 _pending_units
    ├─ 完整响应 parse_final_json → 正文 / 方向 / 自定义方向；split_full_text 定格最终切分
@@ -171,19 +174,24 @@ run() → SessionResult
    ├─ _start_detail_query：立即后台询问 AI「想了解的细节」（不阻塞推进）
    └─ _finish_step → 记录阈值跨越关键事件 → check_triggers：
         章节跳转 / 插入段 / 选项弹窗 / 短暂视效 / 结局（结局另起线程生成 → 保存）
+   └─ finally：下一次点击必然生成时 → _maybe_pregen_next 后台预生成下一段
 ```
 
 | 概念 | 说明 |
 |---|---|
 | **逻辑段落 vs 显示段落** | 一次 AI 输出（约 100 字）是一个逻辑段落，属性演化、回放、剧情压缩、对话历史都以它为单位；内置分句器（`dungeon/splitter.py`）把它切成若干显示段落（换行、对话引号闭合、句末标点、分号、破折号为断点），逐句展示只为阅读节奏。队列耗尽后下一次点击才触发新的 AI 调用；插入触发器的段落走同一条仿流式管线 |
 | **说话人标记** | Solea/Bulla 耦合等级的对话分支（`dialog`/`branch`，方案可配 `protagonist_title` 指定主角称呼）要求 AI 在对话句句首写 `@说话人@`（规则见 `dungeon/coupling.SPEAKER_MARKER_RULE`）；分句器解析进显示单元（`DisplayUnit.speaker`），`story_history` 条目带 `speaker` 键，UI 组件据此渲染名牌。落盘正文（回放/报告/概要）经 `strip_speaker_markers` 剥离标记，回放文件格式不变；Velum 等级正文无标记，行为不变 |
-| **文本显示所有权** | 官方文本组件三选一（`TEXT_FAMILY_IDS` 互斥，方案配置 `components` 里声明）：`text` **底部渐变式**（视口底部向上淡出的深色衬底上显示最近 N 句）、`text_card` **底部卡片式**（居中圆角半透明卡片）、`text_nvl` **全屏 NVL**（半透明覆盖层堆叠全部历史，可选衬线字体、可滚轮回看）。行首标签优先用说话人、回退类型前缀，继续点击用闪烁 ▼ 提示。接管期间（`owns_text_display = True`）`_update_text_display` 跳过内置 `text_container` 管线、转调组件刷新链；`text`/`text_card` 屏幕只呈现当下几句，完整历史由回放/报告承接 |
+| **文本显示所有权** | 文本主组件由方案配置 `text_component` 字段**三选一**（`dungeon.schema.TEXT_COMPONENT_IDS`）：`text` **底部渐变式**（视口底部向上淡出的深色衬底上显示最近 N 句）、`text_card` **底部卡片式**（居中圆角半透明卡片）、`text_nvl` **全屏 NVL**（半透明覆盖层堆叠全部历史，可选衬线字体、可滚轮回看）；`components` 列表只放其余组件，主组件先建、z 序在底。行首标签优先用说话人、回退类型前缀，继续点击用闪烁 ▼ 提示。接管期间（`owns_text_display = True`）`_update_text_display` 跳过内置 `text_container` 管线、转调组件刷新链；`text`/`text_card` 屏幕只呈现当下几句，完整历史由回放/报告承接 |
+| **覆盖层服务面** | 窗口向文本主组件提供受控调用：`ctx.toggle_overlay("log")` 调出**对话记录**（全量 `story_history` 快照、可滚动，居中半透明面板），`ctx.component(cid)` 只读访问兄弟组件实例；写操作与组件生命周期仍由窗口集中管理，主组件只拿到调度权而非所有权。覆盖层打开时为阅读模态：点击只关闭覆盖层（`ui.py::_on_mouse_click`），空格/回车推进在 `_on_next_step` 入口挂起 |
 | **细节探究** | 流式输出完成后用刚生成的段落组装提问，后台线程询问 AI 还想了解哪些细节（最多 3 条，存 `_detail_queries`）；下次生成时用问题关键词在回放缓存中检索最相关段落作为「细节补充」注入提示词，随后消费掉这批问题 |
+| **预演化** | 步进收尾后（`finally`，插入晋升之后）若下一次点击必然触发生成（无选项/插入/结局排队），立即后台预生成下一段，缓存 `(user_prompt, messages 快照, 原始响应, 段落类型)`；玩家点击时 `_take_pregen_for_next` 直接采用（在途则等待收养，不重复发请求），首句仿流式揭示。选项选择后、插入段消费后各补射一次；预生成失败自动回退实时路径并还原 `keyword_match_given`。调用次数不变，只是提前发出 |
 | **章节与触发器** | 会话开始先 `_enter_start_chapter()` 进入起始章节再 `check_triggers()`；完整条件是「所在章节 + 前置触发器 + 条件规则」三者同时满足 |
 | **结束章节** | 段落类型固定为「结局」（前缀 `【结局】`），步进 0（`evolve_attributes(step_override=0.0)`），触发器不能跳出或弹选项；节内段落数达到 `max_paragraphs` 时终止并结算 |
 | **章节上限兜底** | 普通章节节内段落数达到 `max_paragraphs`（默认 99）时，在 `_finish_step` 末尾（触发器判定之后）自动跳到 `overflow_target`（空串 = 离开章节） |
-| **剧情压缩** | `StorySummarizer` 按块（默认 20 段）与换章时机压缩；`build_user_prompt` 注入「全部压缩概要 + 关键事实 + 关键事件 + 最近 N 段原文」。AI 额外输出 `facts`（跨块去重成事实卡）；确定性关键事件（章节进出、选项选择、介入度 / 破坏性跨整数阈值）由代码直接登记 |
+| **剧情压缩** | `StorySummarizer` 按块（默认 20 段）与换章时机压缩；`build_user_prompt` 注入「全部压缩概要 + 关键事实 + 关键事件」。近期原文不再注入——对话历史（窗口大小即 `story_recent_count` 设置，`_message_window_size`）已逐字携带最近剧情，重复注入只会推高 prefill 与首字延迟。AI 额外输出 `facts`（跨块去重成事实卡）；确定性关键事件（章节进出、选项选择、介入度 / 破坏性跨整数阈值）由代码直接登记 |
 | **回放模式** | 不建 AI 客户端，`_replay_next_step` 逐条重放 `loaded_replay`（`kind == "trigger"` → `_replay_trigger`，`kind == "chapter"` → `_replay_chapter`） |
+| **过程日志（proc_log 组件）** | 右上角日志面板是官方组件包里的 `proc_log` 组件：方案在 `components` 里声明才构建（`_default` 已声明），默认收起，**F12** 切换展开 / 收起。数据源是 `dungeon/process_log.py`：组件 build 时订阅并取走缓冲积压（构造 / 会话初始化阶段的报错也会补显），此后任意线程的 `log()` 经订阅回调 → `ctx._frame.call()` 进主线程追加（上限 300 行，自动滚底）；组件 destroy 时退订。方案未配置该组件时按 F12 弹通知「日志查看已禁用」 |
+| **轻通知窗** | 主窗口顶部居中的通知条（`ui.py::_notify`），窗口级常驻、**不受组件配置影响**；显示约 3 秒自动隐藏（`after` 同 key 任务互斥，连续通知覆盖前一条并重置计时）。副本内需要「提示但不必确认」的场景都可用它 |
 
 ## 4. 线程与帧时钟
 

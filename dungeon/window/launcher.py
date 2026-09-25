@@ -17,6 +17,7 @@ import re
 import dearpygui.dearpygui as dpg
 from PIL import Image
 
+from dungeon import process_log
 from dungeon.chapters import normalize_chapters
 from dungeon.terms import scenario_id_of
 
@@ -389,7 +390,7 @@ class DungeonLaunchStages:
                     default_value=(f"{item['achieved_at']}　{dungeon}"
                                    if dungeon else item["achieved_at"]))
         except Exception as e:
-            print(f"结局图标轮播更新失败: {e}")
+            process_log.log(f"结局图标轮播更新失败: {e}")
 
     # ------------------ 动态背景（随机轮播，进入会话后冻结） ------------------
     def _prime_background(self):
@@ -404,7 +405,7 @@ class DungeonLaunchStages:
             self._background.change(path, smooth_transition=False,
                                     rotate_angle=angle, blur_radius=blur)
         except Exception as e:
-            print(f"副本入口背景加载失败: {e}")
+            process_log.log(f"副本入口背景加载失败: {e}")
 
     def _start_background_cycle(self):
         """背景轮播：随机 6~10s 换一张（帧任务自续链，取代原先的休眠线程）。"""
@@ -464,7 +465,7 @@ class DungeonLaunchStages:
                 dpg.configure_item("bg_image_item", pmin=pmin, pmax=pmax)
         except Exception as e:
             if not isinstance(e, SystemError):
-                print(f"背景运动更新失败: {e}")
+                process_log.log(f"背景运动更新失败: {e}")
 
     def _switch_background(self, path, angle=0.0, blur=2.0):
         """主线程内切换到指定背景（淡入淡出，带旋转/模糊）。"""
@@ -474,7 +475,7 @@ class DungeonLaunchStages:
             self._background.change(path, smooth_transition=True,
                                     rotate_angle=angle, blur_radius=blur)
         except Exception as e:
-            print(f"副本入口背景切换失败: {e}")
+            process_log.log(f"副本入口背景切换失败: {e}")
 
     # ------------------ 窗口内切换回放（L4） ------------------
     def _pick_replay_file(self):
@@ -485,7 +486,7 @@ class DungeonLaunchStages:
         try:
             return picker()
         except Exception as e:
-            print(f"[Replay] 读取回放文件失败: {e}")
+            process_log.log(f"[Replay] 读取回放文件失败: {e}")
             return []
 
     def _enter_replay_phase(self, replay_data):
@@ -598,7 +599,7 @@ class DungeonLaunchStages:
                 text += f"　|　剩余 {getattr(self.character, 'action_points', 0)} AP"
             dpg.configure_item("ctl_info", default_value=text)
         except Exception as e:
-            print(f"副本信息刷新失败: {e}")
+            process_log.log(f"副本信息刷新失败: {e}")
 
     def _on_entry_start(self, sender=None, app_data=None, user_data=None):
         if not self.scenario_ids:

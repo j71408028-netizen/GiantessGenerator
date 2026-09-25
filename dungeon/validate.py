@@ -146,6 +146,17 @@ def _validate_top_level(config: dict, add) -> None:
     cost = config.get("entry_action_cost", 0)
     if not _is_number(cost) or cost < 0:
         add("warning", "entry_action_cost", "进入所需行动点数必须是非负数字")
+    if config.get("text_component", schema.DEFAULT_TEXT_COMPONENT) not in schema.TEXT_COMPONENT_IDS:
+        add("warning", "text_component",
+            f"文本组件「{config.get('text_component')}」无效"
+            f"（允许：{', '.join(schema.TEXT_COMPONENT_IDS)}），运行时回退为默认")
+    # 旧写法残留：文本组件曾在 components 列表里声明（text_component 字段接管后忽略）
+    stale_text = [c for c in (config.get("components") or [])
+                  if isinstance(c, str) and c in schema.TEXT_COMPONENT_IDS]
+    if stale_text:
+        add("info", "components",
+            f"文本组件已改由 text_component 字段三选一配置，"
+            f"列表里的 {', '.join(stale_text)} 会被忽略，可删除")
     _validate_section_prompts(config.get("section_prompts"), add)
     _validate_section_steps(config.get("section_steps"), add)
     _validate_transition_matrix(config.get("transition_matrix"), add)

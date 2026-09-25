@@ -26,6 +26,8 @@ import time
 from collections import deque
 from itertools import count
 
+from dungeon import process_log
+
 
 class FrameTask:
     """一条挂在帧时钟上的任务（每 N 秒一次 / 延迟 N 秒一次）。"""
@@ -107,7 +109,7 @@ class FrameScheduler:
             try:
                 fn(*args, **kwargs)
             except Exception as exc:
-                print(f"[FrameScheduler] 更新异常: {exc}")
+                process_log.log(f"[FrameScheduler] 更新异常: {exc}")
 
     # ---------------- 定时任务 ----------------
     def every(self, interval, fn, *args, key=None, **kwargs) -> int:
@@ -166,7 +168,7 @@ class FrameScheduler:
             try:
                 task.fn(*task.args, **task.kwargs)
             except Exception as exc:
-                print(f"[FrameScheduler] 帧任务异常（{task.key}）: {exc}")
+                process_log.log(f"[FrameScheduler] 帧任务异常（{task.key}）: {exc}")
         # 排在后面的 drain：任务里 call() 出来的界面更新同帧就能上屏
         self.drain()
         return len(due)

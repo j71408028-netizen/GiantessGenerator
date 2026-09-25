@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Galgame / 视觉小说文本组件演示系统</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts: Noto Serif SC & Zen Maru Gothic -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&family=Zen+Maru+Gothic:wght@400;500;700&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            font-family: 'Zen Maru Gothic', 'Noto Serif SC', sans-serif;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        /* Noto Serif for NVL Fullscreen mode classic novel aesthetic */
+        .font-nvl {
+            font-family: 'Noto Serif SC', serif;
+        }
+
+        /* Glassmorphism Styles */
+        .glass-card {
+            background: rgba(20, 24, 40, 0.75);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+        }
+
+        .glass-gradient-bottom {
+            background: linear-gradient(to top, rgba(10, 12, 24, 0.95) 0%, rgba(15, 20, 35, 0.75) 70%, rgba(15, 20, 35, 0) 100%);
+        }
+
+        .glass-nvl {
+            background: rgba(8, 10, 18, 0.88);
+            backdrop-filter: blur(8px);
+        }
+
+        /* Blinking Next-Indicator Arrow */
+        @keyframes pulse-arrow {
+            0%, 100% { transform: translateY(0) scale(1); opacity: 0.9; }
+            50% { transform: translateY(4px) scale(1.1); opacity: 0.4; }
+        }
+
+        .animate-next-arrow {
+            animation: pulse-arrow 1.2s infinite ease-in-out;
+        }
+
+        /* Character Sprite Animation */
+        .sprite-transition {
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        /* Custom Scrollbar for Log Modal */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.5);
+        }
+
+        /* Glowing Text Effect */
+        .text-glow {
+            text-shadow: 0 0 10px rgba(255, 255, 255, 0.5), 0 0 20px rgba(147, 51, 234, 0.3);
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 h-screen w-screen relative overflow-hidden select-none">
+
+    <!-- Game Scene Container -->
+    <div id="game-scene" class="relative w-full h-full bg-cover bg-center transition-all duration-700" style="background-image: url('https://images.unsplash.com/photo-1516483638261-f4dbaf036963?q=80&w=1920&auto=format&fit=crop');">
+        <!-- Background Overlay Tint -->
+        <div class="absolute inset-0 bg-black/20 pointer-events-none"></div>
+
+        <!-- Character Standee / Sprite Area -->
+        <div id="sprite-container" class="absolute bottom-0 left-1/2 -translate-x-1/2 h-[85%] max-h-[850px] w-auto pointer-events-none sprite-transition flex items-end justify-center z-10">
+            <svg id="character-sprite" class="h-full w-auto drop-shadow-[0_10px_25px_rgba(0,0,0,0.6)] transition-all duration-500" viewBox="0 0 400 800" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <!-- Anime Silhouette / Vector Character Illustration -->
+                <path d="M200 100 C160 100 130 140 130 190 C130 230 150 260 170 280 C120 320 80 420 70 600 C65 690 60 780 60 800 L340 800 C340 780 335 690 330 600 C320 420 280 320 230 280 C250 260 270 230 270 190 C270 140 240 100 200 100 Z" fill="url(#char-grad)" opacity="0.85"/>
+                <!-- Hair details -->
+                <path d="M120 180 C110 120 160 80 200 80 C240 80 290 120 280 180 C270 140 240 110 200 110 C160 110 130 140 120 180 Z" fill="#c084fc"/>
+                <!-- Eyes Light -->
+                <ellipse cx="175" cy="185" rx="6" ry="10" fill="#f43f5e"/>
+                <ellipse cx="225" cy="185" rx="6" ry="10" fill="#f43f5e"/>
+                <!-- Gradient definition -->
+                <defs>
+                    <linearGradient id="char-grad" x1="200" y1="80" x2="200" y2="800" gradientUnits="userSpaceOnUse">
+                        <stop offset="0%" stop-color="#38bdf8"/>
+                        <stop offset="40%" stop-color="#818cf8"/>
+                        <stop offset="100%" stop-color="#1e1b4b"/>
+                    </linearGradient>
+                </defs>
+            </svg>
+        </div>
+
+        <!-- Navigation & Control Panel Header -->
+        <header id="top-panel" class="absolute top-0 left-0 right-0 z-40 p-4 bg-gradient-to-b from-black/80 via-black/40 to-transparent flex flex-wrap justify-between items-center gap-4 transition-transform duration-300">
+            <div class="flex items-center space-x-3">
+                <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-pink-500 flex items-center justify-center text-white shadow-lg shadow-indigo-500/30">
+                    <i class="fa-solid fa-book-open text-sm"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-base tracking-wide text-white flex items-center gap-2">
+                        Galgame Text System
+                        <span class="text-xs font-normal px-2 py-0.5 rounded-full bg-pink-500/20 text-pink-300 border border-pink-500/30">Interactive Demo</span>
+                    </h1>
+                    <p class="text-xs text-slate-300">视觉小说常用文本显示组件演示</p>
+                </div>
+            </div>
+
+            <!-- Mode Switcher Buttons -->
+            <div class="flex bg-slate-900/80 p-1.5 rounded-2xl border border-slate-700/60 backdrop-blur-md shadow-inner">
+                <button onclick="switchMode('gradient')" id="btn-mode-gradient" class="mode-btn px-3 py-1.5 rounded-xl text-xs font-medium transition-all duration-200 flex items-center gap-1.5 text-white bg-indigo-600 shadow-md">
+                    <i class="fa-solid fa-sliders"></i> 1. 底部渐变式
+                </button>
+                <button onclick="switchMode('card')" id="btn-mode-card" class="mode-btn px-3 py-1.5 rounded-xl text-xs font-medium transition-all duration-200 flex items-center gap-1.5 text-slate-400 hover:text-white">
+                    <i class="fa-solid fa-address-card"></i> 2. 底部卡片式
+                </button>
+                <button onclick="switchMode('nvl')" id="btn-mode-nvl" class="mode-btn px-3 py-1.5 rounded-xl text-xs font-medium transition-all duration-200 flex items-center gap-1.5 text-slate-400 hover:text-white">
+                    <i class="fa-solid fa-book"></i> 3. 全屏 NVL 模式
+                </button>
+            </div>
+
+            <!-- Background & Control Quick Actions -->
+            <div class="flex items-center gap-2">
+                <button onclick="toggleBackground()" class="px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-600/50 text-xs font-medium transition text-slate-200 flex items-center gap-1.5">
+                    <i class="fa-solid fa-image"></i> 切换场景
+                </button>
+                <button onclick="toggleSprite()" class="px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-600/50 text-xs font-medium transition text-slate-200 flex items-center gap-1.5">
+                    <i class="fa-solid fa-user-ninja"></i> 切换立绘
+                </button>
+            </div>
+        </header>
+
+        <!-- MODE 1: Bottom Gradient NVL/ADV -->
+        <div id="mode-gradient" class="mode-container absolute inset-x-0 bottom-0 z-20 glass-gradient-bottom pt-24 pb-8 px-8 md:px-20 lg:px-32 transition-all duration-500">
+            <div class="max-w-5xl mx-auto relative">
+                <!-- Character Name Tag -->
+                <div id="grad-speaker" class="text-pink-400 font-bold text-lg md:text-xl tracking-wider mb-2 flex items-center gap-2 text-glow">
+                    <span class="inline-block w-2 h-4 bg-pink-500 rounded-full"></span>
+                    <span>爱丽丝</span>
+                </div>
+                <!-- Main Dialogue Text -->
+                <div class="min-h-[90px] text-slate-100 text-base md:text-lg lg:text-xl leading-relaxed tracking-wide font-normal">
+                    <p id="grad-text" class="inline"></p>
+                    <span id="grad-cursor" class="inline-block w-2 h-5 bg-pink-400/80 ml-1 animate-pulse"></span>
+                </div>
+                <!-- Click to continue prompt -->
+                <div id="grad-indicator" class="absolute right-0 bottom-0 text-pink-400 text-lg animate-next-arrow hidden">
+                    <i class="fa-solid fa-caret-down"></i>
+                </div>
+            </div>
+        </div>
+
+        <!-- MODE 2: Bottom Card Dialog Box (Floating Card Mode) -->
+        <div id="mode-card" class="mode-container absolute inset-x-0 bottom-6 z-20 px-4 md:px-12 lg:px-24 transition-all duration-500 hidden">
+            <div class="max-w-4xl mx-auto glass-card rounded-3xl p-6 md:p-8 relative border border-slate-500/30 shadow-2xl">
+                <!-- Avatar and Name Tag Header Block -->
+                <div class="absolute -top-6 left-8 flex items-center gap-3">
+                    <!-- Character Avatar Box -->
+                    <div class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-pink-500 to-indigo-600 p-0.5 shadow-lg shadow-pink-500/20">
+                        <div class="w-full h-full bg-slate-900 rounded-[14px] overflow-hidden flex items-center justify-center">
+                            <i class="fa-solid fa-face-smile-beam text-2xl text-pink-400"></i>
+                        </div>
+                    </div>
+                    <!-- Nameplate Badge -->
+                    <div class="bg-gradient-to-r from-pink-600 to-indigo-600 px-5 py-1.5 rounded-2xl text-white font-bold text-sm tracking-wider shadow-md border border-white/20">
+                        <span id="card-speaker">爱丽丝</span>
+                    </div>
+                </div>
+
+                <!-- Text Content Area -->
+                <div class="mt-4 min-h-[80px] text-slate-100 text-base md:text-lg leading-relaxed font-normal">
+                    <p id="card-text" class="inline"></p>
+                    <span id="card-cursor" class="inline-block w-2 h-5 bg-indigo-400 ml-1 animate-pulse"></span>
+                </div>
+
+                <!-- Next Page Blinking Indicator -->
+                <div id="card-indicator" class="absolute right-6 bottom-4 text-indigo-400 text-xl animate-next-arrow hidden">
+                    <i class="fa-solid fa-circle-chevron-right"></i>
+                </div>
+            </div>
+        </div>
+
+        <!-- MODE 3: Full Screen NVL Mode (Fate / Mahoyo Style) -->
+        <div id="mode-nvl" class="mode-container absolute inset-0 z-30 glass-nvl p-8 md:p-16 lg:p-24 flex flex-col justify-between transition-all duration-500 hidden font-nvl">
+            <!-- Fullscreen Dialogue Lines Stack -->
+            <div id="nvl-lines-container" class="max-w-4xl mx-auto w-full space-y-6 pt-12 overflow-y-auto max-h-[80vh]">
+                <!-- Dynamic Lines populated via JS -->
+            </div>
+
+            <!-- Bottom NVL Next Line Indicator -->
+            <div id="nvl-indicator" class="text-center text-slate-400 text-sm tracking-widest animate-pulse pb-4 hidden">
+                ▼ 点击任意位置继续阅读 ▼
+            </div>
+        </div>
+
+        <!-- Galgame Common Bottom Right Quick UI Controls -->
+        <div id="quick-ui-bar" class="absolute bottom-3 right-6 z-40 flex items-center gap-1.5 bg-slate-900/80 border border-slate-700/60 px-3 py-1.5 rounded-full backdrop-blur-md shadow-lg transition-all duration-300">
+            <button onclick="toggleAuto()" id="btn-auto" class="px-2.5 py-1 rounded-full text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 transition flex items-center gap-1">
+                <i class="fa-solid fa-play text-[10px]"></i> AUTO
+            </button>
+            <button onclick="toggleSkip()" id="btn-skip" class="px-2.5 py-1 rounded-full text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 transition flex items-center gap-1">
+                <i class="fa-solid fa-forward text-[10px]"></i> SKIP
+            </button>
+            <button onclick="openLogModal()" class="px-2.5 py-1 rounded-full text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 transition flex items-center gap-1">
+                <i class="fa-solid fa-clock-rotate-left text-[10px]"></i> LOG
+            </button>
+            <button onclick="toggleHideUI()" class="px-2.5 py-1 rounded-full text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 transition flex items-center gap-1">
+                <i class="fa-solid fa-eye-slash text-[10px]"></i> HIDE
+            </button>
+        </div>
+
+        <!-- Interactive Screen Click Trigger Area (For advancing text) -->
+        <div id="screen-click-target" onclick="handleScreenClick()" class="absolute inset-0 z-10 cursor-pointer"></div>
+    </div>
+
+    <!-- History LOG Modal Component -->
+    <div id="log-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden flex items-center justify-center p-4 transition-opacity duration-300">
+        <div class="glass-card max-w-2xl w-full max-h-[80vh] rounded-3xl p-6 flex flex-col border border-slate-700">
+            <div class="flex justify-between items-center pb-4 border-b border-slate-700/60">
+                <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                    <i class="fa-solid fa-book-open text-pink-500"></i> 对话历史记录 (Backlog)
+                </h3>
+                <button onclick="closeLogModal()" class="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <!-- Log Content List -->
+            <div id="log-list" class="flex-1 overflow-y-auto py-4 space-y-4 pr-2">
+                <!-- Populated dynamically -->
+            </div>
+            <div class="pt-3 border-t border-slate-700/60 text-right">
+                <button onclick="closeLogModal()" class="px-5 py-1.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-xs font-medium transition shadow-md">
+                    关闭
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden UI Restore Button -->
+    <button id="restore-ui-btn" onclick="toggleHideUI()" class="fixed top-4 right-4 z-50 px-4 py-2 rounded-2xl bg-indigo-600/90 hover:bg-indigo-500 text-white text-xs font-bold shadow-xl border border-white/20 transition hidden">
+        <i class="fa-solid fa-eye mr-1"></i> 显示 UI
+    </button>
+
+    <script>
+        // Preset Script Data (Galgame Dialogue Lines)
+        const scriptData = [
+            {
+                speaker: "爱丽丝",
+                avatarColor: "from-pink-500 to-indigo-600",
+                text: "欢迎来到视觉小说与 Galgame 文本演示系统！点击屏幕任意区域即可继续下一句对话。"
+            },
+            {
+                speaker: "爱丽丝",
+                avatarColor: "from-pink-500 to-indigo-600",
+                text: "当前演示的是经典的 Galgame 文本框渲染效果。我们提供了 3 种主流的文本呈现模式。"
+            },
+            {
+                speaker: "旁白",
+                avatarColor: "from-slate-600 to-slate-800",
+                text: "【提示】你可以通过顶部的控制面板，自由切换「底部渐变式」、「底部卡片式」以及「全屏 NVL 模式」。"
+            },
+            {
+                speaker: "爱丽丝",
+                avatarColor: "from-pink-500 to-indigo-600",
+                text: "全屏 NVL 模式经常用于沉浸式叙事或气氛渲染，例如经典的 Fate/Stay Night 或 魔法使之夜！"
+            },
+            {
+                speaker: "旁白",
+                avatarColor: "from-slate-600 to-slate-800",
+                text: "夕阳渐渐西沉，教室里被一抹温柔的橙红色晚霞所笼罩。空气中弥漫着微风吹过的樱花香气……"
+            },
+            {
+                speaker: "爱丽丝",
+                avatarColor: "from-pink-500 to-indigo-600",
+                text: "试着点击底部的 LOG 按钮看看吧！所有的历史对话都会被记录在里面哦！"
+            }
+        ];
+
+        // Background List
+        const backgroundList = [
+            "https://images.unsplash.com/photo-1516483638261-f4dbaf036963?q=80&w=1920&auto=format&fit=crop", // Classroom/School vibe
+            "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=1920&auto=format&fit=crop", // Beach Sunset
+            "https://images.unsplash.com/photo-1519681393784-d120267933ba?q=80&w=1920&auto=format&fit=crop"  // Starry Night
+        ];
+
+        // Application State
+        let currentMode = 'gradient'; // 'gradient' | 'card' | 'nvl'
+        let currentScriptIndex = 0;
+        let isTyping = false;
+        let typewriterTimer = null;
+        let currentTypedText = "";
+        let autoPlay = false;
+        let autoPlayTimer = null;
+        let skipPlay = false;
+        let bgIndex = 0;
+        let spriteVisible = true;
+        let uiHidden = false;
+
+        // NVL Accumulated Lines Container
+        let nvlHistory = [];
+
+        // DOM Element Cache
+        const elements = {
+            scene: document.getElementById('game-scene'),
+            spriteContainer: document.getElementById('sprite-container'),
+            topPanel: document.getElementById('top-panel'),
+            quickUiBar: document.getElementById('quick-ui-bar'),
+            restoreUiBtn: document.getElementById('restore-ui-btn'),
+            logModal: document.getElementById('log-modal'),
+            logList: document.getElementById('log-list'),
+            
+            // Mode containers
+            modeGradient: document.getElementById('mode-gradient'),
+            modeCard: document.getElementById('mode-card'),
+            modeNvl: document.getElementById('mode-nvl'),
+
+            // Gradient Mode
+            gradSpeaker: document.getElementById('grad-speaker'),
+            gradText: document.getElementById('grad-text'),
+            gradIndicator: document.getElementById('grad-indicator'),
+
+            // Card Mode
+            cardSpeaker: document.getElementById('card-speaker'),
+            cardText: document.getElementById('card-text'),
+            cardIndicator: document.getElementById('card-indicator'),
+
+            // NVL Mode
+            nvlLinesContainer: document.getElementById('nvl-lines-container'),
+            nvlIndicator: document.getElementById('nvl-indicator')
+        };
+
+        // Initialize Page
+        window.addEventListener('DOMContentLoaded', () => {
+            renderCurrentLine();
+        });
+
+        // Switch Display Modes (Gradient, Card, NVL)
+        function switchMode(mode) {
+            currentMode = mode;
+
+            // Update Header Buttons Styling
+            ['gradient', 'card', 'nvl'].forEach(m => {
+                const btn = document.getElementById(`btn-mode-${m}`);
+                if (m === mode) {
+                    btn.className = "mode-btn px-3 py-1.5 rounded-xl text-xs font-medium transition-all duration-200 flex items-center gap-1.5 text-white bg-indigo-600 shadow-md";
+                } else {
+                    btn.className = "mode-btn px-3 py-1.5 rounded-xl text-xs font-medium transition-all duration-200 flex items-center gap-1.5 text-slate-400 hover:text-white";
+                }
+            });
+
+            // Hide all containers
+            elements.modeGradient.classList.add('hidden');
+            elements.modeCard.classList.add('hidden');
+            elements.modeNvl.classList.add('hidden');
+
+            // Show current mode container
+            if (mode === 'gradient') elements.modeGradient.classList.remove('hidden');
+            if (mode === 'card') elements.modeCard.classList.remove('hidden');
+            if (mode === 'nvl') elements.modeNvl.classList.remove('hidden');
+
+            // Reset and render line in new mode
+            renderCurrentLine();
+        }
+
+        // Render Current Line with Typewriter Effect
+        function renderCurrentLine() {
+            clearTimeout(typewriterTimer);
+            clearTimeout(autoPlayTimer);
+            isTyping = true;
+
+            const data = scriptData[currentScriptIndex];
+
+            // Hide Indicators
+            elements.gradIndicator.classList.add('hidden');
+            elements.cardIndicator.classList.add('hidden');
+            elements.nvlIndicator.classList.add('hidden');
+
+            if (currentMode === 'gradient') {
+                elements.gradSpeaker.innerHTML = `<span class="inline-block w-2 h-4 bg-pink-500 rounded-full"></span><span>${data.speaker}</span>`;
+                typewriter(data.text, elements.gradText, elements.gradIndicator);
+            } else if (currentMode === 'card') {
+                elements.cardSpeaker.innerText = data.speaker;
+                typewriter(data.text, elements.cardText, elements.cardIndicator);
+            } else if (currentMode === 'nvl') {
+                renderNvlMode();
+            }
+        }
+
+        // Typewriter Effect Generator
+        function typewriter(fullText, targetElement, indicatorElement) {
+            let charIndex = 0;
+            targetElement.innerText = "";
+
+            function step() {
+                if (charIndex < fullText.length) {
+                    targetElement.innerText += fullText.charAt(charIndex);
+                    charIndex++;
+                    const speed = skipPlay ? 5 : 35;
+                    typewriterTimer = setTimeout(step, speed);
+                } else {
+                    isTyping = false;
+                    if (indicatorElement) indicatorElement.classList.remove('hidden');
+                    
+                    // Auto advancement logic
+                    if (autoPlay) {
+                        autoPlayTimer = setTimeout(() => {
+                            advanceDialogue();
+                        }, 2000);
+                    }
+                }
+            }
+            step();
+        }
+
+        // Render Fullscreen NVL Mode Stack
+        function renderNvlMode() {
+            elements.nvlLinesContainer.innerHTML = "";
+            
+            // Show all lines up to current index in NVL mode
+            for (let i = 0; i <= currentScriptIndex; i++) {
+                const item = scriptData[i];
+                const lineDiv = document.createElement('div');
+                lineDiv.className = "line-item transition-all duration-500 opacity-90 hover:opacity-100";
+                
+                if (i === currentScriptIndex) {
+                    lineDiv.innerHTML = `
+                        <div class="text-pink-400 font-bold text-sm mb-1">[ ${item.speaker} ]</div>
+                        <p id="nvl-active-line" class="text-slate-100 text-lg md:text-xl leading-relaxed tracking-wide"></p>
+                    `;
+                    elements.nvlLinesContainer.appendChild(lineDiv);
+                    
+                    // Scroll to bottom
+                    elements.nvlLinesContainer.scrollTop = elements.nvlLinesContainer.scrollHeight;
+                    
+                    const activeP = document.getElementById('nvl-active-line');
+                    typewriter(item.text, activeP, elements.nvlIndicator);
+                } else {
+                    lineDiv.innerHTML = `
+                        <div class="text-slate-400 font-bold text-sm mb-1">[ ${item.speaker} ]</div>
+                        <p class="text-slate-300 text-base md:text-lg leading-relaxed tracking-wide">${item.text}</p>
+                    `;
+                    elements.nvlLinesContainer.appendChild(lineDiv);
+                }
+            }
+        }
+
+        // Handle Screen Click or Tap
+        function handleScreenClick() {
+            if (uiHidden) {
+                toggleHideUI();
+                return;
+            }
+
+            const currentData = scriptData[currentScriptIndex];
+
+            // If text is still typing, finish typing immediately on click
+            if (isTyping) {
+                clearTimeout(typewriterTimer);
+                isTyping = false;
+
+                if (currentMode === 'gradient') {
+                    elements.gradText.innerText = currentData.text;
+                    elements.gradIndicator.classList.remove('hidden');
+                } else if (currentMode === 'card') {
+                    elements.cardText.innerText = currentData.text;
+                    elements.cardIndicator.classList.remove('hidden');
+                } else if (currentMode === 'nvl') {
+                    const activeP = document.getElementById('nvl-active-line');
+                    if (activeP) activeP.innerText = currentData.text;
+                    elements.nvlIndicator.classList.remove('hidden');
+                }
+            } else {
+                // Advance to next line
+                advanceDialogue();
+            }
+        }
+
+        // Advance Dialogue
+        function advanceDialogue() {
+            if (currentScriptIndex < scriptData.length - 1) {
+                currentScriptIndex++;
+            } else {
+                // Loop back to start for continuous demo
+                currentScriptIndex = 0;
+            }
+            renderCurrentLine();
+        }
+
+        // Auto Play Toggle
+        function toggleAuto() {
+            autoPlay = !autoPlay;
+            const btn = document.getElementById('btn-auto');
+            if (autoPlay) {
+                btn.classList.add('bg-pink-600', 'text-white');
+                btn.classList.remove('text-slate-400');
+                if (!isTyping) advanceDialogue();
+            } else {
+                btn.classList.remove('bg-pink-600', 'text-white');
+                btn.classList.add('text-slate-400');
+                clearTimeout(autoPlayTimer);
+            }
+        }
+
+        // Skip Mode Toggle
+        function toggleSkip() {
+            skipPlay = !skipPlay;
+            const btn = document.getElementById('btn-skip');
+            if (skipPlay) {
+                btn.classList.add('bg-amber-600', 'text-white');
+                btn.classList.remove('text-slate-400');
+                if (isTyping) renderCurrentLine();
+            } else {
+                btn.classList.remove('bg-amber-600', 'text-white');
+                btn.classList.add('text-slate-400');
+            }
+        }
+
+        // Hide UI Elements
+        function toggleHideUI() {
+            uiHidden = !uiHidden;
+            if (uiHidden) {
+                elements.topPanel.classList.add('-translate-y-full');
+                elements.quickUiBar.classList.add('translate-y-20', 'opacity-0');
+                elements.modeGradient.classList.add('opacity-0', 'pointer-events-none');
+                elements.modeCard.classList.add('opacity-0', 'pointer-events-none');
+                elements.modeNvl.classList.add('opacity-0', 'pointer-events-none');
+                elements.restoreUiBtn.classList.remove('hidden');
+            } else {
+                elements.topPanel.classList.remove('-translate-y-full');
+                elements.quickUiBar.classList.remove('translate-y-20', 'opacity-0');
+                elements.modeGradient.classList.remove('opacity-0', 'pointer-events-none');
+                elements.modeCard.classList.remove('opacity-0', 'pointer-events-none');
+                elements.modeNvl.classList.remove('opacity-0', 'pointer-events-none');
+                elements.restoreUiBtn.classList.add('hidden');
+            }
+        }
+
+        // Open Log Modal
+        function openLogModal() {
+            elements.logList.innerHTML = "";
+            scriptData.forEach((item, index) => {
+                const logItem = document.createElement('div');
+                logItem.className = `p-3 rounded-2xl border ${index === currentScriptIndex ? 'bg-indigo-950/40 border-pink-500/50' : 'bg-slate-800/40 border-slate-700/50'}`;
+                logItem.innerHTML = `
+                    <div class="text-xs font-bold text-pink-400 mb-1 flex items-center gap-2">
+                        <span class="w-1.5 h-1.5 rounded-full bg-pink-400"></span>
+                        ${item.speaker}
+                    </div>
+                    <div class="text-sm text-slate-200 leading-relaxed">${item.text}</div>
+                `;
+                elements.logList.appendChild(logItem);
+            });
+            elements.logModal.classList.remove('hidden');
+        }
+
+        // Close Log Modal
+        function closeLogModal() {
+            elements.logModal.classList.add('hidden');
+        }
+
+        // Change Background Image
+        function toggleBackground() {
+            bgIndex = (bgIndex + 1) % backgroundList.length;
+            elements.scene.style.backgroundImage = `url('${backgroundList[bgIndex]}')`;
+        }
+
+        // Toggle Character Sprite Visibility
+        function toggleSprite() {
+            spriteVisible = !spriteVisible;
+            if (spriteVisible) {
+                elements.spriteContainer.classList.remove('opacity-0', 'scale-95');
+            } else {
+                elements.spriteContainer.classList.add('opacity-0', 'scale-95');
+            }
+        }
+    </script>
+</body>
+</html>

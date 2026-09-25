@@ -252,10 +252,13 @@ data/
 
 ## 11. 显示组件包
 
-官方组件包位于 `data/packs/scenarios/_default/components/`，方案在 `config.json` 的
-`components` 字段按 id 声明启用项（未声明回退 `["text"]`），参数记在 `components_params`。
-组件类只需实现 `build / layout / refresh / destroy` 四个钩子，由 `ComponentHandler` 接入窗口的更新链；
-可用性与参数声明来自 `component_registry`，编辑器侧由 `ui/scenario/component_mgr.py` 卡片化管理。
+官方组件包位于 `assets/components/`（随应用分发的只读资源，经 `paths.dungeon_components_dir()`
+定位）。文本主组件由方案配置的 `text_component` 字段**三选一**声明（text / text_card /
+text_nvl），`components` 列表只放其余组件（如属性条、过程日志），参数统一记在
+`components_params`。组件类只需实现 `build / layout / refresh / destroy` 四个钩子，
+由 `ComponentHandler` 接入窗口的更新链（主组件先建、z 序在底）；
+可用性与参数声明来自 `component_registry`，编辑器侧由 `ui/scenario/component_mgr.py`
+三选一控件 + 卡片化管理。
 
 ---
 

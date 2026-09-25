@@ -7,6 +7,7 @@ from PIL import Image
 from PIL import ImageFilter
 import dearpygui.dearpygui as dpg
 
+from dungeon import process_log
 from dungeon.actions import VISUAL_FILTER_KEYS
 
 #: 背景重采样的防抖任务 key（同 key 的任务互相顶掉，天然去重）
@@ -81,7 +82,7 @@ class PixelWorker:
             try:
                 job()
             except Exception as exc:
-                print(f"[PixelWorker] 像素任务异常: {exc}")
+                process_log.log(f"[PixelWorker] 像素任务异常: {exc}")
             finally:
                 self._jobs.task_done()
 
@@ -186,7 +187,7 @@ class DungeonBackground:
             return
         full_path = self.resolve_path(image_path)
         if not full_path or not os.path.exists(full_path):
-            print(f"背景加载失败: 图片文件不存在 -> {image_path}")
+            process_log.log(f"背景加载失败: 图片文件不存在 -> {image_path}")
             return
         try:
             new_pil = Image.open(full_path).convert("RGBA")
@@ -199,7 +200,7 @@ class DungeonBackground:
             elif filter_effect:
                 new_pil = self.apply_filter(new_pil, filter_effect)
         except Exception as exc:
-            print(f"图片加载错误: {exc}")
+            process_log.log(f"图片加载错误: {exc}")
             return
 
         owner._bg_pil_full = new_pil

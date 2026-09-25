@@ -2,6 +2,8 @@
 
 import threading
 
+from dungeon import process_log
+
 
 class EndingHandler:
     # ------------------ 敏感效果汇总 ------------------
@@ -69,7 +71,7 @@ class EndingHandler:
                 current_item["text"] = f"结局：{name}"
                 self.ending_text = current_item["text"]
                 self._schedule_text_update()
-                print("[Ending] AI 客户端不可用，仅显示结局名称")
+                process_log.log("[Ending] AI 客户端不可用，仅显示结局名称")
                 return
 
             personality_desc = getattr(self.personality, "description", "") if self.personality else ""
@@ -101,9 +103,9 @@ class EndingHandler:
             current_item["text"] = buffer.strip()
             self.ending_text = current_item["text"]
             self._schedule_text_update()
-            print(f"[Ending] 结局已生成：{name}")
+            process_log.log(f"[Ending] 结局已生成：{name}")
         except Exception as e:
-            print(f"结局生成异常: {e}")
+            process_log.log(f"结局生成异常: {e}")
         finally:
             self.pending_ending = None
             self.dungeon_ended = True

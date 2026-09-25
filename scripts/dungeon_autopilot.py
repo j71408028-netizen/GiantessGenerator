@@ -74,13 +74,13 @@ _DATA_ROOT = os.path.join(tempfile.mkdtemp(prefix="dungeon_autopilot_data_"), "d
 os.makedirs(os.path.join(_DATA_ROOT, "user"), exist_ok=True)
 paths.data_dir = lambda: _DATA_ROOT
 
-# 官方组件包随 data_dir 重定向会定位不到（临时 data/ 下没有 packs/）：
+# 官方组件包在 assets/components（随包只读资源，不随 data_dir 重定向）：
 # 显式把注册表指向仓库内的组件包，组件冒烟场景才有东西可建
 from dungeon.window import component_registry as _component_registry  # noqa: E402
 
 _REPO_PACK_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "data", "packs", "scenarios", "_default", "components")
+    "assets", "components")
 _component_registry._registry = _component_registry.ComponentRegistry(
     pack_dir=_REPO_PACK_DIR)
 
@@ -397,12 +397,15 @@ def _make_window(script, explore=False, parent=None, host=None,
     L1 之后构造与运行分离；L4 之后 ``run()`` 返回 :class:`SessionResult` 而不是
     ``self``——需要检查窗口内部状态时把实例一起返回（``win, result``）。
     L2 之后宿主能力全部经 ``host`` 端口注入，自检因此不再打桩对话框模块。
-    ``config_overrides`` 直接覆盖 ``_scenario_config()`` 的字段（组件冒烟用）。
-    """
+    ``config_overrides`` 直接覆盖 ``_scenario_config()`` 的字段（组件冒烟用）；
+    值为 ``None`` 表示删除该键（构造"text_component 缺失"的旧写法配置）。"""
     repo = _scenario_repo() if explore else None
     cfg = _scenario_config()
-    if config_overrides:
-        cfg.update(config_overrides)
+    for key, value in (config_overrides or {}).items():
+        if value is None:
+            cfg.pop(key, None)
+        else:
+            cfg[key] = value
     win = AutopilotWindow(
         parent, name="自检角色", nick="", height=100.0, personality=_Personality(),
         preset=None, greed=0, original_height=1.6, intro_hidden="", intro_visible="",
@@ -680,37 +683,95 @@ def _check_owned_display(cid):
     return _probe
 
 
-def _check_family_mutex(win):
-    import dearpygui.dearpygui as dpg
-    ids = [c.id for c in win._components]
-    assert ids == ["text"], f"互斥失败，实际构建: {ids}"
-    assert dpg.does_item_exist("text_gradient_back"), "text 组件应已构建"
-    assert not dpg.does_item_exist("text_card_box"), "互斥后 text_card 不应构建"
+def _check_text_component(cid, extra_ids=()):
+    """会话中途（主线程）验证组件构建顺序：文本主组件在前、其余组件在后。"""
+    def _probe(win):
+        ids = [c.id for c in win._components]
+        assert ids == [cid] + list(extra_ids), f"组件构建结果: {ids}"
 
-_check_family_mutex.__name__ = "family-mutex"
+    _probe.__name__ = f"text-component:{cid}"
+    return _probe
+
+
+def _check_overlay_service(win):
+    """服务面探针：覆盖层调出 → 阅读模态挂起推进 → 关闭恢复 → 兄弟组件只读。"""
+    import dearpygui.dearpygui as dpg
+    from dungeon.splitter import DisplayUnit
+
+    def _shown(tag):
+        return dpg.get_item_configuration(tag).get("show", True)
+
+    assert win.overlay_open() is None, "初始不应有覆盖层"
+    win.toggle_overlay("log")
+    assert win.overlay_open() == "log", win.overlay_open()
+    assert dpg.does_item_exist("overlay_log") and _shown("overlay_log"), \
+        "对话记录覆盖层应存在且可见"
+    # 阅读模态：未揭示句在覆盖层打开时不被消费（点击/空格都挂起）
+    win._pending_units = [DisplayUnit(speaker=None, text="覆盖层挂起验证。")]
+    win._on_next_step()
+    assert len(win._pending_units) == 1, "覆盖层打开时推进应被挂起"
+    # 关闭后恢复推进，覆盖层控件删除
+    win.close_overlay()
+    assert win.overlay_open() is None and not dpg.does_item_exist("overlay_log")
+    win._on_next_step()
+    assert len(win._pending_units) == 0, "覆盖层关闭后应恢复逐句揭示"
+    # 兄弟组件只读访问（服务面 component(cid)）
+    assert win.component("attr_bar") is not None, "attr_bar 实例应可读"
+    assert win.component("ghost") is None, "未知组件应返回 None"
+    # 再开关一轮确认 toggle 幂等
+    win.toggle_overlay("log")
+    win.toggle_overlay("log")
+    assert win.overlay_open() is None, "toggle 两次应回到关闭态"
+
+_check_overlay_service.__name__ = "overlay-service"
 
 
 def scene_text_components():
-    """文本组件家族冒烟：text_card / text_nvl 接管显示 + 家族互斥。"""
+    """文本组件家族冒烟：text_card / text_nvl 接管显示 + text_component 字段。"""
     for cid in ("text_card", "text_nvl"):
         win, result = _make_window(
             [("click", 3), ("sleep", 0.5), ("check", _check_owned_display(cid)),
              ("close", None)],
             explore=False,
-            config_overrides={"components": [cid], "components_params": {}})
+            config_overrides={"text_component": cid, "components": [],
+                              "components_params": {}})
         check(f"{cid}：结果 succeeded", result.succeeded and not result.failed, result)
         check(f"{cid}：退出时组件已销毁", win._components == [], win._components)
         failures = [d for s, d in win._check_results if s != "ok"]
         check(f"{cid}：会话中途接管断言通过", bool(win._check_results) and not failures,
               failures)
 
-    # 家族互斥：text 与 text_card 同时配置，只保留 text（会话中途断言）
+    # text_component 字段（三选一）：配置 text_card 时按它构建
     win, result = _make_window(
-        [("click", 2), ("check", _check_family_mutex), ("close", None)],
+        [("click", 2), ("check", _check_text_component("text_card")), ("close", None)],
         explore=False,
-        config_overrides={"components": ["text", "text_card"],
+        config_overrides={"text_component": "text_card", "components": [],
                           "components_params": {}})
-    check("互斥：会话中断言通过",
+    check("字段：text_card 三选一生效",
+          bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
+          win._check_results)
+
+    # 旧写法兼容：text_component 缺失时，components 列表里的家族成员被提升
+    win, result = _make_window(
+        [("click", 2),
+         ("check", _check_text_component("text_nvl", ["attr_bar"])), ("close", None)],
+        explore=False,
+        config_overrides={"text_component": None,
+                          "components": ["attr_bar", "text_nvl"],
+                          "components_params": {}})
+    check("兼容：旧写法提升 text_nvl",
+          bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
+          win._check_results)
+
+    # 服务面：覆盖层调出/阅读模态挂起/关闭恢复 + 兄弟组件只读访问
+    win, result = _make_window(
+        [("click", 2), ("sleep", 0.5), ("check", _check_overlay_service),
+         ("close", None)],
+        explore=False,
+        config_overrides={"text_component": "text",
+                          "components": ["attr_bar"],
+                          "components_params": {}})
+    check("服务面：覆盖层与挂起断言通过",
           bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
           win._check_results)
 

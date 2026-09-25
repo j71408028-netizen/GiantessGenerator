@@ -11,6 +11,7 @@ from .components import ComponentHandler
 from .ending import EndingHandler
 from .engine import DungeonStoryEngine
 from .options import OptionHandler
+from .overlay import OverlayHandler
 from .persistence import DungeonPersistence
 from .triggers import TriggerHandler
 from .ui import DungeonWindowUI
@@ -19,7 +20,8 @@ from dungeon.window.launcher import DungeonLaunchStages
 
 class DungeonSessionWindow(DungeonWindowBase, DungeonLaunchStages, DungeonWindowUI,
                            DungeonStoryEngine, TriggerHandler, OptionHandler,
-                           EndingHandler, DungeonPersistence, ComponentHandler):
+                           EndingHandler, DungeonPersistence, ComponentHandler,
+                           OverlayHandler):
     """副本会话窗口：生命周期/入口阶段/UI/推进逻辑/触发器/选项/结局/持久化均由 mixin 提供。"""
 
 

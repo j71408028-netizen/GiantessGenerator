@@ -7,6 +7,7 @@
 
 import random
 
+from dungeon import process_log
 from dungeon.actions import (EMPTY_ACTIONS, VISUAL_FILTER_KEYS,
                              normalize_action_type)
 from dungeon.chapters import (find_chapter, is_terminating_chapter,
@@ -56,7 +57,7 @@ class TriggerHandler:
         name = str(name or "").strip()
         chapter = find_chapter(self.chapters, name) if name else None
         if name and chapter is None and not allow_unknown:
-            print(f"[Chapter] 章节不存在：{name}")
+            process_log.log(f"[Chapter] 章节不存在：{name}")
             return False
 
         # 离开当前章节：压缩本章剩余段落（作为提示词概要的一部分）
@@ -99,7 +100,7 @@ class TriggerHandler:
         if start is None:
             return
         if self._enter_chapter(start["name"], record=True):
-            print(f"[Chapter] 起始章节：{start['name']}")
+            process_log.log(f"[Chapter] 起始章节：{start['name']}")
 
     def _apply_chapter_background(self, background: dict = None):
         """应用章节的特定背景（未配置背景时保持当前背景不变）。"""
@@ -135,7 +136,7 @@ class TriggerHandler:
         self._applied_visual_filter = active
         if not self.current_background_path:
             if active:
-                print(f"[Trigger] 短暂视效 {active} 没有可用的背景，已忽略")
+                process_log.log(f"[Trigger] 短暂视效 {active} 没有可用的背景，已忽略")
             return
         effect_filter = active
         if effect_filter is None:
@@ -175,7 +176,7 @@ class TriggerHandler:
             if action_type == "insert":
                 text = str(action_data.get("text", "")).strip()
                 if not text:
-                    print(f"[Trigger] 插入触发器 {trigger['name']} 缺少插入文本，已跳过")
+                    process_log.log(f"[Trigger] 插入触发器 {trigger['name']} 缺少插入文本，已跳过")
                     action_accepted = False
                 else:
                     delayed = bool(action_data.get("delayed", False))
@@ -185,21 +186,21 @@ class TriggerHandler:
                         "highlight": bool(action_data.get("highlight", False)),
                         "delayed": delayed,
                     })
-                    print(f"[Trigger] 已触发: {trigger['name']}，排队插入段落（延迟={delayed}）")
+                    process_log.log(f"[Trigger] 已触发: {trigger['name']}，排队插入段落（延迟={delayed}）")
                     self._record_trigger_action(trigger, action_type, action_data)
             elif action_type == "option":
                 # 结束章节：不允许弹出选项
                 if is_terminating_chapter(
                         find_chapter(self.chapters, self.current_chapter)):
-                    print(f"[Trigger] 选项触发器 {trigger['name']} 位于结束章节内，已跳过")
+                    process_log.log(f"[Trigger] 选项触发器 {trigger['name']} 位于结束章节内，已跳过")
                     action_accepted = False
                     continue
                 options = action_data.get("options") or []
                 if not options:
-                    print(f"[Trigger] 选项触发器 {trigger['name']} 未配置选项，已跳过")
+                    process_log.log(f"[Trigger] 选项触发器 {trigger['name']} 未配置选项，已跳过")
                     action_accepted = False
                 elif self.pending_option is not None:
-                    print(f"[Trigger] 选项触发器 {trigger['name']} 触发时已有选项弹窗，已跳过")
+                    process_log.log(f"[Trigger] 选项触发器 {trigger['name']} 触发时已有选项弹窗，已跳过")
                     action_accepted = False
                 else:
                     self.pending_option = {
@@ -210,13 +211,13 @@ class TriggerHandler:
                             for i, o in enumerate(options)
                         ],
                     }
-                    print(f"[Trigger] 已触发: {trigger['name']}，弹出选项")
+                    process_log.log(f"[Trigger] 已触发: {trigger['name']}，弹出选项")
                     self._start_option_generation()
                     self._last_option_record = self._record_trigger_action(trigger, action_type, action_data)
             elif action_type == "effect":
                 filter_key = str(action_data.get("filter") or "").strip()
                 if filter_key not in VISUAL_FILTER_KEYS:
-                    print(f"[Trigger] 视效触发器 {trigger['name']} 的视效无效：{filter_key}，已跳过")
+                    process_log.log(f"[Trigger] 视效触发器 {trigger['name']} 的视效无效：{filter_key}，已跳过")
                     action_accepted = False
                 else:
                     try:
@@ -225,26 +226,26 @@ class TriggerHandler:
                         duration = 1
                     self.visual_effects.append({"filter": filter_key, "remaining": duration})
                     self._refresh_visual_effect()
-                    print(f"[Trigger] 已触发: {trigger['name']}，短暂视效 {filter_key}（{duration} 步）")
+                    process_log.log(f"[Trigger] 已触发: {trigger['name']}，短暂视效 {filter_key}（{duration} 步）")
                     self._record_trigger_action(trigger, action_type, action_data)
             elif action_type == "goto":
                 # 结束章节：不允许通过触发器跳出
                 if is_terminating_chapter(
                         find_chapter(self.chapters, self.current_chapter)):
-                    print(f"[Trigger] 跳转触发器 {trigger['name']} 位于结束章节内，已跳过")
+                    process_log.log(f"[Trigger] 跳转触发器 {trigger['name']} 位于结束章节内，已跳过")
                     action_accepted = False
                     continue
                 target = str(action_data.get("chapter") or "").strip()
                 chapter = find_chapter(self.chapters, target) if target else None
                 if target and chapter is None:
-                    print(f"[Trigger] 跳转触发器 {trigger['name']} 的目标章节不存在：{target}，已跳过")
+                    process_log.log(f"[Trigger] 跳转触发器 {trigger['name']} 的目标章节不存在：{target}，已跳过")
                     action_accepted = False
                 elif self.current_chapter == (target or None):
-                    print(f"[Trigger] 跳转触发器 {trigger['name']} 已处于章节「{target or '无章节'}」，已跳过")
+                    process_log.log(f"[Trigger] 跳转触发器 {trigger['name']} 已处于章节「{target or '无章节'}」，已跳过")
                     action_accepted = False
                 else:
                     self._enter_chapter(target)
-                    print(f"[Trigger] 已触发: {trigger['name']}，"
+                    process_log.log(f"[Trigger] 已触发: {trigger['name']}，"
                           f"跳转章节：{target or '离开章节'}")
                     self._record_trigger_action(
                         trigger, action_type, action_data,
@@ -252,23 +253,23 @@ class TriggerHandler:
             elif action_type == "ending":
                 name = str(action_data.get("name") or action_data.get("ending_text") or "").strip()
                 if not name:
-                    print(f"[Trigger] 结局触发器 {trigger['name']} 未填写结局名称，已跳过")
+                    process_log.log(f"[Trigger] 结局触发器 {trigger['name']} 未填写结局名称，已跳过")
                     action_accepted = False
                 elif self.dungeon_ended:
-                    print(f"[Trigger] 结局触发器 {trigger['name']} 触发时故事已结束，已跳过")
+                    process_log.log(f"[Trigger] 结局触发器 {trigger['name']} 触发时故事已结束，已跳过")
                     action_accepted = False
                 else:
                     self.pending_ending = {
                         "name": name, "action_data": action_data, "trigger_index": trigger_index}
-                    print(f"[Trigger] 已触发: {trigger['name']}，结局：{name}")
+                    process_log.log(f"[Trigger] 已触发: {trigger['name']}，结局：{name}")
                     self._start_ending_generation()
                     self._last_ending_record = self._record_trigger_action(trigger, action_type, action_data)
             elif action_type in EMPTY_ACTIONS:
                 # 空触发器：无动作，仅用于标记条件成立，供其他触发器作为前置条件
-                print(f"[Trigger] 空触发器 {trigger['name']} 条件成立（无动作）")
+                process_log.log(f"[Trigger] 空触发器 {trigger['name']} 条件成立（无动作）")
                 self._record_trigger_action(trigger, action_type, action_data)
             else:
-                print(f"未知的触发器动作类型：{action_type}")
+                process_log.log(f"未知的触发器动作类型：{action_type}")
                 action_accepted = False
 
             if not action_accepted:
@@ -298,7 +299,7 @@ class TriggerHandler:
         self._enter_chapter(name, record=False,
                             background=record.get("background"),
                             allow_unknown=True)
-        print(f"[Replay] 复现章节进入: {name or '无章节'}")
+        process_log.log(f"[Replay] 复现章节进入: {name or '无章节'}")
 
     def _replay_trigger(self, record):
         """回放时复现触发器动作（不判定条件、不弹选项，选择作为一步直接展示）。"""
@@ -310,7 +311,7 @@ class TriggerHandler:
                                 record=False,
                                 background=record.get("chapter_background"),
                                 allow_unknown=True)
-            print(f"[Replay] 复现章节跳转: {name}")
+            process_log.log(f"[Replay] 复现章节跳转: {name}")
         elif action_type == "effect":
             filter_key = str(action_data.get("filter") or "").strip()
             if filter_key:
@@ -320,7 +321,7 @@ class TriggerHandler:
                     duration = 1
                 self.visual_effects.append({"filter": filter_key, "remaining": duration})
                 self._refresh_visual_effect()
-            print(f"[Replay] 复现短暂视效: {name}")
+            process_log.log(f"[Replay] 复现短暂视效: {name}")
         elif action_type == "option":
             choice_index = record.get("choice_index")
             if choice_index is None:
@@ -340,7 +341,7 @@ class TriggerHandler:
             self.story_history.append({"type_str": "【选择】", "text": text,
                                        "highlight": True, "speaker": None})
             self._update_text_display()
-            print(f"[Replay] 复现选项触发器: {name} → 选择 {idx}")
+            process_log.log(f"[Replay] 复现选项触发器: {name} → 选择 {idx}")
         elif action_type == "ending":
             ending_text = record.get("ending_text", "")
             # 回放时同样显示结局图标（图标路径来自结局动作配置）
@@ -355,10 +356,10 @@ class TriggerHandler:
                 self._update_text_display()
             self.pending_ending = None
             self.dungeon_ended = True
-            print(f"[Replay] 复现结局触发器: {name}")
+            process_log.log(f"[Replay] 复现结局触发器: {name}")
         else:
             # insert / sensitivity / none：效果已随文本步骤与属性快照复现
-            print(f"[Replay] 触发器动作无需额外复现: {name} [{action_type}]")
+            process_log.log(f"[Replay] 触发器动作无需额外复现: {name} [{action_type}]")
 
     # ------------------ 插入段落 ------------------
     def _peek_pending_insertion(self):
@@ -395,8 +396,9 @@ class TriggerHandler:
 
         # 与一般段落一样进入对话历史，后续 AI 生成时可见
         self.messages.append({"role": "assistant", "content": item["text"]})
-        if len(self.messages) > 21:
-            self.messages = [self.messages[0]] + self.messages[-20:]
+        window = self._message_window_size()
+        if len(self.messages) > window + 1:
+            self.messages = [self.messages[0]] + self.messages[-window:]
 
         before_state = self.dungeon_state
         self.dungeon_state = self.dungeon_logic.evolve_attributes(
@@ -424,3 +426,5 @@ class TriggerHandler:
             step_info["ending_chapter"] = True
 
         self._finish_step(text_type, item["text"], step_info)
+        # 插入段消费后下一次点击必然生成：立即补射预生成
+        self._maybe_pregen_next()

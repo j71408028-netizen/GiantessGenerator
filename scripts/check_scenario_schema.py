@@ -47,6 +47,7 @@ GOLDEN_EMPTY = {
     "initial_prompt": "",
     "coupling_level": "velum",
     "protagonist_title": "",
+    "text_component": "text",
     "entry_action_cost": 0,
     "section_prompts": {"background": "", "branch": "", "dialog": "",
                         "interaction": "", "action": ""},
@@ -82,6 +83,8 @@ def _bad_config():
         "initial_prompt": 123,
         "coupling_level": "nope",
         "protagonist_title": 123,
+        "text_component": "nope",
+        "components": ["text"],
         "entry_action_cost": -5,
         "view_mode": "game",
         "typo_key": 1,
@@ -145,6 +148,8 @@ _expect("error", "chapters[0].overflow_target", "超限跳转悬空（error）")
 _expect("warning", "initial_prompt", "initial_prompt 非字符串")
 _expect("warning", "coupling_level", "耦合等级无效")
 _expect("warning", "protagonist_title", "主角称呼非字符串")
+_expect("warning", "text_component", "文本组件无效")
+_expect("info", "components", "旧写法文本组件残留")
 _expect("warning", "entry_action_cost", "进入点数非法")
 _expect("warning", "view_mode", "废弃顶层字段")
 _expect("info", "typo_key", "未知顶层字段")
@@ -190,6 +195,24 @@ check("保存干净配置后诊断清空", not has_errors(repo.last_diagnostics)
 check("加载后再校验（迁移后配置）",
       has_errors(validate_scenario_config(repo.load_config("_default")) or [])
       is False, "迁移后的干净配置仍有 error")
+
+# 旧写法迁移：components 列表里的文本家族成员提升到 text_component
+_old_style = dict(clean)
+_old_style.pop("text_component", None)
+_old_style["components"] = ["text", "attr_bar"]
+repo.save_config("_default", _old_style)
+_loaded_old = repo.load_config("_default")
+check("迁移：旧写法文本组件提升到 text_component",
+      _loaded_old.get("text_component") == "text"
+      and "text" not in (_loaded_old.get("components") or []),
+      _loaded_old)
+_old_style["components"] = ["attr_bar", "text_nvl"]
+repo.save_config("_default", _old_style)
+_loaded_old = repo.load_config("_default")
+check("迁移：列表里的 text_nvl 同样提升",
+      _loaded_old.get("text_component") == "text_nvl"
+      and _loaded_old.get("components") == ["attr_bar"],
+      _loaded_old)
 
 # ---------------- 6. 演化规则：配置矩阵/步长真的生效 ----------------
 # 曾经 transition_matrix 与 section_steps 只写进 config.json、从未进运行时，
