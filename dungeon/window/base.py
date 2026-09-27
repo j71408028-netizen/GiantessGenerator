@@ -30,9 +30,6 @@ from dungeon.validate import format_diagnostics, has_errors, validate_scenario_c
 from logic import get_size_category
 from services.state_service import StateService
 
-# 文本区布局样式：旧的「副本窗口视图」设置已移除，统一用保留全历史的故事布局
-LAYOUT_STYLE = "story"
-
 
 class DungeonWindowBase:
     """副本窗口的生命周期：构造（``__init__``）与运行（``run``）分离。
@@ -193,10 +190,10 @@ class DungeonWindowBase:
         # 必须在会话初始化之前就绪——_init_session 会立刻据此构建系统提示。
         self.coupling_level = normalize_coupling_level(
             (scenario_config or {}).get("coupling_level"))
-        # 显示组件（官方组件库，见 dungeon/window/components.py）
+        # 显示组件（见 component_pack/ 与 dungeon/window/components.py）。
+        # 这里先给入口阶段用的空默认值，会话阶段进入时由 _init_components 复位重建。
         self._components = []
         self._components_built = False
-        self.layout_style = LAYOUT_STYLE
 
         # 会话内容初始化分为“新开”（可能延迟到入口选择后）与“回放”两种
         if is_replay:

@@ -11,8 +11,8 @@
 - 反向依赖自己的 UI 子包：``dungeon.window``（含 ``from .window import``）；
 - 逃逸出包的相对导入（``from .. import``）。
 
-**B. ``dungeon/window/*.py``（窗口层）** —— 允许 ``dearpygui`` / ``services``，
-但**不允许** ``tkinter`` / ``customtkinter`` / ``ui.*``：宿主能力（尺寸/DPI、
+**B. ``dungeon/window/**/*.py``（窗口层，含 ``component_pack/`` 子包）** —— 允许 ``dearpygui`` /
+``services``，但**不允许** ``tkinter`` / ``customtkinter`` / ``ui.*``：宿主能力（尺寸/DPI、
 显隐、事件泵、弹框、字体、活动窗口登记）一律经 ``dungeon.window.host.HostPort``
 端口取得，Tk 相关实现只存在于 ``ui/common/tk_host.py``（L2，见
 docs/Dungeon/window_host.md §3）。
@@ -94,11 +94,18 @@ def check_module(path: Path, forbidden=FORBIDDEN_ROOTS, label="领域层",
     return violations
 
 
-def _scan(directory: Path, forbidden, label, check_ui_subpackage=True):
-    """扫描目录下的顶层模块，返回 (文件数, 违规列表)。"""
+def _scan(directory: Path, forbidden, label, check_ui_subpackage=True,
+          recursive=False):
+    """扫描目录下的模块，返回 (文件数, 违规列表)。
+
+    ``recursive=True`` 连子包一起扫：窗口层的 ``component_pack/`` 也属于 UI 层，
+    漏掉它等于给组件包开后门。领域层只扫包根顶层模块——``dungeon/window/`` 由
+    窗口层那次扫描负责，重复扫会把窗口文件误判成领域层越界。
+    """
     total = 0
     violations = []
-    for path in sorted(directory.glob("*.py")):
+    paths = directory.rglob("*.py") if recursive else directory.glob("*.py")
+    for path in sorted(paths):
         total += 1
         for item in check_module(path, forbidden, label, check_ui_subpackage):
             item["file"] = path.relative_to(ROOT).as_posix()
@@ -109,11 +116,12 @@ def _scan(directory: Path, forbidden, label, check_ui_subpackage=True):
 def main() -> int:
     domain_total, domain_bad = _scan(DOMAIN_DIR, FORBIDDEN_ROOTS, "领域层")
     window_total, window_bad = _scan(
-        WINDOW_DIR, WINDOW_FORBIDDEN_ROOTS, "窗口层", check_ui_subpackage=False)
+        WINDOW_DIR, WINDOW_FORBIDDEN_ROOTS, "窗口层", check_ui_subpackage=False,
+        recursive=True)
     violations = domain_bad + window_bad
 
     print(f"[check_dungeon_layering] 已检查 dungeon/ 根 {domain_total} 个领域模块，"
-          f"dungeon/window/ {window_total} 个窗口模块")
+          f"dungeon/window/（含子包）{window_total} 个窗口模块")
     if violations:
         for item in violations:
             print(f"  FAIL {item['file']}:{item['lineno']}  {item['module']} — {item['reason']}")

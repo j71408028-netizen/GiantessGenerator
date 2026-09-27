@@ -8,7 +8,13 @@
   refresh(ctx)（如底部渐变式文本栏接管显示），否则走内置 text_container 管线
 - 会话退出 _handle_exit() 前 → 各组件 destroy(ctx) + 注册表丢弃
 
-组件的根对象 ctx 即窗口实例本身，组件只读窗口现有状态，不反向写状态。
+组件的根对象 ctx 即窗口实例；组件**只允许**经本 mixin 提供的组件服务面访问窗口
+（`component_viewport / component_top_inset / session_waiting_for_input /
+component_autoplay_on / text_font_tag / bold_font_tag / schedule / schedule_every /
+cancel_task / component`，另有覆盖层与工具服务的 `toggle_overlay` 等）。
+组件不得再读窗口私有属性（`_dpi_scale` / `_layout_w` / `_frame` / `_autoplay`…）；
+契约由 ``scripts/check_component_pack.py`` 的替身 ctx 强制——替身只实现服务面，
+组件一旦伸手摸私有一律在守卫里报错。
 """
 
 import traceback
@@ -23,9 +29,9 @@ class ComponentHandler:
     def _init_components(self):
         """初始化组件实例列表与默认布局样式（在 _load_session_config 后调用）。"""
         self._components = []
-        # 旧的「副本窗口视图」已移除，布局样式固定为保留全历史的故事布局
-        self.layout_style = "story"
         self._components_built = False
+        # 自动播放开关（ui.toggle_autoplay 切换；帧任务随会话收尾一并丢弃）
+        self._autoplay = False
 
     def _configured_component_ids(self):
         """把副本配置解析成组件 id 列表（首位恒为文本主组件）。
@@ -69,7 +75,11 @@ class ComponentHandler:
                 comp.build(self)
             except Exception as exc:
                 process_log.log(f"[Components] 组件 build 失败 ({getattr(comp, 'id', '?')}): {exc}")
-        self._components_built = True
+        # 只有真的建出组件才算「接管」：空列表时 _relayout/_update_text_display 要走
+        # 内置几何与内置 text_container 管线（否则内置容器在窗口缩放后不再重排）
+        self._components_built = bool(self._components)
+        if not self._components:
+            process_log.log("[Components] 本次会话未构建任何显示组件，回退内置文本容器")
 
     def _relayout_components(self):
         """窗口重排后调用各组件 layout（主线程）。"""
@@ -101,30 +111,69 @@ class ComponentHandler:
         except Exception:
             pass
 
-    # ---- 供 UI 层调用的几何布局委托（保持单一入口） ----
-    def _layout_text_container(self, style):
-        """按布局样式重排文本容器。"""
+    # ---- 组件服务面（组件访问窗口的唯一入口，见 DungeonComponent 契约） ----
+    def component_viewport(self):
+        """返回 ``(dpi_scale, 布局宽, 布局高)``：组件的唯一几何来源。"""
+        s = getattr(self, "_dpi_scale", 1.0) or 1.0
         w = getattr(self, "_layout_w", 0) or dpg.get_viewport_client_width()
         h = getattr(self, "_layout_h", 0) or dpg.get_viewport_client_height()
-        margin_x = round(40 * getattr(self, "_dpi_scale", 1.0))
-        margin_top = round(40 * getattr(self, "_dpi_scale", 1.0))
-        margin_bottom = round(20 * getattr(self, "_dpi_scale", 1.0))
-        cw = max(1, w - 2 * margin_x)
-        if style == "story":
-            cpos, ch = [margin_x, margin_top], h - margin_top - margin_bottom
-        else:  # game / bottom
-            ch = round(190 * getattr(self, "_dpi_scale", 1.0))
-            cpos, ch = [margin_x, h - ch - margin_bottom], ch
+        return s, w, h
 
-        if dpg.does_item_exist("text_container"):
-            dpg.configure_item("text_container", pos=cpos, width=cw, height=ch)
-        if dpg.does_item_exist("bg_overlay_child"):
-            dpg.configure_item("bg_overlay_child", pos=cpos, width=cw,
-                               height=max(1, h - cpos[1]))
-        self._text_wrap_width = max(1, cw - round(40 * getattr(self, "_dpi_scale", 1.0)))
-        for tag in self._text_item_tags:
-            if dpg.does_item_exist(tag):
-                dpg.configure_item(tag, wrap=self._text_wrap_width)
+    def component_top_inset(self):
+        """返回其它组件已占用的顶部高度（全屏类组件据此让位）。
+
+        各组件用可选的 ``top_inset(ctx)`` 钩子自报占位，组件之间不互读私有几何，
+        因此与构建顺序无关（主组件先建时也能算出后面属性面板的占位）。
+        """
+        inset = 0
+        for comp in getattr(self, "_components", []):
+            hook = getattr(comp, "top_inset", None)
+            if not callable(hook):
+                continue
+            try:
+                inset = max(inset, int(hook(self) or 0))
+            except Exception as exc:
+                process_log.log(f"[Components] 组件 top_inset 失败 "
+                                f"({getattr(comp, 'id', '?')}): {exc}")
+        return inset
+
+    def session_waiting_for_input(self):
+        """当前是否在等玩家输入（继续指示与自动播放共用同一判定）。
+
+        生成中 / 仿流式动画中 / 结局已达成 / 有待选选项或待触发结局都不算等待。
+        """
+        return (not getattr(self, "_generating", False)
+                and getattr(self, "_text_anim_state", None) is None
+                and not getattr(self, "dungeon_ended", False)
+                and getattr(self, "pending_option", None) is None
+                and getattr(self, "pending_ending", None) is None)
+
+    def component_autoplay_on(self):
+        """自动播放开关是否打开（工具条播放按钮着色用）。"""
+        return bool(getattr(self, "_autoplay", False))
+
+    def text_font_tag(self):
+        """窗口创建的正文 24 号字体 tag（组件绑正文用；未建时为 None）。"""
+        tag = getattr(self, "dungeon_text_font", None)
+        return tag if tag and dpg.does_item_exist(tag) else None
+
+    def bold_font_tag(self):
+        """窗口创建的 24 号粗体 tag（DPG 无字重 API，粗度靠字体文件；可能为 None）。"""
+        tag = getattr(self, "dungeon_bold_font", None)
+        return tag if tag and dpg.does_item_exist(tag) else None
+
+    # ---- 帧时钟（组件不得直接触碰 self._frame） ----
+    def schedule(self, fn, *args):
+        """把一次调用投递到主线程帧泵（跨线程回主线程的唯一入口）。"""
+        return self._frame.call(fn, *args)
+
+    def schedule_every(self, interval, fn, key):
+        """登记周期帧任务（同 key 互斥覆盖）。"""
+        self._frame.every(interval, fn, key=key)
+
+    def cancel_task(self, key):
+        """取消帧任务（幂等）。"""
+        self._frame.cancel(key)
 
 
 __all__ = ["ComponentHandler"]

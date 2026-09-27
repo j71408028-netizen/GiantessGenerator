@@ -18,7 +18,7 @@
 | §2 | 生命周期（构造 / 运行 / 帧循环 / 阶段 / 退出 / 收尾） |
 | §3 | 一步会话数据流 |
 | §4 | 线程与帧时钟 |
-| §5 | 约束清单（C1–C11） |
+| §5 | 约束清单（C1–C13） |
 | §6 | 自检命令 |
 
 ---
@@ -31,7 +31,7 @@
 | `dungeon/window/base.py` | 构造（`__init__` 只存参数 + 会话初始化）与运行（`run()` 建 UI、帧循环 `_run_frame_loop`、收尾 `_finish_session`）、入口 / 会话阶段切换、关闭路径、视口尺寸（取自宿主端口） |
 | `dungeon/window/host.py` | **宿主端口** `HostPort`（含无宿主缺省实现）：尺寸/DPI、宿主显隐、事件泵、收尾弹框、活动窗口登记、缺省字体、回放文件选择 |
 | `ui/common/tk_host.py` | 宿主端口的 Tk/CTk 适配器 `TkHost`——**window 层唯一的 Tk 细节所在地** |
-| `dungeon/window/ui.py` | DPG 上下文 / 视口 / 主窗口构建、文本显示、布局自适应（`_relayout`）、输入事件、**F12 过程日志开关** 与 **顶部轻通知窗**（`_notify`，窗口级常驻） |
+| `dungeon/window/ui.py` | DPG 上下文 / 视口 / 主窗口构建、**副本字体对接**（经 `dungeon/window/fonts.py` 解析家族名→字体文件，按两档字号建 `dungeon_text_font` 与粗体 `dungeon_bold_font` 供文本组件使用——DPG 无字重 API，粗度靠选字体文件）、文本显示、布局自适应（`_relayout`）、输入事件、**F12 过程日志开关**、**A 自动播放 / F2 截图**（`toggle_autoplay` / `take_screenshot`，与文本组件工具条按钮共用入口）与 **顶部轻通知窗**（`_notify`，窗口级常驻） |
 | `dungeon/window/engine.py` | 推进核心：AI 流式生成、JSON 解析、伤亡结算、回放步进、关闭回调 `_on_close` |
 | `dungeon/window/triggers.py` | 触发器判定（所在章节 / 前置 / 条件）、章节进入、短暂视效、插入段落 |
 | `dungeon/window/options.py` | 选项触发器：后台生成选项文字并弹出选择弹窗 |
@@ -42,7 +42,9 @@
 | `dungeon/window/background.py` | 背景图加载 / 旋转 / 模糊 / 淡入淡出 / 纹理更新（含单工作者 `PixelWorker`） |
 | `dungeon/window/frame.py` | 帧时钟 `FrameScheduler`（窗口实例成员 `self._frame`）：`every` / `after` / `cancel` / `call` / `tick` / `drain` / `stop`——window 层唯一的时间源 |
 | `dungeon/window/result.py` | `SessionResult` 与原因常量：`run()` 的返回值，替代「读窗口私有属性」 |
-| `dungeon/window/component_registry.py` | 显示组件注册表与官方组件包加载 |
+| `dungeon/window/fonts.py` | **字体与字号唯一真相源**：两档字号（`TEXT_FONT_SIZE` 24 / `UI_FONT_SIZE` 21 / `BOLD_FONT_SIZE`）、家族名→字体文件映射 `_FAMILY_FONT_FILES` + 平台回退链 + 粗体/衬线候选链 + `resolve_font_files()`；窗口 `ui.py` 与组件包共用同一份 |
+| `dungeon/window/component_registry.py` | 显示组件注册表：惰性导入官方常驻组件包、id 解析与回退、参数合并（含 `min/max` 夹取）、按窗口复用实例；`source` 记录实际生效的包来源（外部包经 `ComponentRegistry(pack_dir=...)` 显式覆盖） |
+| `dungeon/window/component_pack/` | **官方显示组件包**（窗口层常驻 Python 包）：`__init__.py` 组装 `REGISTRY`，各组件拆在同目录模块（`base.py` 共享常量与文本基类 / `text_gradient.py` / `text_card.py` / `text_nvl.py` / `attr_bar.py` / `proc_log.py`） |
 | `dungeon/window/overlay.py` | **覆盖层服务面**（OverlayHandler）：`toggle_overlay / close_overlay / overlay_open / component`——文本主组件经 ctx 调出对话记录等模态浮层；打开期间进入阅读模态（点击只关闭浮层、剧情推进挂起），H 调出 / ESC 关闭 |
 
 被本层消费的领域模块：
@@ -181,8 +183,9 @@ run() → SessionResult
 |---|---|
 | **逻辑段落 vs 显示段落** | 一次 AI 输出（约 100 字）是一个逻辑段落，属性演化、回放、剧情压缩、对话历史都以它为单位；内置分句器（`dungeon/splitter.py`）把它切成若干显示段落（换行、对话引号闭合、句末标点、分号、破折号为断点），逐句展示只为阅读节奏。队列耗尽后下一次点击才触发新的 AI 调用；插入触发器的段落走同一条仿流式管线 |
 | **说话人标记** | Solea/Bulla 耦合等级的对话分支（`dialog`/`branch`，方案可配 `protagonist_title` 指定主角称呼）要求 AI 在对话句句首写 `@说话人@`（规则见 `dungeon/coupling.SPEAKER_MARKER_RULE`）；分句器解析进显示单元（`DisplayUnit.speaker`），`story_history` 条目带 `speaker` 键，UI 组件据此渲染名牌。落盘正文（回放/报告/概要）经 `strip_speaker_markers` 剥离标记，回放文件格式不变；Velum 等级正文无标记，行为不变 |
-| **文本显示所有权** | 文本主组件由方案配置 `text_component` 字段**三选一**（`dungeon.schema.TEXT_COMPONENT_IDS`）：`text` **底部渐变式**（视口底部向上淡出的深色衬底上显示最近 N 句）、`text_card` **底部卡片式**（居中圆角半透明卡片）、`text_nvl` **全屏 NVL**（半透明覆盖层堆叠全部历史，可选衬线字体、可滚轮回看）；`components` 列表只放其余组件，主组件先建、z 序在底。行首标签优先用说话人、回退类型前缀，继续点击用闪烁 ▼ 提示。接管期间（`owns_text_display = True`）`_update_text_display` 跳过内置 `text_container` 管线、转调组件刷新链；`text`/`text_card` 屏幕只呈现当下几句，完整历史由回放/报告承接 |
+| **文本显示所有权** | 文本主组件由方案配置 `text_component` 字段**三选一**（`dungeon.schema.TEXT_COMPONENT_IDS`）：`text` **底部渐变式**（视口底部向上淡出的深色衬底上显示最近 N 句）、`text_card` **底部卡片式**（居中圆角半透明卡片）、`text_nvl` **全屏 NVL**（半透明覆盖层堆叠全部历史，可选衬线字体、可滚轮回看）；`components` 列表只放其余组件，主组件先建、z 序在底。行首标签只显示说话人（类型前缀是内部属性不上屏，过程日志面板可见），继续点击用闪烁 ▼ 提示。接管期间（`owns_text_display = True`）`_update_text_display` 跳过内置 `text_container` 管线、转调组件刷新链；`text`/`text_card` 屏幕只呈现当下几句，完整历史由回放/报告承接 |
 | **覆盖层服务面** | 窗口向文本主组件提供受控调用：`ctx.toggle_overlay("log")` 调出**对话记录**（全量 `story_history` 快照、可滚动，居中半透明面板），`ctx.component(cid)` 只读访问兄弟组件实例；写操作与组件生命周期仍由窗口集中管理，主组件只拿到调度权而非所有权。覆盖层打开时为阅读模态：点击只关闭覆盖层（`ui.py::_on_mouse_click`），空格/回车推进在 `_on_next_step` 入口挂起 |
+| **组件服务面（C13）** | 组件访问窗口的唯一入口集中在 `components.py::ComponentHandler`：几何 `component_viewport()`、帧时钟 `schedule / schedule_every / cancel_task`（**不碰 `self._frame`**）、状态查询 `session_waiting_for_input()`（继续指示与自动播放共用同一判定）/ `component_autoplay_on()`、字体 `text_font_tag() / bold_font_tag()`、顶部让位 `component_top_inset()`（聚合各组件的 `top_inset(ctx)` 可选钩子，与构建顺序无关）。契约的可执行版本是 `check_component_pack.py` 的替身 ctx——它**只**实现服务面，组件越界（读私有）在冒烟与 AST 扫描里都会失败 |
 | **细节探究** | 流式输出完成后用刚生成的段落组装提问，后台线程询问 AI 还想了解哪些细节（最多 3 条，存 `_detail_queries`）；下次生成时用问题关键词在回放缓存中检索最相关段落作为「细节补充」注入提示词，随后消费掉这批问题 |
 | **预演化** | 步进收尾后（`finally`，插入晋升之后）若下一次点击必然触发生成（无选项/插入/结局排队），立即后台预生成下一段，缓存 `(user_prompt, messages 快照, 原始响应, 段落类型)`；玩家点击时 `_take_pregen_for_next` 直接采用（在途则等待收养，不重复发请求），首句仿流式揭示。选项选择后、插入段消费后各补射一次；预生成失败自动回退实时路径并还原 `keyword_match_given`。调用次数不变，只是提前发出 |
 | **章节与触发器** | 会话开始先 `_enter_start_chapter()` 进入起始章节再 `check_triggers()`；完整条件是「所在章节 + 前置触发器 + 条件规则」三者同时满足 |
@@ -191,6 +194,7 @@ run() → SessionResult
 | **剧情压缩** | `StorySummarizer` 按块（默认 20 段）与换章时机压缩；`build_user_prompt` 注入「全部压缩概要 + 关键事实 + 关键事件」。近期原文不再注入——对话历史（窗口大小即 `story_recent_count` 设置，`_message_window_size`）已逐字携带最近剧情，重复注入只会推高 prefill 与首字延迟。AI 额外输出 `facts`（跨块去重成事实卡）；确定性关键事件（章节进出、选项选择、介入度 / 破坏性跨整数阈值）由代码直接登记 |
 | **回放模式** | 不建 AI 客户端，`_replay_next_step` 逐条重放 `loaded_replay`（`kind == "trigger"` → `_replay_trigger`，`kind == "chapter"` → `_replay_chapter`） |
 | **过程日志（proc_log 组件）** | 右上角日志面板是官方组件包里的 `proc_log` 组件：方案在 `components` 里声明才构建（`_default` 已声明），默认收起，**F12** 切换展开 / 收起。数据源是 `dungeon/process_log.py`：组件 build 时订阅并取走缓冲积压（构造 / 会话初始化阶段的报错也会补显），此后任意线程的 `log()` 经订阅回调 → `ctx._frame.call()` 进主线程追加（上限 300 行，自动滚底）；组件 destroy 时退订。方案未配置该组件时按 F12 弹通知「日志查看已禁用」 |
+| **文本组件功能工具条** | 三种文本组件（text / text_card / text_nvl）各自在合适位置挂一条悬浮工具条（基类 `_build_toolbar` 统一创建，圆角低透明度容器 + 三个图标按钮——图标为程序化生成的小纹理，无底色仅悬停色，常驻不可关）：播放（自动播放，A）/ 相机（截图，F2）/ 列表（过程日志面板，F12），悬停有文字提示。渐变文本栏放渐变区右下角（继续指示 ▼ 左移让位），卡片文本栏骑在卡片右上角，NVL 顶部居中。按钮只转调窗口同名服务，与快捷键等效；自动播放由帧时钟任务按 1.2s 节奏调 `_on_next_step`，与继续指示同源的等待条件决定是否推进（选项 / 结局 / 生成 / 动画期间自动停），自动播放中播放图标转金色。窗口 `_on_mouse_click` 用 `toolbar_hovered()` 区分点按钮与点屏幕推进剧情。截图经 `dpg.output_frame_buffer` 存到 `data/user/screenshots/`（通知延后弹出，避免通知条被截进画面）。正文颜色为固定常量（`_DEFAULT_TEXT_COLOR`），可配置的是标签 / 高亮 / 渐变底色（见组件包 `param_specs`） |
 | **轻通知窗** | 主窗口顶部居中的通知条（`ui.py::_notify`），窗口级常驻、**不受组件配置影响**；显示约 3 秒自动隐藏（`after` 同 key 任务互斥，连续通知覆盖前一条并重置计时）。副本内需要「提示但不必确认」的场景都可用它 |
 
 ## 4. 线程与帧时钟
@@ -239,6 +243,7 @@ run() → SessionResult
 | **C10** | 写盘一律用原子写（`persistence/json_store.py`） | 半截文件不可恢复，`.bak` 是唯一回退；回放 / 报告按时间戳命名、本来不会被覆盖，调用时传 `backup=False` | `scripts/check_dungeon_finalize.py` |
 | **C11** | 术语不混用：`scenario_*` = 方案，`dungeon_*` = 一局 | 见 [术语表](domain_terms.md) 与 `dungeon/terms.py` | `scripts/check_scenario_naming.py` |
 | **C12** | 任何 Tk 交互前必须调用 `self._discard_pending_quit()` | 用户通过视口原生关闭键（X）退出时，GLFW 销毁原生窗口会导致 Windows 在本线程队列中留下一条 `WM_QUIT`；它不会被 Tk 消费，却会让 Windows 停止合成 `WM_TIMER`，造成随后的收尾提示模态对话框（`wait_window`）以及主窗口所有 `after` 计时器彻底收不到事件而表现为**弹出提示对话框后主窗口卡死**；收尾时在 `show_window()` / 弹框前由端口抛弃该残留消息 | `python scripts/dungeon_autopilot.py --scene native-close --isolate` |
+| **C13** | 组件只经**组件服务面**访问窗口（`ctx.component_viewport / schedule / schedule_every / cancel_task / session_waiting_for_input / component_autoplay_on / text_font_tag / bold_font_tag / component_top_inset / component`），不得读窗口私有属性（`_dpi_scale` / `_layout_w` / `_frame` / `_autoplay`…） | 组件 ctx 就是窗口实例，摸私有零成本，一旦窗口侧改名即静默 AttributeError；契约的可执行版本是守卫里的**替身 ctx**（只实现服务面）与 AST 越界扫描 | `scripts/check_component_pack.py` |
 
 ### 5.1 C6：DPG 2.3.1 兼容性怪癖
 
@@ -247,7 +252,7 @@ run() → SessionResult
 | `dpg.add_child_window(..., no_scrollbar=...)` 等参数创建时传入不生效 | 创建后 `dpg.configure_item()` 再设一遍（见 `_build_ui` 对 `main_window`） |
 | viewport 级 drawlist 不渲染 `draw_image` | 背景图放在主窗口自己的 drawlist（`bg_drawlist`）；主窗口 `no_background=True` |
 | 入口阶段控件在容器块**之后**创建，DPG 推断不出父级 | 显式 `parent="main_window"`（见 `launcher._build_entry_ui`） |
-| 动态纹理更新 | 尺寸一致时 `set_value`（接受 numpy float32，~30ms）；尺寸变化才 delete + `add_dynamic_texture`（不接受 numpy，必须传 list，约 0.5s）。`pil_to_dpg` 已用 numpy 整块转换，**不要改回逐像素 Python 推导**；保持 `_bg_revision` 检查丢弃过期帧 |
+| 动态纹理更新 | 背景 `bg_texture` 在 `_build_ui` 一次建到「客户区 ∨ 主显示器物理尺寸」，**永不重建**：数据与纹理同尺寸时 `set_value`（接受 numpy float32，~30ms）；数据小于纹理（窗口模式 vs 全屏）时经 background 的常驻组合缓冲贴进左上角，`draw_image` 的 uv 子区域映射铺到窗口矩形——窗口/全屏切换因此全程快速路径（~200ms 落地，无主线程卡顿）。若纹理不够大（换更大显示器）走换新 tag 重建：**同 tag delete+重建会复用旧 GL 存储导致花屏**（DPG 2.3.1 怪癖），且不依赖 default_value 上传大列表——建零列表纹理后立即 `set_value`。重采样结果按 (来源代, 尺寸) 缓存两份，来回切换免重采样。`pil_to_dpg` 已用 numpy 整块转换，**不要改回逐像素 Python 推导**；保持 `_bg_revision` 检查丢弃过期帧 |
 | 初始 `bg_texture` 尺寸 | 按主窗口**客户区**尺寸创建，`_layout_w/h` 初始也取客户区尺寸；视口外框尺寸只用于创建视口，参与布局会因客户区查询时机不同造成首图被守卫丢弃 |
 | 无过渡背景（`smooth_transition=False`，如入口首图 `_prime_background`） | 在 `background.change` 内**同步直接应用**，不走 Timer + 队列，否则常因视口未稳定延迟数秒 |
 | 窗口标题 | 创建时用临时标题 `DungeonSession`，首帧后 `_fix_windows_title` 改真实标题（绕过 DPG 标题缓存）；`_temp_title` 只用于这个修正 |
@@ -283,10 +288,11 @@ DungeonSessionWindow(...).run()                      # 不传 = HostPort()，无
 
 | 改动范围 | 先跑 |
 |---|---|
-| 关闭路径、收尾、入口阶段、生命周期、帧时钟 | `python scripts/dungeon_autopilot.py`（5 场景 48 项断言）；单场景 `--scene <名字> --isolate`，连开关窗 `--scene session-close --repeat 2 --isolate` |
+| 关闭路径、收尾、入口阶段、生命周期、帧时钟 | `python scripts/dungeon_autopilot.py`（7 场景 63 项断言，含 `text-components` 组件冒烟）；单场景 `--scene <名字> --isolate`，连开关窗 `--scene session-close --repeat 2 --isolate` |
 | `_finalize` / `json_store` / `scenario_repo` | `python scripts/check_dungeon_finalize.py`（无 GUI，32 项断言） |
+| 显示组件包 / 文本组件 / 组件参数 | `python scripts/check_component_pack.py`（无 GUI，102 项断言：加载链、契约与服务面（替身 ctx + AST 越界扫描）、元数据与参数夹取、外部包覆盖、隐藏 DPG 上下文里的四钩子冒烟与控件无残留） |
 | 分句器 / 说话人标记 | `python scripts/check_splitter.py` |
-| 新增 import / 分层 | `python scripts/check_dungeon_layering.py` |
+| 新增 import / 分层 | `python scripts/check_dungeon_layering.py`（窗口层含 `component_pack/` 子包） |
 | schema / 校验器 | `python scripts/check_scenario_schema.py`；批量校验 `python scripts/validate_scenarios.py --errors-only` |
 
 无 GUI 守卫（`check_dungeon_layering.py` / `check_dungeon_finalize.py` / `check_splitter.py` 等）+

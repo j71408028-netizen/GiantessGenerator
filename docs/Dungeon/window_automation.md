@@ -38,8 +38,10 @@
 七个场景共 **63 项断言全绿**。每个场景结束还会断言 **会话内无残留非 daemon 线程**
 （`threading.enumerate()` 为空）——这是 L3 帧时钟 + `PixelWorker` 的验收条件。
 
-注意：组件包定位随 data_dir 重定向会落空，autopilot 在隔离头部把注册表显式指到
-仓库内 `assets/components/`（组件包在 assets，本就不随 data_dir 重定向；见脚本开头 `_component_registry` 注入）。
+注意：官方组件包是窗口层常驻 Python 包 `dungeon/window/component_pack/`，随 registry
+正常导入，与 data_dir 重定向无关——autopilot **不需要**任何组件包注入（历史上曾把注册表
+显式指向 `assets/components/`，该目录已随拆包移除）。组件包本身由无 GUI 守卫
+`check_component_pack.py` 覆盖；本脚本的 `text-components` 场景只负责真窗口里的接管可见状态。
 
 L2 之后注入点更干净：宿主能力（尺寸/DPI、显隐、事件泵、收尾弹框、回放文件选择）全部经
 `dungeon.window.host.HostPort` 注入，**不用再打桩 `ui.common.dialogs`**——

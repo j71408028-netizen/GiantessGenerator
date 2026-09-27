@@ -1,10 +1,15 @@
 """UI 构建、文本显示、布局自适应与事件回调。"""
 
 import os
+import sys
+import time
 
 import dearpygui.dearpygui as dpg
 
+from dungeon import process_log
 from dungeon.models import DungeonTextType
+from dungeon.window.fonts import (BOLD_FONT_SIZE, TEXT_FONT_SIZE, UI_FONT_SIZE,
+                                  resolve_font_files)
 
 
 _TEXT_COLOR = (255, 255, 255, 255)
@@ -22,6 +27,10 @@ _ANIM_TICK_SECONDS = 0.03
 #: 仿流式动画的帧任务 key（同一时刻只有一条动画，新的顶掉旧的）
 _TEXT_ANIM_TASK = "text:anim"
 
+# 自动播放：等待输入时的推进节奏（秒）；帧任务 key 与播放开关配套
+_AUTOPLAY_INTERVAL = 1.2
+_AUTOPLAY_TASK = "autoplay:tick"
+
 
 class DungeonWindowUI:
     # ---------- UI 构建 ----------
@@ -34,14 +43,23 @@ class DungeonWindowUI:
         self._layout_w = viewport_w
         self._layout_h = viewport_h
 
-        # 背景纹理直接建到主窗口客户区尺寸（与 _relayout 收敛后的布局一致，
-        # 也与 _prime_background 同步首图应用的尺寸一致）：后续背景应用几乎
-        # 都走 set_value 快速路径；若建为 1×1，首次应用需重建纹理并做一次
-        # 全分辨率 list 转换（约 1s）。
+        # 背景纹理一次建到「客户区 ∨ 主显示器物理尺寸」的较大者：全屏客户区
+        # 即显示器尺寸，切换窗口/全屏因此永远走 set_value 快速路径、不重建
+        # 纹理（DPG 对动态纹理改尺寸有存储复用怪癖，见 background.apply_data）。
+        # 数据贴进纹理左上角，由 draw_image 的 uv 子区域映射铺到窗口矩形。
+        tex_w, tex_h = self._main_client_w, self._main_client_h
+        if sys.platform.startswith("win"):
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                tex_w = max(tex_w, user32.GetSystemMetrics(0))    # SM_CXSCREEN
+                tex_h = max(tex_h, user32.GetSystemMetrics(1))    # SM_CYSCREEN
+            except Exception:
+                pass
         with dpg.texture_registry(tag="dungeon_texture_registry"):
             dpg.add_dynamic_texture(
-                width=self._main_client_w, height=self._main_client_h,
-                default_value=[0.0] * (self._main_client_w * self._main_client_h * 4),
+                width=tex_w, height=tex_h,
+                default_value=[0.0] * (tex_w * tex_h * 4),
                 tag="bg_texture")
 
         # 布局尺寸以主窗口客户区为基准；视口外框（标题栏/边框）尺寸只用于
@@ -49,23 +67,20 @@ class DungeonWindowUI:
         self._layout_w = self._main_client_w
         self._layout_h = self._main_client_h
 
-        font_path = None
-        possible_paths = [
-            "C:/Windows/Fonts/msyh.ttc",
-            "C:/Windows/Fonts/simhei.ttf",
-            "/System/Library/Fonts/PingFang.ttc",
-            "/System/Library/Fonts/STHeiti Medium.ttc",
-            "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        ]
-        for path in possible_paths:
-            if os.path.exists(path):
-                font_path = path
-                break
+        # 副本字体：主程序设置 dungeon_font（家族名，经构造参数 / 宿主端口缺省）
+        # → DPG 需要的字体文件路径；字号与候选链的唯一真相源是 dungeon/window/fonts.py。
+        # 全局默认 UI_FONT_SIZE（工具条/属性栏/通知等），文本组件正文 TEXT_FONT_SIZE
+        # （经 dungeon_text_font 绑到组件文本项上），dungeon_bold_font 是粗体（可能 None）。
+        font_path, bold_path = self._resolve_dungeon_font_files()
         if font_path:
             with dpg.font_registry():
-                default_font = dpg.add_font(font_path, round(20 * self._dpi_scale))
+                default_font = dpg.add_font(font_path, round(UI_FONT_SIZE * self._dpi_scale))
+                text_font = dpg.add_font(font_path, round(TEXT_FONT_SIZE * self._dpi_scale))
+                bold_font = (dpg.add_font(bold_path, round(BOLD_FONT_SIZE * self._dpi_scale))
+                             if bold_path else None)
             dpg.bind_font(default_font)
+            self.dungeon_text_font = text_font
+            self.dungeon_bold_font = bold_font
 
         dpg.create_viewport(
             title=self._temp_title,
@@ -150,6 +165,9 @@ class DungeonWindowUI:
             # H：对话记录覆盖层开关；ESC：关闭已打开的覆盖层（overlay.py 服务面）
             dpg.add_key_press_handler(key=dpg.mvKey_H, callback=self._on_log_key)
             dpg.add_key_press_handler(key=dpg.mvKey_Escape, callback=self._on_escape_key)
+            # A：自动播放开关；F2：截图（与文本组件工具条按钮共用同一入口）
+            dpg.add_key_press_handler(key=dpg.mvKey_A, callback=self._on_autoplay_hotkey)
+            dpg.add_key_press_handler(key=dpg.mvKey_F2, callback=self._on_screenshot_hotkey)
 
         dpg.set_viewport_resize_callback(self._on_viewport_resize)
         # 不注册 set_exit_callback：手动渲染模式下它在 destroy_context() 内部才
@@ -162,6 +180,14 @@ class DungeonWindowUI:
         self._correct_viewport_size_to_main()
         self._relayout()
         self._update_text_display()
+
+    def _resolve_dungeon_font_files(self):
+        """把设置的副本字体家族名解析成 DPG 用的 (常规文件, 粗体文件|None)。
+
+        具体映射与候选链在 ``dungeon/window/fonts.py``（窗口层唯一真相源），
+        组件包也从那里取同一份，避免两处漂移。
+        """
+        return resolve_font_files(getattr(self, "dungeon_font", ""))
 
     # ---------- 通知窗（窗口级常驻，不受组件配置影响） ----------
     def _build_notification(self, viewport_w):
@@ -225,7 +251,65 @@ class DungeonWindowUI:
         if comp is None:
             self._notify("日志查看已禁用")
             return
-        comp.toggle(self)
+        comp.toggle(self)   # toggle 是基类声明的可选钩子（见契约）
+
+    def toggle_proc_log(self):
+        """调出 / 收起过程日志面板（文本组件工具条的按钮入口，与 F12 等效）。"""
+        self._on_proc_log_hotkey()
+
+    # ---------- 工具功能：自动播放 / 截图（文本组件工具条与快捷键共用） ----------
+    def toggle_autoplay(self):
+        """切换自动播放：等待输入时按固定节奏自动推进（会话与回放均适用）。
+
+        选项弹窗 / 结局 / 生成 / 动画期间自动暂停，无需人工干预；再次切换关闭。
+        """
+        if getattr(self, "_is_entry_phase", False):
+            return
+        self._autoplay = not getattr(self, "_autoplay", False)
+        if self._autoplay:
+            self._frame.every(_AUTOPLAY_INTERVAL, self._autoplay_tick,
+                              key=_AUTOPLAY_TASK)
+        else:
+            self._frame.cancel(_AUTOPLAY_TASK)
+        self._notify("自动播放已开启" if self._autoplay else "自动播放已关闭")
+        self._refresh_components()   # 工具条按钮同步「自动中」状态标签
+
+    def _autoplay_tick(self):
+        if self._closing or not getattr(self, "_autoplay", False):
+            return
+        if self.overlay_open():
+            return
+        # 与继续指示的等待条件同源（组件服务面 session_waiting_for_input）
+        if self.session_waiting_for_input():
+            self._on_next_step()
+
+    def _on_autoplay_hotkey(self, sender=None, app_data=None):
+        self.toggle_autoplay()
+
+    def take_screenshot(self):
+        """把当前帧保存为 PNG 到用户数据区 screenshots/ 下（下一帧落盘）。"""
+        from paths import data_dir
+        folder = os.path.join(data_dir(), "user", "screenshots")
+        try:
+            os.makedirs(folder, exist_ok=True)
+            filename = time.strftime("dungeon_%Y%m%d_%H%M%S.png")
+            path = os.path.join(folder, filename)
+            dpg.output_frame_buffer(file=path)
+        except Exception as exc:
+            process_log.log(f"[Screenshot] 截图失败: {exc}")
+            self._notify(f"截图失败：{exc}")
+            return
+        # 通知延后到截图落盘之后弹出，避免通知条被截进画面
+        self._frame.after(0.3, self._notify, f"截图已保存：{filename}")
+
+    def _on_screenshot_hotkey(self, sender=None, app_data=None):
+        self.take_screenshot()
+
+    # ---------- 组件工具条（toolbar_hovered 是基类声明的可选钩子，见契约） ----------
+    def _component_toolbar_hovered(self):
+        """光标是否悬停在某个组件的功能按钮工具条上。"""
+        return any(comp.toolbar_hovered()
+                   for comp in getattr(self, "_components", []))
 
     # ---------- 文本更新（仅主线程调用） ----------
     def _text_owned_by_component(self) -> bool:
@@ -434,6 +518,10 @@ class DungeonWindowUI:
                                width=pw, height=ph)
 
     def _refresh_background(self, delay=0.08):
+        if getattr(self, "_bg_refresh_fast", False):
+            # 全屏切换等离散跳变：防抖归零，重采样立即上工作者
+            self._bg_refresh_fast = False
+            delay = 0.0
         self._background.refresh(delay)
 
     def _apply_prepared_bg(self, pil_img, dpg_data, w, h, revision):
@@ -446,6 +534,9 @@ class DungeonWindowUI:
     # ---------- 事件回调 ----------
     def _on_mouse_click(self, sender, app_data):
         if getattr(self, "_is_entry_phase", False):
+            return
+        # 点击落在组件工具条上：只触发按钮本身，不当作"点击推进剧情"
+        if self._component_toolbar_hovered():
             return
         if self.overlay_open():
             # 阅读模态：点击只关闭覆盖层，不推进剧情
@@ -461,6 +552,10 @@ class DungeonWindowUI:
     def _toggle_fullscreen(self, sender, app_data):
         self.is_fullscreen = not self.is_fullscreen
         dpg.toggle_viewport_fullscreen()
+        # 离散尺寸跳变：立刻重排 + 背景重采样绕过防抖（连续拖拽缩放的
+        # 防抖仍由 resize 回调路径保留）
+        self._bg_refresh_fast = True
+        self._schedule_relayout()
 
     def _on_viewport_resize(self, sender, app_data):
         self._schedule_relayout()
@@ -475,13 +570,15 @@ class DungeonWindowUI:
         self._background.apply_data(pil_img, dpg_data, w, h)
 
     def _set_bg_texture(self, dpg_data, w, h, revision):
-        """仅由主线程通过调度器调用。"""
+        """淡入淡出中间帧上纹理（仅由主线程通过调度器调用）。
+
+        pil_img 传 None：中间帧不更新 ``_bg_pil_original``（终帧由
+        ``_finish_bg_fade`` 更新）。走 apply_data 统一处理常驻纹理的
+        贴图与 uv 子区域映射。
+        """
         if revision != self._bg_revision or (w, h) != (self._layout_w, self._layout_h):
             return
-        if dpg.does_item_exist("bg_texture"):
-            cur = dpg.get_item_configuration("bg_texture")
-            if cur.get("width") == w and cur.get("height") == h:
-                dpg.set_value("bg_texture", dpg_data)
+        self._apply_bg_data(None, dpg_data, w, h)
 
     def _finish_bg_fade(self, pil_img, w, h, revision):
         if revision == self._bg_revision and (w, h) == (self._layout_w, self._layout_h):

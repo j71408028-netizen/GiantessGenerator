@@ -6,9 +6,12 @@
 启用后展开参数编辑表单（text / int / bool / color）。所有修改都会**自动
 保存**到副本方案配置（输入类修改带短防抖），无需手动保存按钮。
 
-组件 id 与参数声明来自 dungeon.window.component_registry.available_component_descriptions()，
-由官方组件包（assets/components/components.py）提供；
-展示名与说明文案维护在 _COMPONENT_META，未登记的组件回退为原始 id。
+组件 id、展示名与参数声明来自 dungeon.window.component_registry.
+available_component_descriptions()——**元数据（label / description / param_specs）
+的单一真相源是组件类本身**（dungeon/window/component_pack/）；本文件的
+_COMPONENT_META 只是「组件类未声明文案」时的兜底，不是第二份真相。
+颜色参数支持 ``#RRGGBB`` 与 ``#RRGGBBAA``：alpha 参与保存，6 位输入沿用组件
+默认 alpha（否则半透明底色改一次颜色就会永久变成不透明）。
 """
 
 import tkinter as tk
@@ -29,7 +32,9 @@ _TEXT_COMPONENT_CHOICES = [
     ("text_nvl", "全屏 NVL"),
 ]
 
-#: 组件展示名与说明（未登记的组件回退为原始 id，无说明文案）
+#: 组件兜底文案：组件类未声明 label / description 时才用它。
+#: 元数据真相源是组件类（见 dungeon/window/component_pack/），
+#: 新增组件请把文案写在类上，不要往这里加。
 _COMPONENT_META = {
     "text": {
         "label": "底部渐变式文本栏",
@@ -55,33 +60,71 @@ _COMPONENT_META = {
 
 
 def _default_value_for(spec):
-    """从 param_spec 取默认值；color 默认转 hex 便于展示。"""
+    """从 param_spec 取默认值；color 默认转 hex（半透明默认给 8 位）。"""
     value = spec.get("default")
     if spec.get("type") == "color":
         return _rgba_to_hex(value) if value else "#FFE196"
     return value
 
 
-def _rgba_to_hex(rgba):
-    """DPG 使用的 (r,g,b,a) 元组转 hex 字符串。"""
+def _rgba_to_hex(rgba, with_alpha=True):
+    """DPG 的 (r,g,b,a) 元组转 hex。
+
+    alpha < 255 时输出 ``#RRGGBBAA``，半透明默认值才能在表单里原样往返；
+    alpha == 255 或未声明时输出常规 ``#RRGGBB``。
+    """
     if not rgba:
         return "#FFE196"
     try:
         r, g, b = int(rgba[0]), int(rgba[1]), int(rgba[2])
-        return "#{:02X}{:02X}{:02X}".format(max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b)))
+        a = int(rgba[3]) if len(rgba) > 3 else 255
     except (TypeError, ValueError, IndexError):
         return "#FFE196"
+    rgb = "#{:02X}{:02X}{:02X}".format(max(0, min(255, r)), max(0, min(255, g)),
+                                       max(0, min(255, b)))
+    if with_alpha and 0 <= a < 255:
+        return rgb + "{:02X}".format(max(0, min(255, a)))
+    return rgb
 
 
-def _hex_to_rgba(hex_str, alpha=255):
-    """hex 颜色字符串转 DPG (r,g,b,a) 元组。"""
-    hex_str = (hex_str or "").strip().lstrip("#")
-    if len(hex_str) != 6:
-        return (255, 225, 150, alpha)
+def _rgb6(hex_str):
+    """截出 6 位 ``#RRGGBB``（Tk 色块与取色器只认 6 位，alpha 不参与显示）。"""
+    text = str(hex_str or "").strip().lstrip("#")
+    return f"#{text[:6]}" if len(text) >= 6 else "#FFE196"
+
+
+def _alpha_suffix(hex_str, fallback=""):
+    """返回 hex 的两位 alpha 部分（6 位或非法时用 fallback）。"""
+    text = str(hex_str or "").strip().lstrip("#")
+    return text[6:8] if len(text) == 8 else fallback
+
+
+def _spec_default_alpha(spec):
+    """spec 里 color 默认值的 alpha（未声明时 255）。"""
+    default = spec.get("default")
+    if isinstance(default, (tuple, list)) and len(default) > 3:
+        try:
+            return max(0, min(255, int(default[3])))
+        except (TypeError, ValueError):
+            return 255
+    return 255
+
+
+def _hex_to_rgba(hex_str, default_alpha=255):
+    """hex（``#RRGGBB`` / ``#RRGGBBAA``）转 DPG (r,g,b,a) 元组。
+
+    6 位输入沿用 ``default_alpha``（组件默认透明度），8 位输入以输入为准；
+    非法输入回退到默认金黄色 + default_alpha。
+    """
+    text = str(hex_str or "").strip().lstrip("#")
+    if len(text) not in (6, 8):
+        return (255, 225, 150, default_alpha)
     try:
-        return (int(hex_str[0:2], 16), int(hex_str[2:4], 16), int(hex_str[4:6], 16), alpha)
+        r, g, b = int(text[0:2], 16), int(text[2:4], 16), int(text[4:6], 16)
+        a = int(text[6:8], 16) if len(text) == 8 else default_alpha
+        return (r, g, b, a)
     except ValueError:
-        return (255, 225, 150, alpha)
+        return (255, 225, 150, default_alpha)
 
 
 class ComponentManager(ctk.CTkFrame):
@@ -131,8 +174,11 @@ class ComponentManager(ctk.CTkFrame):
         return next((d for d in self._descriptions if d["id"] == cid), None)
 
     def _meta_by_id(self, cid):
+        """展示名与说明：优先组件类自带文案（元数据单源），其次兜底表，再回退 id。"""
+        desc = self._desc_by_id(cid) or {}
         meta = _COMPONENT_META.get(cid) or {}
-        return meta.get("label", cid), meta.get("desc", "")
+        return (str(desc.get("label") or meta.get("label") or cid),
+                str(desc.get("description") or meta.get("desc") or ""))
 
     # ---------------- UI 构建 ----------------
     def _build_ui(self):
@@ -291,7 +337,7 @@ class ComponentManager(ctk.CTkFrame):
                 swatch = ctk.CTkButton(
                     color_frame, text="", width=34, height=26, corner_radius=6,
                     border_width=1, border_color=SC_BORDER_STRONG,
-                    fg_color=str(current),
+                    fg_color=_rgb6(current),
                     command=lambda k=key, s=spec: self._pick_color(cid, k, s))
                 swatch.pack(side='left', padx=(0, 6))
                 self._swatches[(cid, key)] = swatch
@@ -356,15 +402,23 @@ class ComponentManager(ctk.CTkFrame):
 
     # ---------------- 颜色参数 ----------------
     def _pick_color(self, cid, key, spec):
-        """打开系统颜色选择器，更新色块与 hex 输入。"""
+        """打开系统颜色选择器，更新色块与 hex 输入（保留原 alpha）。"""
         var = self._color_vars.get(cid, {}).get(key)
         if var is None:
             return
         current = var.get()
-        result = colorchooser.askcolor(current, title=f"选择颜色 - {spec.get('label', key)}",
+        # 取色器只认 6 位；选完保留原 alpha（没有则沿用组件默认 alpha）
+        keep = _alpha_suffix(current)
+        if not keep:
+            keep = _alpha_suffix(_default_value_for(spec)) or "{:02X}".format(
+                _spec_default_alpha(spec))
+        result = colorchooser.askcolor(_rgb6(current),
+                                       title=f"选择颜色 - {spec.get('label', key)}",
                                        parent=self.winfo_toplevel())
         if result and result[1]:
-            var.set(result[1])
+            picked = _rgb6(result[1])
+            keep = keep.upper()
+            var.set(picked if keep == "FF" else picked + keep)
             self._on_hex_committed(cid, key, spec)
 
     def _on_hex_committed(self, cid, key, spec=None):
@@ -379,7 +433,7 @@ class ComponentManager(ctk.CTkFrame):
         if var is None or swatch is None:
             return
         try:
-            swatch.configure(fg_color=var.get())
+            swatch.configure(fg_color=_rgb6(var.get()))
         except Exception:
             pass
 
@@ -455,14 +509,24 @@ class ComponentManager(ctk.CTkFrame):
                     continue
                 ptype = spec.get("type", "text")
                 if ptype == "color":
-                    entry[key] = _hex_to_rgba(widget.get())
+                    # 6 位输入沿用组件默认 alpha，8 位以输入为准
+                    entry[key] = _hex_to_rgba(widget.get(),
+                                              _spec_default_alpha(spec))
                 elif ptype == "bool":
                     entry[key] = bool(widget.get())
                 elif ptype == "int":
                     try:
-                        entry[key] = int(widget.get())
+                        value = int(widget.get())
                     except (TypeError, ValueError):
-                        entry[key] = spec.get("default")
+                        value = spec.get("default")
+                    # 范围声明统一夹取（与运行时 merge_params 同一规则）
+                    if isinstance(value, int):
+                        lo, hi = spec.get("min"), spec.get("max")
+                        if lo is not None and value < lo:
+                            value = lo
+                        if hi is not None and value > hi:
+                            value = hi
+                    entry[key] = value
                 else:
                     entry[key] = widget.get()
             result[cid] = entry

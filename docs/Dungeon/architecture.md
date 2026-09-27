@@ -234,7 +234,7 @@ data/
 
 ## 9. 自检与守卫脚本
 
-见 [副本文档索引](README.md) §4（无 GUI 六个 + GUI 冒烟一个）。
+见 [副本文档索引](README.md) §4（无 GUI 八个 + GUI 冒烟一个）。
 改动领域层 import、演化链路、收尾路径或配置结构后跑对应脚本；以上全部通过才算绿。
 
 ## 10. 硬性约定
@@ -248,17 +248,26 @@ data/
 | `destroy_context()` 之后不碰 Tk | 会 0xC0000005；`_finish_session()` 的顺序就是为此固定的 | [窗口文档](window.md) §5-C2 |
 | 写盘必走原子写 | 半截文件不可恢复 | 本文 §8 |
 | 剧本 / 运营术语不混用 | `scenario_*` = 方案，`dungeon_*` = 一局 | [术语表](domain_terms.md) |
-| 组件只读窗口状态 | 组件 ctx 即窗口实例，不反向写状态 | `component_registry.py` / `components.py` |
+| 组件只读窗口状态 | 组件 ctx 即窗口实例，不反向写状态；**访问只经组件服务面**（`component_viewport` / `schedule*` / `session_waiting_for_input` / `component_top_inset` 等，C13），不读窗口私有属性 | `component_registry.py::DungeonComponent` 契约文档、`components.py::ComponentHandler`、`scripts/check_component_pack.py` |
 
 ## 11. 显示组件包
 
-官方组件包位于 `assets/components/`（随应用分发的只读资源，经 `paths.dungeon_components_dir()`
-定位）。文本主组件由方案配置的 `text_component` 字段**三选一**声明（text / text_card /
+官方组件包是窗口层常驻 Python 包 `dungeon/window/component_pack/`（`__init__.py`
+组装 `REGISTRY`，各组件拆在同目录模块——`base.py` 共享常量与文本组件公共基类、
+`text_gradient.py` / `text_card.py` / `text_nvl.py` / `attr_bar.py` / `proc_log.py`），
+由 `component_registry` 惰性导入。文本主组件由方案配置的 `text_component` 字段**三选一**声明（text / text_card /
 text_nvl），`components` 列表只放其余组件（如属性条、过程日志），参数统一记在
 `components_params`。组件类只需实现 `build / layout / refresh / destroy` 四个钩子，
 由 `ComponentHandler` 接入窗口的更新链（主组件先建、z 序在底）；
 可用性与参数声明来自 `component_registry`，编辑器侧由 `ui/scenario/component_mgr.py`
 三选一控件 + 卡片化管理。
+`ComponentRegistry(pack_dir=...)` 可显式指定**外部组件包目录**（入口文件名 `components.py`）
+整体替换常驻包，`registry.source` 记录实际生效来源；加载链与组件契约由无 GUI 守卫
+`scripts/check_component_pack.py` 断言（含隐藏 DPG 上下文里的四钩子冒烟）。
+配套约定：组件的展示名 / 说明写在**组件类**的 `label` / `description` 上（编辑器经
+`available_component_descriptions()` 取，`_COMPONENT_META` 只是兜底）；参数用
+`param_specs` 声明，`min` / `max` 在 `merge_params` 统一夹取；字号与字体候选链只在
+`dungeon/window/fonts.py`；组件的显式 tag 一律以各自的 `TAG_PREFIX` 开头（守卫查冲突）。
 
 ---
 

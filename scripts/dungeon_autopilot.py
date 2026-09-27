@@ -74,15 +74,8 @@ _DATA_ROOT = os.path.join(tempfile.mkdtemp(prefix="dungeon_autopilot_data_"), "d
 os.makedirs(os.path.join(_DATA_ROOT, "user"), exist_ok=True)
 paths.data_dir = lambda: _DATA_ROOT
 
-# 官方组件包在 assets/components（随包只读资源，不随 data_dir 重定向）：
-# 显式把注册表指向仓库内的组件包，组件冒烟场景才有东西可建
-from dungeon.window import component_registry as _component_registry  # noqa: E402
-
-_REPO_PACK_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "assets", "components")
-_component_registry._registry = _component_registry.ComponentRegistry(
-    pack_dir=_REPO_PACK_DIR)
+# 官方组件包是窗口层常驻 Python 包（dungeon/window/component_pack），随 registry
+# 正常导入，与 data_dir 重定向无关——这里不再需要任何注入。
 
 # ---------------------------------------------------------------------------
 # 假 AI：不联网、不花钱、可确定性复现

@@ -162,6 +162,19 @@ class DungeonBackground:
     def __init__(self, owner):
         self.owner = owner
         self._worker = PixelWorker()
+        #: 当前背景纹理 tag。DPG 2.3.1 怪癖：同 tag 的 delete+重建会复用旧 GL
+        #: 纹理存储（新尺寸数据写入被截断 → 花屏），因此尺寸增长时换新 tag
+        #: 建新纹理、重新绑定 bg_image_item 后再删旧纹理
+        self.texture_tag = "bg_texture"
+        self._tex_gen = 0
+        #: 组合缓冲（纹理尺寸的 numpy 画布，避免每次 apply 分配大内存）
+        self._compose_buf = None
+        #: 重采样来源代数：change() 换源图（含滤镜/旋转）时 +1，作缓存键一部分
+        self._src_gen = 0
+        #: 重采样结果缓存：(来源代, 宽, 高) → 平铺 float32。最多 2 份——
+        #: 窗口/全屏来回切换（标题栏导致比例略有不同，必须各自重采样）时
+        #: 第二个方向直接命中，免掉一次重采样
+        self._resize_cache = {}
 
     def cancel_pending_refresh(self):
         """取消尚未执行的 resize 重采样任务（退出/冻结背景时用）。"""
@@ -204,6 +217,7 @@ class DungeonBackground:
             return
 
         owner._bg_pil_full = new_pil
+        self._src_gen += 1
         width, height = owner._layout_w, owner._layout_h
         if owner._bg_pil_original is None or not smooth_transition:
             # 无过渡（首图/强制刷新）：在当前线程同步应用。改走"延迟一帧 + 队列"时
@@ -306,35 +320,76 @@ class DungeonBackground:
         owner._frame.after(delay, fire, key=BG_REFRESH_TASK)
 
     def _prepare_refresh(self, full, width, height, revision):
-        """（工作者线程）重采样到当前尺寸并交回主线程上纹理。"""
+        """（工作者线程）重采样到当前尺寸并交回主线程上纹理。
+
+        结果按 (来源代, 尺寸) 缓存两份：窗口/全屏来回切换时第二个方向
+        直接命中，不再重采样。
+        """
         owner = self.owner
-        resized = self.crop_and_resize(full, width, height)
-        owner._frame.call(owner._apply_prepared_bg, resized,
-                          self.pil_to_dpg(resized), width, height, revision)
+        key = (self._src_gen, width, height)
+        data = self._resize_cache.get(key)
+        pil_img = None
+        if data is None:
+            resized = self.crop_and_resize(full, width, height)
+            data = self.pil_to_dpg(resized)
+            self._resize_cache[key] = data
+            while len(self._resize_cache) > 2:
+                self._resize_cache.pop(next(iter(self._resize_cache)))
+            pil_img = resized
+        owner._frame.call(owner._apply_prepared_bg, pil_img,
+                          data, width, height, revision)
 
     def apply_data(self, pil_img, dpg_data, width, height):
-        # 尺寸一致时直接 set_value（接受 numpy float32，比整张重建快一个量级）；
-        # 仅在尺寸变化（窗口 resize / 首次应用）时才重建纹理，
-        # 注意 add_dynamic_texture 不接受 numpy，重建必须传 list。
-        if dpg.does_item_exist("bg_texture"):
-            cur = dpg.get_item_configuration("bg_texture")
-            if cur.get("width") == width and cur.get("height") == height:
-                dpg.set_value("bg_texture", dpg_data)
-                self.owner._bg_pil_original = pil_img
-                return
-            dpg.delete_item("bg_texture")
-            if dpg.does_alias_exist("bg_texture"):
-                dpg.remove_alias("bg_texture")
-        dpg.add_dynamic_texture(
-            width=width,
-            height=height,
-            default_value=list(dpg_data),
-            tag="bg_texture",
-            parent="dungeon_texture_registry",
-        )
+        """把 (width, height) 的背景数据上到纹理（仅主线程）。
+
+        纹理尺寸**只增不减**：够大时永远走 set_value 快速路径（接受 numpy，
+        ~30ms）——数据按当前窗口比例贴进纹理左上角，经 draw_image 的 uv
+        子区域映射到窗口矩形，因此窗口/全屏切换（客户区比例因标题栏略有
+        不同）不再触发纹理重建；仅当纹理比数据小（首次进全屏、换更大的
+        显示器）时一次性重建。``pil_img`` 为 None 表示淡入淡出中间帧等
+        不更新 ``_bg_pil_original`` 的写入。
+        """
+        tag = self.texture_tag
+        if dpg.does_item_exist(tag):
+            cur = dpg.get_item_configuration(tag)
+            tex_w, tex_h = cur.get("width") or 0, cur.get("height") or 0
+        else:
+            tex_w = tex_h = 0
+        if tex_w < width or tex_h < height:
+            # 纹理生长（首次进全屏 / 换更大显示器）：换新 tag 建新纹理——
+            # 同 tag delete+重建会复用旧 GL 存储（DPG 2.3.1 怪癖，见 __init__）。
+            # 建法与 ui._build_ui 的已知可靠路径一致：零列表建纹理 + set_value
+            # 上数据（不依赖 default_value 直接上传大列表）
+            self._tex_gen += 1
+            new_tag = f"bg_texture_{self._tex_gen}"
+            dpg.add_dynamic_texture(
+                width=width, height=height,
+                default_value=[0.0] * (width * height * 4),
+                tag=new_tag, parent="dungeon_texture_registry",
+            )
+            if dpg.does_item_exist("bg_image_item"):
+                dpg.configure_item("bg_image_item", texture_tag=new_tag,
+                                   pmax=[width, height])
+            if dpg.does_item_exist(tag):
+                dpg.delete_item(tag)
+                if dpg.does_alias_exist(tag):
+                    dpg.remove_alias(tag)
+            self.texture_tag = new_tag
+            self._compose_buf = None
+            dpg.set_value(new_tag, dpg_data)
+        elif (width, height) == (tex_w, tex_h):
+            dpg.set_value(tag, dpg_data)
+        else:
+            # 数据小于纹理：贴进左上角，其余区域在 uv 子区域之外不会被采样
+            if self._compose_buf is None or len(self._compose_buf) != tex_w * tex_h * 4:
+                self._compose_buf = np.empty(tex_w * tex_h * 4, dtype=np.float32)
+            self._compose_buf.reshape(tex_h, tex_w, 4)[:height, :width] =                 dpg_data.reshape(height, width, 4)
+            dpg.set_value(tag, self._compose_buf)
         if dpg.does_item_exist("bg_image_item"):
-            dpg.configure_item("bg_image_item", texture_tag="bg_texture", pmax=[width, height])
-        self.owner._bg_pil_original = pil_img
+            dpg.configure_item("bg_image_item", uv_min=[0.0, 0.0],
+                               uv_max=[width / tex_w, height / tex_h])
+        if pil_img is not None:
+            self.owner._bg_pil_original = pil_img
 
     def resolve_path(self, image_path):
         owner = self.owner

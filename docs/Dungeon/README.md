@@ -26,6 +26,7 @@
 | 帧时钟 / 线程 / 跨线程 UI 更新 | [窗口](window.md) §4 | `dungeon_autopilot.py` |
 | 宿主（Tk）耦合 / 换 UI 框架 | [宿主边界](window_host.md) §3、§4 | `check_dungeon_layering.py` |
 | 分层越界（领域层碰了 GUI） | [架构](architecture.md) §3 | `check_dungeon_layering.py` |
+| 显示组件（文本栏 / 属性条 / 过程日志）与组件参数 | [窗口](window.md) §1、`dungeon/window/component_pack/` | `check_component_pack.py`、`dungeon_autopilot.py --scene text-components` |
 | 新增 / 改名标识符（scenario vs dungeon） | [术语表](domain_terms.md) §2 | `check_scenario_naming.py` |
 | 写盘方式（配置 / 回放 / 报告） | [架构](architecture.md) §8、[窗口](window.md) §5-C10 | `check_dungeon_finalize.py` |
 | 自动驾驶脚本 / 自检场景 | [调试自动化](window_automation.md) | `dungeon_autopilot.py` |
@@ -37,6 +38,7 @@
 |---|---|---|
 | `dungeon/*.py`（包根） | 领域层 | 纯逻辑；禁 import GUI / 服务层（AST 强制） |
 | `dungeon/window/*.py` | UI 层 | 唯一允许 DPG 的地方；宿主能力一律经 `host.py` |
+| `dungeon/window/component_pack/` | 组件包 | 官方显示组件（文本栏三选一 / 属性条 / 过程日志），常驻 Python 包，惰性导入 |
 | `dungeon/window/host.py` | 端口 | `HostPort`：window 层向宿主索取能力的唯一出口 |
 | `ui/common/tk_host.py` | 宿主适配 | `TkHost`——window 层之外唯一的 Tk 细节所在地 |
 | `persistence/scenario_repo.py` | 持久化 | 方案读写、旧目录迁移、保存即校验 |
@@ -52,6 +54,7 @@
 | `check_dungeon_layering.py` | 分层守卫：领域层禁 import GUI/服务层/反向依赖 window；`window/` 禁 import `tkinter`/`customtkinter`/`ui` | `python scripts/check_dungeon_layering.py` |
 | `check_scenario_schema.py` | schema 单一真相源（空模板 golden、字段漂移）+ 校验器规则 + 演化配置链路 | `python scripts/check_scenario_schema.py` |
 | `check_splitter.py` | 内置分句器：断点切分、流式幂等、`@说话人@` 标记解析与落盘净化 | `python scripts/check_splitter.py` |
+| `check_component_pack.py` | 显示组件包：加载链（常驻包来源 / 必需 id）、文本家族与 schema 一致、组件契约与服务面（替身 ctx 只实现服务面 + AST 扫 `ctx._x` 越界）、元数据 `label`/`description`、`param_specs` 结构与 `min/max` 夹取、tag 前缀冲突、组件包不 `print` 且类都登记进 `REGISTRY`、外部包覆盖、隐藏 DPG 上下文里的 `build/layout/refresh/destroy` 冒烟与控件无残留 | `python scripts/check_component_pack.py` |
 | `check_dungeon_finalize.py` | 原子写 / `.bak` / 损坏回退 + `_finalize` 完成与未完成两条路径 | `python scripts/check_dungeon_finalize.py` |
 | `check_scenario_naming.py` | 命名守卫（旧标识符残留）+ 兼容读与迁移行为 | `python scripts/check_scenario_naming.py` |
 | `validate_scenarios.py` | 离线批量校验所有 / 单个方案，有 error 时退出码 1 | `python scripts/validate_scenarios.py --errors-only` |
