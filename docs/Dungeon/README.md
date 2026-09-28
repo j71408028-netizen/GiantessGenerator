@@ -66,7 +66,8 @@
 |---|---|---|
 | `dungeon_autopilot.py` | 真窗口生命周期：构造 → `run()` → 步进 → 关闭 → 落盘（7 场景 63 项断言，含文本组件接管与覆盖层服务面冒烟） | `python scripts/dungeon_autopilot.py` |
 
-判定方式详见 [调试自动化](window_automation.md) §4：**看结论行，不看退出码**。
+判定方式详见 [调试自动化](window_automation.md) §4：**看结论行，不看退出码**（默认如此；
+`--require-clean-exit` 复测退出路径时退出状态也计入验收）。
 
 ## 5. 历史档案（与现状分离）
 

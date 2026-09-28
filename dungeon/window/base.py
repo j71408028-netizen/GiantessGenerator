@@ -4,6 +4,11 @@
 切换副本方案发生在同一视口内（dungeon.window.launcher.DungeonLaunchStages 负责入口阶段），
 选择“开始副本 / 加载回放”后由 _enter_dungeon_phase() 切换到会话阶段，
 同一生命周期内不再重建整个 DPG 上下文。
+
+**两局之间**则必须重建：会话收尾会 ``destroy_context()``，它顺带终止 GLFW，此后
+Tk 根窗口就失去了销毁/隐藏能力（热切换界面因此会静默杀进程）。所以收尾要立刻补一个
+隐藏的**保活视口**（:func:`dungeon.window.dpg_state.park_context`），下一局开头、
+宿主已隐藏之后再拆掉它（``unpark_context``）——DPG 的上下文与视口都是进程单例。
 """
 
 import random
@@ -17,6 +22,7 @@ from dungeon import process_log
 from dungeon.window.background import DungeonBackground
 from dungeon.chapters import normalize_chapters
 from dungeon.coupling import normalize_coupling_level
+from dungeon.window import dpg_state
 from dungeon.window.frame import FrameScheduler
 from dungeon.window.host import HostPort
 from dungeon.window.result import (REASON_ALREADY_RUNNING, REASON_ENTRY_CANCELLED,
@@ -265,6 +271,19 @@ class DungeonWindowBase:
         # 向主窗口注册自身，以便关闭时能通知 DPG 退出
         self._register_with_parent()
         try:
+            # 宿主尺寸/DPI 要在它**仍可见**时取下（之后会先藏宿主、再拆保活上下文；
+            # 隐藏状态下取客户区在不同平台上结果不一致）。见 _get_initial_viewport_size。
+            self._host_metrics = self.host.viewport_metrics()
+
+            # 藏起宿主：DPG 视口是独立顶层窗口，不藏会两个窗口同时占屏。
+            # **必须排在拆保活上下文之前**：拆它会终止 GLFW，此后宿主的窗口级命令
+            # （withdraw）会硬崩（见 dungeon.window.dpg_state 的模块说明）。
+            self.host.hide_window()
+
+            # 上一局收尾留下的保活视口要让位：DPG 的上下文与视口都是进程单例，
+            # 不拆掉就没法为本局建新的。
+            dpg_state.unpark_context()
+
             self._build_ui()
 
             # 入口阶段：与正式副本会话界面共享同一个 viewport，
@@ -277,9 +296,6 @@ class DungeonWindowBase:
                 self._init_components()
                 self._build_components()
                 self._enter_start_chapter()
-
-            # 藏起宿主：DPG 视口是独立顶层窗口，不藏会两个窗口同时占屏
-            self.host.hide_window()
 
             # 标题修正放到首帧：此时原生窗口已创建，按标题 FindWindowW 才找得到
             self._frame.call(self._fix_windows_title)
@@ -365,7 +381,17 @@ class DungeonWindowBase:
             # 建 UI 阶段就抛异常时上下文可能根本没建起来，这里不能连累收尾
             process_log.log(f"[Dungeon] 销毁 DPG 上下文失败: {e}")
         finally:
+            # 无论销毁是否成功，上下文都不再可用；标志必须清除，否则界面切换
+            # 时会对着已销毁的上下文调用 DPG 函数。
+            dpg_state.mark_destroyed()
             self._unregister_with_parent()
+
+        # 立刻补一个隐藏的保活视口：destroy_context() 终止了 GLFW，此后现场那个
+        # Tk 根窗口不能销毁/隐藏，之后新建的 CTk 根首次显示也会硬崩——热切换界面
+        # 正好是「销毁旧根、新建另一套根」，不补就切不过去。留一个不 show 的视口
+        # 即可把 Tk 根修回来，且它对使用者完全不可见。
+        # 下一局开头由 _start_session 拆掉；详见 dungeon.window.dpg_state 的模块说明。
+        dpg_state.park_context()
 
     # ---------------- 会话内容初始化 ----------------
     def _current_action_points(self):
@@ -590,6 +616,14 @@ class DungeonWindowBase:
         except Exception:
             pass
 
+    def request_close(self):
+        """公开版 :meth:`_request_close`：宿主整体退出时停掉本窗口。
+
+        宿主（如挂件界面）只持有登记进来的窗口实例，用这个入口即可，
+        不必自己 import dearpygui，也不必碰私有方法。
+        """
+        self._request_close()
+
     def _close_loop(self):
         """入口阶段选择“返回”时关闭窗口。
 
@@ -609,7 +643,13 @@ class DungeonWindowBase:
         尺寸与 DPI 全部来自宿主端口：Tk 的 ``winfo_*`` 与 Windows 的
         ``GetDpiForWindow``/``GetClientRect`` 都在 ``ui.common.tk_host.TkHost``
         里，window 层不直接碰宿主 API。
+
+        ``_start_session`` 会在藏起宿主**之前**取一次并缓存在 ``_host_metrics``：
+        宿主隐藏后取到的客户区在不同平台上结果不一致。
         """
+        metrics = getattr(self, "_host_metrics", None)
+        if metrics is not None:
+            return metrics
         return self.host.viewport_metrics()
 
     def _correct_viewport_size_to_main(self):

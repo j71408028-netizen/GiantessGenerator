@@ -113,21 +113,28 @@ python scripts/dungeon_autopilot.py --scene session-close --repeat 2 --isolate  
 python scripts/dungeon_autopilot.py --in-process                 # 当前进程内依次跑（快，但崩溃带走全部）
 ```
 
-判定规则（**不要**把退出码当验收条件）：
+判定规则（默认**不要**把退出码当验收条件）：
 
 1. 控制台出现 `[dungeon_autopilot] PASSED n/n` 即通过；脚本自身会用 `report:` 行给出明细报告路径。
-2. 判定成败**看子进程打印的结论行，不看退出码**。
-3. 每个场景开**子进程**（单场景用 `--isolate`），父进程读到结论行后等 `EXIT_GRACE`（5s）宽限，
-   仍不退出才 `kill()` 并按挂死记录（正常子进程在结论行后约 0.1s 就退出，这是加宽限的原因）。
-4. CI：GUI 冒烟层单独一个 job（需要显示器），不要并进无 GUI 的门禁。
+2. 判定成败**看子进程打印的结论行，不看退出码**。结论行在子进程里打印后立即 flush（管道 stdout 是
+   块缓冲，默认 flush 排在解释器退出收尾的最后——退出挂死时结论行会困在缓冲里，父进程就会把
+   「已通过但退出挂死」误判成「超时未出结论」）。
+3. 每个场景开**子进程**（单场景用 `--isolate`）。读输出在父进程的独立线程里做，主线程按 deadline
+   轮询，所以超时是**硬超时**——子进程停止出字（如 DPG 渲染占住 GIL）也吊不住父进程。读到结论行
+   后等 `EXIT_GRACE`（5s）宽限，仍不退出才 `kill()`（正常子进程在结论行后约 0.1s 就退出，这是加
+   宽限的原因）。
+4. 断言、退出码、退出方式（自行退出 / 超时未出结论 / 结论已出但退出挂死）**分开汇报**，默认只有
+   断言影响成败；`--require-clean-exit` 把「未自行干净退出」也判为失败（退出路径的环境复测用，
+   见 §6 与 [宿主边界](window_host.md) §6）。
+5. CI：GUI 冒烟层单独一个 job（需要显示器），不要并进无 GUI 的门禁。
 
 ## 5. 坑清单
 
 | 坑 | 现象 | 应对 |
 |---|---|---|
-| **退出阶段挂死（与 DPG 无关）** | 断言全部打印完毕、无残留非 daemon 线程，`sys.exit` 与 `os._exit` 都试过仍不退出（约 190MB 常驻）；卡点在 Python 之下，卡住后 `Stop-Process -Force` 也杀不掉 | 按 §4 的输出判定 + 父进程宽限兜底；**不要**看退出码。根因与复测见 [退出挂死调查](history/exit_hang_investigation.md)——长时会话累积的环境现象，不建议为它做进程隔离 |
+| **退出阶段挂死（与 DPG 无关）** | 断言全部打印完毕、无残留非 daemon 线程，`sys.exit` 与 `os._exit` 都试过仍不退出（约 190MB 常驻）；卡点在 Python 之下，卡住后 `Stop-Process -Force` 也杀不掉 | 按 §4 的输出判定 + 父进程硬超时兜底；**不要**看退出码（复测退出路径用 `--require-clean-exit`）。根因与复测见 [退出挂死调查](history/exit_hang_investigation.md)——长时会话累积的环境现象，不建议为它做进程隔离 |
 | **Python 层看门狗无效** | DPG 循环期间 `threading.Timer` 可能拿不到 GIL，实测 40s 定时器根本没触发 | 超时只能由父进程兜底 |
-| **会话结束后不要再碰 Tk** | `destroy_context()` 之后再调 Tk API 会 0xC0000005 | `scene_tk_host` 故意**不销毁**它创建的根窗口（留在 `_KEEP_ALIVE_ROOTS` 里） |
+| **GLFW 终止后别对旧 Tk 根做窗口级命令** | 终止**之前** Tk 照常可用（收尾顺序刻意把 Tk 交互放在 `destroy_context()` 之前）；终止后那个 Tk 根窗口 `destroy()` / `withdraw()` 硬崩，之后新建的 `CTk` 根首次 `deiconify()` 同样崩 | 会话收尾立刻补一个隐藏的保活视口（`dpg_state.park_context()`）把 Tk 根修回来（§5-C2 见[窗口索引](window.md)）；自检里 `scene_tk_host` 仍**不销毁**它创建的根窗口（留在 `_KEEP_ALIVE_ROOTS` 里），只是现在销毁也不会崩了 |
 | **自检里不要用真模态弹框** | L2 之后 `scene_tk_host` 用真 `TkHost`，收尾提示会弹真 CTk 模态框，没人点就一直等（实测 40s/90s 均超时） | 用 `RecordingTkHost(TkHost)`：尺寸/DPI/显隐/事件泵走真适配器，只把 `dialog()` 换成记录器 |
 | **不要 `minimize_viewport()`** | 最小化后不再有新帧到达，帧时钟上排队的任务（含关闭）永远执行不到，窗口卡在屏幕上 | 脚本里该开关默认关闭 |
 | **需要显示器** | DPG 没有 headless 渲染，窗口会真的出现 | 这是它属于 GUI 冒烟层、不进无 GUI CI 门禁的原因 |

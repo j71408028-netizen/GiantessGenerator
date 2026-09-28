@@ -72,6 +72,11 @@
 | 无框架脚本 / CI | `while` + `sleep` | 屏幕尺寸 + no-op + print |
 | Web / 其它进程 | 做不到（DPG 必须在本进程有 GLFW 窗口） | — |
 
+> 注意：副本 `run()` 是**同步阻塞**的帧循环（§2），节拍源是在循环内部被**消费**的（每帧
+> `pump_events()` + `sleep`）。`QTimer` 这类事件循环回调式节拍没法直接驱动它——要么继续用
+> 「循环内轮询」式节拍（`processEvents()`，即表中 Qt 行的主推方案），要么把会话挪到自己的
+> 线程里跑、让宿主主循环保持空闲。
+
 因此「迁移到 Qt」的真正工作量从来不在副本窗口（只需换 host 适配器），而在 `ui/` 那一整套面板。
 
 ## 4. 嵌入：不能
@@ -88,7 +93,8 @@ DPG 2.3.1 的视口是**独立的 GLFW 顶层窗口**，公开 API 里没有任�
 |---|---|
 | 同一进程里同时持有两个 DPG context 或并发两个副本窗口 | DPG 的上下文与视口都是全局单例语义；`DungeonWindowBase._session_running` 是守门人 |
 | 在帧循环里 `join` 线程 | 会卡帧 |
-| 在 `destroy_context()` 之后再碰 Tk | 会 0xC0000005（见 [窗口索引](window.md) §5-C2） |
+| 把「GLFW 终止**后**才崩的 Tk 交互」排到 `destroy_context()` **之后** | GLFW 终止前 Tk 照常可用（收尾顺序「恢复主窗口 → 弹框 → `destroy_context()`」正是刻意把 Tk 交互都放在销毁之前）；终止后那个 Tk 根窗口的 `destroy()` / `withdraw()` 硬崩（0xC0000005）。可用/崩溃操作矩阵见 [窗口索引](window.md) §5-C2 与 `dungeon/window/dpg_state.py` |
+| 让会话收尾之后进程里**没有**活的 DPG 上下文/视口 | `destroy_context()` 终止 GLFW，那个 Tk 根窗口随即不能 `destroy()`/`withdraw()`，之后新建的 `CTk` 根也起不来（首次 `deiconify` 硬崩）——宿主的热切换就完了。收尾必须补一个隐藏保活视口（`dpg_state.park_context()`），下一局开头（宿主隐藏之后）再 `unpark_context()` 拆掉 |
 | 在业务代码里直接 `dpg.stop_dearpygui()` | 一律走 `_request_close()` |
 | 为「修挂死」堆看门狗 | Python 层定时器在 DPG 渲染期间拿不到 GIL，超时兜底只能放父进程；真正卡住时 `os._exit` 与 `Stop-Process -Force` 都无效 |
 | 指望把 DPG 窗口嵌入宿主布局 | 只能是独立顶层窗口（§4） |
@@ -100,8 +106,11 @@ DPG 2.3.1 的视口是**独立的 GLFW 顶层窗口**，公开 API 里没有任�
 跑完会话后进程可能在**退出阶段挂死**。已查明：这是**长时会话累积出的 OS/驱动级环境现象**，
 与本项目代码、与 DPG、与驱动方式都无关（纯 Tk、不 import dpg 的进程同样复现，重启即消失）。
 
-因此：自检按「读输出判定 + 父进程超时兜底」，**不要**把退出码当失败信号；真遇到症状**先重启系统**
-再复现，不要改代码。完整复现矩阵与修正过程见 [退出挂死调查](history/exit_hang_investigation.md)。
+因此：自检按「读输出判定 + 父进程超时兜底」，默认**不**把退出码当失败信号；真遇到症状**先重启系统**
+再复现，不要改代码。复测退出路径时用 `dungeon_autopilot.py --require-clean-exit`（重启后应全绿；
+它把「未自行干净退出」也判为失败）。父进程的等待是**硬超时**（读输出在独立线程里做，主线程按
+deadline 轮询），子进程的结论行打印后立即 flush——「已通过但退出挂死」与「超时未出结论」因此可以
+分开汇报。完整复现矩阵与修正过程见 [退出挂死调查](history/exit_hang_investigation.md)。
 
 ---
 

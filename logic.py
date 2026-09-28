@@ -272,6 +272,27 @@ def should_skip_by_part_tags(part: str, selected_tags: List[str], p: float) -> b
     return False
 
 
+def comparison_lines(comp: Dict, height: float) -> Tuple[str, str]:
+    """把一条地标对比翻成报告里的两行文字，返回 ``(尺寸文本, 对比文本)``。
+
+    报告正文与挂件版「身高对比」开场共用同一套措辞——两处各写一遍迟早会写歪。
+    """
+    landmark = comp["landmark"]
+    size_str = format_size(comp["size"], base_size=height)
+    ratio = comp["ratio"]
+    suffix = "高" if landmark.dimension == "vertical" else (
+        "长" if landmark.horizontal_type == "length" else "宽")
+    if landmark.frequency == "unique":
+        compare_text = f"    └─ 约等于{landmark.name}{suffix}度的{ratio:.2f}倍"
+    elif ratio < 0.5:
+        compare_text = f"    └─ 尚不足{landmark.name}的{suffix}度"
+    elif ratio > 1.5:
+        compare_text = f"    └─ 完全超过{landmark.name}的{suffix}度"
+    else:
+        compare_text = f"    └─ 相当于{landmark.name}的{suffix}度"
+    return size_str, compare_text
+
+
 @behavior_hook("logic", "get_comparisons")
 def get_comparisons(
     landmarks: List[Landmark],

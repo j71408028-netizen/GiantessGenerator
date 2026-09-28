@@ -9,6 +9,7 @@
     python scripts/dungeon_autopilot.py --scene session-close --isolate
     python scripts/dungeon_autopilot.py --repeat 10 --isolate   # 连续开关窗口 10 次
     python scripts/dungeon_autopilot.py --in-process     # 当前进程内依次跑（快，但崩溃会带走全部）
+    python scripts/dungeon_autopilot.py --require-clean-exit    # 退出挂死也判失败（环境复测用）
 
 场景：
 
@@ -534,10 +535,12 @@ def scene_tk_host():
     在 Tk 主窗口里时，主窗口不再"假死"。用 100ms 心跳计数验证：心跳只在
     宿主的事件循环被处理过之后才会增长。
 
-    **故意不在会话结束后碰 Tk**：实测（新旧两种驱动都一样）在
-    ``destroy_context()`` 之后再调用任何 Tk API（``update()``/``destroy()``）
-    会以 0xC0000005 崩掉进程。真应用不受影响——它的 Tk 对话框都在
-    ``destroy_context()`` 之前（见 base._finish_session 的顺序）。
+    **故意不在会话结束后碰 Tk**：``destroy_context()`` 之后现场那个 Tk 根窗口的
+    窗口级命令（``destroy()`` / ``withdraw()``）会以 0xC0000005 崩掉进程；会话收尾
+    会立刻补一个隐藏保活视口把它修回来（见 ``dungeon/window/dpg_state.py`` 与
+    ``base._finish_session``），这里仍保持「创建了就不销毁」的老做法，省得自检
+    自己踩在修复链路上。真应用的 Tk 对话框也都在 ``destroy_context()`` 之前
+    （见 base._finish_session 的顺序）。
     """
     import tkinter as tk
     root = tk.Tk()
@@ -809,7 +812,21 @@ def _watchdog(seconds):
     _watchdog_timer.start()
 
 
-def _run_isolated(names, timeout, repeat=1):
+def _drain_output(proc, sink):
+    """在独立线程里把子进程输出逐行收进 ``sink``。
+
+    ``readline`` 在管道上没有超时：一旦子进程停止出字（如 DPG 渲染占住 GIL），
+    主循环里再怎么检查 deadline 都会被它无限期吊住——正是文档要求「父进程兜
+    超时」要防的事。读操作挪到 daemon 线程后，主线程的等待才是真正有界的。
+    """
+    try:
+        for line in iter(proc.stdout.readline, ""):
+            sink.append(line)
+    except Exception:
+        pass
+
+
+def _run_isolated(names, timeout, repeat=1, require_clean_exit=False):
     """每个场景一个子进程：崩溃/挂死只影响子进程，主进程能定位到具体场景。
 
     判定用子进程打印的结论行而不是退出码——历史上确实出现过"跑完会话后进程在
@@ -818,6 +835,12 @@ def _run_isolated(names, timeout, repeat=1):
     但**不要**看到结论行就立刻断定挂死：实测正常子进程在结论行之后 0.1s 内就
     自行退出，立即 `poll()` 会把正常退出误判成挂死（2026-09-23 修正为宽限
     ``EXIT_GRACE`` 秒）。只有宽限过后仍未退出才算挂死，此时按结论判定成败。
+
+    三件事分开汇报，不混成一个「通过」：场景断言（上面的两个 check）、
+    子进程退出码、退出方式（自行退出 / 超时未出结论 / 结论已出但退出挂死）。
+    默认退出码与挂死只汇报不判败（文档 §6 认定退出挂死是环境现象）；
+    ``require_clean_exit=True`` 时把「未自行干净退出」也判为失败，供环境
+    复测（重启系统后）确认退出路径真的修好。
 
     ``repeat > 1`` 时把重复次数交给子进程内联执行——同一进程里连续开关窗口
     才是"重开副本"的回归形状（上一轮 stop 掉的调度队列必须重新启用）。
@@ -831,16 +854,17 @@ def _run_isolated(names, timeout, repeat=1):
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
             encoding="utf-8", errors="replace")
         buf = []
+        reader = threading.Thread(
+            target=_drain_output, args=(proc, buf), daemon=True)
+        reader.start()
         deadline = time.time() + timeout * (repeat if repeat > 1 else 1)
         while time.time() < deadline:
-            line = proc.stdout.readline()
-            if line:
-                buf.append(line)
-            if not line and proc.poll() is not None:
-                break
             if any("report:" in b for b in buf):   # 结论已输出
                 break
-        out = "".join(buf)
+            if proc.poll() is not None and not reader.is_alive():
+                break
+            time.sleep(0.1)
+        report_seen = any("report:" in b for b in buf)
         # 结论行出现后给一小段退出宽限：正常子进程 0.1s 内就退出了，
         # 立即 poll 会把正常退出误判成挂死（2026-09-23 修正）。
         grace_deadline = time.time() + EXIT_GRACE
@@ -849,14 +873,26 @@ def _run_isolated(names, timeout, repeat=1):
         hung = proc.poll() is None
         if hung:
             proc.kill()
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+        out = "".join(buf)
         print(f"  [{name}] 输出: {out.strip()[-400:]}")
-        if hung:
-            print(f"  [{name}] 进程在退出阶段挂死（已知环境现象），已强制结束")
+        if not report_seen and hung:
+            print(f"  [{name}] 超时（{timeout}s）未给出结论，已强制结束")
+        elif not report_seen:
+            print(f"  [{name}] 子进程未见结论即退出 rc={proc.returncode}")
+        elif hung:
+            print(f"  [{name}] 结论已出，但进程在退出阶段挂死"
+                  f"（已知环境现象，见 window_host.md §6），已强制结束")
         else:
             print(f"  [{name}] 子进程自行退出 rc={proc.returncode}")
-        check(f"场景 {name} 在 {timeout}s 内给出结论", "[dungeon_autopilot] report:" in out,
-              out[-300:])
+        check(f"场景 {name} 在 {timeout}s 内给出结论", report_seen, out[-300:])
         check(f"场景 {name} 断言全过", "[dungeon_autopilot] PASSED" in out, out[-300:])
+        if require_clean_exit:
+            check(f"场景 {name} 自行干净退出（rc={proc.returncode}）",
+                  report_seen and not hung and proc.returncode == 0, out[-300:])
 
 
 def main():
@@ -870,12 +906,17 @@ def main():
                         help="强制在子进程里跑（单场景也能用）：进程退出挂死时由父进程超时 kill")
     parser.add_argument("--timeout", type=int, default=40,
                         help="硬看门狗秒数：超时即自杀，避免窗口卡在屏幕上")
+    parser.add_argument("--require-clean-exit", action="store_true",
+                        help="把「未自行干净退出」（超时 / 退出挂死 / 非零退出码）也判为失败；"
+                             "默认只汇报，因为退出挂死按 window_host.md §6 属于环境现象，"
+                             "不作失败信号。适用于重启系统后复测退出路径")
     args = parser.parse_args()
 
     names = sorted(SCENES) if args.scene == "all" else [args.scene]
     # 全部场景默认开子进程；单场景想在子进程里跑（推荐：退出挂死由父进程兜底）用 --isolate
     if args.isolate or (args.scene == "all" and not args.in_process):
-        _run_isolated(names, args.timeout, args.repeat)
+        _run_isolated(names, args.timeout, args.repeat,
+                      require_clean_exit=args.require_clean_exit)
     else:
         for _ in range(args.repeat):
             for name in names:
@@ -901,6 +942,12 @@ def main():
     if leftover:
         print(f"[dungeon_autopilot] 残留非 daemon 线程: {leftover}")
     print(f"[dungeon_autopilot] report: {_REPORT_PATH}")
+    # 结论行当场冲出缓冲：父进程按这行判定成败，而管道 stdout 是块缓冲，默认的
+    # flush 排在解释器退出收尾的最后——若 DPG/GLFW 的退出清理卡住（文档 §6 的
+    # 「退出挂死」），结论行会困在缓冲里，父进程就会把「已通过但退出挂死」
+    # 误判成「超时未出结论」。
+    sys.__stdout__.flush()
+    sys.__stderr__.flush()
     # 走正常解释器退出（sys.exit），让 DPG 有机会完成自己的收尾；
     # 若仍有残留的 native 线程导致退出挂死，由外层 --isolate 的超时兜底。
     _log.flush()

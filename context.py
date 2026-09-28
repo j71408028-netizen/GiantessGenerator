@@ -17,7 +17,7 @@ from persistence.character_repo import CharacterRepo
 from persistence.settings_repo import SettingsRepo
 from logic import ALL_PART_NAMES, format_size, get_size_category, replace_quip_tags, \
     get_comparisons, apply_size_unlock_updates, compute_casualty, compute_environment_factor, build_size_description, \
-    select_quip_with_budget
+    select_quip_with_budget, comparison_lines
 from models import CharacterSnapshot, ReportData
 from services import build_detail_pools
 from services.creation_service import CreationService
@@ -571,12 +571,12 @@ class ExplorationContext:
                 previous_frequency = frequency
 
             part = comp["part"]
-            size_str = format_size(comp['size'], base_size=height)
             ratio = comp["ratio"]
-            suffix = "高" if comp["landmark"].dimension == "vertical" else (
-                "长" if comp["landmark"].horizontal_type == "length" else "宽")
             if comp["landmark"].frequency == "unique":
                 lm = comp["landmark"]
+                suffix = "高" if lm.dimension == "vertical" else (
+                    "长" if lm.horizontal_type == "length" else "宽")
+                size_str = format_size(comp['size'], base_size=height)
                 lm_addr = self._landmark_full_address(lm, landmark_registers)
                 lm_key = f"{lm.name}@{lm_addr}" if lm_addr else lm.name
                 if lm_addr:
@@ -589,12 +589,8 @@ class ExplorationContext:
                 durability_suffix = "（残破的）" if durability < 0.5 else ""
                 compare_text = f"    └─ 约等于{lm.name}{durability_suffix}{suffix}度的{ratio:.2f}倍"
             else:
-                if ratio < 0.5:
-                    compare_text = f"    └─ 尚不足{comp['landmark'].name}的{suffix}度"
-                elif ratio > 1.5:
-                    compare_text = f"    └─ 完全超过{comp['landmark'].name}的{suffix}度"
-                else:
-                    compare_text = f"    └─ 相当于{comp['landmark'].name}的{suffix}度"
+                # 非唯一地标的措辞与挂件版共用一份，见 logic.comparison_lines
+                size_str, compare_text = comparison_lines(comp, height)
 
             quip_text = ""
             quip_style = ""
@@ -857,6 +853,15 @@ class ExplorationContext:
 
     def _detail_selected_parts(self) -> set:
         return set(self.settings.get("selected_parts", ALL_PART_NAMES.copy()))
+
+    def size_unlocks_from_report(self, report: ReportData) -> Dict[str, str]:
+        """从一份报告现推部位解锁表（未持角色档案时看尺寸一览用）。
+
+        规则与建号时初始化 ``CharacterSnapshot.size_unlocks`` 完全一致：报告里提及
+        过的部位才算「已测量」，其余留空——于是「只看报告」与「有角色」在尺寸一览
+        里露出的部位一样多，不会一次抖出全部尺寸。
+        """
+        return self._init_size_unlocks_from_report(report, report.body_parts)
 
     def _init_size_unlocks_from_report(self, report: ReportData, body_parts: dict) -> Dict[str, str]:
         """从报告创建角色时初始化尺寸解锁信息。

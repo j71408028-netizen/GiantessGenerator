@@ -309,6 +309,8 @@ class ScenarioEditor(ctk.CTkFrame):
         protagonist_row.pack(fill='x', padx=(0, 20), pady=(10, 0))
         ctk.CTkLabel(protagonist_row, text="主角称呼", font=ui_fonts.ui_font(_F_BIG),
                      text_color=_TITLE).pack(side='left')
+        ctk.CTkLabel(protagonist_row, text="（仅 Solea / Bulla）", font=ui_fonts.ui_font(_F_SMALL),
+                     text_color=_MUTED).pack(side='left', padx=2)
         self.protagonist_var = ctk.StringVar()
         self.protagonist_entry = ctk.CTkEntry(
             protagonist_row, textvariable=self.protagonist_var,
@@ -316,12 +318,6 @@ class ScenarioEditor(ctk.CTkFrame):
             text_color=_DARK, placeholder_text="主角",
             fg_color=SC_PANEL_BG, border_color=SC_BORDER_STRONG)
         self.protagonist_entry.pack(side='right')
-        self.protagonist_hint = ctk.CTkLabel(
-            left_inner, text="仅 Solea / Bulla 使用：对话段落中主角台词的说话人标注，"
-                             "留空按「主角」处理",
-            font=ui_fonts.ui_font(_F_SMALL), text_color=_MUTED,
-            anchor='w', justify='left', wraplength=_LEFT_WIDTH - 6)
-        self.protagonist_hint.pack(fill='x', pady=(2, 0))
 
         ctk.CTkLabel(left_inner, text="系统初始提示",
                      font=ui_fonts.ui_font(_F_SMALL, "bold"),

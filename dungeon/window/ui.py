@@ -8,6 +8,7 @@ import dearpygui.dearpygui as dpg
 
 from dungeon import process_log
 from dungeon.models import DungeonTextType
+from dungeon.window import dpg_state
 from dungeon.window.fonts import (BOLD_FONT_SIZE, TEXT_FONT_SIZE, UI_FONT_SIZE,
                                   resolve_font_files)
 
@@ -35,7 +36,12 @@ _AUTOPLAY_TASK = "autoplay:tick"
 class DungeonWindowUI:
     # ---------- UI 构建 ----------
     def _build_ui(self):
+        # 进程里不该再挂着别的 DPG 上下文：上一局收尾留下的保活视口（见
+        # dungeon.window.dpg_state）已由 base._start_session 拆掉。
         dpg.create_context()
+        # 记下上下文已创建：未建上下文时调用 DPG 的运行时查询会让进程段错误，
+        # 外部（应用外壳切换界面）只能靠这个标志判断能否安全清理。
+        dpg_state.mark_created()
 
         self.is_fullscreen = False
         (viewport_w, viewport_h, self._dpi_scale,

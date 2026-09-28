@@ -158,31 +158,23 @@ def _handoff_to_main(root, splash_conn, splash_proc, fallback_loading, state):
             pass
 
 
-def main():
+def run_professional(boot):
+    """启动专业模式界面。
+
+    ``boot`` 是 ``app_shell.bootstrap()`` 的结果（设置 / 世界包 / 仓库宿主）。
+    窗口关闭后返回下一次要切换的界面模式，无切换请求则返回 None——由
+    ``app_shell.run_app`` 决定是重建另一套界面还是结束进程。
+    """
     # PyInstaller 打包 + multiprocessing 子进程必需。
     multiprocessing.freeze_support()
 
-    # 无论从命令行、Finder 双击还是打包后的 .app / exe 启动，先把工作目录
-    # 锚定到数据目录的父级，确保 data/、assets/ 等相对路径稳定可解析（macOS
-    # 下从 Finder 启动时 CWD 为 “/”，不修正会找不到存档与素材）。
+    # 工作目录已由 app_shell 锚定；直接运行本模块时补一次，确保从命令行、
+    # Finder 双击或打包后的 .app / exe 启动时 data/、assets/ 都能解析。
     ensure_cwd()
 
-
-    # 先读取设置并应用主题，再创建窗口，避免暗色模式下初始化页先以亮色显示、随后再翻转，产生明显的亮暗闪动。
-    settings_repo = SettingsRepo()
-    settings = settings_repo.load()
-
-    # 恢复持久化的世界包激活状态，并把包设置叠加到内存 settings。
-    world_manager = WorldManager(data_dir="data")
-    active_id = settings.get("active_world")
-    if active_id:
-        try:
-            world_manager.load_active(active_id)
-        except ValueError as e:
-            print(f"[Warning] 世界包 '{active_id}' 无法加载，已忽略: {e}")
-            settings.pop("active_world", None)
-    world_manager.apply_world_settings(settings)
-    settings_repo.world_state = world_manager.world_state
+    settings = boot["settings"]
+    settings_repo = boot["settings_repo"]
+    world_manager = boot["world_manager"]
 
     theme_mode = settings.get("theme_mode", "Light")
     color_theme = settings.get("color_theme", "blue")
@@ -354,6 +346,20 @@ def main():
     root.after(0, _poll_cancel)
     root.after(0, run_next)
     root.mainloop()
+
+    # 窗口销毁后 mainloop 返回：取一次切换请求交给外壳处理。
+    from app_shell import take_request
+    return take_request()
+
+
+def main():
+    """入口：经应用外壳启动，因此支持运行时切到挂件模式。
+
+    直接运行本模块与运行 main_mini.py 的区别只在首次启动用哪套界面，
+    之后两套界面可以来回切换。
+    """
+    from app_shell import MODE_PRO, run_app
+    run_app(default_mode=MODE_PRO)
 
 
 if __name__ == "__main__":

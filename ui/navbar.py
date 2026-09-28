@@ -11,13 +11,19 @@ from ui.common import fonts as ui_fonts
 
 
 class NavigationBar(ctk.CTkFrame):
-    """左侧导航栏组件"""
+    """左侧导航栏组件
 
-    def __init__(self, master, on_switch, **kwargs):
+    ``on_switch`` 是页面切换回调（点页面按钮）；``on_switch_ui`` 是**界面模式**
+    切换回调（点底部「ME模式」）。后者不是换页而是换掉整套界面——窗口会被销毁
+    重建，所以单独放一个 action 按钮，不混进页面列表。
+    """
+
+    def __init__(self, master, on_switch, on_switch_ui=None, **kwargs):
         super().__init__(master, width=200, height=60, corner_radius=0,
                          fg_color=NAV_BG, **kwargs)
         self.pack_propagate(False)
         self._on_switch = on_switch
+        self._on_switch_ui = on_switch_ui
         self._buttons = {}
         self._frames = {}
         self._current_page = None
@@ -55,6 +61,17 @@ class NavigationBar(ctk.CTkFrame):
             frame.pack(side='bottom', fill='x')
             self._frames[foot] = frame
 
+        # 底部「ME模式」入口：与版本页脚同属导航栏底部固定区（后 pack 的
+        # bottom 排在先 pack 的上面，所以它会停在页脚正上方）。界面模式切换会
+        # 重建整个窗口，因此与页面按钮分开放，避免被当成「换一页」。
+        self._switch_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self._switch_frame.pack(side='bottom', fill='x')
+        self.ui_switch_btn = ctk.CTkButton(
+            self._switch_frame, text="  ⇄  ME模式", anchor='w', height=32,
+            fg_color="transparent", text_color=NAV_TEXT, hover_color=NAV_HOVER,
+            font=ui_fonts.ui_font(13), command=self._on_ui_switch_clicked)
+        self.ui_switch_btn.pack(fill='x', padx=9, pady=(6, 2))
+
         # 底部容器：版本页脚与世界包信息统一收纳，使导航栏底部更紧凑
         self.app_version_label = ctk.CTkLabel(
             self._frames["app_version"], text=f"生成器版本：v{APP_VERSION}", font=ui_fonts.ui_font(12),
@@ -70,6 +87,11 @@ class NavigationBar(ctk.CTkFrame):
             self._frames["packloaded"], text="", font=ui_fonts.ui_font(11, "bold"),
             text_color=NAV_WORLD_GREEN)
         self.packloaded_label.pack(side="left", padx=14, pady=2)
+
+    def _on_ui_switch_clicked(self):
+        """「ME模式」按钮：只负责转发，确认框与拦截都在主窗口管理器里。"""
+        if self._on_switch_ui is not None:
+            self._on_switch_ui()
 
     def set_active(self, page_key):
         """高亮指定按钮，其余恢复默认"""
@@ -113,6 +135,8 @@ class NavigationBar(ctk.CTkFrame):
             footer_color = NAV_TEXT
         self._title_label.configure(text_color=title_color)
         self.app_version_label.configure(text_color=footer_color)
+        # 「ME模式」不是页面按钮，不参与高亮，只跟随整体文字/悬停配色
+        self.ui_switch_btn.configure(text_color=text, hover_color=hover)
         for key, btn in self._buttons.items():
             if key == self._current_page:
                 btn.configure(fg_color=sel_bg, text_color=sel_text, hover_color=hover)

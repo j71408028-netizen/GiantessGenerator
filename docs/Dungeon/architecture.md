@@ -245,7 +245,7 @@ data/
 | 构造参数必须保存到 `self` | mixin 方法可能被其他 mixin 调用，`__init__` 里的局部变量会 AttributeError | [窗口文档](window.md) §5-C3 |
 | 关闭一律走 `_request_close()` | 业务代码不直接 `dpg.stop_dearpygui()` | [窗口文档](window.md) §5-C1 |
 | 跨线程 UI 更新走 `self._frame.call()` | 帧时钟是**窗口实例成员**；计时类逻辑用 `every/after` 帧任务而不是开线程 | [窗口文档](window.md) §5-C4、`window/frame.py` |
-| `destroy_context()` 之后不碰 Tk | 会 0xC0000005；`_finish_session()` 的顺序就是为此固定的 | [窗口文档](window.md) §5-C2 |
+| `destroy_context()` 之前不碰 Tk；之后必须补隐藏保活视口 | 前者会 0xC0000005；后者让 GLFW 终止后 Tk 根窗口仍可销毁/隐藏，宿主的热切换才成立。`_finish_session()` / `_start_session()` 的顺序就是为此固定的 | [窗口文档](window.md) §5-C2 |
 | 写盘必走原子写 | 半截文件不可恢复 | 本文 §8 |
 | 剧本 / 运营术语不混用 | `scenario_*` = 方案，`dungeon_*` = 一局 | [术语表](domain_terms.md) |
 | 组件只读窗口状态 | 组件 ctx 即窗口实例，不反向写状态；**访问只经组件服务面**（`component_viewport` / `schedule*` / `session_waiting_for_input` / `component_top_inset` 等，C13），不读窗口私有属性 | `component_registry.py::DungeonComponent` 契约文档、`components.py::ComponentHandler`、`scripts/check_component_pack.py` |

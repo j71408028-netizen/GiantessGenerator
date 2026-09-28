@@ -888,6 +888,18 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.show_casualties_var = tk.BooleanVar(value=self.settings.get("show_casualties", True))
         self.show_casualties_switch = self._make_switch(ctrl, self.show_casualties_var)
 
+        # 启动界面模式：只决定**下次启动**用哪套界面，点这里不重建窗口。
+        # 非 "mini" 一律按专业模式显示，与 app_shell.load_mode 的兜底一致。
+        from app_shell import MODE_MINI, UI_MODE_KEY
+        _, ctrl = self._make_row(self.disp_body, row, "启动界面模式")
+        row += 1
+        startup_display = ("ME模式" if self.settings.get(UI_MODE_KEY) == MODE_MINI
+                           else "专业模式")
+        self.ui_mode_var = tk.StringVar(value=startup_display)
+        self.ui_mode_button = self._make_cycle_button(
+            ctrl, ["专业模式", "ME模式"], self._on_ui_mode_changed,
+            self.ui_mode_var)
+
         self._section_label(self.disp_body, row, "字体设置")
         row += 1
 
@@ -908,6 +920,21 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.dungeon_font_var = tk.StringVar(value=self.settings.get("dungeon_font", ui_fonts.dungeon_font_default()))
         self.dungeon_font_entry = self._make_entry(ctrl, self.dungeon_font_var, width=150)
         self.dungeon_font_entry.pack(side='left')
+
+    def _on_ui_mode_changed(self, value):
+        """记录「下次启动用哪套界面」，仅此而已。
+
+        这个选项**只影响启动**：点击只把选择写进设置，不重建窗口。界面重建会
+        丢掉当前界面上的编辑状态，所以实时切换不放在设置页——那是导航栏底部
+        「切换界面」的职责（见 ``MainWindowManager.prompt_switch_to_mini``）。
+        """
+        from app_shell import MODE_MINI, MODE_PRO, UI_MODE_KEY, save_mode
+
+        mode = MODE_MINI if value == "ME模式" else MODE_PRO
+        # 同步内存里的设置副本：本页「保存并返回」会把 settings 整份回写，
+        # 不同步就会把这里刚选的值覆盖回旧值。
+        self.settings[UI_MODE_KEY] = mode
+        save_mode(mode)
 
     def _story_recent_count_value(self) -> int:
         """剧情概要保留的最近段落数（1~200，非法输入回退到原值/20）。"""

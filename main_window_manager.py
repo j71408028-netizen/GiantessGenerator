@@ -89,7 +89,8 @@ class MainWindowManager:
         self.main_frame = ctk.CTkFrame(root, corner_radius=0, fg_color=APP_BG)
         self.main_frame.pack(fill='both', expand=True)
 
-        self.nav_bar = NavigationBar(self.main_frame, on_switch=self.show_page)
+        self.nav_bar = NavigationBar(self.main_frame, on_switch=self.show_page,
+                                     on_switch_ui=self.prompt_switch_to_mini)
         self.nav_bar.pack(side='left', fill='y')
 
         self.content_frame = ctk.CTkFrame(self.main_frame, corner_radius=0,
@@ -116,11 +117,8 @@ class MainWindowManager:
             self._on_progress(value, detail)
 
     # ==================== 生命周期 ====================
-    def on_closing(self):
-        if self._closing:
-            return
-        self._closing = True
-
+    def _persist_settings(self):
+        """把当前上下文里的运行态写回设置并落盘（关闭与切换界面共用）。"""
         try:
             if self.context is not None:
                 self.settings["selected_styles"] = self.context.selected_styles
@@ -129,6 +127,55 @@ class MainWindowManager:
             self._settings_repo.save(self.settings)
         except Exception as e:
             print(f"[Warning] 保存设置失败: {e}")
+
+    def prompt_switch_to_mini(self):
+        """导航栏「切换界面」入口：确认后立刻切到挂件模式。
+
+        这是本会话里**唯一**的实时切换入口。设置页的「启动界面模式」只记录下次
+        启动用哪套界面，不重建窗口——窗口重建会丢弃当前界面上的编辑状态，所以
+        真正动手前必须在这里明确确认一次。
+        """
+        from app_shell import MODE_MINI
+
+        # 副本视口是独立顶层窗口，切换界面会把它连同 Tk 根一起带走，
+        # 会话结果无从回收，因此进行中直接拒绝切换（先于确认框，避免白问一次）。
+        if self._active_dungeon_window is not None:
+            ui.common.dialogs.showwarning(
+                "提示", "副本进行中，请先结束副本再切换界面。")
+            return
+        if not ui.common.dialogs.askyesno(
+                "切换界面",
+                "将保存当前设置并切换到挂件模式，窗口会重建。\n\n"
+                "两套界面共用同一份角色与存档数据。是否继续？"):
+            return
+        self.switch_ui_mode(MODE_MINI)
+
+    def switch_ui_mode(self, mode):
+        """切到另一套界面：保存设置后由外壳销毁本窗口并重建。
+
+        两套界面的 Tk 根窗口类型不同，因此不复用任何控件——销毁 ``CTk`` 根、
+        重建 ``tk.Tk`` 根（挂件模式），进程与数据目录保持不变。
+
+        本方法只做事、不提问：确认框由 :meth:`prompt_switch_to_mini` 负责，
+        自检脚本因此可以直接调用它来驱动一次切换。
+        """
+        from app_shell import switch_to
+
+        # 副本视口是独立顶层窗口，切换界面会把它连同 Tk 根一起带走，
+        # 会话结果无从回收，因此进行中直接拒绝切换。
+        if self._active_dungeon_window is not None:
+            ui.common.dialogs.showwarning(
+                "提示", "副本进行中，请先结束副本再切换界面。")
+            return
+        self._closing = True
+        switch_to(self.root, mode, save=self._persist_settings)
+
+    def on_closing(self):
+        if self._closing:
+            return
+        self._closing = True
+
+        self._persist_settings()
 
         if self._active_dungeon_window is not None:
             try:

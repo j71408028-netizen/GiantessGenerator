@@ -84,15 +84,18 @@ __init__
 run() → SessionResult
 ├─ _register_with_parent()
 ├─ _start_session()
+│  ├─ host.viewport_metrics()  # 宿主仍可见时先取尺寸/DPI（缓存给 _get_initial_viewport_size）
+│  ├─ host.hide_window()       # 必须排在 unpark 之前：拆保活会终止 GLFW，withdraw 会崩
+│  ├─ dpg_state.unpark_context()  # 拆掉上一局收尾留下的保活视口，让出 DPG 单例
 │  ├─ _build_ui()          # create_context → 视口 → 主窗口 → 事件注册 → setup/show
 │  ├─ _enter_entry_phase() # 仅探索模式：动态背景 + 方案选择面板
 │  │   或 _init_components() + _build_components()  # 挑战/回放：直接进会话
-│  ├─ host.hide_window()
 │  ├─ _frame.call(_fix_windows_title)   # 首帧：此时原生窗口已建好
 │  └─ _run_frame_loop()    # ← 手动渲染
 └─ _finish_session()    # _frame.stop() + 背景工作者 shutdown → 恢复主窗口 → join 结局线程 0.5s
-   ├─ _closing 且非入口退出 → _handle_exit()
-   └─ destroy_context() → _unregister_with_parent()
+   ├─ _closing 且非入口退出 → _handle_exit()   # 结局已触发时内部还会再 join 最长 15s（persistence._handle_exit）
+   ├─ destroy_context() → _unregister_with_parent()
+   └─ dpg_state.park_context()   # 补一个隐藏保活视口，Tk 根窗口才拿得回 destroy/withdraw（§5-C2）
 ```
 
 注：入口页「加载回放」不再重开窗口——同一生命周期内由 `_on_entry_replay()` 经端口
@@ -232,7 +235,7 @@ run() → SessionResult
 | 编号 | 约束 | 原因 / 出处 | 验证 |
 |---|---|---|---|
 | **C1** | 任何「程序主动关闭副本窗口」都必须走 `base._request_close()`，业务代码不直接 `dpg.stop_dearpygui()` | 手动渲染下一次回调与下一帧之间隔着帧循环，`_request_close()` 直接 `stop_dearpygui()` 即可安全收尾；`FindWindowW` + `WM_CLOSE` 平台 hack 已整体删除 | `python scripts/dungeon_autopilot.py --scene session-close --isolate`（含 `--repeat 2`）；真应用手测「进入副本 → 返回 → 再进入副本」 |
-| **C2** | `destroy_context()` **之后**不得调用任何 Tk API（`root.update()` / `destroy()` / `winfo_*`） | 会以 0xC0000005 直接死掉（无 traceback），新旧两种驱动都能复现；`_finish_session()` 的顺序（恢复主窗口 → join → `_handle_exit()` 弹框 → `destroy_context()` → 解除宿主登记）就是为此固定的 | 自检里 `scene_tk_host` 故意不销毁根窗口 |
+| **C2** | GLFW 被终止（`destroy_context()` / `unpark_context()`）**之前** Tk 照常可用——收尾顺序（恢复主窗口 → 弹框）正是刻意把 Tk 交互放在 `destroy_context()` **之前**；终止**之后**，当时存在的那个 Tk 根窗口**不能**再 `destroy()` / `withdraw()`（0xC0000005，无 traceback），`quit()` / `geometry()` / `attributes('-alpha')` / `winfo_*()` / `update()` 仍正常（完整矩阵见 `dungeon/window/dpg_state.py` 模块说明）；且**之后新建**的 `CTk` 根首次 `deiconify()` 同样硬崩——所以 `destroy_context()` 之后必须立刻补一个隐藏的保活视口（`dpg_state.park_context()`），下一局开头（宿主隐藏之后）由 `dpg_state.unpark_context()` 拆掉 | 硬崩的是「GLFW 终止**后**」的窗口级命令，不是「碰 Tk」本身（2026-09-28 复核矩阵，取代早先「销毁前碰 Tk 即崩」的过宽结论）。保活视口把进程留在「Tk 根窗口健康」状态，热切换（销毁旧根 → 建另一套根）才走得通；它从不 `show_viewport()`，对使用者完全不可见。顺序固定为：恢复主窗口 → join → `_handle_exit()` 弹框 → `destroy_context()` → 解除宿主登记 → `park_context()`；下一局为 `viewport_metrics()`（宿主仍可见时取）→ `hide_window()` → `unpark_context()` → `_build_ui()`（拆保活要排在藏宿主之后，否则 `withdraw` 会崩） | `scripts/smoke_test_switch.py` 第 2/5 轮（真跑两局副本 + 三次切换）；`scripts/dungeon_autopilot.py` |
 | **C3** | `__init__` 的每个构造参数都必须存到 `self` 上 | `_init_session()` 在入口阶段**迟到执行**（点「开始副本」时才跑），此时局部变量早已不可见；曾因漏存 `merged_quips` 导致「开始副本」必然 AttributeError | 构造后读属性 / `entry-start` 场景 |
 | **C4** | 跨线程 UI 更新走 `self._frame.call()`；禁止后台线程直接调 DPG | 帧时钟是窗口实例成员（随会话创建与停止），不是模块级单例；`stop()` 后 `call()` 返回 `False` 不抛异常 | `dungeon_autopilot.py` |
 | **C5** | 计时类逻辑不开线程，用 `every` / `after` 帧任务 | 旧实现各自靠 `_closing` 标志轮询退出、收尾时逐个 join；现在退出不需要 join | 场景结束时断言 `threading.enumerate()` 无非 daemon 残留 |

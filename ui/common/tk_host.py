@@ -29,13 +29,27 @@ _WM_QUIT = 0x0012          #: DefWindowProc(WM_DESTROY) 投递的「退出进程
 _PM_REMOVE = 0x0001        #: PeekMessage 取出消息（不是只看一眼）
 _MAX_PENDING_QUIT_DRAIN = 16   #: 一次最多清几条（正常只会有一条）
 
+#: 缺省弹框实现（customtkinter 版）；纯 Tk 宿主可在构造时替换掉
+_DEFAULT_DIALOGS = dialogs
 
 
 class TkHost(HostPort):
-    """宿主端口在 Tk 上的实现。``widget`` 为任意 Tk 控件（通常是调用方的父控件）。"""
+    """宿主端口在 Tk 上的实现。``widget`` 为任意 Tk 控件（通常是调用方的父控件）。
 
-    def __init__(self, widget=None):
+    两个可选参数用于非 CTk 宿主（挂件版就是纯 Tk）：
+
+    - ``owner``：活动窗口的登记目标。缺省时沿 ``widget`` 的控件链向上找
+      持有 ``_active_dungeon_window`` 的对象；挂件的主控 ``MiniApp`` 不是控件
+      （不在这条链上），必须显式传入，否则主窗口退出时停不掉副本窗口。
+    - ``dialogs``：弹框实现，需提供 ``showinfo/showwarning/showerror/askyesno``。
+      缺省用 ``ui.common.dialogs``（customtkinter 实现）；纯 Tk 宿主传入自己的
+      实现，避免为了一个提示框把 CTk 拉起来。
+    """
+
+    def __init__(self, widget=None, owner=None, dialogs=None):
         self.widget = widget
+        self.owner = owner
+        self.dialogs = dialogs or _DEFAULT_DIALOGS
 
     # ---------------- 内部工具 ----------------
     def _root(self):
@@ -144,14 +158,15 @@ class TkHost(HostPort):
 
     # ---------------- 弹框 ----------------
     def dialog(self, kind, title, message):
+        ui_dialogs = self.dialogs
         if kind == DIALOG_ASK:
-            return bool(dialogs.askyesno(title, message))
+            return bool(ui_dialogs.askyesno(title, message))
         if kind == DIALOG_WARNING:
-            dialogs.showwarning(title, message)
+            ui_dialogs.showwarning(title, message)
         elif kind == DIALOG_ERROR:
-            dialogs.showerror(title, message)
+            ui_dialogs.showerror(title, message)
         elif kind == DIALOG_INFO:
-            dialogs.showinfo(title, message)
+            ui_dialogs.showinfo(title, message)
         return None
 
     # ---------------- 回放文件选择 ----------------
@@ -168,7 +183,7 @@ class TkHost(HostPort):
                 title="选择回放文件",
                 filetypes=[("副本回放", "*.replay.json"), ("所有文件", "*.*")])
         except Exception as exc:
-            dialogs.showerror("错误", f"打开文件选择框失败：{exc}")
+            self.dialogs.showerror("错误", f"打开文件选择框失败：{exc}")
             return None
         if not file_path:
             return None
@@ -176,10 +191,10 @@ class TkHost(HostPort):
             with open(file_path, "r", encoding="utf-8") as handle:
                 data = json.load(handle)
         except Exception as exc:
-            dialogs.showerror("错误", f"加载回放失败：{exc}")
+            self.dialogs.showerror("错误", f"加载回放失败：{exc}")
             return None
         if not isinstance(data, list) or not data:
-            dialogs.showerror("错误", "回放文件格式错误")
+            self.dialogs.showerror("错误", "回放文件格式错误")
             return None
         return data
 
@@ -189,8 +204,11 @@ class TkHost(HostPort):
 
         主程序退出时要停掉正在跑的副本窗口（``main_window_manager.close``），
         原先由窗口自己沿 ``master/parent`` 链摸宿主，现在收进宿主适配器。
+
+        显式 ``owner`` 优先：非控件的宿主（挂件版 ``MiniApp``）不在控件链上，
+        只能由调用方指名。
         """
-        obj = self.widget
+        obj = self.owner if self.owner is not None else self.widget
         while obj is not None:
             if hasattr(obj, "_active_dungeon_window") and hasattr(obj, "_closing"):
                 obj._active_dungeon_window = window
@@ -198,7 +216,7 @@ class TkHost(HostPort):
             obj = getattr(obj, "master", None) or getattr(obj, "parent", None)
 
     def unregister_active_window(self, window):
-        obj = self.widget
+        obj = self.owner if self.owner is not None else self.widget
         while obj is not None:
             if hasattr(obj, "_active_dungeon_window") and obj._active_dungeon_window is window:
                 obj._active_dungeon_window = None
