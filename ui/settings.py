@@ -921,6 +921,13 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.dungeon_font_entry = self._make_entry(ctrl, self.dungeon_font_var, width=150)
         self.dungeon_font_entry.pack(side='left')
 
+        # 对话语音总开关：关掉后所有副本方案都不出声，音色仍在方案里留着
+        _, ctrl = self._make_row(self.disp_body, row, "朗读副本对话")
+        row += 1
+        self.dungeon_voice_var = tk.BooleanVar(
+            value=self.settings.get("dungeon_voice_enabled", True))
+        self.dungeon_voice_switch = self._make_switch(ctrl, self.dungeon_voice_var)
+
     def _on_ui_mode_changed(self, value):
         """记录「下次启动用哪套界面」，仅此而已。
 
@@ -1349,6 +1356,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             "auto_save_report": self.auto_save_report_var.get(),
             "auto_save_replay": self.auto_save_replay_var.get(),
             "story_recent_count": self._story_recent_count_value(),
+            "dungeon_voice_enabled": self.dungeon_voice_var.get(),
             "save_low_resolution_image": self.save_low_resolution_var.get(),
             "use_preview_image_as_avatar": self.use_preview_avatar_var.get(),
             "info_update_rate": INFO_UPDATE_OPTIONS.get(self.info_update_var.get(), self.info_update_rate)

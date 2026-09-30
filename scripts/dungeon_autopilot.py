@@ -14,6 +14,16 @@
 场景：
 
 ===============  ==========================================================
+callback-thread  真实按键回调（SendMessage 直投 WM_KEYDOWN）的执行线程 == 帧循环线程
+                 ——DPG 2.3.1 默认把回调派发到工作线程，须由手动回调管理收拢
+                 （见 ui._build_ui 的 configure_app 与 base._run_frame_loop）
+chapter-bgm      章节背景音乐接线：起始章节起播 → 跳到无音乐章节停播 → 收尾收工
+                 （用替身后端，自检不出声；真实后端由 check_scenario_schema 探）
+chapter-voice-fx 章节对话语音效果（物理尺度，不是语气）：她那一档开分拍回声 →
+                 其他人那一档缓抖 → 叙述句不念 → 换章清效果 → 回放带配置 → 收尾
+                 （假合成器不联网、替身后端不出声）
+dialogue-voice   Solea/Bulla 对话语音接线：她/主角/配角分嗓子 → 叙述句不念 →
+                 全局开关关掉一声不吭 → 收尾收工（假合成器不联网、替身后端不出声）
 session-close    挑战模式直进会话 → 步进若干 → 点 X 关闭（走「未完成」收尾）
 entry-cancel     探索模式入口页 → 点「返回」（入口退出，不应落盘）
 entry-start      探索模式入口页 → 点「开始副本」→ 步进 → 点 X 关闭
@@ -209,6 +219,23 @@ def _post_viewport_native_close() -> bool:
     return True
 
 
+def _post_viewport_key() -> bool:
+    """向自检视口投一次 K 键按下/抬起（SendMessage 直达窗口过程，不依赖焦点）。"""
+    if not sys.platform.startswith("win"):
+        return False
+    import ctypes
+    user32 = ctypes.windll.user32
+    hwnd = user32.FindWindowW("DungeonSession", None)
+    if not hwnd:
+        return False
+    vk_k = 0x4B
+    lparam = 0x00250001   # scancode=0x25 扩展位0 重复1
+    user32.SendMessageW(hwnd, 0x0100, vk_k, lparam)   # WM_KEYDOWN
+    time.sleep(0.05)
+    user32.SendMessageW(hwnd, 0x0101, vk_k, lparam | 0xC0000000)   # WM_KEYUP
+    return True
+
+
 def _pending_quit() -> int:
     """线程消息队列里是否压着 ``WM_QUIT``（1/0；非 Windows 恒为 0）。
 
@@ -237,6 +264,8 @@ class AutopilotWindow(DungeonSessionWindow):
       ("check", fn)     会话中途在主线程（DPG 存活时）执行 fn(win)，断言失败记入
                         _check_results（run() 结束后场景据此判定）
       ("close", None)   关闭窗口（走 _close_loop → dpg.stop_dearpygui）
+      ("native-close", None)  向视口投 WM_CLOSE（模拟用户点关闭键）
+      ("native-key", None)    向视口投 K 键按下/抬起（回调线程探针用）
     """
 
     def __init__(self, *args, script=None, **kwargs):
@@ -247,10 +276,21 @@ class AutopilotWindow(DungeonSessionWindow):
         self._check_results = []
         #: ``native-close`` 动作是否真的把 WM_CLOSE 投给了视口原生窗口
         self._native_close_posted = False
+        self._callback_thread = None
+        self._callback_received = threading.Event()
+        self._native_key_posted = False
         super().__init__(*args, **kwargs)
 
     def _build_ui(self):
         super()._build_ui()
+        if getattr(self, "_probe_callback", False):
+            import dearpygui.dearpygui as dpg
+            dpg.add_button(label="Callback probe", tag="autopilot_callback_probe",
+                           parent="main_window", pos=[24, 24], width=160,
+                           height=42, callback=self._record_callback_thread)
+            with dpg.handler_registry():
+                dpg.add_key_press_handler(key=dpg.mvKey_K,
+                                          callback=self._record_callback_thread)
         if _MINIMIZE:
             try:
                 import dearpygui.dearpygui as dpg
@@ -310,6 +350,9 @@ class AutopilotWindow(DungeonSessionWindow):
                     # 模拟用户点视口关闭键（X）：只有这条路径会在队列里留下 WM_QUIT
                     self._native_close_posted = _post_viewport_native_close()
                     time.sleep(1.0)
+                elif action == "native-key":
+                    self._native_key_posted = _post_viewport_key()
+                    self._callback_received.wait(timeout=3.0)
                 # 每个动作之后留一张快照，场景可以断言"那一刻"的情形
                 self._snapshots[(action, str(value))] = {
                     "closing": bool(self._closing),
@@ -331,6 +374,10 @@ class AutopilotWindow(DungeonSessionWindow):
         except Exception as exc:
             print(f"[autopilot] 选择方案失败: {exc}")
         self._on_entry_start()
+
+    def _record_callback_thread(self, sender, app_data):
+        self._callback_thread = threading.get_ident()
+        self._callback_received.set()
 
 
 # ---------------------------------------------------------------------------
@@ -460,6 +507,369 @@ def scene_session_close():
     check("会话：帧任务已清空", win._frame.task_count() == 0, win._frame.task_count())
     check("会话：帧时钟跑过任务", win._frame.task_runs > 0, win._frame.task_runs)
     check("会话：像素工作者已收工", win._background.worker_alive is False)
+    # 章节背景音乐：会话收尾必须静音且线程不再挂着（作者没配音乐也要成立）
+    check("会话：背景音乐已收工", win._bgm.worker_alive is False)
+
+
+def _write_silent_wav(path, seconds=0.2):
+    """写一个真实存在的静音 wav：替身后端也只认"文件在不在"。"""
+    import struct
+    import wave
+    rate = 8000
+    frames = int(rate * seconds)
+    with wave.open(path, "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(rate)
+        handle.writeframes(struct.pack("<h", 0) * frames)
+    return path
+
+
+class _FakeTrack:
+    """自检替身后端：只记录指令，不碰音频设备（因此自检全程不出声）。"""
+
+    name = "fake"
+    #: 收到的指令 [(动作, 路径), ...]，场景据此断言"真的起了播/真的关了"
+    events = []
+    #: set_volume 调用次数：语音效果的「缓抖」靠音量调制，据此断言它真的动了
+    volume_calls = 0
+
+    def __init__(self, path):
+        self._path = path
+        self.volume = None
+        self.loop = None
+
+    @classmethod
+    def supported(cls):
+        return True
+
+    @classmethod
+    def open(cls, path):
+        return cls(path) if os.path.isfile(path) else None
+
+    def start(self, loop, volume):
+        self.loop = loop
+        self.volume = volume
+        self.events.append(("start", self._path))
+        return True
+
+    def set_volume(self, volume):
+        self.volume = volume
+        _FakeTrack.volume_calls += 1
+        self.events.append(("volume", self._path))
+
+    def stop(self):
+        self.events.append(("stop", self._path))
+
+    def close(self):
+        self.events.append(("close", self._path))
+
+    def finished(self):
+        """语音层靠它回收播完的音轨；替身没真在放，一律算播完。"""
+        return True
+
+    def tick(self):
+        """背景音乐层靠它续播；替身说自己不需要（返回 False = 后端自带循环）。"""
+        return False
+
+
+def _fake_synth(dest_dir=None):
+    """假合成器：不联网、不出声，只留一份"合成产物"在临时目录里。
+
+    返回 ``(synth, calls)``——``calls`` 里是 ``(音色, 语速, 台词)``，场景据此
+    断言「她/主角/配角各用自己的嗓子」。
+    """
+    calls = []
+
+    def _synth(voice, rate, text, directory):
+        calls.append((voice, rate, text))
+        path = os.path.join(directory, f"voice_{len(calls)}.mp3")
+        with open(path, "wb") as handle:
+            handle.write(b"fake")
+        return path
+
+    return _synth, calls
+
+
+def scene_dialogue_voice():
+    """Solea/Bulla 对话语音：谁说话谁出声，关掉就安静，收尾收干净。
+
+    与 ``chapter-bgm`` 同款替身策略——真实合成要联网、真实播放会出声，自检
+    只盯**接线**：方案音色有没有传到播放器、说话人有没有分对嗓子、全局开关
+    关掉时是不是一声不吭、会话收尾后线程与临时文件有没有留下。
+    """
+    from dungeon import audio as audio_mod
+    _FakeTrack.events = []
+    synth, calls = _fake_synth()
+    previous = audio_mod.set_backends((_FakeTrack,))
+    try:
+        voice_cfg = {"enabled": True, "voice_her": "V_HER",
+                     "voice_protagonist": "V_PRO",
+                     "voice_other": ["A", "B", "C"], "rate": "+0%",
+                     "volume": 70}
+        observed = {}
+
+        def _speak(win):
+            # 换掉合成实现：真合成要联网，自检不该依赖外网也不该出声
+            win._speech._synth = synth
+            # 走窗口层的同一条路径（带说话人的显示单元定稿 → 朗读）。
+            # 一句一句等完：新台词本来就会打断旧台词（翻页时不该念上一页的），
+            # 连发三句只会留下最后一句。
+            for speaker, text in (("自检角色", "你跑不掉的"),
+                                  ("主角", "等等！"),
+                                  ("军官", "全体撤退"),
+                                  ("", "一阵尘土落下。")):
+                win._speak_item({"speaker": speaker, "text": text})
+                win._speech.wait_idle(5.0)
+            observed["calls"] = list(calls)
+            observed["last_voice"] = win._speech.last_voice
+            observed["tmp_dir"] = win._speech._tmp_dir
+
+        def _mute(win):
+            # 全局开关关掉：不看方案配置，一句都不该念
+            win.settings["dungeon_voice_enabled"] = False
+            win._configure_voice(win.scenario_config)
+            calls.clear()
+            win._speak_item({"speaker": "自检角色", "text": "关掉后不该出声"})
+            win._speech.wait_idle(2.0)
+            observed["muted_calls"] = list(calls)
+            observed["muted_enabled"] = win._speech.enabled
+
+        win, _result = _make_window(
+            [("check", _speak), ("check", _mute), ("close", None)],
+            config_overrides={"voice": voice_cfg, "coupling_level": "solea",
+                              "protagonist_title": "主角"})
+        check("语音：故障不在脚本里",
+              all(s == "ok" for s, _ in win._check_results), win._check_results)
+        voices = [call[0] for call in observed.get("calls") or []]
+        check("语音：只有带说话人的台词念出来", len(voices) == 3, voices)
+        check("语音：她用自己的音色", voices and voices[0] == "V_HER", voices)
+        check("语音：主角用自己的音色", len(voices) > 1 and voices[1] == "V_PRO",
+              voices)
+        check("语音：配角从音色池里拿嗓子",
+              len(voices) > 2 and voices[2] in ("A", "B", "C"), voices)
+        check("语音：合成产物真的起了播",
+              any(kind == "start" for kind, _ in _FakeTrack.events),
+              _FakeTrack.events)
+        check("语音：全局开关关掉后一声不吭",
+              observed.get("muted_enabled") is False
+              and not observed.get("muted_calls"), observed.get("muted_calls"))
+        check("语音：会话收尾后线程已收工", win._speech.worker_alive is False)
+        check("语音：临时音频已清理",
+              not observed.get("tmp_dir")
+              or not os.path.isdir(observed["tmp_dir"]),
+              observed.get("tmp_dir"))
+    finally:
+        audio_mod.set_backends(previous)
+
+
+def scene_chapter_voice_fx():
+    """章节对话语音效果：她那一档开分拍回声，其他人那一档缓抖，换章即清。
+
+    与 ``dialogue-voice`` 同款替身策略——假合成器不联网、替身后端不出声，自检
+    只盯**接线**：章节配置有没有真的传到语音导演、两档有没有按说话人分对、
+    回放记录有没有带上配置、走到没配效果的章节会不会串味、收尾干不干净。
+
+    注意：假合成器产出的不是真音频，解码必然失败 → 这条链走的是**零依赖的
+    播放侧**（分拍 + 音量调制），正好把「解不开也不能拖垮朗读」一起验了。
+    """
+    from dungeon import audio as audio_mod
+    _FakeTrack.events = []
+    _FakeTrack.volume_calls = 0
+    synth, calls = _fake_synth()
+    previous = audio_mod.set_backends((_FakeTrack,))
+    try:
+        cfg = _scenario_config()
+        cfg["chapters"] = [
+            {"name": "回声章", "start": True,
+             "voice_fx": {"her": {"preset": "open_valley", "intensity": 80},
+                          "others": {"preset": "trembling_ground",
+                                     "intensity": 70}}},
+            {"name": "静默章", "voice_fx": {}},
+        ]
+        observed = {}
+
+        def _snapshot(events):
+            return {"starts": sum(1 for kind, _p in events if kind == "start"),
+                    "volumes": sum(1 for kind, _p in events if kind == "volume")}
+
+        def _speak(win):
+            win._speech._synth = synth
+            observed["effect"] = dict(win._speech.effect)
+            observed["replay_fx"] = [r.get("voice_fx") for r in win.replay_data
+                                     if r.get("kind") == "chapter"]
+            # 她 → 「她」那一档（旷野回声：主声 + 两拍分拍）
+            _FakeTrack.events = []
+            win._speak_item({"speaker": "自检角色", "text": "你跑不掉的"})
+            win._speech.wait_idle(6.0)
+            observed["her"] = _snapshot(_FakeTrack.events)
+            observed["her_engine"] = win._speech.last_engine
+            observed["her_starts"] = [p for kind, p in _FakeTrack.events
+                                      if kind == "start"]
+            # 配角 → 「其他人」那一档（震地余波：缓抖，不动分拍）
+            _FakeTrack.events = []
+            win._speak_item({"speaker": "军官", "text": "全体撤退"})
+            win._speech.wait_idle(4.0)
+            observed["other"] = _snapshot(_FakeTrack.events)
+            observed["other_engine"] = win._speech.last_engine
+            # 叙述句（无说话人）不该出声，也不该进合成队列
+            _FakeTrack.events = []
+            before = len(calls)
+            win._speak_item({"speaker": "", "text": "一阵尘土落下。"})
+            win._speech.wait_idle(2.0)
+            observed["narration"] = _snapshot(_FakeTrack.events)
+            observed["narration_calls"] = len(calls) - before
+            observed["calls"] = len(calls)
+
+        def _leave_chapter(win):
+            _FakeTrack.events = []
+            win._enter_chapter("静默章", record=True)
+            observed["silent_effect"] = dict(win._speech.effect)
+            win._speak_item({"speaker": "自检角色", "text": "安静下来"})
+            win._speech.wait_idle(3.0)
+            observed["silent"] = _snapshot(_FakeTrack.events)
+            observed["silent_engine"] = win._speech.last_engine
+            observed["replay_fx_after"] = [r.get("voice_fx")
+                                           for r in win.replay_data
+                                           if r.get("kind") == "chapter"]
+
+        def _finale(win):
+            observed["tmp_dir"] = win._speech._tmp_dir
+
+        win, _result = _make_window(
+            [("check", _speak), ("check", _leave_chapter), ("check", _finale),
+             ("close", None)],
+            config_overrides={"chapters": cfg["chapters"],
+                              "voice": {"enabled": True, "volume": 80},
+                              "coupling_level": "solea",
+                              "protagonist_title": "主角"})
+        check("语音效果：故障不在脚本里",
+              all(s == "ok" for s, _ in win._check_results), win._check_results)
+        expected = {"her": {"preset": "open_valley", "intensity": 80},
+                    "others": {"preset": "trembling_ground", "intensity": 70}}
+        check("语音效果：起始章节把两档装进语音导演",
+              observed.get("effect") == expected, observed.get("effect"))
+        check("语音效果：回放记录带上章节的 voice_fx",
+              observed.get("replay_fx") and all(
+                  fx and fx.get("her") for fx in observed["replay_fx"]),
+              observed.get("replay_fx"))
+        check("语音效果：她那一档开了分拍回声（主声 + 2 拍）",
+              observed.get("her_engine") == "playback"
+              and observed.get("her", {}).get("starts") == 3, observed.get("her"))
+        check("语音效果：分拍用的是同一份合成音频",
+              len(observed.get("her_starts") or []) == 3
+              and len(set(observed["her_starts"])) == 1
+              and all(p.endswith((".mp3", ".wav")) for p in observed["her_starts"]),
+              observed.get("her_starts"))
+        check("语音效果：其他人那一档走缓抖（1 起播 + 音量调制）",
+              observed.get("other_engine") == "playback"
+              and observed.get("other", {}).get("starts") == 1
+              and observed.get("other", {}).get("volumes", 0) >= 1,
+              observed.get("other"))
+        check("语音效果：叙述句不念也不进合成队列",
+              observed.get("narration", {}).get("starts") == 0
+              and observed.get("narration_calls") == 0,
+              observed.get("narration"))
+        check("语音效果：跳到没配效果的章节后清空",
+              observed.get("silent_effect") == {}
+              and observed.get("silent_engine") == "none"
+              and observed.get("silent", {}).get("starts") == 1
+              and observed.get("silent", {}).get("volumes") == 0,
+              (observed.get("silent_effect"), observed.get("silent")))
+        check("语音效果：新章节的回放记录也是空效果",
+              observed.get("replay_fx_after")
+              and observed["replay_fx_after"][-1] == {},
+              observed.get("replay_fx_after"))
+        check("语音效果：会话收尾后语音线程已收工",
+              win._speech.worker_alive is False)
+        check("语音效果：临时音频已清理",
+              not observed.get("tmp_dir")
+              or not os.path.isdir(observed["tmp_dir"]), observed.get("tmp_dir"))
+    finally:
+        audio_mod.set_backends(previous)
+
+
+def scene_chapter_bgm():
+    """章节背景音乐：进配了音乐的章节起播，跳到没配音乐的章节停播。
+
+    真实后端只在``check_scenario_schema``里探一次（那台机器上有没有可用后端
+    不该决定自检成败），这里换成替身后端——要盯的是**接线**：章节配置有没有
+    真的传到播放器、离开音乐章节有没有静下来、会话收尾有没有收干净。
+    """
+    from dungeon import audio as audio_mod
+    _FakeTrack.events = []
+    previous = audio_mod.set_backends((_FakeTrack,))
+    wav = _write_silent_wav(os.path.join(_REPORT_DIR, "bgm_probe.wav"))
+    try:
+        cfg = _scenario_config()
+        cfg["chapters"] = [
+            {"name": "音乐章", "start": True,
+             "bgm": {"path": wav, "volume": 30, "loop": True, "fade_seconds": 0}},
+            {"name": "静默章", "bgm": {}},
+        ]
+        observed = {}
+
+        def _probe_playing(win):
+            win._bgm.wait_idle()
+            observed["path"] = win.current_bgm_path
+            observed["track"] = win._bgm.track_path
+            observed["playing"] = win._bgm.playing
+            observed["replay_bgm"] = [
+                r.get("bgm") for r in win.replay_data if r.get("kind") == "chapter"]
+
+        def _leave_chapter(win):
+            win._enter_chapter("静默章", record=True)
+            win._bgm.wait_idle()
+            observed["silent_path"] = win.current_bgm_path
+            observed["silent_playing"] = win._bgm.playing
+
+        win, _result = _make_window(
+            [("check", _probe_playing), ("check", _leave_chapter),
+             ("close", None)], config_overrides={"chapters": cfg["chapters"]})
+        check("音乐：故障不在脚本里",
+              all(s == "ok" for s, _ in win._check_results), win._check_results)
+        check("音乐：起始章节自动带出曲目", observed.get("path") == wav, observed)
+        check("音乐：播放器真的起了播",
+              observed.get("playing") is True and observed.get("track") == wav,
+              observed)
+        check("音乐：回放记录带上 bgm 配置",
+              any(b and b.get("path") == wav for b in observed.get("replay_bgm") or []),
+              observed.get("replay_bgm"))
+        check("音乐：跳到无音乐章节后停播",
+              observed.get("silent_playing") is False
+              and observed.get("silent_path") == "", observed)
+        check("音乐：曲目被关闭（不留设备句柄）",
+              ("close", wav) in _FakeTrack.events, _FakeTrack.events)
+        check("音乐：会话收尾后播放线程已收工", win._bgm.worker_alive is False)
+    finally:
+        audio_mod.set_backends(previous)
+
+
+def scene_callback_thread():
+    """真实 DPG 回调必须与手动渲染循环运行在同一线程。
+
+    回调经由「SendMessage 直投 WM_KEYDOWN」触发的真实按键 handler 触发
+    （悬停判定的按钮对合成鼠标输入不可靠）；断言其执行线程就是跑 ``run()``
+    帧循环的线程。此前 DPG 默认把回调派发到工作线程，与 window 层线程约定
+    冲突，靠 ui._build_ui 的 manual_callback_management + 帧循环
+    run_callbacks 收拢（见 window.md §2.2 / §4）。
+    """
+    win = AutopilotWindow(
+        None, name="自检角色", nick="", height=100.0, personality=_Personality(),
+        preset=None, greed=0, original_height=1.6, intro_hidden="", intro_visible="",
+        tags=[], uploaded_image=None, scenario_config=_scenario_config(),
+        scenario_repo=None, merged_landmarks=[], merged_quips={}, selected_styles=[],
+        selected_quip_styles=[], detail_pools={}, ai_config={"provider": "fake"},
+        body_parts={}, character=None, character_repo=None, gui=None,
+        mode="challenge", host=_HOST,
+        script=[("native-key", None), ("close", None)])
+    win._probe_callback = True
+    render_thread = threading.get_ident()
+    win.run()
+    check("回调：原生按键已投递", win._native_key_posted)
+    check("回调：真实按钮回调已触发", win._callback_received.is_set())
+    check("回调：按钮在帧循环线程执行", win._callback_thread == render_thread,
+          (win._callback_thread, render_thread))
 
 
 def scene_entry_cancel():
@@ -773,6 +1183,10 @@ def scene_text_components():
 
 
 SCENES = {
+    "callback-thread": scene_callback_thread,
+    "chapter-bgm": scene_chapter_bgm,
+    "chapter-voice-fx": scene_chapter_voice_fx,
+    "dialogue-voice": scene_dialogue_voice,
     "session-close": scene_session_close,
     "entry-cancel": scene_entry_cancel,
     "entry-start": scene_entry_start,

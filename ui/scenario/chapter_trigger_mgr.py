@@ -11,6 +11,7 @@ from dungeon.chapters import (
     CHAPTER_ANY, CHAPTER_NONE, CHAPTER_ANY_LABEL, CHAPTER_NONE_LABEL,
     default_chapter_color, shade_for_mode,
 )
+from dungeon.voice_fx import SLOTS, label_of
 from ui.common.managers import TreeviewManager
 from ui.common.theme import (
     SCRIPT_BORDER, SCRIPT_HOVER, SCRIPT_TEXT_SOFT, SCRIPT_OK,
@@ -43,6 +44,8 @@ class ChapterTriggerManager(TreeviewManager):
             ("名称", 140, "name"),
             ("章节", 80, "scope"),
             ("特定背景", 100, "background"),
+            ("背景音乐", 90, "bgm"),
+            ("语音效果", 140, "voice_fx"),
             ("敏感效果", 100, "sensitivity"),
             ("条件", 150, "condition"),
             ("动作类型", 60, "action_type"),
@@ -203,13 +206,15 @@ class ChapterTriggerManager(TreeviewManager):
                 + ("  ✦" if item.get("ending") else ""),
                 kind,
                 self._format_background(item.get("background") or {}),
+                self._format_bgm(item.get("bgm") or {}),
+                self._format_voice_fx(item.get("voice_fx") or {}),
                 self._format_sensitivity(item.get("sensitivity") or []),
                 condition_text, "", "", "",
             )
         return (
             f"    └ {item.get('name', '未命名')}",
             self._trigger_scope_text(item.get("chapter")),
-            "", "",
+            "", "", "", "",
             self._format_condition(item.get("condition", {})),
             self._action_text(item),
             "是" if item.get("repeatable", True) else "否",
@@ -245,6 +250,31 @@ class ChapterTriggerManager(TreeviewManager):
         if background.get("filter_effect"):
             text += f"（{self._filter_label(background['filter_effect'])}）"
         return text
+
+    def _format_bgm(self, bgm: dict) -> str:
+        audio_path = bgm.get("path") or ""
+        if not audio_path:
+            return "（无）"
+        text = os.path.basename(str(audio_path))
+        volume = bgm.get("volume")
+        if isinstance(volume, (int, float)):
+            text += f" 音量{int(volume)}"
+        if not bgm.get("loop", True):
+            text += "（不循环）"
+        return text
+
+    def _format_voice_fx(self, fx: dict) -> str:
+        """两档效果压缩成一行：``她:旷野回声  其他:震地余波``。"""
+        if not fx:
+            return "（无）"
+        parts = []
+        for slot in SLOTS:
+            spec = fx.get(slot) or {}
+            preset = str(spec.get("preset") or "").strip()
+            if not preset:
+                continue
+            parts.append(f"{'她' if slot == 'her' else '其他'}:{label_of(preset)}")
+        return "  ".join(parts) or "（无）"
 
     def _filter_label(self, key: str) -> str:
         for filter_key, label in VISUAL_FILTERS:

@@ -4,6 +4,8 @@
 章节自身只描述“身处其中时的环境”：
 
 - ``background``：本章节的特定背景（含平滑切换与滤镜）；
+- ``bgm``：本章节的背景音乐（曲目、音量、循环、淡入淡出）；
+- ``voice_fx``：本章节的对话语音物理效果（她 / 其他人两档）；
 - ``sensitivity``：本章节持续生效的敏感效果；
 - ``color``：编辑器里该章节的自定义颜色。
 
@@ -11,6 +13,8 @@
 ``condition`` 一起构成完整的触发条件；``节内计数``（进入本章节后的步数，
 见 ``DungeonState.chapter_steps``）可在条件规则中判定。
 """
+
+from dungeon.voice_fx import normalize_voice_fx
 
 # 触发器 chapter 字段的特殊取值
 CHAPTER_ANY = ""            # 任意章节（含无章节），不做章节限制
@@ -31,6 +35,16 @@ DESTRUCTION_ATTR = "破坏性"
 
 # 章节内最大段落数默认值；超出后自动跳转到 overflow_target（空串=离开章节/终止）
 DEFAULT_MAX_PARAGRAPHS = 99
+
+# ---------------- 章节背景音乐 ----------------
+#: 缺省音量（0-100）；与编者能在编辑器直接看到的取值一致（不是 0.0-1.0）
+DEFAULT_BGM_VOLUME = 70
+#: 缺省切换淡入淡出秒数；0 表示硬切
+DEFAULT_BGM_FADE_SECONDS = 1.5
+#: 音量上限，越界值会被夹到这里
+MAX_BGM_VOLUME = 100
+#: 常见可用音频格式（仅用于选择与校验时的提示；实际能不能放出来由播放后端决定）
+BGM_SUPPORTED_EXTS = (".mp3", ".wav", ".ogg", ".flac", ".m4a", ".wma")
 
 
 def default_chapter_color(index: int) -> str:
@@ -74,6 +88,43 @@ def normalize_sensitivity_effect(raw: dict) -> dict:
     }
 
 
+def normalize_bgm(raw) -> dict:
+    """把配置里的背景音乐补全为 ``{path, volume, loop, fade_seconds}``。
+
+    缺曲目（``path`` 为空）时返回**空字典**——运行时视为「本章节不放音乐」，
+    进入时会停掉上一章遗留的曲目；这也是编辑器里“没选音频”的存盘形态，
+    避免每个章节都摊一份只有默认值的空配置。
+    """
+    raw = raw if isinstance(raw, dict) else {}
+    path = str(raw.get("path") or "").strip()
+    if not path:
+        return {}
+    try:
+        volume = int(float(raw.get("volume", DEFAULT_BGM_VOLUME)))
+    except (TypeError, ValueError):
+        volume = DEFAULT_BGM_VOLUME
+    try:
+        fade_seconds = float(raw.get("fade_seconds", DEFAULT_BGM_FADE_SECONDS))
+    except (TypeError, ValueError):
+        fade_seconds = DEFAULT_BGM_FADE_SECONDS
+    return {
+        "path": path,
+        "volume": max(0, min(MAX_BGM_VOLUME, volume)),
+        "loop": bool(raw.get("loop", True)),
+        "fade_seconds": max(0.0, fade_seconds),
+    }
+
+
+def chapter_bgm(chapter) -> dict:
+    """取章节的背景音乐配置（缺项返回空字典）。"""
+    return normalize_bgm((chapter or {}).get("bgm"))
+
+
+def chapter_voice_fx(chapter) -> dict:
+    """取章节的对话语音效果配置（缺项返回空字典 = 本章节不加效果）。"""
+    return normalize_voice_fx((chapter or {}).get("voice_fx"))
+
+
 def normalize_chapter(raw, index: int = 0) -> dict:
     """补全章节结构；保留未知字段以便向后兼容。"""
     chapter = dict(raw) if isinstance(raw, dict) else {}
@@ -109,6 +160,11 @@ def normalize_chapter(raw, index: int = 0) -> dict:
         if background.get(key) is not None:
             clean_bg[key] = background[key]
     chapter["background"] = clean_bg
+
+    chapter["bgm"] = normalize_bgm(chapter.get("bgm"))
+
+    # 对话语音效果：两档（她 / 其他人），没配就不摊一份空配置
+    chapter["voice_fx"] = normalize_voice_fx(chapter.get("voice_fx"))
 
     sensitivity = chapter.get("sensitivity")
     if not isinstance(sensitivity, list):

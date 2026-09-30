@@ -45,7 +45,9 @@
 | `max_paragraphs` | int | `99` | 节内最大段落数（`chapters.DEFAULT_MAX_PARAGRAPHS`） |
 | `overflow_target` | str | `""` | 超限跳转目标；空串 = 离开章节（无章节） |
 | `background` | dict | — | 章节背景，见 §2.1 |
-| `sensitivity` | list | — | 身处本章节时持续生效、离开即失效，见 §2.2 |
+| `bgm` | dict | — | 章节背景音乐，见 §2.2 |
+| `voice_fx` | dict | — | 章节对话语音的**物理**效果（她 / 其他人两档），见 §2.4 |
+| `sensitivity` | list | — | 身处本章节时持续生效、离开即失效，见 §2.3 |
 | `intrusion_delta` | float | `0` | 结束结算：介入度增量（仅 `ending=true`） |
 | `destruction_delta` | float | `0` | 结束结算：破坏性增量（仅 `ending=true`） |
 | `casualty_step` | float | `0` | 结束结算：伤亡步进（仅 `ending=true`） |
@@ -61,7 +63,30 @@
 | `smooth_transition` | bool | `true` | 平滑切换 |
 | `filter_effect` | enum | `None` | 滤镜键，取值来自 `dungeon/actions.py::VISUAL_FILTERS` |
 
-### 2.2 `sensitivity[]`（`schema.SENSITIVITY_FIELDS`）
+### 2.2 `bgm`（`schema.BGM_FIELDS`）
+
+进入章节时播放、离开即停的背景音乐；**没配就是不放**（`normalize_bgm` 把缺曲目的
+配置归一成空 dict，也不会往每个章节摊一份只有默认值的空配置）。
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `path` | str | `""` | 音频文件，相对方案目录（编辑器导入的落在 `<方案>/audio/`）；空串 = 本章节不放音乐 |
+| `volume` | int | `70` | 音量 0-100（`chapters.DEFAULT_BGM_VOLUME`，越界夹到 `MAX_BGM_VOLUME`） |
+| `loop` | bool | `true` | 循环播放 |
+| `fade_seconds` | float | `1.5` | 切换时的淡入淡出秒数（`0` = 硬切） |
+
+播放由领域模块 `dungeon/audio.py` 承担（**不依赖任何 UI 框架**）：Windows 走
+`winmm` 的 MCI（零依赖，mp3/wav/wma 同一套），非 Windows 退到 pygame（装了才用），
+两者都不可用时静音降级——**没有声音不该拖垮一局副本**。换曲走「旧曲淡出 → 关 →
+新曲从 0 淡入」，同一首曲子重复进入只挪音量、不从头重放；所有设备操作都在一条
+后台线程上串行执行，`play()` 只入队就返回，不占帧循环。
+
+MCI 的坑：`play <alias> repeat` 只有 mpegvideo（mp3 等）认，waveaudio（wav）会把整条
+命令判成非法——先试 `repeat`，失败就退回普通 play 并把该设备标为「手动续播」，
+由工作线程轮询 `status mode` 在曲末从头再放（否则作者写的 `loop: true` 会在第一遍
+播完后无声无息地静下去）。
+
+### 2.3 `sensitivity[]`（`schema.SENSITIVITY_FIELDS`）
 
 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---|---|
@@ -79,14 +104,72 @@
 #   归一个性强度 = skip_base_prob / 5
 ```
 
+### 2.4 `voice_fx`（`schema.VOICE_FX_FIELDS` / `VOICE_FX_SLOT_FIELDS`）
+
+章节对话语音的**物理**效果，两档分开配：**她（`her`）是巨大声源的物理后果，其他人
+（`others`）是普通尺度声源在同一个环境里的后果**。设计定位是尺度 / 距离 / 空间，
+**不是语气**——所以预设名全是物理描述（巨躯轰鸣、旷野回声、高空遥语），没有「愤怒 /
+耳语」这类情绪预设。分档由 `speech.SpeechDirector._speak_job` 按说话人认：她本人走
+`her` 档，主角与其余角色走 `others` 档。
+
+没配 = 本章节不加效果（`normalize_voice_fx` 返回空 dict，不摊默认配置）；
+`normalize_chapter` 产出的 `voice_fx` 与 `CHAPTER_FIELDS` 的一致性由
+`check_scenario_schema.py` 守卫。
+
+```jsonc
+"voice_fx": {
+  "her":    {"preset": "open_valley",  "intensity": 80},
+  "others": {"preset": "trembling_ground", "intensity": 70}
+}
+```
+
+| 档 | 预设 | 物理含义 |
+|---|---|---|
+| 她 | `giant_boom` 巨躯轰鸣 | 巨大胸腔与肺量：低频厚重、轻微过载、空气随声缓抖 |
+| 她 | `open_valley` 旷野回声 | 声音撞上山体与楼群折回：稀疏的长回声 |
+| 她 | `far_above` 高空遥语 | 她在远处/高处：空气吸收吃掉高频、直达成变弱且晚到 |
+| 她 | `shaking_air` 震空低鸣 | 庞大身躯搅动空气：低频隆隆裹着缓慢的抖动 |
+| 她 | `deafening_close` 近距震耳 | 俯身贴近：过载、低频迅速膨胀、被压实 |
+| 其他人 | `room_echo` 室内回响 | 普通嗓门在室内：墙面折回的短回声 |
+| 其他人 | `valley_echo` 山谷折回 | 同一个旷野里的折回，比她的更弱更短 |
+| 其他人 | `muffled_wall` 隔墙闷响 | 隔着一层建筑结构：高频被吃掉，只剩闷响 |
+| 其他人 | `trembling_ground` 震地余波 | 她一动，地面与空气还在抖：台词裹在低频抖动里 |
+
+字段（每档）：`preset`（预设键，非法或**不属于该档**都按「不加效果」处理并给诊断）、
+`intensity`（0-100，缺省 60：把预设的基准参数按 `intensity/100` 缩放——**量**跟着变
+（湿量、深度、增益、过载、拍数），**频率不跟着变**（抖得快慢由尺度决定））。
+其余键是**手改 JSON 才用得上的高级参数**（编辑器只暴露预设 + 强度），取值范围单一
+真相源在 `voice_fx.PARAM_RANGES`：`pre_delay` / `muffle_hz` / `low_gain_db` / `drive` /
+`rumble_hz` / `rumble_level` / `tremor_hz` / `tremor_depth` / `echo_delay` / `echo_count` /
+`echo_decay` / `echo_wet`，越界运行时夹取、校验给 warning。
+
+**两级引擎（互不叠加，按本机能力择优）**，实测数字见 [架构说明](architecture.md) §4.3：
+
+| 引擎 | 依赖 | 能做什么 | 什么时候用 |
+|---|---|---|---|
+| 离线渲染（`render`） | 可选解码器 `miniaudio` **或** `soundfile`（+ numpy） | 全部环节：预延迟、空气吸收（低通）、躯体共振（低频增益）、次声隆隆、过载、缓抖、回声 | 有解码器时**一律走它**（采样级精确、跨平台一致） |
+| 播放侧近似（`playback`） | **零依赖** | 稀疏延迟分拍 = 回声；音量包络 = 缓抖 | 没有解码器时（Windows MCI 同一文件多路实测可用） |
+| 原声（`none`） | — | 无 | 没配效果；或预设纯渲染（`deafening_close`）而本机没解码器——此时日志留一条 |
+
+> **音量烘进样本**：渲染路线产出 WAV，而 MCI 的 waveaudio 设备**不认 `setaudio`**
+> （实测错误 261），播放层设不了音量，所以 `voice.volume` 在渲染时直接乘进样本。
+> 播放侧路线的音量仍走 `track.set_volume`（mp3 设备支持，实测可用）。
+> 顺带提醒：作者给 `bgm.path` 选了 `.wav` 时，Windows 上的 BGM 音量/淡入淡出同样
+> 不生效（同一条驱动限制），选 `.mp3` 才正常。
+
+降级与其余能力一致：解码失败 / 缺 numpy / 缺音频后端都只是「少点效果」，
+**不拖垮朗读**；效果渲染产物与合成音频同在会话临时目录里，收尾一起清掉。
+
 ## 3. 章节运行时规则
 
 ### 3.1 进出章节与超限
 
 | 规则 | 行为 |
 |---|---|
-| 进入章节 | 重置节内计数（`DungeonState.chapter_steps`），清除上一章遗留的短暂视效 |
-| 离开章节（跳到空目标） | 不清零属性、不切换背景，只是不再有章节效果 |
+| 进入章节 | 重置节内计数（`DungeonState.chapter_steps`），清除上一章遗留的短暂视效；应用本章的背景与背景音乐 |
+| 离开章节（跳到空目标） | 不清零属性、不切换背景，只是不再有章节效果；**背景音乐会停掉**（音乐是「身处其中」的一部分，留着上一章的曲子只会串味） |
+| 音乐随章节走 | 跳到没配 `bgm` 的章节 = 停播；回放记录里带着当时的 `bgm` 配置，回放时按当时的曲目复现，不依赖当前方案 |
+| 语音效果随章节走 | `_apply_chapter_voice_fx` 把 `voice_fx` 塞进语音导演（两档：她 / 其他人）；跳到没配效果的章节 = 清空效果（与音乐同一套语义）；回放记录与 `goto` 触发器记录都带着当时的配置复现 |
 | 起始章节 | 唯一的自动进入点；它描述初始状态，不是判定，不违反「章节无条件字段」 |
 | 超限跳转 | 节内计数达到 `max_paragraphs` 时，在 `_finish_step` 末尾（触发器判定**之后**）自动跳到 `overflow_target`；空串 = 离开章节 |
 | 上限只是兜底 | 触发器的 `goto` / `option` 仍可在达到上限**之前**离开章节 |
@@ -175,9 +258,10 @@
 | 文件 | 职责 |
 |---|---|
 | `ui/scenario/chapter_trigger_mgr.py` | 章节与触发器**合并面板**：章节行加粗并按自定义颜色着色，其下缩进行是本章节触发器；「任意章节 / 无章节」的触发器排在最后。底部是新建章节 / 新建触发器与共用的编辑、删除、上移、下移 |
-| `ui/scenario/chapter_dlg.py` | 章节编辑：配色色板 + 手填 hex、起始 / 结束标记、最大段落数与超限跳转、背景导入、敏感效果增删、结束章节的结局结算与图标 |
+| `ui/scenario/chapter_dlg.py` | 章节编辑：配色色板 + 手填 hex、起始 / 结束标记、最大段落数与超限跳转、背景导入、背景音乐（曲目 / 音量 / 循环 / 淡入淡出）、**对话语音物理效果（她 / 其他人两档的预设 + 强度）**、敏感效果增删、结束章节的结局结算与图标 |
 | `ui/scenario/trigger_dlg.py` | 触发器编辑：所在章节下拉、`跳转章节` / `短暂视效` 表单、`节内计数` 条件键、旧版动作独立按钮行；`结局` 动作已从按钮行移除 |
-| `ui/scenario/asset_import.py` | 背景 / 结局图标导入的共用实现（裁剪入库、相对路径） |
+| `ui/scenario/asset_import.py` | 背景 / 结局图标 / 背景音乐导入的共用实现（裁剪入库、相对路径；音频落 `<方案>/audio/`，不裁剪） |
+| `ui/scenario/sc_frame.py` | 方案级配置：耦合等级与主角称呼、**对话语音**（总开关 + 她 / 主角 / 其他角色的音色选择 + 语速 / 音量）、进入消耗、显示组件 |
 | `ui/scenario/component_mgr.py` | 显示组件卡片化管理（开关与参数改动自动保存） |
 
 配色与调序：
@@ -198,7 +282,7 @@
 |---|---|
 | `error` | 悬空 goto / overflow_target、无起始章节、空选项列表 |
 | `warning` | 多起始章节、结束章节内的 option / goto、废弃动作与旧版字段、条件键 / 比较符 / 度量非法、转移矩阵行缺失与权重越界、背景图 / 结局图标缺失（需传 `scenario_dir`） |
-| `info` | 无结局路径、旧版顶层字段、未知顶层键 |
+| `info` | 无结局路径、旧版顶层字段、未知顶层键、`voice` 未知子键、Velum 等级配了对话语音（不生效） |
 
 接入点：
 
@@ -240,6 +324,54 @@
 | 压缩方式 | 优先用 AI 生成不超过 100 字的第三人称概要；AI 不可用 / 失败时回退内部算法（首句 + 高频词 + 末句）；回放模式无 AI，走内部算法 |
 | 提示词内容 | `build_user_prompt` 注入 `prompt_block()`：**截至此刻的全部压缩概要** + **最近 N 段原文**；N = `settings["story_recent_count"]`，默认 20，设置项「剧情概要保留段数」（1~200） |
 | 存放 | 只存内存（`summaries`），不写入回放文件；回放按同样的块大小重新累计，不依赖保存时的概要内容 |
+
+---
+
+## 10. 对话语音（方案级 `voice`，`schema.VOICE_FIELDS`）
+
+Solea / Bulla 耦合等级的对话分支会给每句台词标 `@说话人@`（见 window.md
+「说话人标记」）。**只有带说话人的台词会念出来**，叙述段落保持安静。
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `enabled` | bool | `true` | 本方案是否朗读；还要过全局开关（设置 → 显示 →「朗读副本对话」） |
+| `voice_her` | str | `zh-CN-XiaoxiaoNeural` | 她的音色（按本局角色名 / 昵称认） |
+| `voice_protagonist` | str | `zh-CN-YunxiNeural` | 主角音色（按方案 `protagonist_title`，留空按「主角」认） |
+| `voice_other` | list | 三把备用嗓 | 其余角色的音色池，**按名字稳定映射**：同一个配角每局都是同一把嗓子 |
+| `rate` | str | `+0%` | 语速（`+10%` / `-20%`；非法写法回退常速） |
+| `volume` | int | `90` | 音量 0-100（越界夹取；比背景音乐默认高，台词要压过配乐） |
+
+合成走 **edge-tts**（微软神经网络语音，**需要联网**，`pip install edge-tts`），
+是**可选依赖**：没装或网络失败只在日志里留一条，不出声不该拖垮一局副本——与
+背景音乐的降级策略一致。播放复用 `dungeon/audio.py` 的后端（MCI → pygame →
+静音占位）。
+
+线程模型同样沿用 `audio.py`：唯一一条后台线程串行处理「合成 → 播放」，
+`speak()` 只入队就返回，**新台词打断旧台词**（翻页时不该念上一页的），
+超长台词（`MAX_SPEECH_CHARS`，300 字）跳过，会话收尾收工并清掉临时音频。
+
+| 接线 | 位置 |
+|---|---|
+| 装配音色（方案配置 × 全局开关） | `window/base.py::_configure_voice`（`_init_session` / `_init_replay` 各调一次） |
+| 触发朗读 | `window/ui.py::_speak_item`（显示单元定稿时，叙述句无 `speaker` 直接返回） |
+
+> **配置优先级**：全局开关 `settings["dungeon_voice_enabled"]` 关掉时不看方案配置
+> ——「我不想要声音」比「这个方案想配音」更强。
+
+### 10.1 章节级物理效果（`voice_fx`）
+
+音色是**谁在说话**（方案级 `voice`）；效果是**她在这个空间里说话会是什么声音**
+（章节级 `voice_fx`，她 / 其他人两档）——字段、预设与两级引擎见 §2.4。接线：
+
+| 环节 | 位置 |
+|---|---|
+| 换章时切效果（没配 = 清空） | `window/triggers.py::_apply_chapter_voice_fx`；配置挂在 `window/base.py::current_voice_fx` |
+| 回放复现 | `kind: "chapter"` 记录带 `voice_fx`，`goto` 触发器记录带 `chapter_voice_fx` |
+| 按说话人分档 | `speech.py::_speak_job`（`VoiceCaster.role_of` 是她 → `her` 档，否则 `others`） |
+| 施加效果 | `speech.py::_play` → `voice_fx.render_wav`（离线渲染）/ `voice_fx.PlaybackFx`（分拍 + 音量包络）/ 原声 |
+| 能力与降级 | `voice_fx.has_effect` / `decoder_name` / `playback_plan`；不可用时 `SpeechDirector._warn_fx_unavailable` 每个预设只提示一次 |
+
+> 效果从属于朗读：全局开关关掉时 `enabled=False`，一句都不念，效果自然也不生效。
 
 ---
 

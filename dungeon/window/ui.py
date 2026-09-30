@@ -43,6 +43,12 @@ class DungeonWindowUI:
         # 外部（应用外壳切换界面）只能靠这个标志判断能否安全清理。
         dpg_state.mark_created()
 
+        # DPG 默认把控件/按键回调派发到**工作线程**执行（官方文档明示），
+        # 与本层「只有帧循环线程允许直接调用 DPG API」的线程约定冲突。
+        # 启用手动回调管理后，回调进入队列，由帧循环在渲染前统一执行
+        # （见 base._run_frame_loop），回调因此与渲染同线程。
+        dpg.configure_app(manual_callback_management=True)
+
         self.is_fullscreen = False
         (viewport_w, viewport_h, self._dpi_scale,
          self._main_client_w, self._main_client_h) = self._get_initial_viewport_size()
@@ -392,6 +398,18 @@ class DungeonWindowUI:
         self.story_history.append(item)
         self._update_text_display()
         self._animate_reveal(item, unit.text)
+        self._speak_item(item)
+
+    def _speak_item(self, item: dict):
+        """带说话人的显示单元定稿：交给语音导演朗读。
+
+        只有 Solea/Bulla 对话分支里带 ``speaker`` 的台词会念（叙述句不念）；
+        合成与播放都在语音线程上，这里只入队，不占帧循环。
+        """
+        director = getattr(self, "_speech", None)
+        if director is None or not item.get("speaker"):
+            return
+        director.speak(item.get("speaker"), item.get("text"))
 
     # ---------- 仿流式输出 ----------
     def _animate_reveal(self, item, text: str):

@@ -17,8 +17,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from dungeon.actions import VISUAL_FILTER_KEYS
+from dungeon.chapters import (DEFAULT_BGM_FADE_SECONDS, DEFAULT_BGM_VOLUME)
 from dungeon.coupling import COUPLING_LEVELS, DEFAULT_COUPLING_LEVEL
 from dungeon.models import DungeonTextType
+from dungeon.speech import (DEFAULT_OTHER_VOICES, DEFAULT_RATE,
+                            DEFAULT_VOICE_HER, DEFAULT_VOICE_PROTAGONIST,
+                            DEFAULT_VOICE_VOLUME, normalize_voice)
+from dungeon.voice_fx import (ALL_PRESET_KEYS, DEFAULT_INTENSITY, INT_PARAMS,
+                              PARAM_LABELS, PARAM_RANGES, PRESET_NONE)
 
 TEXT_TYPE_KEYS = tuple(t.value for t in DungeonTextType)
 
@@ -69,6 +75,19 @@ SCENARIO_FIELDS = (
     FieldSpec("components", "list", "启用的显示组件", None,
               note="文本主组件之外的组件（如属性条）；文本组件写在这里会被忽略"),
     FieldSpec("components_params", "dict", "显示组件参数"),
+    FieldSpec("voice", "dict", "对话语音", None,
+              note="Solea/Bulla 对话句的朗读音色；需联网（edge-tts），未启用则不出声"),
+)
+
+# 对话语音（Solea/Bulla）：音色按「她 / 主角 / 其他角色」三类分配
+VOICE_FIELDS = (
+    FieldSpec("enabled", "bool", "启用对话语音", True),
+    FieldSpec("voice_her", "str", "她的音色", DEFAULT_VOICE_HER),
+    FieldSpec("voice_protagonist", "str", "主角的音色", DEFAULT_VOICE_PROTAGONIST),
+    FieldSpec("voice_other", "list", "其他角色的音色池", DEFAULT_OTHER_VOICES,
+              note="按顺序给不同配角，同一个说话人固定用一把嗓子"),
+    FieldSpec("rate", "str", "语速", DEFAULT_RATE, note="如 +0% / -20% / +15%"),
+    FieldSpec("volume", "int", "音量 0-100", DEFAULT_VOICE_VOLUME),
 )
 
 # 迁移前遗留、``_migrate`` 会移除的顶层键（读到即提示作者清理）
@@ -92,6 +111,11 @@ CHAPTER_FIELDS = (
     FieldSpec("custom_deltas", "dict", "结束结算：自定义属性增量", None),
     FieldSpec("icon_path", "str", "结局图标（相对方案目录）", ""),
     FieldSpec("background", "dict", "章节背景"),
+    FieldSpec("bgm", "dict", "章节背景音乐", None,
+              note="进入章节时播放；本章未配置则停止音乐"),
+    FieldSpec("voice_fx", "dict", "章节对话语音效果", None,
+              note="按「她 / 其他人」两档配置的物理声学效果（低频轰鸣/回声/空气缓抖）；"
+                   "本章未配置则不加效果"),
     FieldSpec("sensitivity", "list", "章节持续敏感效果"),
 )
 
@@ -99,6 +123,32 @@ BACKGROUND_FIELDS = (
     FieldSpec("image_path", "str", "背景图（相对方案目录）", ""),
     FieldSpec("smooth_transition", "bool", "平滑切换", True),
     FieldSpec("filter_effect", "enum", "滤镜", None, choices=("",) + VISUAL_FILTER_KEYS),
+)
+
+# 背景音乐：``path`` 相对方案目录，空串 = 本章节不放音乐
+BGM_FIELDS = (
+    FieldSpec("path", "str", "音频文件（相对方案目录）", ""),
+    FieldSpec("volume", "int", "音量 0-100", DEFAULT_BGM_VOLUME),
+    FieldSpec("loop", "bool", "循环播放", True),
+    FieldSpec("fade_seconds", "float", "切换淡入淡出秒数", DEFAULT_BGM_FADE_SECONDS),
+)
+
+# 对话语音效果（章节级）：两档。她那一档是巨大声源的物理后果，其他人那一档是
+# 普通尺度声源处在同一环境里的后果——**不是语气**，所以预设名全是物理描述。
+VOICE_FX_FIELDS = (
+    FieldSpec("her", "dict", "她的声音效果", None,
+              note="巨大声源：巨躯轰鸣 / 旷野回声 / 高空遥语 / 震空低鸣 / 近距震耳"),
+    FieldSpec("others", "dict", "其他人的声音效果", None,
+              note="普通尺度声源处在她的物理环境里：室内回响 / 山谷折回 / 隔墙闷响 / 震地余波"),
+)
+
+# 单档的形状：预设 + 强度（其余是手改 JSON 时才用得上的高级参数，按物理量命名）
+VOICE_FX_SLOT_FIELDS = (
+    FieldSpec("preset", "enum", "预设", PRESET_NONE, choices=ALL_PRESET_KEYS),
+    FieldSpec("intensity", "int", "强度 0-100", DEFAULT_INTENSITY),
+) + tuple(
+    FieldSpec(key, "int" if key in INT_PARAMS else "float", PARAM_LABELS[key], None)
+    for key in PARAM_RANGES
 )
 
 SENSITIVITY_FIELDS = (
@@ -168,4 +218,6 @@ def empty_scenario_config() -> dict:
         ],
         "chapters": [],
         "triggers": [],
+        # 对话语音：默认开，音色取默认值（作者可在编辑器里改或整段关掉）
+        "voice": normalize_voice(None),
     }

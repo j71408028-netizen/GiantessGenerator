@@ -33,6 +33,9 @@ class SettingsRepo:
             "auto_save_report": False,
             "auto_save_replay": False,
             "story_recent_count": 20,
+            # 副本对话语音总开关：关掉后所有方案都不出声（方案级 voice.enabled
+            # 只在这个开关打开时才看）
+            "dungeon_voice_enabled": True,
             "save_low_resolution_image": False,
             "use_preview_image_as_avatar": False,
             "blocked_words": []

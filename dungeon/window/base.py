@@ -19,6 +19,8 @@ import dearpygui.dearpygui as dpg
 
 from ai import create_client
 from dungeon import process_log
+from dungeon.audio import BgmPlayer
+from dungeon.speech import SpeechDirector, VoiceCaster, normalize_voice
 from dungeon.window.background import DungeonBackground
 from dungeon.chapters import normalize_chapters
 from dungeon.coupling import normalize_coupling_level
@@ -139,6 +141,16 @@ class DungeonWindowBase:
         self._bg_pil_original = None
         self._bg_revision = 0
         self._background = DungeonBackground(self)
+        # 章节背景音乐：一个人一条（bgm 与 background 共用同一套素材路径解析，
+        # 因此把 background 的解析器注入进去，省得多写一份相对路径兜底）
+        self.current_bgm_path = ""
+        # 章节对话语音效果（她 / 其他人两档），进章时由 triggers 填
+        self.current_voice_fx = {}
+        self._bgm = BgmPlayer(resolver=self._background.resolve_path,
+                              logger=process_log.log)
+        # 对话语音：Solea/Bulla 的带说话人台词由它朗读（音色在会话初始化时
+        # 按方案配置 + 全局开关填进去，见 _configure_voice）
+        self._speech = SpeechDirector(logger=process_log.log, enabled=False)
 
         # 入口阶段（dungeon.window.launcher.DungeonLaunchStages）与会话阶段共用同一 DPG 生命周期
         self.scenario_ids = list(scenario_ids) if scenario_ids else []
@@ -316,6 +328,10 @@ class DungeonWindowBase:
         while True:
             self._pump_host_events()
             self._frame.tick()
+            # DPG 手动回调管理（见 ui._build_ui）：渲染前在**本线程**执行
+            # 控件/按键回调——DPG 默认把回调派发到工作线程，与「只有帧循环
+            # 线程允许直接调用 DPG」的约定冲突；收进帧循环后回调与渲染同线程。
+            dpg.run_callbacks(dpg.get_callback_queue())
             if not dpg.is_dearpygui_running():
                 # 用户点 X 或程序 stop：走与退出回调等价的清理
                 self._on_close()
@@ -351,6 +367,10 @@ class DungeonWindowBase:
         self._destroy_overlays()
         # 背景像素工作者：会话内的全部重采样/混合任务都在这里排队，收工时一并结束
         self._background.shutdown()
+        # 章节背景音乐：会话一结束就该静音（帧循环已停，渐变任务不会再被调用方刷新）
+        self._bgm.shutdown()
+        # 对话语音：同样必须立刻收声，顺手清掉合成的临时音频
+        self._speech.shutdown()
 
         # 用户点视口关闭键（X）退出时，GLFW 销毁原生窗口会往本线程队列里留一条
         # WM_QUIT；它不会危害 DPG，却会让 Tk 的计时器与模态对话框（tkwait）
@@ -566,6 +586,30 @@ class DungeonWindowBase:
         self.system_prompt = self.prompt_builder.build_system_prompt()
         self.messages = [{"role": "system", "content": self.system_prompt}]
 
+        self._configure_voice(scenario_config)
+
+    def _configure_voice(self, scenario_config=None):
+        """按方案配置 + 全局开关装配对话语音（Solea/Bulla 对话句朗读）。
+
+        全局开关（``settings["dungeon_voice_enabled"]``）关掉时不看方案配置——
+        "我不想要声音"是比"这个方案想配音"更强的意图。章节级的物理效果
+        （``current_voice_fx``）随它一起装配：全局关掉时自然不会出声。
+        """
+        cfg = normalize_voice((scenario_config or {}).get("voice"))
+        global_on = bool((self.settings or {}).get("dungeon_voice_enabled", True))
+        caster = VoiceCaster(
+            her_names=(self.name, self.nick),
+            # 注意逗号：单元素元组写成 ``(x)`` 会得到字符串，遍历时按字符拆开
+            protagonist_names=((getattr(self, "protagonist_title", "") or "主角"),),
+            voice_her=cfg["voice_her"],
+            voice_protagonist=cfg["voice_protagonist"],
+            other_voices=cfg["voice_other"],
+        )
+        self._speech.configure(caster=caster, rate=cfg["rate"],
+                               volume=cfg["volume"],
+                               enabled=global_on and cfg["enabled"],
+                               effect=getattr(self, "current_voice_fx", None) or {})
+
     def _init_replay(self, replay_data):
         """回放模式：仅重放数据，不创建 AI 客户端与提示词构建器。"""
         replay_data = replay_data or []
@@ -586,6 +630,8 @@ class DungeonWindowBase:
         self.current_text_type = None
         # 回放模式同样维护剧情压缩器（不调用 AI，仅走内部算法压缩）
         self.story_summary = StorySummarizer()
+        # 回放也照方案配置朗读（音色可能只有默认值——回放数据里没有主角称呼）
+        self._configure_voice(getattr(self, "scenario_config", None))
 
     def _message_window_size(self) -> int:
         """对话历史保留的消息条数（不含系统提示；可在设置中调整，默认 20）。

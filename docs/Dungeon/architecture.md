@@ -82,7 +82,10 @@
 |---|---|---|
 | `models.py` | 运行态数据与枚举 | `DungeonTextType`（5 种段落类型 + 默认步进值）、`DungeonState`（坐标 / 自定义属性 / 计数 / 二阶步长） |
 | `rules.py` | 演化与条件求值 | `EvolutionRules`（转移矩阵、分节步长、属性演化）、`TriggerRules.evaluate` |
-| `chapters.py` | 章节模型与归一化 | `normalize_chapter(s)`、`normalize_chapters`、`find_chapter`、`is_terminating_chapter`、`overflow_jump_target`、`chapter_step_override`、`sensitivity_amount`、`matches_scope` |
+| `chapters.py` | 章节模型与归一化 | `normalize_chapter(s)`、`normalize_chapters`、`normalize_bgm`、`find_chapter`、`is_terminating_chapter`、`overflow_jump_target`、`chapter_step_override`、`sensitivity_amount`、`matches_scope` |
+| `audio.py` | 音频播放底座（纯领域，不碰 UI 框架） | `BgmPlayer.play/stop/shutdown/wait_idle`、`open_track`、`backend_name`、`set_backends`（MCI → pygame → 静音降级） |
+| `speech.py` | Solea/Bulla 对话的合成语音（纯领域） | `VoiceCaster.voice_for`（她 / 主角 / 配角按名字稳定映射）、`SpeechDirector.speak/stop/set_effect/shutdown`、`normalize_voice`、`RECOMMENDED_VOICES`、`edge_tts_available` |
+| `voice_fx.py` | 章节对话语音的**物理**声学效果（她 / 其他人两档） | `PRESETS`（预设单一真相源）、`normalize_voice_fx`、`resolved_params`、`playback_plan`（零依赖近似）、`render_wav`（可选解码器 + numpy）、`PlaybackFx`（分拍轨 + 音量包络） |
 | `actions.py` | 动作类型单一注册表 | `NEW_ACTIONS`（insert/option/effect/goto/none）、`ENDING_ACTION`（只读兼容）、`ACTION_LABELS`、`VISUAL_FILTERS` |
 | `coupling.py` | 耦合等级与对应提示词 | `coupling_prompts`、`section_instruction`、`normalize_coupling_level` |
 | `prompts.py` | 系统与玩家提示词构建 | `DungeonPromptBuilder.build_system_prompt / build_user_prompt` |
@@ -125,6 +128,26 @@ mixin 之间只通过 `self` 上的约定属性通信；新增方法时注意排
 | 未出现的行 | 沿用内置默认 `EvolutionRules.DEFAULT_TRANSITION_MATRIX` |
 | 脏权重 | 统一转 float、负值按 0、未知行列键跳过（已在校验阶段报 warning） |
 | 整行无效 | 全 0 或解析不出有效权重时回退默认行 |
+
+### 4.3 语音效果：两级引擎与实测（2026-09-29 本机实测）
+
+`voice_fx.py` 的「物理效果」建立在下面这组实测结论上（Windows / Python 3.13.7 /
+edge-tts 7.2.8 / winmm MCI，探针脚本在临时目录跑，未入库）：
+
+| 实测项 | 结论 | 对实现的约束 |
+|---|---|---|
+| 合成服务只给 MP3 | `__stream` 里 `outputFormat` 是硬编码字面量；换成 `raw-24khz-16bit-mono-pcm` / `riff-…` / `ogg-…-opus` 一律 `NoAudioReceived` | **不能**指望服务端给 PCM → 效果必须自己算 |
+| `mstts:express-as` 风格 | `whispering` / `terrified` / `angry` / `sad` 全部 `NoAudioReceived` | 语气类预设做不了（也**不该**做，见 §2.4 定位） |
+| prosody `rate` / `pitch` / `volume` | 生效（`+40%` 语速 2.95s→2.11s；`pitch=-100Hz` 谱重心 3448→1664 Hz；`volume=-40%` RMS 0.089→0.053） | 语速/音量/变调是**合成侧**免费参数（本轮按用户要求不纳入效果，见 `voice.volume` 仍走原字段） |
+| MP3 解码 | `miniaudio` 1.6 ms、`soundfile`（libsndfile 1.2.2）2.4 ms（2.95s 音频） | 离线渲染的代价可忽略（网络合成 ~1 s 才是瓶颈） |
+| numpy 效果链 | 缓抖 1.2 ms、三拍回声 0.7 ms、FFT 混响 47 ms（首帧），三者串联 7.3 ms | 全部在语音工作线程里做，不占帧循环 |
+| MCI 同一文件多路 | 同一文件开 8 个 alias 全部 `playing`；命令到 `playing` 0.3~1.0 ms | 播放侧「延迟分拍 = 回声」可行（零依赖） |
+| MCI `setaudio volume`（mp3/mpegvideo） | 支持，**播放中**也支持；`left volume` 支持，`bass` 不支持 | 播放侧的「缓抖 = 音量包络」可行 |
+| MCI `setaudio`（wav/waveaudio） | **整条命令不被驱动支持**（错误 261） | 渲染路线必须把音量烘进样本；**顺带**：BGM 选 `.wav` 时音量/淡入淡出同样静默失效 |
+| MCI `save … type waveaudio` | 错误 295 / 274（`mpegvideo` 设备不支持） | 不能靠 MCI 白嫖 MP3→WAV 解码 |
+
+因此的降级阶梯（`speech.SpeechDirector._play`）：**离线渲染 → 播放侧近似 → 原声**，
+三者互不叠加；任何一步失败只影响「听感」，不影响「出声」。
 
 ## 5. 一次步进的数据流
 
@@ -245,7 +268,7 @@ data/
 | 构造参数必须保存到 `self` | mixin 方法可能被其他 mixin 调用，`__init__` 里的局部变量会 AttributeError | [窗口文档](window.md) §5-C3 |
 | 关闭一律走 `_request_close()` | 业务代码不直接 `dpg.stop_dearpygui()` | [窗口文档](window.md) §5-C1 |
 | 跨线程 UI 更新走 `self._frame.call()` | 帧时钟是**窗口实例成员**；计时类逻辑用 `every/after` 帧任务而不是开线程 | [窗口文档](window.md) §5-C4、`window/frame.py` |
-| `destroy_context()` 之前不碰 Tk；之后必须补隐藏保活视口 | 前者会 0xC0000005；后者让 GLFW 终止后 Tk 根窗口仍可销毁/隐藏，宿主的热切换才成立。`_finish_session()` / `_start_session()` 的顺序就是为此固定的 | [窗口文档](window.md) §5-C2 |
+| GLFW 终止**之后**，当时的 Tk 根窗口不得 `destroy()` / `withdraw()`；收尾后必须补隐藏保活视口 | 终止**前** Tk 照常可用——收尾顺序刻意把 Tk 交互（恢复主窗口、弹框）放在 `destroy_context()` 之前；终止后那个根的窗口级命令会 0xC0000005 硬崩。保活视口把进程留在「Tk 根健康」状态，宿主的热切换才成立。`_finish_session()` / `_start_session()` 的顺序就是为此固定的 | [窗口文档](window.md) §5-C2 |
 | 写盘必走原子写 | 半截文件不可恢复 | 本文 §8 |
 | 剧本 / 运营术语不混用 | `scenario_*` = 方案，`dungeon_*` = 一局 | [术语表](domain_terms.md) |
 | 组件只读窗口状态 | 组件 ctx 即窗口实例，不反向写状态；**访问只经组件服务面**（`component_viewport` / `schedule*` / `session_waiting_for_input` / `component_top_inset` 等，C13），不读窗口私有属性 | `component_registry.py::DungeonComponent` 契约文档、`components.py::ComponentHandler`、`scripts/check_component_pack.py` |

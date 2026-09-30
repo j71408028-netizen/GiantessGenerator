@@ -52,6 +52,7 @@
 | 脚本 | 覆盖 | 命令 |
 |---|---|---|
 | `check_dungeon_layering.py` | 分层守卫：领域层禁 import GUI/服务层/反向依赖 window；`window/` 禁 import `tkinter`/`customtkinter`/`ui` | `python scripts/check_dungeon_layering.py` |
+| `check_dungeon_window_contract.py` | 窗口契约守卫：`window/` 内禁 `threading.Timer`、禁无超时 `join`；`dpg.stop_dearpygui` / `create_context` / `destroy_context` 只在生命周期属主文件（base / ui / dpg_state）允许；禁 `start_dearpygui` / `set_exit_callback` / `minimize_viewport` | `python scripts/check_dungeon_window_contract.py` |
 | `check_scenario_schema.py` | schema 单一真相源（空模板 golden、字段漂移）+ 校验器规则 + 演化配置链路 | `python scripts/check_scenario_schema.py` |
 | `check_splitter.py` | 内置分句器：断点切分、流式幂等、`@说话人@` 标记解析与落盘净化 | `python scripts/check_splitter.py` |
 | `check_component_pack.py` | 显示组件包：加载链（常驻包来源 / 必需 id）、文本家族与 schema 一致、组件契约与服务面（替身 ctx 只实现服务面 + AST 扫 `ctx._x` 越界）、元数据 `label`/`description`、`param_specs` 结构与 `min/max` 夹取、tag 前缀冲突、组件包不 `print` 且类都登记进 `REGISTRY`、外部包覆盖、隐藏 DPG 上下文里的 `build/layout/refresh/destroy` 冒烟与控件无残留 | `python scripts/check_component_pack.py` |
@@ -64,7 +65,7 @@
 
 | 脚本 | 覆盖 | 命令 |
 |---|---|---|
-| `dungeon_autopilot.py` | 真窗口生命周期：构造 → `run()` → 步进 → 关闭 → 落盘（7 场景 63 项断言，含文本组件接管与覆盖层服务面冒烟） | `python scripts/dungeon_autopilot.py` |
+| `dungeon_autopilot.py` | 真窗口生命周期：构造 → `run()` → 步进 → 关闭 → 落盘（11 场景 95 项断言，含回调线程、章节背景音乐、章节对话语音物理效果、对话语音与文本组件接管冒烟） | `python scripts/dungeon_autopilot.py` |
 
 判定方式详见 [调试自动化](window_automation.md) §4：**看结论行，不看退出码**（默认如此；
 `--require-clean-exit` 复测退出路径时退出状态也计入验收）。

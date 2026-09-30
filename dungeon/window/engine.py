@@ -3,8 +3,6 @@
 import threading
 import time
 
-import dearpygui.dearpygui as dpg
-
 from dungeon import process_log
 from dungeon.chapters import find_chapter, is_terminating_chapter, overflow_jump_target
 from dungeon.details import build_detail_query_prompt, parse_detail_queries
@@ -130,6 +128,8 @@ class DungeonStoryEngine:
                 if pregen is not None and current_item["text"]:
                     # 预生成整段就绪：首句仿流式揭示，与实时流式的节奏一致
                     self._animate_reveal(current_item, current_item["text"])
+                # 首句定稿：带说话人（Solea/Bulla 对话分支）就该念出来
+                self._speak_item(current_item)
 
                 self.messages.append({"role": "assistant", "content": full_response_buffer})
                 window = self._message_window_size()
@@ -524,6 +524,10 @@ class DungeonStoryEngine:
         self._update_text_display()
 
     def _on_close(self):
+        """收尾钩子：由帧循环在 DPG **已停止**后调用（base._run_frame_loop 的
+        退出分支），这里只做清理标记。不再调用 ``stop_dearpygui()``——那时
+        DPG 已经停了；业务侧主动关窗一律走 ``base._request_close()``（§5-C1），
+        契约由 ``check_dungeon_window_contract.py`` 守住。"""
         self._closing = True
         # 尚未进入会话阶段（仍在入口选择页）直接关闭窗口时，
         # 不触发会话退出处理（未触发结局的数据丢失警告只对会话阶段有意义）
@@ -532,7 +536,6 @@ class DungeonStoryEngine:
         # 挂起的重采样任务不必再跑：帧时钟会在 _finish_session 里连同其余任务一起丢掉
         self._background.cancel_pending_refresh()
         self._unregister_with_parent()
-        dpg.stop_dearpygui()
 
     # ---------- 辅助方法 ----------
     def _parse_final_json(self, response_text: str):

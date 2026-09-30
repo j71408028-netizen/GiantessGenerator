@@ -20,8 +20,16 @@ from dataclasses import dataclass
 from dungeon import schema
 from dungeon.actions import (ENDING_ACTION, VISUAL_FILTER_KEYS,
                              normalize_action_type)
-from dungeon.chapters import CHAPTER_NONE, normalize_chapters
-from dungeon.coupling import COUPLING_LEVELS, VELUM
+from dungeon.chapters import (BGM_SUPPORTED_EXTS, CHAPTER_NONE,
+                              MAX_BGM_VOLUME, normalize_chapters)
+from dungeon.coupling import (BULLA, COUPLING_LEVEL_LABELS, COUPLING_LEVELS,
+                              SOLEA, VELUM, normalize_coupling_level)
+from dungeon.speech import (DEFAULT_VOICE_VOLUME, MAX_VOICE_VOLUME,
+                            normalize_rate)
+from dungeon.voice_fx import (MAX_INTENSITY, PARAM_LABELS, PARAM_RANGES,
+                              PRESETS_BY_KEY, PRESET_NONE, SLOT_KEYS,
+                              SLOT_LABELS, SLOTS, needs_render,
+                              preset_keys_for, render_available)
 
 LEVEL_LABELS = {"error": "错误", "warning": "警告", "info": "提示"}
 _LEVEL_ORDER = {"error": 0, "warning": 1, "info": 2}
@@ -95,7 +103,8 @@ def validate_scenario_config(config, *, scenario_dir: str = None) -> list:
         config.get("triggers"), config.get("evolution_attrs"))
 
     _validate_chapters(config.get("chapters"), chapters, chapter_names,
-                       terminating, scenario_dir, add)
+                       terminating, scenario_dir, add,
+                       coupling_level=config.get("coupling_level"))
     _validate_triggers(config.get("triggers"), chapter_names, terminating,
                        trigger_names, custom_attrs, scenario_dir, add)
 
@@ -165,6 +174,48 @@ def _validate_top_level(config: dict, add) -> None:
         add("error", "chapters", "章节列表必须是数组")
     if not isinstance(config.get("triggers"), list):
         add("error", "triggers", "触发器列表必须是数组")
+    _validate_voice(config.get("voice"), config.get("coupling_level"), add)
+
+
+def _validate_voice(voice_raw, coupling_level, add) -> None:
+    """对话语音配置（Solea/Bulla 才用得上，因此按耦合等级给不同级别的提示）。"""
+    if voice_raw is None:
+        return
+    if not isinstance(voice_raw, dict):
+        add("warning", "voice", "对话语音配置不是对象，已按默认值处理")
+        return
+    level = normalize_coupling_level(coupling_level)
+    enabled = bool(voice_raw.get("enabled", True))
+    # 未知键只提示一次，避免和 chapters 那样逐条刷屏
+    unknown = [k for k in voice_raw if k not in schema.field_map(schema.VOICE_FIELDS)]
+    if unknown:
+        add("info", "voice", f"未知字段：{', '.join(sorted(unknown))}（会原样保留）")
+    if not enabled:
+        return
+    if level not in (SOLEA, BULLA):
+        add("info", "voice", "对话语音只对 Solea / Bulla 的对话句生效，"
+                             f"当前耦合等级为 {COUPLING_LEVEL_LABELS.get(level, level)}")
+    for key, label in (("voice_her", "她的音色"),
+                       ("voice_protagonist", "主角的音色")):
+        value = str(voice_raw.get(key) or "").strip()
+        if not value:
+            add("warning", f"voice.{key}", f"{label}为空，将回退到默认音色")
+    others = voice_raw.get("voice_other")
+    if not isinstance(others, (list, tuple)) or not [
+            v for v in others if str(v or "").strip()]:
+        add("warning", "voice.voice_other", "其他角色的音色池为空，将回退到默认音色池")
+    rate = str(voice_raw.get("rate") or "").strip()
+    if rate and normalize_rate(rate) != rate:
+        add("warning", "voice.rate", f"语速写法无法识别：{rate}（应如 +0% / -20%），"
+                                     f"将按常速处理")
+    try:
+        volume = int(float(voice_raw.get("volume", DEFAULT_VOICE_VOLUME)))
+    except (TypeError, ValueError):
+        add("warning", "voice.volume", "音量不是数字，已按默认值处理")
+    else:
+        if not 0 <= volume <= MAX_VOICE_VOLUME:
+            add("warning", "voice.volume",
+                f"音量 {volume} 超出 0-{MAX_VOICE_VOLUME}，运行时会被夹取")
 
 
 def _validate_section_prompts(section_prompts, add) -> None:
@@ -301,11 +352,118 @@ def _asset_exists(scenario_dir: str, rel_path: str) -> bool:
     return os.path.isfile(os.path.join(scenario_dir, rel_path))
 
 
+def _validate_bgm(raw_bgm, bgm, path: str, scenario_dir: str, add) -> None:
+    """章节背景音乐：资产缺失 + 编辑器填不出来的越界值。
+
+    ``bgm`` 是 normalize 后的运行时视图（值已被夹到合法区间），``raw_bgm``
+    是作者存的原文——**只有原文才能看出笔误**：写 500 会被悄悄改成 100，
+    运行时一切正常，作者的意图却没生效。
+    """
+    if not isinstance(bgm, dict) or not bgm.get("path"):
+        return
+    audio = str(bgm.get("path") or "").strip()
+    if audio and scenario_dir and not _asset_exists(scenario_dir, audio):
+        add("warning", f"{path}.bgm.path",
+            f"背景音乐文件不存在：{audio}（进入该章节时不会有声音）")
+    suffix = os.path.splitext(audio)[1].lower()
+    if suffix and suffix not in BGM_SUPPORTED_EXTS:
+        recommended = "、".join(ext.lstrip(".") for ext in BGM_SUPPORTED_EXTS)
+        add("warning", f"{path}.bgm.path",
+            f"音频后缀「{suffix}」不是常见格式（推荐：{recommended}），"
+            f"能不能放出声取决于系统解码器")
+    raw = raw_bgm if isinstance(raw_bgm, dict) else {}
+    volume = raw.get("volume")
+    if volume is not None and not _is_number(volume):
+        add("warning", f"{path}.bgm.volume", "音量必须是数字，加载时回退默认值")
+    elif _is_number(volume) and not 0 <= float(volume) <= MAX_BGM_VOLUME:
+        add("warning", f"{path}.bgm.volume",
+            f"音量需在 0~{MAX_BGM_VOLUME} 之间，加载时会自动夹到范围内")
+    fade = raw.get("fade_seconds")
+    if fade is not None and not (_is_number(fade) and float(fade) >= 0):
+        add("warning", f"{path}.bgm.fade_seconds",
+            "淡入淡出秒数必须是非负数字，加载时回退默认值")
+
+
+def _validate_voice_fx(raw_fx, path: str, add, coupling_level=None) -> None:
+    """章节对话语音效果（她 / 其他人两档）：只报作者能看懂的错。
+
+    看**原文**而不是 normalize 后的值——写错的预设名会被悄悄按「不加效果」处理，
+    运行时一声不吭，作者却以为自己配好了（与 ``_validate_bgm`` 同一个道理）。
+    """
+    if raw_fx is None:
+        return
+    if not isinstance(raw_fx, dict):
+        add("warning", f"{path}.voice_fx", "对话语音效果不是对象，已按「不加效果」处理")
+        return
+    configured = False
+    for slot in SLOTS:
+        raw_slot = raw_fx.get(slot)
+        if raw_slot is None:
+            continue
+        label = SLOT_LABELS.get(slot, slot)
+        slot_path = f"{path}.voice_fx.{slot}"
+        if not isinstance(raw_slot, dict):
+            add("warning", slot_path, f"{label}的声音效果不是对象，已按「不加效果」处理")
+            continue
+        key = str(raw_slot.get("preset") or PRESET_NONE).strip() or PRESET_NONE
+        allowed = preset_keys_for(slot)
+        preset = PRESETS_BY_KEY.get(key)
+        preset_ok = True
+        if key != PRESET_NONE and preset is None:
+            add("warning", slot_path + ".preset",
+                f"未知预设「{key}」（{label}可选：{', '.join(allowed)}），按「不加效果」处理")
+            preset_ok = False
+        elif preset is not None and not preset.supports(slot):
+            owner = SLOT_LABELS.get(preset.slots[0], "") if preset.slots else ""
+            add("warning", slot_path + ".preset",
+                f"预设「{preset.label}」属于{owner}那一档，放在这里按「不加效果」处理"
+                f"（{label}可选：{', '.join(allowed)}）")
+            preset_ok = False
+        if preset_ok:
+            configured = True
+        # 预设写错也不放过其余笔误：一次把作者能改的都告诉他
+        unknown = [k for k in raw_slot if k not in SLOT_KEYS]
+        if unknown:
+            add("info", slot_path, f"未知参数：{', '.join(sorted(unknown))}（会原样保留）")
+        intensity = raw_slot.get("intensity")
+        if intensity is not None and not (
+                _is_number(intensity) and 0 <= float(intensity) <= MAX_INTENSITY):
+            add("warning", slot_path + ".intensity",
+                f"强度必须是 0~{MAX_INTENSITY} 的数字，加载时会自动夹到范围内")
+        for key, value in raw_slot.items():
+            if key not in PARAM_RANGES or value is None:
+                continue
+            low, high = PARAM_RANGES[key]
+            if not _is_number(value):
+                add("warning", f"{slot_path}.{key}",
+                    f"{PARAM_LABELS[key]}必须是数字，加载时回退默认值")
+            elif not low <= float(value) <= high:
+                add("warning", f"{slot_path}.{key}",
+                    f"{PARAM_LABELS[key]} {value} 超出范围 {low}~{high}，加载时会夹取")
+        if (preset_ok and preset is not None and needs_render(raw_slot)
+                and not render_available(raw_slot)):
+            add("info", slot_path,
+                f"「{preset.label}」要靠离线渲染才完整（pip install miniaudio 或 "
+                f"soundfile），本机没装解码器，运行时只有播放侧近似或原声")
+    if configured and coupling_level is not None:
+        level = normalize_coupling_level(coupling_level)
+        if level not in (SOLEA, BULLA):
+            add("info", f"{path}.voice_fx",
+                "对话语音效果只对 Solea / Bulla 的对话句生效，"
+                f"当前耦合等级为 {COUPLING_LEVEL_LABELS.get(level, level)}")
+
+
 def _validate_chapters(chapters_raw, effective, chapter_names, terminating,
-                       scenario_dir, add) -> None:
+                       scenario_dir, add, coupling_level=None) -> None:
     """``chapters_raw`` 用于未知键检查；``effective`` 是 normalize 后的运行时视图。"""
     if not isinstance(chapters_raw, list):
         return  # 已在顶层报过
+    # 原图按章节名索引：effective 会丢掉无名章节，下标与 raw 不再对齐，
+    # 只有按名字取才不会把别人的笔误记到这一章头上。
+    raw_by_name = {}
+    for item in chapters_raw:
+        if isinstance(item, dict):
+            raw_by_name.setdefault(str(item.get("name") or "").strip(), item)
     seen = set()
     for index, chapter in enumerate(effective):
         path = f"chapters[{index}]"
@@ -331,6 +489,11 @@ def _validate_chapters(chapters_raw, effective, chapter_names, terminating,
             if filter_key and filter_key not in VISUAL_FILTER_KEYS:
                 add("warning", f"{path}.background.filter_effect",
                     f"未知滤镜「{filter_key}」（允许：{', '.join(VISUAL_FILTER_KEYS)}）")
+        raw_chapter = raw_by_name.get(name) or {}
+        _validate_bgm(raw_chapter.get("bgm"), chapter.get("bgm"), path,
+                      scenario_dir, add)
+        _validate_voice_fx(raw_chapter.get("voice_fx"), path, add,
+                           coupling_level=coupling_level)
         icon = str(chapter.get("icon_path") or "").strip()
         if icon and scenario_dir and not _asset_exists(scenario_dir, icon):
             add("warning", f"{path}.icon_path", f"结局图标不存在：{icon}")

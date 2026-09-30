@@ -7,9 +7,11 @@
 import datetime
 import os
 import re
+import shutil
 from tkinter import filedialog
 
 import ui.common.dialogs
+from dungeon.chapters import BGM_SUPPORTED_EXTS
 from ui.common.dialogs import ImageCropDialog
 
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp")
@@ -81,6 +83,48 @@ def import_background_image(parent, scenario_repo, scenario_id) -> str:
         ui.common.dialogs.showerror("错误", f"保存裁剪图片失败: {e}")
         return ""
     return os.path.relpath(dest_path, dungeon_dir)
+
+
+def import_bgm_audio(parent, scenario_repo, scenario_id) -> str:
+    """选音频文件并存入副本 ``audio`` 目录，返回相对副本目录的路径（正斜杠）。
+
+    音频不像图片需要裁剪，拷进来即可；同名文件覆盖前会先问一句。
+    用户取消、副本目录不可用或后缀不是常见音频时返回空字符串。
+    """
+    patterns = " ".join(f"*{ext}" for ext in BGM_SUPPORTED_EXTS)
+    file_path = filedialog.askopenfilename(
+        title="选择背景音乐",
+        filetypes=[("音频文件", patterns), ("所有文件", "*.*")])
+    if not file_path:
+        return ""
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext not in BGM_SUPPORTED_EXTS:
+        ui.common.dialogs.showerror(
+            "错误", f"不支持的音频格式：{ext or '（无后缀）'}\n"
+                    f"请用：{patterns}")
+        return ""
+    if not (scenario_id and scenario_repo):
+        ui.common.dialogs.showerror("错误", "无法解析副本目录，无法保存音频文件")
+        return ""
+
+    dungeon_dir = os.path.join(scenario_repo.root, scenario_id)
+    if not os.path.exists(dungeon_dir):
+        ui.common.dialogs.showerror("错误", f"副本目录不存在: {dungeon_dir}")
+        return ""
+
+    audio_dir = os.path.join(dungeon_dir, "audio")
+    os.makedirs(audio_dir, exist_ok=True)
+    basename = os.path.basename(file_path)
+    dest_path = os.path.join(audio_dir, basename)
+    if os.path.exists(dest_path):
+        if not ui.common.dialogs.askyesno("文件已存在", f"音频 {basename} 已存在，是否覆盖？"):
+            return ""
+    try:
+        shutil.copy2(file_path, dest_path)
+    except Exception as e:
+        ui.common.dialogs.showerror("错误", f"保存音频文件失败: {e}")
+        return ""
+    return os.path.relpath(dest_path, dungeon_dir).replace("\\", "/")
 
 
 def import_ending_icon(parent, scenario_repo, scenario_id) -> str:

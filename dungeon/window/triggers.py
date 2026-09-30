@@ -48,11 +48,11 @@ class TriggerHandler:
         }
 
     def _enter_chapter(self, name, record: bool = False, background=None,
-                       allow_unknown: bool = False) -> bool:
+                       bgm=None, voice_fx=None, allow_unknown: bool = False) -> bool:
         """进入章节（``""`` 表示离开章节）。
 
-        ``record`` 为真时写入一条回放记录；``background`` 用于回放时直接
-        复现当时的环境，避免依赖当前加载的章节配置。
+        ``record`` 为真时写入一条回放记录；``background`` / ``bgm`` / ``voice_fx``
+        用于回放时直接复现当时的环境，避免依赖当前加载的章节配置。
         """
         name = str(name or "").strip()
         chapter = find_chapter(self.chapters, name) if name else None
@@ -82,14 +82,22 @@ class TriggerHandler:
         self._applied_visual_filter = None
 
         bg = background if background is not None else (chapter or {}).get("background")
+        # 回放记录里同样带上音乐配置：回放时照当时的曲目复现，不依赖当前方案
+        music = bgm if bgm is not None else (chapter or {}).get("bgm")
+        # 语音效果同理：当时配的两档效果跟着记录走
+        effect = voice_fx if voice_fx is not None else (chapter or {}).get("voice_fx")
         if record:
             self.replay_data.append({
                 "kind": "chapter",
                 "name": self.current_chapter or "",
                 "background": dict(bg or {}),
+                "bgm": dict(music or {}),
+                "voice_fx": dict(effect or {}),
                 "step": self.dungeon_state.total_steps,
             })
         self._apply_chapter_background(bg)
+        self._apply_chapter_bgm(music)
+        self._apply_chapter_voice_fx(effect)
         return True
 
     def _enter_start_chapter(self):
@@ -114,6 +122,35 @@ class TriggerHandler:
         self._set_background(image_path,
                              bool(background.get("smooth_transition", True)),
                              background.get("filter_effect"))
+
+    def _apply_chapter_bgm(self, bgm: dict = None):
+        """应用章节的背景音乐。
+
+        与背景图不同，**没有配 bgm 的章节会停掉音乐**：音乐是「身处其中时的环境」
+        的一部分，跳到一个没配音乐的章节还放着上一章的曲子只会串味。
+        """
+        if bgm is None:
+            chapter = (find_chapter(self.chapters, self.current_chapter)
+                       if self.current_chapter else None)
+            bgm = (chapter or {}).get("bgm") or {}
+        self.current_bgm_path = str((bgm or {}).get("path") or "")
+        self._bgm.play(bgm or {})
+
+    def _apply_chapter_voice_fx(self, voice_fx: dict = None):
+        """应用章节的对话语音物理效果（两档：她 / 其他人）。
+
+        与 bgm 同一套语义：章节是「身处其中时的环境」，**没配就是不加效果**——
+        走到没配效果的章节会把上一章的效果清掉，不会串味。具体哪一档作用于谁
+        由语音层按说话人认（她走「她」档，主角与其余角色走「其他人」档）。
+        """
+        if voice_fx is None:
+            chapter = (find_chapter(self.chapters, self.current_chapter)
+                       if self.current_chapter else None)
+            voice_fx = (chapter or {}).get("voice_fx") or {}
+        self.current_voice_fx = dict(voice_fx or {})
+        speech = getattr(self, "_speech", None)
+        if speech is not None:
+            speech.set_effect(self.current_voice_fx)
 
     def _set_background(self, image_path, smooth: bool = False, filter_effect=None):
         """切换背景并记录当前图路径，供短暂视效重刷滤镜使用。"""
@@ -249,7 +286,9 @@ class TriggerHandler:
                           f"跳转章节：{target or '离开章节'}")
                     self._record_trigger_action(
                         trigger, action_type, action_data,
-                        chapter_background=dict((chapter or {}).get("background") or {}))
+                        chapter_background=dict((chapter or {}).get("background") or {}),
+                        chapter_bgm=dict((chapter or {}).get("bgm") or {}),
+                        chapter_voice_fx=dict((chapter or {}).get("voice_fx") or {}))
             elif action_type == "ending":
                 name = str(action_data.get("name") or action_data.get("ending_text") or "").strip()
                 if not name:
@@ -294,10 +333,12 @@ class TriggerHandler:
         return record
 
     def _replay_chapter(self, record):
-        """回放时直接复现章节进入（含当时的背景，不依赖当前章节配置）。"""
+        """回放时直接复现章节进入（含当时的环境，不依赖当前章节配置）。"""
         name = record.get("name") or ""
         self._enter_chapter(name, record=False,
                             background=record.get("background"),
+                            bgm=record.get("bgm"),
+                            voice_fx=record.get("voice_fx"),
                             allow_unknown=True)
         process_log.log(f"[Replay] 复现章节进入: {name or '无章节'}")
 
@@ -310,6 +351,8 @@ class TriggerHandler:
             self._enter_chapter(str(action_data.get("chapter") or ""),
                                 record=False,
                                 background=record.get("chapter_background"),
+                                bgm=record.get("chapter_bgm"),
+                                voice_fx=record.get("chapter_voice_fx"),
                                 allow_unknown=True)
             process_log.log(f"[Replay] 复现章节跳转: {name}")
         elif action_type == "effect":

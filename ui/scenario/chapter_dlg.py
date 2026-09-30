@@ -6,15 +6,20 @@ import customtkinter as ctk
 import ui.common.dialogs
 from dungeon.actions import VISUAL_FILTERS
 from dungeon.chapters import (
-    CHAPTER_COLOR_PRESETS, DEFAULT_MAX_PARAGRAPHS, DEFAULT_SENSITIVITY_ATTR,
+    CHAPTER_COLOR_PRESETS, DEFAULT_BGM_FADE_SECONDS, DEFAULT_BGM_VOLUME,
+    DEFAULT_MAX_PARAGRAPHS, DEFAULT_SENSITIVITY_ATTR, MAX_BGM_VOLUME,
     chapter_names, normalize_chapter,
 )
+from dungeon.voice_fx import (DEFAULT_INTENSITY, MAX_INTENSITY, PRESET_NONE,
+                              SLOT_LABELS, SLOTS, label_of,
+                              preset_keys_for)
 from ui.common.dialogs import BaseDialog
 from ui.common.theme import (
     CHAPTER_BORDER, CHAPTER_HOVER, CHAPTER_TEXT, CHAPTER_TEXT_SOFT,
     CHAPTER_HINT, CHAPTER_ERR, CHAPTER_ERR_HOVER, CHAPTER_SWATCH_SELECTED_BORDER,
 )
-from ui.scenario.asset_import import import_background_image, import_ending_icon
+from ui.scenario.asset_import import (import_background_image,
+                                      import_bgm_audio, import_ending_icon)
 
 NO_FILTER_LABEL = "（不使用滤镜）"
 OVERFLOW_LEAVE_LABEL = "（离开章节）"
@@ -24,15 +29,16 @@ class ChapterEditDialog(BaseDialog):
     """章节编辑对话框。
 
     章节没有条件字段：进入与离开都由触发器的「跳转章节」动作执行。
-    这里只编辑“身处其中时的环境”——特定背景与持续敏感效果，外加编辑器配色。
+    这里只编辑“身处其中时的环境”——特定背景、背景音乐、对话语音的物理效果与
+    持续敏感效果，外加编辑器配色。
     """
 
     def __init__(self, parent, chapter: dict = None, scenario_repo=None, scenario_id=None,
                  evolution_attrs=None, all_chapters=None):
         super().__init__(parent)
         self.title("编辑章节")
-        self.geometry("580x700")
-        self.minsize(540, 500)
+        self.geometry("600x900")
+        self.minsize(560, 560)
         self.resizable(True, True)
         self.chapter = chapter if chapter is not None else {}
         self._scenario_repo = scenario_repo
@@ -159,6 +165,59 @@ class ChapterEditDialog(BaseDialog):
                         state="readonly", width=130, height=28,
                         font=self.UI_FONT).pack(side='left')
 
+        # ---------- 背景音乐 ----------
+        ctk.CTkLabel(main, text="背景音乐（进入本章节时播放）", **section_label).pack(
+            fill='x', pady=(10, 4))
+        bgm_frame = ctk.CTkFrame(main, fg_color="transparent")
+        bgm_frame.pack(fill='x', padx=6)
+
+        bgm_path_row = ctk.CTkFrame(bgm_frame, fg_color="transparent")
+        bgm_path_row.pack(fill='x')
+        ctk.CTkLabel(bgm_path_row, text="音频:", font=self.UI_FONT).pack(side='left')
+        bgm = self.chapter.get("bgm") or {}
+        self.bgm_path_var = tk.StringVar(value=bgm.get("path", ""))
+        ctk.CTkEntry(bgm_path_row, textvariable=self.bgm_path_var, height=28,
+                     font=self.UI_FONT).pack(side='left', fill='x', expand=True,
+                                             padx=(6, 6))
+        ctk.CTkButton(bgm_path_row, text="选择音频", width=84, height=28, font=self.UI_FONT,
+                      command=self._import_bgm).pack(side='left')
+        ctk.CTkButton(bgm_path_row, text="清除", width=52, height=28, font=self.UI_FONT,
+                      fg_color="transparent", border_width=1, corner_radius=8,
+                      text_color=CHAPTER_TEXT_SOFT, hover_color=CHAPTER_HOVER,
+                      border_color=CHAPTER_BORDER,
+                      command=lambda: self.bgm_path_var.set("")).pack(side='left', padx=(6, 0))
+
+        bgm_option_row = ctk.CTkFrame(bgm_frame, fg_color="transparent")
+        bgm_option_row.pack(fill='x', pady=(6, 0))
+        ctk.CTkLabel(bgm_option_row, text="音量:", font=self.UI_FONT).pack(side='left')
+        self.bgm_volume_var = tk.IntVar(value=int(bgm.get("volume", DEFAULT_BGM_VOLUME)))
+        self.bgm_volume_label = ctk.CTkLabel(
+            bgm_option_row, text=str(self.bgm_volume_var.get()), font=self.UI_FONT,
+            width=28, anchor='w')
+        ctk.CTkSlider(bgm_option_row, from_=0, to=MAX_BGM_VOLUME, number_of_steps=MAX_BGM_VOLUME,
+                      variable=self.bgm_volume_var, width=150,
+                      command=self._on_bgm_volume_change).pack(side='left', padx=(6, 0))
+        self.bgm_volume_label.pack(side='left', padx=(6, 0))
+        self.bgm_loop_var = tk.BooleanVar(value=bool(bgm.get("loop", True)))
+        ctk.CTkCheckBox(bgm_option_row, text="循环播放", variable=self.bgm_loop_var,
+                        font=self.UI_FONT, text_color=CHAPTER_TEXT,
+                        checkbox_width=20, checkbox_height=20).pack(side='left', padx=(18, 0))
+
+        bgm_fade_row = ctk.CTkFrame(bgm_frame, fg_color="transparent")
+        bgm_fade_row.pack(fill='x', pady=(6, 0))
+        ctk.CTkLabel(bgm_fade_row, text="切换淡入淡出:", font=self.UI_FONT).pack(side='left')
+        self.bgm_fade_var = tk.StringVar(
+            value=str(bgm.get("fade_seconds", DEFAULT_BGM_FADE_SECONDS)))
+        ctk.CTkEntry(bgm_fade_row, textvariable=self.bgm_fade_var, width=64, height=28,
+                     font=self.UI_FONT).pack(side='left', padx=(6, 2))
+        ctk.CTkLabel(bgm_fade_row, text="秒（0 = 直接切换）", font=self.UI_FONT_SMALL,
+                     text_color=CHAPTER_HINT).pack(side='left')
+
+        # ---------- 对话语音效果（她 / 其他人两档）----------
+        ctk.CTkLabel(main, text="对话语音效果（进入本章节时生效，离开即失效）",
+                     **section_label).pack(fill='x', pady=(10, 4))
+        self._build_voice_fx_rows(main)
+
         # ---------- 持续敏感效果 ----------
         sens_head = ctk.CTkFrame(main, fg_color="transparent")
         sens_head.pack(fill='x', pady=(10, 2))
@@ -184,7 +243,8 @@ class ChapterEditDialog(BaseDialog):
             main,
             text="敏感效果倍率 = 强度 ×（性格值 + 客观影响）：介入度用敏感值，\n"
                  "破坏性用重力，其余属性用策略值（敏感×(1-归一行动点数)+重力×归一个性强度）。\n"
-                 "章节背景与敏感效果由「跳转章节」触发器在进入时应用，离开章节即失效。",
+                 "章节背景/音乐与敏感效果由「跳转章节」触发器在进入时应用，离开章节即失效；\n"
+                 "进入没有配置音乐的章节时会停掉上一章的曲目。",
             justify='left', anchor='w', wraplength=520, font=self.UI_FONT_SMALL,
             text_color=CHAPTER_HINT).pack(fill='x', padx=6, pady=(10, 0))
 
@@ -228,6 +288,81 @@ class ChapterEditDialog(BaseDialog):
             return
         self.background_path_var.set(rel_path)
         self.smooth_var.set(True)
+
+    # ---------- 背景音乐 ----------
+    def _on_bgm_volume_change(self, value):
+        self.bgm_volume_label.configure(text=str(int(float(value))))
+
+    def _import_bgm(self):
+        rel_path = import_bgm_audio(self, self._scenario_repo, self.scenario_id)
+        if rel_path:
+            self.bgm_path_var.set(rel_path)
+
+    # ---------- 对话语音效果 ----------
+    def _build_voice_fx_rows(self, parent):
+        """两档（她 / 其他人）：预设下拉 + 强度滑杆。
+
+        预设是**物理**效果（尺度 / 距离 / 空间），不是语气；按档给：她走巨大声源
+        那组，主角与其余角色走普通尺度那组。高级参数（回声拍数、缓抖频率等）手改
+        JSON 也能用，编辑器只暴露预设 + 强度，免得对话框变成调音台。
+        """
+        self._fx_vars = {}
+        self._fx_label_keys = {}
+        container = ctk.CTkFrame(parent, fg_color="transparent")
+        container.pack(fill='x', padx=6)
+        for slot in SLOTS:
+            fx = (self.chapter.get("voice_fx") or {}).get(slot) or {}
+            keys = preset_keys_for(slot)
+            labels = [label_of(key) for key in keys]
+            self._fx_label_keys[slot] = {label_of(key): key for key in keys}
+
+            row = ctk.CTkFrame(container, fg_color="transparent")
+            row.pack(fill='x', pady=3)
+            ctk.CTkLabel(row, text=f"{SLOT_LABELS[slot]}:", font=self.UI_FONT
+                         ).pack(side='left')
+            preset_var = tk.StringVar(
+                value=label_of(fx.get("preset") or PRESET_NONE))
+            ctk.CTkComboBox(row, values=labels, variable=preset_var,
+                            state="readonly", width=176, height=28,
+                            font=self.UI_FONT).pack(side='left', padx=(6, 14))
+
+            ctk.CTkLabel(row, text="强度:", font=self.UI_FONT).pack(side='left')
+            intensity_var = tk.IntVar(
+                value=int(fx.get("intensity", DEFAULT_INTENSITY)))
+            ctk.CTkSlider(row, from_=0, to=MAX_INTENSITY,
+                          number_of_steps=MAX_INTENSITY,
+                          variable=intensity_var, width=140,
+                          ).pack(side='left', padx=(6, 0))
+            value_label = ctk.CTkLabel(row, text=str(intensity_var.get()),
+                                       width=30, anchor='w', font=self.UI_FONT)
+            value_label.pack(side='left', padx=(6, 0))
+            intensity_var.trace_add(
+                "write",
+                lambda *_a, label=value_label, var=intensity_var:
+                    label.configure(text=str(var.get())))
+            self._fx_vars[slot] = (preset_var, intensity_var)
+
+        ctk.CTkLabel(
+            parent,
+            text="效果是物理层面的：她按巨大尺度（低频轰鸣、旷野回声、空气缓抖），"
+                 "其他人按普通尺度在同一个环境里（回声、隔墙、震地余波）——不含情绪语气。\n"
+                 "没装音频解码器（pip install miniaudio）的机器上，"
+                 "「近距震耳」这类预设会退回原声，其余走零依赖的回声/缓抖近似。",
+            justify='left', anchor='w', wraplength=560, font=self.UI_FONT_SMALL,
+            text_color=CHAPTER_HINT).pack(fill='x', padx=6, pady=(4, 0))
+
+    def _voice_fx_from_ui(self) -> dict:
+        """收集两档效果；选了「不加效果」的那一档不写进配置。"""
+        result = {}
+        for slot in SLOTS:
+            preset_var, intensity_var = self._fx_vars[slot]
+            key = self._fx_label_keys[slot].get(preset_var.get().strip(), PRESET_NONE)
+            if key == PRESET_NONE:
+                continue
+            result[slot] = {"preset": key,
+                            "intensity": max(0, min(MAX_INTENSITY,
+                                                   int(intensity_var.get())))}
+        return result
 
     # ---------- 敏感效果 ----------
     def _add_sensitivity_row(self, effect: dict = None):
@@ -350,6 +485,24 @@ class ChapterEditDialog(BaseDialog):
             ui.common.dialogs.showerror("错误", "配置了滤镜但没有选择背景图片，滤镜不会生效")
             return
 
+        bgm = {}
+        audio_path = self.bgm_path_var.get().strip()
+        if audio_path:
+            try:
+                fade_seconds = float(self.bgm_fade_var.get())
+            except ValueError:
+                ui.common.dialogs.showerror("错误", "背景音乐的淡入淡出秒数必须是数字")
+                return
+            if fade_seconds < 0:
+                ui.common.dialogs.showerror("错误", "背景音乐的淡入淡出秒数不能为负")
+                return
+            bgm = {
+                "path": audio_path,
+                "volume": max(0, min(MAX_BGM_VOLUME, int(self.bgm_volume_var.get()))),
+                "loop": bool(self.bgm_loop_var.get()),
+                "fade_seconds": fade_seconds,
+            }
+
         sensitivity = []
         for index, row in enumerate(self.sens_rows, start=1):
             attr = row["attr_var"].get().strip()
@@ -390,6 +543,8 @@ class ChapterEditDialog(BaseDialog):
             "max_paragraphs": max_paragraphs,
             "overflow_target": overflow_target,
             "background": background,
+            "bgm": bgm,
+            "voice_fx": self._voice_fx_from_ui(),
             "sensitivity": sensitivity,
             "note": self.note_var.get().strip(),
         }

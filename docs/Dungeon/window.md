@@ -103,9 +103,11 @@ run() → SessionResult
 
 ### 2.2 帧循环
 
-每帧顺序固定：`_pump_host_events()` → `self._frame.tick()` → 判 `dpg.is_dearpygui_running()` → `render_dearpygui_frame()`（+ `time.sleep(FRAME_INTERVAL)`，默认 1/60s）。
+每帧顺序固定：`_pump_host_events()` → `self._frame.tick()` → `dpg.run_callbacks(dpg.get_callback_queue())` → 判 `dpg.is_dearpygui_running()` → `render_dearpygui_frame()`（+ `time.sleep(FRAME_INTERVAL)`，默认 1/60s）。
 
 - 先 tick 后判关闭：保证「关闭前最后一次 UI 更新」不丢
+- 回调队列必须在渲染前于**本线程**执行完（DPG 默认把回调派发到工作线程，见 §4）；
+  回调里 `_request_close()` 停掉 DPG 后，同一轮的运行检查随即看到 not running，语义与回调在工作线程时一致
 - 判关闭放在渲染前：`stop_dearpygui()` 后不再白渲染一帧
 - 判定关闭**只能**用 `dpg.is_dearpygui_running()`（`is_viewport_ok()` 关闭后仍返回 True）
 
@@ -185,7 +187,7 @@ run() → SessionResult
 | 概念 | 说明 |
 |---|---|
 | **逻辑段落 vs 显示段落** | 一次 AI 输出（约 100 字）是一个逻辑段落，属性演化、回放、剧情压缩、对话历史都以它为单位；内置分句器（`dungeon/splitter.py`）把它切成若干显示段落（换行、对话引号闭合、句末标点、分号、破折号为断点），逐句展示只为阅读节奏。队列耗尽后下一次点击才触发新的 AI 调用；插入触发器的段落走同一条仿流式管线 |
-| **说话人标记** | Solea/Bulla 耦合等级的对话分支（`dialog`/`branch`，方案可配 `protagonist_title` 指定主角称呼）要求 AI 在对话句句首写 `@说话人@`（规则见 `dungeon/coupling.SPEAKER_MARKER_RULE`）；分句器解析进显示单元（`DisplayUnit.speaker`），`story_history` 条目带 `speaker` 键，UI 组件据此渲染名牌。落盘正文（回放/报告/概要）经 `strip_speaker_markers` 剥离标记，回放文件格式不变；Velum 等级正文无标记，行为不变 |
+| **说话人标记** | Solea/Bulla 耦合等级的对话分支（`dialog`/`branch`，方案可配 `protagonist_title` 指定主角称呼）要求 AI 在对话句句首写 `@说话人@`（规则见 `dungeon/coupling.SPEAKER_MARKER_RULE`）；分句器解析进显示单元（`DisplayUnit.speaker`），`story_history` 条目带 `speaker` 键，UI 组件据此渲染名牌。落盘正文（回放/报告/概要）经 `strip_speaker_markers` 剥离标记，回放文件格式不变；Velum 等级正文无标记，行为不变。**带说话人的显示单元定稿时还会交给语音导演朗读**（`ui.py::_speak_item` → `speech.SpeechDirector`），只有对话句出声，叙述句不念；音色与开关见 script.md §10 |
 | **文本显示所有权** | 文本主组件由方案配置 `text_component` 字段**三选一**（`dungeon.schema.TEXT_COMPONENT_IDS`）：`text` **底部渐变式**（视口底部向上淡出的深色衬底上显示最近 N 句）、`text_card` **底部卡片式**（居中圆角半透明卡片）、`text_nvl` **全屏 NVL**（半透明覆盖层堆叠全部历史，可选衬线字体、可滚轮回看）；`components` 列表只放其余组件，主组件先建、z 序在底。行首标签只显示说话人（类型前缀是内部属性不上屏，过程日志面板可见），继续点击用闪烁 ▼ 提示。接管期间（`owns_text_display = True`）`_update_text_display` 跳过内置 `text_container` 管线、转调组件刷新链；`text`/`text_card` 屏幕只呈现当下几句，完整历史由回放/报告承接 |
 | **覆盖层服务面** | 窗口向文本主组件提供受控调用：`ctx.toggle_overlay("log")` 调出**对话记录**（全量 `story_history` 快照、可滚动，居中半透明面板），`ctx.component(cid)` 只读访问兄弟组件实例；写操作与组件生命周期仍由窗口集中管理，主组件只拿到调度权而非所有权。覆盖层打开时为阅读模态：点击只关闭覆盖层（`ui.py::_on_mouse_click`），空格/回车推进在 `_on_next_step` 入口挂起 |
 | **组件服务面（C13）** | 组件访问窗口的唯一入口集中在 `components.py::ComponentHandler`：几何 `component_viewport()`、帧时钟 `schedule / schedule_every / cancel_task`（**不碰 `self._frame`**）、状态查询 `session_waiting_for_input()`（继续指示与自动播放共用同一判定）/ `component_autoplay_on()`、字体 `text_font_tag() / bold_font_tag()`、顶部让位 `component_top_inset()`（聚合各组件的 `top_inset(ctx)` 可选钩子，与构建顺序无关）。契约的可执行版本是 `check_component_pack.py` 的替身 ctx——它**只**实现服务面，组件越界（读私有）在冒烟与 AST 扫描里都会失败 |
@@ -206,6 +208,16 @@ run() → SessionResult
 `self._frame.call(fn, *args)` 投递；队列由帧循环每帧 `tick()` 时 `drain()` 清空。
 会话收尾 `_finish_session()` 会 `_frame.stop()`，此后 `call()` 返回 `False` 而不是抛异常，
 后台线程不必再轮询 `_closing`。
+
+**DPG 回调的默认派发线程不是主线程**：DearPyGui 2.3.1 默认把控件 / 按键 handler 回调放到
+**工作线程**执行（官方文档明示，已实测复现——回调线程 ≠ 帧循环线程）。这意味着
+`_on_mouse_click` / `_on_key_down` / `_toggle_fullscreen` 这类回调若直接执行，
+天然违反上面的单线程约定（靠 DPG 内部互斥才没常崩）。因此窗口启用了
+**手动回调管理**（`ui._build_ui` 里 `dpg.configure_app(manual_callback_management=True)`）：
+回调进入 DPG 队列，由帧循环在渲染前 `run_callbacks(get_callback_queue())` 统一执行，
+回调与渲染同线程，上面的约定才真正成立。自动驾驶 `callback-thread` 场景用
+「SendMessage 直投 WM_KEYDOWN 触发真实按键 handler」锁住这条性质。
+新增回调时无需再手工转投递，但**不要**关掉手动回调管理。
 
 帧时钟 API（`dungeon/window/frame.py::FrameScheduler`，窗口实例成员 `self._frame`）：
 
@@ -234,11 +246,11 @@ run() → SessionResult
 
 | 编号 | 约束 | 原因 / 出处 | 验证 |
 |---|---|---|---|
-| **C1** | 任何「程序主动关闭副本窗口」都必须走 `base._request_close()`，业务代码不直接 `dpg.stop_dearpygui()` | 手动渲染下一次回调与下一帧之间隔着帧循环，`_request_close()` 直接 `stop_dearpygui()` 即可安全收尾；`FindWindowW` + `WM_CLOSE` 平台 hack 已整体删除 | `python scripts/dungeon_autopilot.py --scene session-close --isolate`（含 `--repeat 2`）；真应用手测「进入副本 → 返回 → 再进入副本」 |
+| **C1** | 任何「程序主动关闭副本窗口」都必须走 `base._request_close()`，业务代码不直接 `dpg.stop_dearpygui()` | 手动渲染下一次回调与下一帧之间隔着帧循环，`_request_close()` 直接 `stop_dearpygui()` 即可安全收尾；`FindWindowW` + `WM_CLOSE` 平台 hack 已整体删除 | `python scripts/check_dungeon_window_contract.py`（属主白名单）；`python scripts/dungeon_autopilot.py --scene session-close --isolate`（含 `--repeat 2`）；真应用手测「进入副本 → 返回 → 再进入副本」 |
 | **C2** | GLFW 被终止（`destroy_context()` / `unpark_context()`）**之前** Tk 照常可用——收尾顺序（恢复主窗口 → 弹框）正是刻意把 Tk 交互放在 `destroy_context()` **之前**；终止**之后**，当时存在的那个 Tk 根窗口**不能**再 `destroy()` / `withdraw()`（0xC0000005，无 traceback），`quit()` / `geometry()` / `attributes('-alpha')` / `winfo_*()` / `update()` 仍正常（完整矩阵见 `dungeon/window/dpg_state.py` 模块说明）；且**之后新建**的 `CTk` 根首次 `deiconify()` 同样硬崩——所以 `destroy_context()` 之后必须立刻补一个隐藏的保活视口（`dpg_state.park_context()`），下一局开头（宿主隐藏之后）由 `dpg_state.unpark_context()` 拆掉 | 硬崩的是「GLFW 终止**后**」的窗口级命令，不是「碰 Tk」本身（2026-09-28 复核矩阵，取代早先「销毁前碰 Tk 即崩」的过宽结论）。保活视口把进程留在「Tk 根窗口健康」状态，热切换（销毁旧根 → 建另一套根）才走得通；它从不 `show_viewport()`，对使用者完全不可见。顺序固定为：恢复主窗口 → join → `_handle_exit()` 弹框 → `destroy_context()` → 解除宿主登记 → `park_context()`；下一局为 `viewport_metrics()`（宿主仍可见时取）→ `hide_window()` → `unpark_context()` → `_build_ui()`（拆保活要排在藏宿主之后，否则 `withdraw` 会崩） | `scripts/smoke_test_switch.py` 第 2/5 轮（真跑两局副本 + 三次切换）；`scripts/dungeon_autopilot.py` |
 | **C3** | `__init__` 的每个构造参数都必须存到 `self` 上 | `_init_session()` 在入口阶段**迟到执行**（点「开始副本」时才跑），此时局部变量早已不可见；曾因漏存 `merged_quips` 导致「开始副本」必然 AttributeError | 构造后读属性 / `entry-start` 场景 |
 | **C4** | 跨线程 UI 更新走 `self._frame.call()`；禁止后台线程直接调 DPG | 帧时钟是窗口实例成员（随会话创建与停止），不是模块级单例；`stop()` 后 `call()` 返回 `False` 不抛异常 | `dungeon_autopilot.py` |
-| **C5** | 计时类逻辑不开线程，用 `every` / `after` 帧任务 | 旧实现各自靠 `_closing` 标志轮询退出、收尾时逐个 join；现在退出不需要 join | 场景结束时断言 `threading.enumerate()` 无非 daemon 残留 |
+| **C5** | 计时类逻辑不开线程，用 `every` / `after` 帧任务 | 旧实现各自靠 `_closing` 标志轮询退出、收尾时逐个 join；现在退出不需要 join | `python scripts/check_dungeon_window_contract.py`（禁 `threading.Timer`）；场景结束时断言 `threading.enumerate()` 无非 daemon 残留 |
 | **C6** | DPG 2.3.1 兼容性怪癖，见 §5.1 子表 | 实测结论 | 手测 + 自动驾驶 |
 | **C7** | 入口阶段与会话页共用 `bg_texture` / `bg_image_item` | 进入会话时 `_freeze_background` 把冻结帧设为 `_bg_pil_full`，后续 relayout 沿用冻结画面 | 手测入口 → 会话 |
 | **C8** | window 层不许 import `tkinter` / `customtkinter` / `ui`；宿主能力一律经 `HostPort`，见 §5.2 端口表 | 换 UI 框架只需换适配器；自检不再需要打桩 `ui.common.dialogs` | `scripts/check_dungeon_layering.py` |
@@ -252,6 +264,7 @@ run() → SessionResult
 
 | 现象 | 应对 |
 |---|---|
+| 控件 / 按键回调默认在**工作线程**执行（非帧循环线程，官方文档明示、已实测） | `ui._build_ui` 启用 `configure_app(manual_callback_management=True)`，帧循环渲染前 `run_callbacks(get_callback_queue())`（见 §2.2 / §4）；自动驾驶 `callback-thread` 场景守护 |
 | `dpg.add_child_window(..., no_scrollbar=...)` 等参数创建时传入不生效 | 创建后 `dpg.configure_item()` 再设一遍（见 `_build_ui` 对 `main_window`） |
 | viewport 级 drawlist 不渲染 `draw_image` | 背景图放在主窗口自己的 drawlist（`bg_drawlist`）；主窗口 `no_background=True` |
 | 入口阶段控件在容器块**之后**创建，DPG 推断不出父级 | 显式 `parent="main_window"`（见 `launcher._build_entry_ui`） |
@@ -291,11 +304,12 @@ DungeonSessionWindow(...).run()                      # 不传 = HostPort()，无
 
 | 改动范围 | 先跑 |
 |---|---|
-| 关闭路径、收尾、入口阶段、生命周期、帧时钟 | `python scripts/dungeon_autopilot.py`（7 场景 63 项断言，含 `text-components` 组件冒烟）；单场景 `--scene <名字> --isolate`，连开关窗 `--scene session-close --repeat 2 --isolate` |
+| 关闭路径、收尾、入口阶段、生命周期、帧时钟、回调线程、章节背景音乐、章节对话语音物理效果、对话语音 | `python scripts/dungeon_autopilot.py`（11 场景 95 项断言，含 `text-components` 组件冒烟）；单场景 `--scene <名字> --isolate`，连开关窗 `--scene session-close --repeat 2 --isolate` |
 | `_finalize` / `json_store` / `scenario_repo` | `python scripts/check_dungeon_finalize.py`（无 GUI，32 项断言） |
 | 显示组件包 / 文本组件 / 组件参数 | `python scripts/check_component_pack.py`（无 GUI，102 项断言：加载链、契约与服务面（替身 ctx + AST 越界扫描）、元数据与参数夹取、外部包覆盖、隐藏 DPG 上下文里的四钩子冒烟与控件无残留） |
 | 分句器 / 说话人标记 | `python scripts/check_splitter.py` |
 | 新增 import / 分层 | `python scripts/check_dungeon_layering.py`（窗口层含 `component_pack/` 子包） |
+| 新增 dpg 生命周期 / 线程调用（stop/create/destroy、Timer、join） | `python scripts/check_dungeon_window_contract.py`（C1 / C4 / C5 的机械可查部分） |
 | schema / 校验器 | `python scripts/check_scenario_schema.py`；批量校验 `python scripts/validate_scenarios.py --errors-only` |
 
 无 GUI 守卫（`check_dungeon_layering.py` / `check_dungeon_finalize.py` / `check_splitter.py` 等）+
