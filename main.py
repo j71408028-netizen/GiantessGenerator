@@ -358,6 +358,12 @@ def main():
     直接运行本模块与运行 main_mini.py 的区别只在首次启动用哪套界面，
     之后两套界面可以来回切换。
     """
+    if "--mini-game-host" in sys.argv:
+        # 打包模式：内置小游戏子进程经应用可执行文件路由到这里
+        # （源码运行直接跑 ui/common/mini_game_host.py，不走本分支）
+        from ui.common.mini_game_host import run as run_mini_game_host
+        run_mini_game_host(sys.argv)
+        return
     from app_shell import MODE_PRO, run_app
     run_app(default_mode=MODE_PRO)
 

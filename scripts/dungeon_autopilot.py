@@ -85,6 +85,24 @@ _DATA_ROOT = os.path.join(tempfile.mkdtemp(prefix="dungeon_autopilot_data_"), "d
 os.makedirs(os.path.join(_DATA_ROOT, "user"), exist_ok=True)
 paths.data_dir = lambda: _DATA_ROOT
 
+# 内置小游戏包（py 后端按当前 data_dir 解析加载）也要进隔离数据目录，
+# mini-game-py 场景才能真的触发覆盖层舞台
+import shutil  # noqa: E402
+
+_MINIGAMES_SRC = os.path.join(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))), "data", "packs", "minigames")
+if os.path.isdir(_MINIGAMES_SRC):
+    shutil.copytree(_MINIGAMES_SRC, os.path.join(_DATA_ROOT, "packs", "minigames"))
+
+# web 分派链路的桩包（escape_giantess 已迁到 py 后端；web 通道用桩包回归）
+_WEB_STUB = os.path.join(_DATA_ROOT, "packs", "minigames", "web_stub")
+os.makedirs(_WEB_STUB, exist_ok=True)
+with open(os.path.join(_WEB_STUB, "manifest.json"), "w", encoding="utf-8") as fh:
+    json.dump({"id": "web_stub", "name": "web桩", "backend": "web",
+               "entry": "session.html"}, fh, ensure_ascii=False)
+with open(os.path.join(_WEB_STUB, "session.html"), "w", encoding="utf-8") as fh:
+    fh.write("<html><body>web stub</body></html>")
+
 # 官方组件包是窗口层常驻 Python 包（dungeon/window/component_pack），随 registry
 # 正常导入，与 data_dir 重定向无关——这里不再需要任何注入。
 
@@ -1182,11 +1200,226 @@ def scene_text_components():
           win._check_results)
 
 
+class _MiniGameHost(ScriptedHost):
+    """小游戏宿主桩：记录 launch 调用并立即回传预置结果（模拟 TkHost 异步链）。
+
+    真实 TkHost 从子进程 watch 线程回调；桩在调用线程直接回调
+    ``on_result``——window 侧经 ``_frame.call`` 并入帧线程，线程语义一致。
+    """
+
+    def __init__(self, results):
+        super().__init__()
+        self.results = list(results)
+        self.launch_calls = []
+
+    def launch_mini_game(self, game_id, config=None, on_result=None) -> bool:
+        self.launch_calls.append((game_id, dict(config or {})))
+        result = self.results.pop(0) if self.results else None
+        if callable(on_result):
+            on_result(result)
+        return True
+
+
+def scene_mini_game():
+    """mini_game 触发器：胜负分支跳转、结果落回放、中断不清章节。
+
+    流程：第一步进后触发「小游戏·开场」（胜利 → 跳「胜利章」）；
+    第二次触发发生在「胜利章」（无结果 → 挂起解除、原地继续）。
+    """
+    host = _MiniGameHost([
+        {"won": True, "level": 3},   # 触发器一：胜利
+        None,                        # 触发器二：用户关窗，无结果
+    ])
+    # 单句段落：一次 click 恰好完成一次步进（多句段落要多次点击逐句揭示）
+    _AI.paragraphs = ["街道在脚下震颤。", "人群开始骚动。", "她低头笑了。"]
+    _AI.index = 0
+    config = _scenario_config()
+    config["chapters"] = [{"name": "开场", "start": True}, {"name": "胜利章"}]
+    config["triggers"] = [
+        {"name": "小游戏·开场", "chapter": "开场", "action_type": "mini_game",
+         "action_data": {"game": "web_stub", "target_level": 3,
+                         "win_goto": "胜利章", "lose_goto": ""}},
+        {"name": "小游戏·胜利章", "chapter": "胜利章", "action_type": "mini_game",
+         "action_data": {"game": "web_stub", "target_level": 1,
+                         "win_goto": "", "lose_goto": ""}},
+    ]
+    win, result = _make_window(
+        [("click", 1), ("sleep", 1.5), ("check", _check_mini_game_win),
+         ("click", 1), ("sleep", 1.5), ("check", _check_mini_game_abort),
+         ("close", None)],
+        explore=False, host=host,
+        config_overrides={"chapters": config["chapters"],
+                          "triggers": config["triggers"]})
+    check("小游戏：launch 恰好两次",
+          len(host.launch_calls) == 2
+          and all(gid == "web_stub" for gid, _cfg in host.launch_calls),
+          host.launch_calls)
+    check("小游戏：场景断言全部通过",
+          bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
+          win._check_results)
+
+
+def _check_mini_game_win(win):
+    assert win.current_chapter == "胜利章", win.current_chapter
+    assert win.pending_mini_game is None, win.pending_mini_game
+    records = [e for e in win.replay_data
+               if e.get("kind") == "trigger" and e.get("action_type") == "mini_game"]
+    assert records and records[0].get("game_result", {}).get("won") is True, records
+    assert any(h.get("type_str") == "【小游戏】" for h in win.story_history)
+
+
+def _check_mini_game_abort(win):
+    assert win.current_chapter == "胜利章", win.current_chapter
+    assert win.pending_mini_game is None, win.pending_mini_game
+    records = [e for e in win.replay_data
+               if e.get("kind") == "trigger" and e.get("action_type") == "mini_game"]
+    assert len(records) == 2 and "game_result" not in records[1], records
+
+
+def scene_mini_game_py():
+    """py 后端小游戏（覆盖层舞台）：打开 / 结算走胜负分支 / ESC 中止。
+
+    游戏用数据包 reaction（点击反应）；结果由检查钩子在帧线程直接调
+    ``api.finish`` 回传，等价于玩家达成的结算，覆盖同一条结果管线。
+    """
+    host = ScriptedHost()
+    # 单句段落：一次 click 恰好完成一次步进（多句段落要多次点击逐句揭示）
+    _AI.paragraphs = ["街道在脚下震颤。", "人群开始骚动。", "她低头笑了。"]
+    _AI.index = 0
+    win, result = _make_window(
+        [("click", 1), ("sleep", 1.5),
+         ("check", _check_mgpy_stage_open), ("check", _check_mgpy_finish_win),
+         ("sleep", 1.0), ("check", _check_mgpy_win_applied),
+         ("click", 1), ("sleep", 1.5),
+         ("check", _check_mgpy_stage_reopen), ("check", _check_mgpy_esc_abort),
+         ("sleep", 0.5), ("check", _check_mgpy_abort_applied),
+         ("close", None)],
+        explore=False, host=host,
+        config_overrides={
+            "chapters": [{"name": "开场", "start": True}, {"name": "胜利章"}],
+            "triggers": [
+                {"name": "小游戏·开场", "chapter": "开场", "action_type": "mini_game",
+                 "action_data": {"game": "reaction", "target_level": 1,
+                                 "win_goto": "胜利章", "lose_goto": ""}},
+                {"name": "小游戏·胜利章", "chapter": "胜利章", "action_type": "mini_game",
+                 "action_data": {"game": "reaction", "target_level": 30,
+                                 "win_goto": "", "lose_goto": ""}},
+            ]})
+    check("小游戏py：场景断言全部通过",
+          bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
+          win._check_results)
+
+
+def _check_mgpy_stage_open(win):
+    stage = win._mini_game_stage
+    assert stage is not None, "py 小游戏舞台未打开"
+    assert win.overlay_open() == "minigame", win.overlay_open()
+    assert stage._game is not None and stage._game.id == "reaction", stage._game
+
+
+def _check_mgpy_finish_win(win):
+    stage = win._mini_game_stage
+    assert stage is not None, "结算前舞台应仍在"
+    stage._api.finish(True, {"level": 1, "hits": 1})
+
+
+def _check_mgpy_win_applied(win):
+    assert win._mini_game_stage is None, "结算后舞台应已销毁"
+    assert win.current_chapter == "胜利章", win.current_chapter
+    assert win.pending_mini_game is None, win.pending_mini_game
+    records = [e for e in win.replay_data
+               if e.get("kind") == "trigger" and e.get("action_type") == "mini_game"]
+    assert records and records[0].get("game_result", {}).get("won") is True, records
+    assert any(h.get("type_str") == "【小游戏】" for h in win.story_history)
+
+
+def _check_mgpy_stage_reopen(win):
+    stage = win._mini_game_stage
+    assert stage is not None, "第二次小游戏舞台未打开"
+    assert len([e for e in win.replay_data
+                if e.get("kind") == "trigger"
+                and e.get("action_type") == "mini_game"]) == 2
+
+
+def _check_mgpy_esc_abort(win):
+    assert win._mini_game_stage is not None, "ESC 前舞台应仍在"
+    assert win._minigame_escape() is True, "ESC 应被小游戏消费"
+
+
+def _check_mgpy_abort_applied(win):
+    assert win._mini_game_stage is None, "中止后舞台应已销毁"
+    assert win.current_chapter == "胜利章", win.current_chapter
+    assert win.pending_mini_game is None, "中止后挂起态应已解除"
+    records = [e for e in win.replay_data
+               if e.get("kind") == "trigger" and e.get("action_type") == "mini_game"]
+    assert len(records) == 2 and "game_result" not in records[1], records
+
+
+def scene_mini_game_escape():
+    """py 后端移植版 escape_giantess：真实覆盖层舞台跑帧渲染 + ESC 中止。
+
+    前置无头模拟（脚本 escape_sim.py）已验证胜负/危险源/地图生成；
+    本场景验证真 DPG 链路：离屏画布纹理上传、每帧绘制指令、帧任务驱动。
+    """
+    host = ScriptedHost()
+    _AI.paragraphs = ["街道在脚下震颤。", "人群开始骚动。", "她低头笑了。"]
+    _AI.index = 0
+    win, result = _make_window(
+        [("click", 1), ("sleep", 1.5),
+         ("check", _check_escape_open),
+         ("sleep", 2.0), ("check", _check_escape_running),
+         ("check", _check_escape_esc),
+         ("sleep", 0.5), ("check", _check_escape_cleared),
+         ("close", None)],
+        explore=False, host=host,
+        config_overrides={
+            "chapters": [{"name": "开场", "start": True}],
+            "triggers": [
+                {"name": "小游戏·开场", "chapter": "开场", "action_type": "mini_game",
+                 "action_data": {"game": "escape_giantess", "target_level": 2,
+                                 "win_goto": "", "lose_goto": ""}},
+            ]})
+    check("小游戏escape：场景断言全部通过",
+          bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
+          win._check_results)
+
+
+def _check_escape_open(win):
+    stage = win._mini_game_stage
+    assert stage is not None, "escape 舞台未打开"
+    assert stage._game is not None and stage._game.id == "escape_giantess", stage._game
+    assert stage._game._terrain is not None, "地形离屏画布未创建"
+    assert stage._game._target == 2, stage._game._target
+    assert win.overlay_open() == "minigame", win.overlay_open()
+
+
+def _check_escape_running(win):
+    stage = win._mini_game_stage
+    assert stage is not None, "跑帧 2s 后舞台应仍在（帧异常会自动中止）"
+    game = stage._game
+    assert game._banner is None, "无操作 2s 不应结算"
+    assert game._terrain._version > 0 and game._fabric_layer._version > 0,         "地形/织物画布应已绘制"
+
+
+def _check_escape_esc(win):
+    assert win._mini_game_stage is not None, "ESC 前舞台应仍在"
+    assert win._minigame_escape() is True, "ESC 应被小游戏消费"
+
+
+def _check_escape_cleared(win):
+    assert win._mini_game_stage is None, "中止后舞台应已销毁"
+    assert win.pending_mini_game is None, "中止后挂起态应已解除"
+    assert win.current_chapter == "开场", win.current_chapter
+
+
 SCENES = {
     "callback-thread": scene_callback_thread,
     "chapter-bgm": scene_chapter_bgm,
     "chapter-voice-fx": scene_chapter_voice_fx,
     "dialogue-voice": scene_dialogue_voice,
+    "mini-game": scene_mini_game,
+    "mini-game-escape": scene_mini_game_escape,
+    "mini-game-py": scene_mini_game_py,
     "session-close": scene_session_close,
     "entry-cancel": scene_entry_cancel,
     "entry-start": scene_entry_start,

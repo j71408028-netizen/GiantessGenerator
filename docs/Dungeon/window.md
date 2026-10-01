@@ -287,6 +287,7 @@ run() → SessionResult
 | `discard_pending_quit()` | 丢弃视口原生关闭（X）留下的退出残留消息（见 §5-C12） | Win32 下 `PeekMessageW(..., WM_QUIT, WM_QUIT, PM_REMOVE)` |
 | `dialog(kind, title, message)` | 收尾提示 / 询问（`info`/`warning`/`error`/`ask`） | `ui.common.dialogs.*` |
 | `open_replay_file()` | 入口页加载回放；缺省实现返回 `None`（等价于用户取消） | `filedialog` + JSON 校验（解析在适配器侧） |
+| `launch_mini_game()` | 打开 **web 后端**小游戏窗口（`mini_game` 触发器按 manifest 分派；`py` 后端走会话内覆盖层舞台 `dungeon/window/minigame/`，不经端口）；结果经回调回传；缺省实现返回 `False` | 独立**子进程**跑 pywebview/WebView2（`ui/common/mini_game_host.py`，pywebview 强制占主线程），结果写 JSON 文件、watch 线程回调 |
 | `register_active_window()` / `unregister_active_window()` | 让宿主整体退出时能找到活动副本窗口 | 沿 `master/parent` 链找持有 `_active_dungeon_window` 的主窗口 |
 | `default_font()` | 段落字体缺省家族 | `ui.common.fonts.dungeon_font_default()` |
 

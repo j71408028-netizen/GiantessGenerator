@@ -6,9 +6,10 @@ import customtkinter as ctk
 
 import ui.common
 from dungeon.actions import (
-    NEW_ACTIONS, VISUAL_FILTERS, VISUAL_FILTER_KEYS, action_label,
-    normalize_action_type,
+    MINI_GAME_DEFAULT_ID, NEW_ACTIONS, VISUAL_FILTERS, VISUAL_FILTER_KEYS,
+    action_label, normalize_action_type,
 )
+from dungeon.window.minigame import list_mini_games
 from dungeon.chapters import (
     CHAPTER_ANY, CHAPTER_ANY_LABEL, CHAPTER_NONE, CHAPTER_NONE_LABEL, chapter_names,
 )
@@ -57,6 +58,15 @@ class TriggerEditDialog(BaseDialog):
             "章节本身没有条件，所有进入与离开都由本动作执行。\n"
             "注意：位于「结束章节」内的跳转触发器会被跳过；跳转到结束章节后"
             "只能等其段落数耗尽终止副本。"
+        ),
+        "mini_game": (
+            "小游戏挑战：触发时进入小游戏，副本步进暂停。\n"
+            "py 后端（如「点击反应」）：在会话窗口内以覆盖层舞台进行，ESC 中止；\n"
+            "web 后端（如「逃离巨大娘」）：弹独立窗口进行（需 pywebview）。\n"
+            "目标关数：语义由游戏自定（点击反应=目标命中数，逃离巨大娘=目标关卡）。\n"
+            "胜利跳转 / 失败跳转：按结果进入对应章节，选“（离开章节）”则原地继续。\n"
+            "注意：位于「结束章节」内的小游戏触发器会被跳过；结果会写入回放记录，\n"
+            "回放时不再进入游戏，直接按记录复现。"
         ),
         "ending": (
             "（已迁移）本动作已改由「结束章节」承担：在章节编辑里勾选“结束章节”，"
@@ -137,7 +147,7 @@ class TriggerEditDialog(BaseDialog):
         template_commands = {
             "insert": self._insert_template, "option": self._option_template,
             "effect": self._effect_template, "goto": self._goto_template,
-            "none": self._empty_template,
+            "mini_game": self._mini_game_template, "none": self._empty_template,
         }
         btn_frame = ctk.CTkFrame(main, fg_color="transparent")
         btn_frame.pack(fill='x', pady=(0, 2))
@@ -200,6 +210,7 @@ class TriggerEditDialog(BaseDialog):
         self.action_frames["option"] = self._build_option_form(self.action_area)
         self.action_frames["effect"] = self._build_effect_form(self.action_area)
         self.action_frames["goto"] = self._build_goto_form(self.action_area)
+        self.action_frames["mini_game"] = self._build_mini_game_form(self.action_area)
         self.action_frames["ending"] = self._build_ending_form(self.action_area)
 
         # ---------- 类型说明（滚动区内的说明文案）----------
@@ -308,6 +319,39 @@ class TriggerEditDialog(BaseDialog):
         if not self.chapter_names:
             ctk.CTkLabel(frame, text="当前副本还没有章节，请先到「章节」页签添加。",
                          font=self.UI_FONT_SMALL, text_color=TRIGGER_HINT).pack(anchor='w', pady=(2, 0))
+        return frame
+
+    def _build_mini_game_form(self, parent):
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
+        row1 = ctk.CTkFrame(frame, fg_color="transparent")
+        row1.pack(fill='x', pady=(2, 4))
+        ctk.CTkLabel(row1, text="目标关数:", font=self.UI_FONT).pack(side='left')
+        self.minigame_target_var = tk.StringVar(value="3")
+        ctk.CTkEntry(row1, textvariable=self.minigame_target_var,
+                     width=68, height=28, font=self.UI_FONT).pack(side='left', padx=(6, 16))
+        ctk.CTkLabel(row1, text="小游戏:", font=self.UI_FONT).pack(side='left')
+        game_ids = [gid for gid, _label, _backend in list_mini_games()] \
+            or [MINI_GAME_DEFAULT_ID]
+        self.minigame_game_var = tk.StringVar(
+            value=MINI_GAME_DEFAULT_ID if MINI_GAME_DEFAULT_ID in game_ids
+            else game_ids[0])
+        ctk.CTkComboBox(row1, values=game_ids, variable=self.minigame_game_var,
+                        state="readonly", width=160, height=28,
+                        font=self.UI_FONT).pack(side='left', padx=(6, 0))
+
+        branch_rows = [("胜利跳转:", "minigame_win_var"), ("失败跳转:", "minigame_lose_var")]
+        goto_values = [self.GOTO_LEAVE_LABEL] + self.chapter_names
+        for label_text, var_name in branch_rows:
+            row = ctk.CTkFrame(frame, fg_color="transparent")
+            row.pack(fill='x', pady=(2, 4))
+            ctk.CTkLabel(row, text=label_text, font=self.UI_FONT).pack(side='left')
+            var = tk.StringVar(value=self.GOTO_LEAVE_LABEL)
+            setattr(self, var_name, var)
+            ctk.CTkComboBox(row, values=goto_values, variable=var,
+                            state="readonly", width=200, height=28,
+                            font=self.UI_FONT).pack(side='left', padx=(6, 0))
+        ctk.CTkLabel(frame, text="选择“（离开章节）”表示该结果不改变章节，原地继续。",
+                     font=self.UI_FONT_SMALL, text_color=TRIGGER_HINT).pack(anchor='w', pady=(2, 0))
         return frame
 
     def _effect_label_to_key(self, label: str) -> str:
@@ -705,6 +749,11 @@ class TriggerEditDialog(BaseDialog):
                          "duration": self.effect_duration_var.get().strip()})
         elif action_type == "goto":
             data["chapter"] = self._goto_label_to_scope(self.goto_var.get())
+        elif action_type == "mini_game":
+            data["game"] = self.minigame_game_var.get().strip() or MINI_GAME_DEFAULT_ID
+            data["target_level"] = self.minigame_target_var.get().strip()
+            data["win_goto"] = self._goto_label_to_scope(self.minigame_win_var.get())
+            data["lose_goto"] = self._goto_label_to_scope(self.minigame_lose_var.get())
         elif action_type == "ending":
             data["name"] = self.ending_name_var.get().strip()
             data["intrusion_delta"] = self.ending_intrusion_var.get().strip()
@@ -742,6 +791,13 @@ class TriggerEditDialog(BaseDialog):
                 self.goto_var.set(scope)
             else:
                 self.goto_var.set(self._goto_scope_to_label(scope))
+        elif action_type == "mini_game":
+            self.minigame_target_var.set(str(action_data.get("target_level", 3)))
+            game_id = str(action_data.get("game") or MINI_GAME_DEFAULT_ID)
+            self.minigame_game_var.set(game_id)
+            for var, branch in (("minigame_win_var", "win_goto"),
+                                ("minigame_lose_var", "lose_goto")):
+                getattr(self, var).set(self._goto_scope_to_label(action_data.get(branch) or ""))
         elif action_type == "ending":
             self.ending_name_var.set(action_data.get("name") or action_data.get("ending_text") or "")
             self._load_ending_deltas(action_data)
@@ -763,6 +819,13 @@ class TriggerEditDialog(BaseDialog):
     def _goto_template(self):
         default_target = self.chapter_names[0] if self.chapter_names else ""
         self._set_action_template("goto", "新跳转", {"chapter": default_target})
+
+    def _mini_game_template(self):
+        default_target = self.chapter_names[0] if self.chapter_names else ""
+        self._set_action_template("mini_game", "新小游戏", {
+            "game": MINI_GAME_DEFAULT_ID, "target_level": 3,
+            "win_goto": default_target, "lose_goto": "",
+        })
 
     def _load_ending_deltas(self, action_data):
         action_data = action_data or {}

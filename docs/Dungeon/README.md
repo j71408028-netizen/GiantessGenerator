@@ -13,6 +13,7 @@
 | [宿主边界与可移植性](window_host.md)   | window 层与宿主（Tk）的边界在哪、换 UI 框架能做到哪一步 | 评估可移植性 / 换宿主 |
 | [调试自动化](window_automation.md) | 怎么不手点电脑就回归窗口 | 改窗口后自检 |
 | [领域术语表](domain_terms.md)      | 方案（Scenario）与一局（Run）怎么区分、怎么命名 | 所有人（命名前必读） |
+| [小游戏框架](minigame.md)          | mini_game 触发器运行时、包格式与作者 API | 写小游戏 / 改 `dungeon/window/minigame/` |
 
 ## 2. 按任务查
 
@@ -26,6 +27,7 @@
 | 帧时钟 / 线程 / 跨线程 UI 更新 | [窗口](window.md) §4 | `dungeon_autopilot.py` |
 | 宿主（Tk）耦合 / 换 UI 框架 | [宿主边界](window_host.md) §3、§4 | `check_dungeon_layering.py` |
 | 分层越界（领域层碰了 GUI） | [架构](architecture.md) §3 | `check_dungeon_layering.py` |
+| 写一个小游戏 / 改小游戏包 | [小游戏框架](minigame.md) | `check_minigame.py`、`dungeon_autopilot.py --scene mini-game-py` |
 | 显示组件（文本栏 / 属性条 / 过程日志）与组件参数 | [窗口](window.md) §1、`dungeon/window/component_pack/` | `check_component_pack.py`、`dungeon_autopilot.py --scene text-components` |
 | 新增 / 改名标识符（scenario vs dungeon） | [术语表](domain_terms.md) §2 | `check_scenario_naming.py` |
 | 写盘方式（配置 / 回放 / 报告） | [架构](architecture.md) §8、[窗口](window.md) §5-C10 | `check_dungeon_finalize.py` |
@@ -65,7 +67,10 @@
 
 | 脚本 | 覆盖 | 命令 |
 |---|---|---|
-| `dungeon_autopilot.py` | 真窗口生命周期：构造 → `run()` → 步进 → 关闭 → 落盘（11 场景 95 项断言，含回调线程、章节背景音乐、章节对话语音物理效果、对话语音与文本组件接管冒烟） | `python scripts/dungeon_autopilot.py` |
+| `dungeon_autopilot.py` | 真窗口生命周期：构造 → `run()` → 步进 → 关闭 → 落盘（14 场景，含回调线程、章节背景音乐、章节对话语音物理效果、小游戏触发器（py 覆盖层舞台与 web 子进程两条链路的胜负分支与中断、escape 移植版真渲染冒烟）、对话语音与文本组件接管冒烟） | `python scripts/dungeon_autopilot.py` |
+| `mini_game_smoke.py` | 小游戏子进程链路（需显示器 + pywebview）：子进程自动结算回传 / 中断按无结果处理 | `python scripts/mini_game_smoke.py` |
+| `check_minigame.py` | 小游戏包契约：manifest（backend/entry/params）+ py 游戏代码（恰一个 MiniGame 子类、禁 DPG/线程/print、禁私有面 `api._`） | `python scripts/check_minigame.py` |
+| `escape_sim.py` | escape_giantess 无头模拟：地图生成 / 出生点连通性 / bot 实跑与自然结算（无显示器可跑） | `python scripts/escape_sim.py` |
 
 判定方式详见 [调试自动化](window_automation.md) §4：**看结论行，不看退出码**（默认如此；
 `--require-clean-exit` 复测退出路径时退出状态也计入验收）。

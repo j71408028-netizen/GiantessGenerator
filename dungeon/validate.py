@@ -14,6 +14,7 @@
 因此规则对缺失/类型不符的字段都要宽容（否则会把"未填"误报为崩溃）。
 """
 
+import json
 import os
 from dataclasses import dataclass
 
@@ -33,6 +34,52 @@ from dungeon.voice_fx import (MAX_INTENSITY, PARAM_LABELS, PARAM_RANGES,
 
 LEVEL_LABELS = {"error": "错误", "warning": "警告", "info": "提示"}
 _LEVEL_ORDER = {"error": 0, "warning": 1, "info": 2}
+
+
+def _mini_game_problem(game_id: str) -> str:
+    """小游戏包可用性诊断：返回问题说明，可用返回空串。
+
+    规则与 ``dungeon.window.minigame.resolve_mini_game`` 的判定一致（这里只
+    做静态检查，不 import 游戏文件——那交给契约脚本 ``check_minigame.py``）：
+
+    - ``manifest.json`` 声明 ``py`` 后端 → ``entry`` 必须存在；
+    - 声明 ``web`` 后端 → ``session.html`` 必须存在；
+    - 无 manifest → 有 ``session.html`` 即按 web 兼容（历史包），否则缺入口。
+    """
+    game_id = str(game_id or "").strip()
+    if not game_id or os.sep in game_id or "/" in game_id:
+        return "游戏 id 非法"
+    try:
+        from paths import data_dir
+    except Exception:
+        return ""  # 离线环境解析不了数据目录时不拦人，运行时自有兜底
+    root = os.path.join(data_dir(), "packs", "minigames", game_id)
+    if not os.path.isdir(root):
+        return f"小游戏「{game_id}」不存在（可用目录见 data/packs/minigames/）"
+    manifest_path = os.path.join(root, "manifest.json")
+    if os.path.isfile(manifest_path):
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as fh:
+                manifest = json.load(fh)
+        except (OSError, ValueError) as exc:
+            return f"manifest.json 解析失败：{exc}"
+        if not isinstance(manifest, dict):
+            return "manifest.json 必须是对象"
+        backend = str(manifest.get("backend") or "").strip()
+        if backend == "py":
+            entry = str(manifest.get("entry") or "game.py")
+            if not os.path.isfile(os.path.join(root, entry)):
+                return f"py 后端入口「{entry}」不存在"
+            return ""
+        if backend == "web":
+            if not os.path.isfile(os.path.join(root, "session.html")):
+                return "web 后端缺少 session.html"
+            return ""
+        return f"未知后端「{backend}」（允许：py / web）"
+    if os.path.isfile(os.path.join(root, "session.html")):
+        return ""  # 历史 web 包无 manifest：兼容
+    return "缺少 manifest.json 或 session.html"
+
 
 # 已退场的旧版动作：只为了把「运行时静默跳过」变成作者能看见的**专项**提示
 # 而保留在这里。它们的职责早已由章节自身的属性承担（见 ``dungeon/chapters``），
@@ -567,6 +614,25 @@ def _validate_triggers(triggers, chapter_names, terminating, trigger_names,
                     f"跳转目标章节「{target}」不存在（空串=离开章节，是合法值）")
             if in_terminating:
                 add("warning", label, "触发器位于结束章节作用域，运行时会跳过 goto")
+        elif action_type == "mini_game":
+            game_id = str(action_data.get("game") or "escape_giantess").strip()
+            problem = _mini_game_problem(game_id)
+            if problem:
+                add("error", path + ".action_data.game", problem)
+            try:
+                target_level = int(float(action_data.get("target_level", 3) or 3))
+            except (TypeError, ValueError):
+                target_level = 0
+            if target_level < 1:
+                add("error", path + ".action_data.target_level",
+                    "目标关数必须是不小于 1 的数字")
+            for branch in ("win_goto", "lose_goto"):
+                target = str(action_data.get(branch) or "").strip()
+                if target and target not in chapter_names:
+                    add("error", path + f".action_data.{branch}",
+                        f"小游戏{branch}目标章节「{target}」不存在（空串=原地继续，是合法值）")
+            if in_terminating:
+                add("warning", label, "触发器位于结束章节作用域，运行时会跳过 mini_game")
         elif action_type == "option":
             options = action_data.get("options") or []
             if not isinstance(options, list) or not options:

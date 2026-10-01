@@ -10,6 +10,7 @@ from .base import DungeonWindowBase
 from .components import ComponentHandler
 from .ending import EndingHandler
 from .engine import DungeonStoryEngine
+from .minigame.stage import MiniGameStageHandler
 from .options import OptionHandler
 from .overlay import OverlayHandler
 from .persistence import DungeonPersistence
@@ -21,8 +22,8 @@ from dungeon.window.launcher import DungeonLaunchStages
 class DungeonSessionWindow(DungeonWindowBase, DungeonLaunchStages, DungeonWindowUI,
                            DungeonStoryEngine, TriggerHandler, OptionHandler,
                            EndingHandler, DungeonPersistence, ComponentHandler,
-                           OverlayHandler):
-    """副本会话窗口：生命周期/入口阶段/UI/推进逻辑/触发器/选项/结局/持久化均由 mixin 提供。"""
+                           OverlayHandler, MiniGameStageHandler):
+    """副本会话窗口：生命周期/入口阶段/UI/推进逻辑/触发器/选项/结局/持久化/小游戏均由 mixin 提供。"""
 
 
 __all__ = ["DungeonSessionWindow"]

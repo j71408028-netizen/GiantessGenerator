@@ -190,6 +190,9 @@ class DungeonWindowBase:
         # 回放记录引用：选择/结局生成完成后把结果写回对应记录
         self._last_option_record = None
         self._last_ending_record = None
+        # 小游戏触发器状态：pending_mini_game 非空期间步进挂起，等结果回传
+        self.pending_mini_game = None
+        self._last_mini_game_record = None
         # 结局触发器状态
         self.pending_ending = None    # 待生成结局 {"name": 结局名称}
         self.dungeon_ended = False    # 结局已生成，故事结束

@@ -1,7 +1,7 @@
 """副本窗口的宿主端口（Host Port）。
 
 ``dungeon/window/`` 不再 import ``tkinter`` / ``customtkinter`` / ``ui.*``：
-窗口对宿主的全部索取都收敛到本端口，共七个能力：
+窗口对宿主的全部索取都收敛到本端口：
 
 =======================  ==================================================
 方法                      用途
@@ -18,6 +18,7 @@
 ``register_active_window()`` 让宿主在整体退出时能找到活动副本窗口
 ``unregister_active_window()``
 ``default_font()``        段落字体缺省家族
+``launch_mini_game()``    打开内置小游戏窗口（pywebview），结果经回调回传
 =======================  ==================================================
 
 实现：
@@ -125,6 +126,20 @@ class HostPort:
         缺省实现返回 None，等价于"用户没有选文件"：入口页原地不动。
         """
         return None
+
+    # ---------------- 内置小游戏 ----------------
+    def launch_mini_game(self, game_id, config=None, on_result=None) -> bool:
+        """打开内置小游戏窗口（``data/packs/minigames/<game_id>/``）。
+
+        ``config`` 为触发器 ``mini_game`` 动作的参数原样透传；结果（胜负等
+        字典）经 ``on_result(result)`` 回传，可能来自**任意线程**，接收方自行
+        决定如何并入帧线程。用户中途关掉游戏窗口时以 ``result=None`` 回传。
+
+        返回 ``True`` 表示窗口已发起打开；``False`` 表示宿主不支持或小游戏
+        不可用（缺依赖 / 目录缺失），调用方据此决定触发器是否算数。
+        缺省实现（无宿主）不支持：直接返回 False。
+        """
+        return False
 
     # ---------------- 活动窗口登记 ----------------
     def register_active_window(self, window):

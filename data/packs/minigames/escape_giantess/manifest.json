@@ -1,0 +1,9 @@
+{
+  "id": "escape_giantess",
+  "name": "逃离巨大娘",
+  "backend": "py",
+  "entry": "game.py",
+  "params": [
+    {"key": "target_level", "label": "目标关数", "type": "int", "default": 3, "min": 1, "max": 30}
+  ]
+}

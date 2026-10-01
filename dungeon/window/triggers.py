@@ -8,12 +8,13 @@
 import random
 
 from dungeon import process_log
-from dungeon.actions import (EMPTY_ACTIONS, VISUAL_FILTER_KEYS,
-                             normalize_action_type)
+from dungeon.actions import (EMPTY_ACTIONS, MINI_GAME_DEFAULT_ID,
+                             VISUAL_FILTER_KEYS, normalize_action_type)
 from dungeon.chapters import (find_chapter, is_terminating_chapter,
                               matches_scope, sensitivity_amount)
 from dungeon.models import DungeonState, DungeonTextType
 from dungeon.rules import TriggerRules
+from dungeon.window.minigame import BACKEND_PY, resolve_mini_game
 
 
 class TriggerHandler:
@@ -251,6 +252,67 @@ class TriggerHandler:
                     process_log.log(f"[Trigger] 已触发: {trigger['name']}，弹出选项")
                     self._start_option_generation()
                     self._last_option_record = self._record_trigger_action(trigger, action_type, action_data)
+            elif action_type == "mini_game":
+                # 结束章节：不允许弹小游戏
+                if is_terminating_chapter(
+                        find_chapter(self.chapters, self.current_chapter)):
+                    process_log.log(f"[Trigger] 小游戏触发器 {trigger['name']} 位于结束章节内，已跳过")
+                    action_accepted = False
+                elif self.pending_mini_game is not None:
+                    process_log.log(f"[Trigger] 小游戏触发器 {trigger['name']} 触发时已有小游戏进行中，已跳过")
+                    action_accepted = False
+                else:
+                    game_id = str(action_data.get("game") or MINI_GAME_DEFAULT_ID).strip()
+                    resolved = resolve_mini_game(game_id)
+                    if resolved is None:
+                        process_log.log(f"[Trigger] 找不到小游戏「{game_id}」，"
+                                        f"触发器 {trigger['name']} 已跳过")
+                        action_accepted = False
+                    elif resolved.backend == BACKEND_PY:
+                        # py 后端：会话窗口内的覆盖层舞台（dungeon.window.minigame.stage）
+                        try:
+                            launched = self._open_mini_game_stage(
+                                resolved, action_data,
+                                on_result=self._on_mini_game_result)
+                        except Exception as exc:
+                            process_log.log(f"[Trigger] 小游戏「{game_id}」打开异常: {exc}")
+                            launched = False
+                        if not launched:
+                            action_accepted = False
+                        else:
+                            self.pending_mini_game = {
+                                "name": trigger["name"],
+                                "action_data": action_data,
+                                "trigger_index": trigger_index,
+                            }
+                            process_log.log(f"[Trigger] 已触发: {trigger['name']}，"
+                                            f"小游戏「{game_id}」开始")
+                            self._last_mini_game_record = self._record_trigger_action(
+                                trigger, action_type, action_data)
+                    else:
+                        # web 后端：子进程 pywebview 独立窗口（宿主端口能力）
+                        try:
+                            launched = self.host.launch_mini_game(
+                                game_id, action_data,
+                                on_result=self._on_mini_game_result)
+                        except Exception as exc:
+                            process_log.log(f"[Trigger] 小游戏「{game_id}」启动异常: {exc}")
+                            launched = False
+                        if not launched:
+                            # 宿主不支持 / 目录缺失：触发器不生效，副本流程照常
+                            process_log.log(f"[Trigger] 小游戏「{game_id}」不可用，"
+                                            f"触发器 {trigger['name']} 已跳过")
+                            action_accepted = False
+                        else:
+                            self.pending_mini_game = {
+                                "name": trigger["name"],
+                                "action_data": action_data,
+                                "trigger_index": trigger_index,
+                            }
+                            process_log.log(f"[Trigger] 已触发: {trigger['name']}，"
+                                            f"小游戏「{game_id}」开始")
+                            self._last_mini_game_record = self._record_trigger_action(
+                                trigger, action_type, action_data)
             elif action_type == "effect":
                 filter_key = str(action_data.get("filter") or "").strip()
                 if filter_key not in VISUAL_FILTER_KEYS:
@@ -319,6 +381,58 @@ class TriggerHandler:
                 self.triggered_names.add(trigger["name"])
             self.dungeon_state.steps_since_trigger = 0
 
+    def _on_mini_game_result(self, result):
+        """小游戏结果回调（宿主线程）：并入帧线程后执行胜负分支。"""
+        self._frame.call(lambda: self._finish_mini_game(result))
+
+    def _finish_mini_game(self, result):
+        """小游戏结算（帧线程）：写叙事行、回填记录，并按胜负跳转目标章节。
+
+        ``result=None`` 表示用户提前关掉了游戏窗口：只解除挂起，不执行分支，
+        副本照常继续。"""
+        pending = self.pending_mini_game
+        self.pending_mini_game = None
+        if pending is None:
+            return
+        record = self._last_mini_game_record
+        self._last_mini_game_record = None
+        action_data = pending.get("action_data") or {}
+        if not result:
+            process_log.log(f"[MiniGame] 小游戏 {pending['name']} 被中断，不执行胜负分支")
+            return
+        won = bool(result.get("won"))
+        try:
+            level = max(1, int(result.get("level", 1) or 1))
+        except (TypeError, ValueError):
+            level = 1
+        summary = (f"小游戏「{pending['name']}」{'胜利' if won else '失败'}"
+                   f"（抵达第 {level} 关）")
+        self.story_history.append(
+            {"type_str": "【小游戏】", "text": summary, "highlight": True, "speaker": None})
+        self._update_text_display()
+        if record is not None:
+            record["game_result"] = dict(result)
+        branch_key = "win_goto" if won else "lose_goto"
+        target = str(action_data.get(branch_key) or "").strip()
+        if not target:
+            process_log.log(f"[MiniGame] {summary}，未配置{branch_key}，原地继续")
+            return
+        chapter = find_chapter(self.chapters, target)
+        if chapter is None:
+            process_log.log(f"[MiniGame] {summary}，{branch_key} 目标章节「{target}」不存在，原地继续")
+            return
+        if self.current_chapter == target:
+            process_log.log(f"[MiniGame] {summary}，已处于章节「{target}」，不重复跳转")
+            return
+        self._enter_chapter(target)
+        if record is not None:
+            # 与 goto 触发器同构：章节环境随触发器记录复现，回放不依赖当前配置
+            record.update(
+                chapter_background=dict((chapter or {}).get("background") or {}),
+                chapter_bgm=dict((chapter or {}).get("bgm") or {}),
+                chapter_voice_fx=dict((chapter or {}).get("voice_fx") or {}))
+        process_log.log(f"[MiniGame] {summary}，跳转章节：{target}")
+
     def _record_trigger_action(self, trigger, action_type, action_data, **extra) -> dict:
         """触发时把动作与时机写入回放记录，回放时不再判定条件，直接按记录复现。"""
         record = {
@@ -385,6 +499,32 @@ class TriggerHandler:
                                        "highlight": True, "speaker": None})
             self._update_text_display()
             process_log.log(f"[Replay] 复现选项触发器: {name} → 选择 {idx}")
+        elif action_type == "mini_game":
+            result = record.get("game_result") or {}
+            if not result:
+                process_log.log(f"[Replay] 复现小游戏触发器: {name}（无结果，跳过）")
+                return
+            won = bool(result.get("won"))
+            try:
+                level = max(1, int(result.get("level", 1) or 1))
+            except (TypeError, ValueError):
+                level = 1
+            self.story_history.append({
+                "type_str": "【小游戏】",
+                "text": f"小游戏「{name}」{'胜利' if won else '失败'}（抵达第 {level} 关）",
+                "highlight": True, "speaker": None})
+            self._update_text_display()
+            branch_key = "win_goto" if won else "lose_goto"
+            target = str(action_data.get(branch_key) or "").strip()
+            if target:
+                self._enter_chapter(target, record=False,
+                                    background=record.get("chapter_background"),
+                                    bgm=record.get("chapter_bgm"),
+                                    voice_fx=record.get("chapter_voice_fx"),
+                                    allow_unknown=True)
+            process_log.log(f"[Replay] 复现小游戏触发器: {name} → "
+                            f"{'胜利' if won else '失败'}"
+                            + (f"，跳转 {target}" if target else ""))
         elif action_type == "ending":
             ending_text = record.get("ending_text", "")
             # 回放时同样显示结局图标（图标路径来自结局动作配置）

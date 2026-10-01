@@ -39,6 +39,9 @@ class DungeonStoryEngine:
         if self.pending_option is not None:
             return  # 选项弹窗进行中，打断正常的生成过程
 
+        if getattr(self, "pending_mini_game", None) is not None:
+            return  # 小游戏窗口进行中，等结果回传后再继续
+
         if self.dungeon_ended or self.pending_ending is not None:
             return  # 结局已生成或正在生成，故事结束
 
@@ -237,6 +240,8 @@ class DungeonStoryEngine:
         if self.dungeon_ended or self.pending_ending is not None:
             return
         if self.pending_option is not None or self.pending_insertions:
+            return
+        if getattr(self, "pending_mini_game", None) is not None:
             return
         if getattr(self, "_pregen", None) is not None or getattr(self, "_pregen_inflight", False):
             return

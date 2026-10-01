@@ -28,7 +28,12 @@ class OverlayHandler:
 
     # ---- 服务面（组件经 ctx 调用） ----
     def overlay_open(self):
-        """当前打开的覆盖层名；None 表示无覆盖层。"""
+        """当前打开的覆盖层名；None 表示无覆盖层。
+
+        小游戏舞台（``dungeon.window.minigame``）存续期间返回 ``"minigame"``：
+        阅读模态挂起步进与自动播放，但点击**不**触发关闭（鼠标是游戏输入）。"""
+        if getattr(self, "_mini_game_stage", None) is not None:
+            return "minigame"
         return getattr(self, "_overlay_name", None)
 
     def toggle_overlay(self, name="log"):
@@ -71,7 +76,10 @@ class OverlayHandler:
         self.toggle_overlay("log")
 
     def _on_escape_key(self, sender=None, app_data=None):
-        """ESC 键：关闭已打开的覆盖层。"""
+        """ESC 键：中止小游戏（无结果收场），否则关闭已打开的覆盖层。"""
+        if getattr(self, "_mini_game_stage", None) is not None:
+            self._minigame_escape()
+            return
         if self.overlay_open():
             self.close_overlay()
 
@@ -130,3 +138,6 @@ class OverlayHandler:
         self._overlay_name = None
         if dpg.does_item_exist("overlay_log"):
             dpg.delete_item("overlay_log")
+        # 小游戏舞台同批清理（帧时钟已停，其中的结果回传自然失效）
+        if getattr(self, "_mini_game_stage", None) is not None:
+            self._destroy_mini_game_stage()

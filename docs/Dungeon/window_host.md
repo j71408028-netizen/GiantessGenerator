@@ -27,7 +27,7 @@
 |---|---|
 | 端口定义 | `dungeon/window/host.py::HostPort`（含无宿主的缺省实现） |
 | Tk 实现 | `ui/common/tk_host.py::TkHost`——window 层之外唯一的 Tk 细节所在地 |
-| 端口方法表 | 见 [窗口索引](window.md) §5.2（尺寸/DPI、显隐、事件泵、弹框、回放文件选择、活动窗口登记、字体） |
+| 端口方法表 | 见 [窗口索引](window.md) §5.2（尺寸/DPI、显隐、事件泵、弹框、回放文件选择、小游戏窗口、活动窗口登记、字体） |
 | 注入方式 | `DungeonSessionWindow(..., host=TkHost(self)).run()`；不传 = `HostPort()`（无宿主，自检走这条路径） |
 | 守卫 | `scripts/check_dungeon_layering.py`：`dungeon/window/*.py` 里出现 `tkinter` / `customtkinter` / `ui` 即失败 |
 

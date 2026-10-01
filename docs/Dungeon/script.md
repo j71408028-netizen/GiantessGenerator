@@ -234,6 +234,7 @@ MCI 的坑：`play <alias> repeat` 只有 mpegvideo（mp3 等）认，waveaudio�
 | `option` | 弹出选项 | `prompt, options[{id, prompt, text}]` | 运行时；选择按编号记入 `选择:<名字>` |
 | `effect` | 短暂视效 | `filter, duration` | 运行时；给当前背景叠加限时滤镜，`duration` 步后恢复章节默认滤镜 |
 | `goto` | 跳转章节 | `chapter`（空串 = 离开章节） | 运行时；进入目标章节，应用其背景与持续敏感效果 |
+| `mini_game` | 小游戏挑战 | `game, target_level, win_goto, lose_goto` | 运行时；按包 manifest 的 `backend` 分派：`py` → 会话窗口内覆盖层舞台（`dungeon/window/minigame/`，ESC=无结果中止），`web` → 子进程 pywebview 独立窗口；步进暂停，结果经 `finish(won, result)` 回传后按 `win_goto`/`lose_goto` 跳转（空串=原地继续），无结果=原地继续。结果随触发器记录落盘，回放不进游戏直接复现 |
 | `none` | 条件标记 | `{}` | 运行时；无动作，只标记条件成立，供其他触发器作前置条件 |
 | `ending` | 结局（旧配置） | `name, intrusion_delta, destruction_delta, casualty_step, action_points_refund, custom_deltas, icon_path` | **只读兼容**：已迁移为「结束章节」，编辑器不再提供新建入口 |
 | `background` / `sensitivity`（早期拼写 `sensitive`） | 旧版·已失效 | — | **运行时不认识**：不在注册表里，落入「未知的触发器动作类型」通用路径（不执行、不记入已触发集合、不重置间隔计数，只打印一行提示） |
