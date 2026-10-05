@@ -178,7 +178,7 @@ class TkHost(HostPort):
         pywebview（Windows 上走系统自带的 WebView2）强制 ``webview.start()``
         占用主线程，而本进程的主线程属于 Tk / 副本 DPG 帧循环，因此窗口由
         ``ui/common/mini_game_host.py`` 的子进程承载（打包模式经应用可执行
-        文件 ``--mini-game-host`` 路由）。胜负结果由子进程写 JSON 文件，本侧
+        文件 ``--mini-game-host`` 路由）。结算结果由子进程写 JSON 文件，本侧
         watch 线程读到后交给 ``on_result``（watch 线程上回调，接收方自行并入
         帧线程）；用户提前关窗或子进程异常 = ``on_result(None)``。
 

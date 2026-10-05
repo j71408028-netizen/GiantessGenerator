@@ -6,9 +6,11 @@
 
 为什么不用现成的音频库：需要的能力只有「按给定音量循环播一个文件、可随时
 换曲并淡入淡出」这么点。Windows 自带的 MCI（``winmm.dll`` 的
-``mciSendStringW``）零依赖就能做，mp3/wav/wma 走同一套；非 Windows 平台退到
-pygame（装了就用），两者都不可用时退到 :class:`NullTrack`——**没有声音不该
-拖垮一局副本**，缺后端只在日志里留一条提示。
+``mciSendStringW``）零依赖就能做，mp3/wav/wma 走同一套；MCI 打不开的格式
+（ogg/flac 这类系统解码器没有的）与非 Windows 平台退到 miniaudio（装了就
+用，整段解码进内存、进程内播放），都不可用时退
+到 :class:`NullTrack`——**没有声音不该拖垮一局副本**，缺后端只在日志里留
+一条提示。
 
 线程模型沿用 ``window/background.py`` 的像素工作者：唯一一条后台线程串行消费
 命令队列。章节流调 :meth:`BgmPlayer.play` 只入队就返回，换曲与音量渐变都不占
@@ -193,77 +195,161 @@ def _winmm():
 _WINMM_CACHE = None
 
 
-# ---------------- 可选后端：pygame ----------------
+# ---------------- 可选后端：miniaudio ----------------
 
-class PygameTrack(AudioTrack):
-    """``pygame.mixer`` 后端：非 Windows 平台（或 Windows 上没走到 MCI）时的兜底。
+_MINIAUDIO_CACHE = None
 
-    pygame 不在依赖清单里，装了才用；``mixer`` 是进程级单例，init 失败就当没
-    这个后端。
+
+def _miniaudio():
+    """取 ``miniaudio`` 模块（可选依赖）；没装返回 None（结果缓存）。"""
+    global _MINIAUDIO_CACHE
+    if _MINIAUDIO_CACHE is None:
+        try:
+            import miniaudio as module
+        except Exception:
+            module = False
+        _MINIAUDIO_CACHE = module
+    return _MINIAUDIO_CACHE or None
+
+
+class MiniaudioTrack(AudioTrack):
+    """miniaudio 进程内解码播放：MCI 不认的格式与非 Windows 平台的兜底。
+
+    整段解码进内存（重采样/声道转换在 C 层顺带完成），回调线程按设备索要的
+    帧数供数——**必须喂满**：供少了设备等满一个周期再要，听感是时长被拉长、
+    放放停停。音量在供数时逐块乘增益（numpy 缺席时音量旋钮失灵：0 当静音、
+    其余直放，只记一条日志）。每个实例独占一个 ``PlaybackDevice``（系统的
+    音频后端允许多实例并存），``close`` 时释放。
+
+    回调协议的两个坑（``scripts/_test_miniaudio_playback.py`` 有实测）：
+    generator 必须先 ``next()`` prime 再交给 ``device.start()``；以及所有
+    供数都发生在绑定内部的回调线程上，本类只在起播前把数据准备好。
     """
 
-    name = "pygame"
+    name = "miniaudio"
 
-    def __init__(self, sound):
-        self._sound = sound
-        self._channel = None
+    def __init__(self, data: bytes, channels: int, rate: int):
+        self._data = data              # 交错 S16 原始字节
+        self._channels = channels
+        self._rate = rate
+        self._device = None
         self._volume = 1.0
+        self._closed = False
+        self._done = threading.Event()
+        self._np = _numpy()
+        self._samples = None
+        if self._np is not None:
+            self._samples = self._np.frombuffer(data, dtype="<i2")
 
+    # ---------- 后端自检 ----------
     @classmethod
     def supported(cls) -> bool:
-        try:
-            import pygame  # noqa: F401
-        except Exception:
-            return False
-        return True
+        return _miniaudio() is not None
 
     @classmethod
     def open(cls, path: str):
-        try:
-            import pygame
-        except Exception:
+        module = _miniaudio()
+        if module is None:
             return None
         try:
-            if not pygame.mixer.get_init():
-                pygame.mixer.init()
-            sound = pygame.mixer.Sound(path)
+            decoded = module.decode_file(path)
         except Exception:
             return None
-        return cls(sound)
+        return cls(bytes(decoded.samples), int(decoded.nchannels),
+                   int(decoded.sample_rate))
 
+    # ---------- 播放 ----------
     def start(self, loop: bool, volume: float) -> bool:
-        self._volume = max(0.0, min(1.0, volume))
-        self._channel = None
-        try:
-            self._channel = self._sound.play(loops=-1 if loop else 0)
-            if self._channel is not None:
-                self._channel.set_volume(self._volume)
-        except Exception:
+        module = _miniaudio()
+        if self._closed or module is None:
             return False
-        return self._channel is not None
+        self._volume = _clamp01(volume)
+        try:
+            device = module.PlaybackDevice(
+                output_format=module.SampleFormat.SIGNED16,
+                nchannels=self._channels, sample_rate=self._rate,
+                buffersize_msec=60)
+            voice = self._voice(loop)
+            next(voice)                     # 绑定要求：传入前必须已 prime
+            device.start(voice)
+        except Exception:
+            self._release_device()
+            return False
+        self._device = device
+        return True
 
-    def set_volume(self, volume: float):
-        self._volume = max(0.0, min(1.0, volume))
-        if self._channel is not None:
-            self._channel.set_volume(self._volume)
+    def _voice(self, loop: bool):
+        """回调 generator：按索要帧数供数，播完（或循环）才让它耗尽。
+
+        每次 ``yield`` 的返回值就是回调线程下一次索要的帧数——必须接住，
+        不能固定吐块（供少了设备等满一个周期，时长会被拉长）。
+        """
+        width = 2 * self._channels          # S16 每帧字节数
+        total = len(self._data)
+        frames = yield                      # prime 后的第一个 send
+        while True:
+            cursor = 0
+            while cursor < total:
+                chunk = self._data[cursor:cursor + max(1, frames) * width]
+                cursor += len(chunk)
+                frames = yield self._apply_gain(chunk)
+            if not loop:
+                break
+        self._done.set()
+
+    def _apply_gain(self, chunk: bytes) -> bytes:
+        volume = self._volume
+        if volume >= 0.999:
+            return chunk
+        if self._samples is None:
+            # 没有 numpy：0 当静音，其余直放（音量旋钮失灵但出声）
+            return b"\x00" * len(chunk) if volume <= 0.001 else chunk
+        count = len(chunk) // 2
+        scaled = self._samples[:count] * volume
+        return scaled.astype("<i2").tobytes()
 
     def finished(self) -> bool:
-        channel = self._channel
-        if channel is None:
-            return True
-        try:
-            return not channel.get_busy()
-        except Exception:
-            return True
+        return self._done.is_set()
+
+    def set_volume(self, volume: float):
+        self._volume = _clamp01(volume)
 
     def stop(self):
-        if self._channel is not None:
-            self._channel.stop()
+        self._release_device()
+        self._done.set()
 
     def close(self):
-        self.stop()
-        self._channel = None
-        self._sound = None
+        self._closed = True
+        self._release_device()
+        self._done.set()
+
+    def _release_device(self):
+        device, self._device = self._device, None
+        if device is None:
+            return
+        try:
+            device.stop()
+        except Exception:
+            pass
+        try:
+            device.close()
+        except Exception:
+            pass
+
+
+def _numpy():
+    """取 ``numpy`` 模块（可选依赖）；没装返回 None（结果缓存）。"""
+    global _NUMPY_CACHE
+    if _NUMPY_CACHE is None:
+        try:
+            import numpy as module
+        except Exception:
+            module = False
+        _NUMPY_CACHE = module
+    return _NUMPY_CACHE or None
+
+
+_NUMPY_CACHE = None
 
 
 class NullTrack(AudioTrack):
@@ -288,8 +374,12 @@ class NullTrack(AudioTrack):
         pass
 
 
-#: 打开文件时依次尝试的后端（MCI 优先：零依赖）
-_TRACK_BACKENDS = (MciTrack, PygameTrack)
+#: 打开文件时依次尝试的后端：Windows 上 MCI 领头（零依赖、流式），miniaudio
+#: 补上 MCI 不认的格式（ogg/flac 等）与非 Windows 平台。
+if os.name == "nt":
+    _TRACK_BACKENDS = (MciTrack, MiniaudioTrack)
+else:
+    _TRACK_BACKENDS = (MiniaudioTrack)
 
 
 def set_backends(backends):
@@ -605,3 +695,174 @@ class BgmPlayer:
         if os.path.isabs(path) and os.path.isfile(path):
             return path
         return None
+
+
+# ---------------- 一次性音效 ----------------
+
+class SfxPlayer:
+    """一次性音效播放器（小游戏 / 短暂视效的发声入口）。
+
+    与 :class:`BgmPlayer` 的分工：BGM 是"常驻一路、换曲渐变"，音效是
+    "触发一发、放完就走"。开轨、收割、停轨**全部收敛在一条工作线程**上——
+    MCI 实测有线程亲和性（``status ... mode`` 查询在非打开线程上返回空，
+    收割线程永远等不到"播完"），这也是 :class:`BgmPlayer` 单线程命令队列的
+    同款原因。``play`` 只做满员判定并入队，立即返回。
+
+    并发封顶：满员就拒绝本次请求——宁可这次不响，也不掐正在播的。
+    任何失败只记日志：**音效不出声不该拖垮触发它的那件事**。播放走
+    :func:`open_track`（MCI / miniaudio依次尝试），本类不管解码。
+    """
+
+    #: 同时在播的音效上限（voice_fx 实测 MCI 可同时开 8 路无压力）
+    MAX_CONCURRENT = 8
+    #: 单条音轨的强制回收上限（秒）：播完判定失灵的轨道不能永远占坑
+    MAX_TRACK_SECONDS = 300.0
+    #: 工作线程空转的收割间隔（秒）
+    REAP_SECONDS = 0.5
+
+    def __init__(self, logger=None):
+        self._logger = logger
+        self._jobs = queue.Queue()
+        self._sentinel = object()
+        self._lock = threading.Lock()   # 只护 _stopped/_count（工作线程外仅读计数）
+        self._count = 0                 # 已接受请求 = 在播 + 排队未起播
+        self._tracks = []               # [(track, monotonic 起点)]（仅工作线程碰）
+        self._thread = None
+        self._stopped = False
+
+    @property
+    def active_count(self) -> int:
+        with self._lock:
+            return self._count
+
+    def play(self, path: str, volume: float = 1.0) -> bool:
+        """排一个音效（异步起播）。返回 False = 已收尾或满员被拒。"""
+        with self._lock:
+            if self._stopped:
+                return False
+            if self._count >= self.MAX_CONCURRENT:
+                self._note(f"[SFX] 音效并发已满（{self.MAX_CONCURRENT} 路），"
+                           f"丢弃本次: {path}")
+                return False
+            self._count += 1
+        if not self._ensure_worker():
+            with self._lock:
+                self._count -= 1
+            return False
+        self._jobs.put((path, volume))
+        return True
+
+    def stop_all(self):
+        """停掉并回收所有在播/排队的音效（之后还能继续 play）。"""
+        self._jobs.put((None, 0.0))    # 停轨作业：见 _loop 的 path 判定
+
+    def shutdown(self, timeout: float = 1.5):
+        """会话收尾：清空音轨、停掉工作线程，之后不再接受 play。"""
+        with self._lock:
+            self._stopped = True
+        thread = self._thread
+        self._jobs.put(self._sentinel)
+        if thread is not None and thread is not threading.current_thread():
+            try:
+                thread.join(timeout=timeout)
+            except Exception:
+                pass
+
+    # ---------------- 工作线程 ----------------
+    def _ensure_worker(self) -> bool:
+        thread = self._thread
+        if thread is not None and thread.is_alive():
+            return True
+        try:
+            thread = threading.Thread(target=self._loop, name="dungeon-sfx",
+                                      daemon=True)
+        except Exception:
+            return False
+        self._thread = thread
+        thread.start()
+        return True
+
+    def _loop(self):
+        while True:
+            try:
+                job = self._jobs.get(timeout=self.REAP_SECONDS)
+            except queue.Empty:
+                job = None
+            if job is self._sentinel:
+                self._close_all()
+                return
+            if job is not None:
+                path, volume = job
+                if path is None:        # stop_all 的停轨作业
+                    self._close_all()
+                else:
+                    self._start_one(path, volume)
+            self._reap()
+            with self._lock:
+                stopped = self._stopped
+            if stopped and not self._tracks and self._jobs.empty():
+                return
+
+    def _start_one(self, path: str, volume: float):
+        if self._stopped:
+            with self._lock:
+                self._count -= 1
+            return
+        track = open_track(path)
+        started = False
+        if track is not None:
+            try:
+                started = track.start(loop=False, volume=_clamp01(volume))
+            except Exception:
+                started = False
+        if not started:
+            if track is not None:
+                try:
+                    track.close()
+                except Exception:
+                    pass
+            with self._lock:
+                self._count -= 1
+            self._note(f"[SFX] 音效未能起播: {path}")
+            return
+        self._tracks.append((track, time.monotonic()))
+
+    def _reap(self):
+        """回收播完（或超时）的音轨；仅工作线程调用。"""
+        now = time.monotonic()
+        alive = []
+        for track, started_at in self._tracks:
+            expired = now - started_at > self.MAX_TRACK_SECONDS
+            try:
+                finished = bool(track.finished())
+            except Exception:
+                finished = False
+            if finished or expired:
+                try:
+                    track.close()
+                except Exception:
+                    pass
+                with self._lock:
+                    self._count -= 1
+                continue
+            alive.append((track, started_at))
+        self._tracks = alive
+
+    def _close_all(self):
+        for track, _started in self._tracks:
+            try:
+                track.close()
+            except Exception:
+                pass
+        with self._lock:
+            self._count -= len(self._tracks)
+        self._tracks = []
+
+    def _note(self, message: str):
+        logger = self._logger
+        if logger is None:
+            return
+        try:
+            logger(message)
+        except Exception:
+            pass

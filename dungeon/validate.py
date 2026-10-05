@@ -36,6 +36,15 @@ LEVEL_LABELS = {"error": "错误", "warning": "警告", "info": "提示"}
 _LEVEL_ORDER = {"error": 0, "warning": 1, "info": 2}
 
 
+def _mini_game_params_safe(game_id: str) -> list:
+    """小游戏参数声明（供校验用）；数据目录不可用时返回空列表。"""
+    try:
+        from dungeon.window.minigame import mini_game_params
+        return mini_game_params(game_id)
+    except Exception:
+        return []
+
+
 def _mini_game_problem(game_id: str) -> str:
     """小游戏包可用性诊断：返回问题说明，可用返回空串。
 
@@ -626,11 +635,34 @@ def _validate_triggers(triggers, chapter_names, terminating, trigger_names,
             if target_level < 1:
                 add("error", path + ".action_data.target_level",
                     "目标关数必须是不小于 1 的数字")
+            # 参数按小游戏 manifest 的声明逐项校验（类型 / 上下限）
+            for param in _mini_game_params_safe(game_id):
+                key = str(param.get("key") or "").strip()
+                if not key or key not in action_data:
+                    continue
+                ptype = str(param.get("type") or "str")
+                raw = action_data.get(key)
+                value = None
+                if ptype in ("int", "float"):
+                    try:
+                        value = int(float(raw)) if ptype == "int" else float(raw)
+                    except (TypeError, ValueError):
+                        add("error", path + f".action_data.{key}",
+                            f"参数「{param.get('label') or key}」应为 {ptype} 类型")
+                        continue
+                lo, hi = param.get("min"), param.get("max")
+                if value is not None and lo is not None and value < lo \
+                        or value is not None and hi is not None and value > hi:
+                    add("error", path + f".action_data.{key}",
+                        f"参数「{param.get('label') or key}」超出声明区间 "
+                        f"[{lo}, {hi}]")
+            # 小游戏不再区分胜负（旧字段运行时直接忽略）：分支改由其他触发器
+            # 用「选择:本触发器名」条件按返回值判定
             for branch in ("win_goto", "lose_goto"):
-                target = str(action_data.get(branch) or "").strip()
-                if target and target not in chapter_names:
-                    add("error", path + f".action_data.{branch}",
-                        f"小游戏{branch}目标章节「{target}」不存在（空串=原地继续，是合法值）")
+                if branch in action_data:
+                    add("warning", path + f".action_data.{branch}",
+                        f"旧字段「{branch}」已失效：小游戏不再区分胜负，"
+                        f"请改用其他触发器的「选择:{name}」条件按返回值分支")
             if in_terminating:
                 add("warning", label, "触发器位于结束章节作用域，运行时会跳过 mini_game")
         elif action_type == "option":

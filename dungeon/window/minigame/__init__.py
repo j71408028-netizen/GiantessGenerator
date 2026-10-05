@@ -128,6 +128,23 @@ def resolve_mini_game(game_id):
     return None
 
 
+def mini_game_params(game_id):
+    """小游戏的参数声明（``manifest.params`` / 内置类 ``params``），编辑器
+    据此动态生成表单。返回 ``[{key, label, type, default, min, max}, ...]``；
+    未知游戏返回 ``[]``。"""
+    game_id = str(game_id or "").strip()
+    if game_id in REGISTRY:
+        return [dict(p) for p in (getattr(REGISTRY[game_id], "params", ()) or ())]
+    root = _pack_root(game_id)
+    if not os.path.isdir(root):
+        return []
+    manifest = _load_manifest(root) or {}
+    params = manifest.get("params")
+    if not isinstance(params, list):
+        return []
+    return [p for p in params if isinstance(p, dict) and p.get("key")]
+
+
 def list_mini_games():
     """枚举可用小游戏：``[(id, label, backend), ...]``（编辑器候选用）。
 
@@ -150,4 +167,5 @@ def list_mini_games():
 
 __all__ = ["GameAPI", "MiniGame", "ResolvedMiniGame", "REGISTRY",
            "MINI_GAME_DEFAULT_ID", "BACKEND_PY", "BACKEND_WEB", "BACKENDS",
-           "clamp_dt", "resolve_mini_game", "list_mini_games"]
+           "clamp_dt", "resolve_mini_game", "list_mini_games",
+           "mini_game_params"]

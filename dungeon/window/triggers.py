@@ -17,6 +17,23 @@ from dungeon.rules import TriggerRules
 from dungeon.window.minigame import BACKEND_PY, resolve_mini_game
 
 
+def _mini_game_return_value(result) -> int:
+    """小游戏结算结果的整数返回值。
+
+    小游戏不再区分胜负，结算只回传一个整数（语义由游戏自定，如达成关数 /
+    命中数）：dict 取 ``level``（次选 ``value``），标量取本身；解析失败按 1。
+    与选项编号同一通道，供「选择:触发器名」条件判定。
+    """
+    if isinstance(result, dict):
+        raw = result["level"] if "level" in result else result.get("value")
+    else:
+        raw = result
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 1
+
+
 class TriggerHandler:
     # ---------- 触发器 ----------
     def _check_unlock_coord(self):
@@ -193,11 +210,16 @@ class TriggerHandler:
         self._refresh_visual_effect()
 
     # ------------------ 触发判定 ------------------
-    def check_triggers(self):
+    def check_triggers(self, skip_names=None):
+        """判定所有触发器。``skip_names``：本轮跳过的触发器名集合——
+        小游戏结算后的重判传入刚结算的触发器，防止条件仍成立时原地重启
+        （后续步进的重判不受影响，可再次触发的触发器照常按条件再进）。"""
         if not self.triggers:
             return
+        skip = skip_names or ()
         for trigger_index, trigger in enumerate(self.triggers):
-            if trigger.get("name") in self.triggered_names:
+            if trigger.get("name") in self.triggered_names \
+                    or trigger.get("name") in skip:
                 continue
             action_data = trigger.get("action_data", {})
             action_type = normalize_action_type(trigger.get("action_type"), action_data)
@@ -382,13 +404,18 @@ class TriggerHandler:
             self.dungeon_state.steps_since_trigger = 0
 
     def _on_mini_game_result(self, result):
-        """小游戏结果回调（宿主线程）：并入帧线程后执行胜负分支。"""
+        """小游戏结果回调（宿主线程）：并入帧线程后执行结算。"""
         self._frame.call(lambda: self._finish_mini_game(result))
 
     def _finish_mini_game(self, result):
-        """小游戏结算（帧线程）：写叙事行、回填记录，并按胜负跳转目标章节。
+        """小游戏结算（帧线程）：写叙事行、回填记录，并立即重跑触发判定。
 
-        ``result=None`` 表示用户提前关掉了游戏窗口：只解除挂起，不执行分支，
+        小游戏是选项触发器的特殊形态，不再区分胜负：结算把整数返回值记入
+        ``trigger_choices``，跳转等分支由其他触发器用「选择:本触发器名」条件
+        完成。这里记录之后立即重跑 ``check_triggers``（与选项选择同构），让
+        依赖本局结果的关联触发器在同一步内生效。
+
+        ``result=None`` 表示用户提前关掉了游戏窗口：只解除挂起，不记返回值，
         副本照常继续。"""
         pending = self.pending_mini_game
         self.pending_mini_game = None
@@ -396,42 +423,26 @@ class TriggerHandler:
             return
         record = self._last_mini_game_record
         self._last_mini_game_record = None
-        action_data = pending.get("action_data") or {}
         if not result:
-            process_log.log(f"[MiniGame] 小游戏 {pending['name']} 被中断，不执行胜负分支")
+            process_log.log(f"[MiniGame] 小游戏 {pending['name']} 被中断，不记录返回值")
             return
-        won = bool(result.get("won"))
-        try:
-            level = max(1, int(result.get("level", 1) or 1))
-        except (TypeError, ValueError):
-            level = 1
-        summary = (f"小游戏「{pending['name']}」{'胜利' if won else '失败'}"
-                   f"（抵达第 {level} 关）")
+        value = _mini_game_return_value(result)
+        # 整数返回值进选择记录（与选项编号同一通道、同一套条件判定）
+        self.trigger_choices.setdefault(pending["name"], []).append(value)
+        summary = f"小游戏「{pending['name']}」结束（返回值 {value}）"
         self.story_history.append(
             {"type_str": "【小游戏】", "text": summary, "highlight": True, "speaker": None})
         self._update_text_display()
         if record is not None:
-            record["game_result"] = dict(result)
-        branch_key = "win_goto" if won else "lose_goto"
-        target = str(action_data.get(branch_key) or "").strip()
-        if not target:
-            process_log.log(f"[MiniGame] {summary}，未配置{branch_key}，原地继续")
-            return
-        chapter = find_chapter(self.chapters, target)
-        if chapter is None:
-            process_log.log(f"[MiniGame] {summary}，{branch_key} 目标章节「{target}」不存在，原地继续")
-            return
-        if self.current_chapter == target:
-            process_log.log(f"[MiniGame] {summary}，已处于章节「{target}」，不重复跳转")
-            return
-        self._enter_chapter(target)
-        if record is not None:
-            # 与 goto 触发器同构：章节环境随触发器记录复现，回放不依赖当前配置
-            record.update(
-                chapter_background=dict((chapter or {}).get("background") or {}),
-                chapter_bgm=dict((chapter or {}).get("bgm") or {}),
-                chapter_voice_fx=dict((chapter or {}).get("voice_fx") or {}))
-        process_log.log(f"[MiniGame] {summary}，跳转章节：{target}")
+            record["game_result"] = dict(result) if isinstance(result, dict) \
+                else {"value": result}
+            record["choice_value"] = value
+        process_log.log(f"[MiniGame] {summary}，重跑触发判定")
+        # 结算后立即重判：按返回值配置的跳转等关联触发器同一步生效。
+        # 跳过刚结算的触发器本身——否则条件仍成立的自动触发器会在结算瞬间
+        # 原地重启游戏，玩家永远回不到副本主页面。
+        self.check_triggers(skip_names={pending["name"]})
+        self._maybe_pregen_next()
 
     def _record_trigger_action(self, trigger, action_type, action_data, **extra) -> dict:
         """触发时把动作与时机写入回放记录，回放时不再判定条件，直接按记录复现。"""
@@ -504,27 +515,17 @@ class TriggerHandler:
             if not result:
                 process_log.log(f"[Replay] 复现小游戏触发器: {name}（无结果，跳过）")
                 return
-            won = bool(result.get("won"))
-            try:
-                level = max(1, int(result.get("level", 1) or 1))
-            except (TypeError, ValueError):
-                level = 1
+            value = record.get("choice_value")
+            if value is None:
+                value = _mini_game_return_value(result)
+            # 返回值进选择记录，与实时结算同构；跳转由回放的关联触发器完成
+            self.trigger_choices.setdefault(name, []).append(value)
             self.story_history.append({
                 "type_str": "【小游戏】",
-                "text": f"小游戏「{name}」{'胜利' if won else '失败'}（抵达第 {level} 关）",
+                "text": f"小游戏「{name}」结束（返回值 {value}）",
                 "highlight": True, "speaker": None})
             self._update_text_display()
-            branch_key = "win_goto" if won else "lose_goto"
-            target = str(action_data.get(branch_key) or "").strip()
-            if target:
-                self._enter_chapter(target, record=False,
-                                    background=record.get("chapter_background"),
-                                    bgm=record.get("chapter_bgm"),
-                                    voice_fx=record.get("chapter_voice_fx"),
-                                    allow_unknown=True)
-            process_log.log(f"[Replay] 复现小游戏触发器: {name} → "
-                            f"{'胜利' if won else '失败'}"
-                            + (f"，跳转 {target}" if target else ""))
+            process_log.log(f"[Replay] 复现小游戏触发器: {name} → 返回值 {value}")
         elif action_type == "ending":
             ending_text = record.get("ending_text", "")
             # 回放时同样显示结局图标（图标路径来自结局动作配置）

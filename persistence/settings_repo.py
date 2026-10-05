@@ -38,6 +38,9 @@ class SettingsRepo:
             "dungeon_voice_enabled": True,
             "save_low_resolution_image": False,
             "use_preview_image_as_avatar": False,
+            # 启动界面模式偏好：pro/mini 固定其一，exit=退出时模式
+            # （跟随 ui_mode 记录的上次所在界面），见 app_shell.resolve_startup_mode
+            "ui_startup": "exit",
             "blocked_words": []
         }
 

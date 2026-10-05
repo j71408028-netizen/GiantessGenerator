@@ -131,8 +131,8 @@ class HostPort:
     def launch_mini_game(self, game_id, config=None, on_result=None) -> bool:
         """打开内置小游戏窗口（``data/packs/minigames/<game_id>/``）。
 
-        ``config`` 为触发器 ``mini_game`` 动作的参数原样透传；结果（胜负等
-        字典）经 ``on_result(result)`` 回传，可能来自**任意线程**，接收方自行
+        ``config`` 为触发器 ``mini_game`` 动作的参数原样透传；结果（含整数
+        返回值的字典）经 ``on_result(result)`` 回传，可能来自**任意线程**，接收方自行
         决定如何并入帧线程。用户中途关掉游戏窗口时以 ``result=None`` 回传。
 
         返回 ``True`` 表示窗口已发起打开；``False`` 表示宿主不支持或小游戏

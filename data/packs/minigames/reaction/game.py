@@ -2,7 +2,7 @@
 """点击反应：限时内点中足够数量的目标光点（py 后端小游戏参考实现）。
 
 演示 MiniGame 契约的完整闭环：setup 读参数 → update 里轮询输入、发绘制指令 →
-api.finish 回传结果（结果进触发器胜负分支与回放记录）。
+api.finish 回传结果（命中数即整数返回值，进触发器选择记录与回放记录）。
 """
 
 import math
@@ -46,16 +46,18 @@ class ReactionGame(MiniGame):
         api = self.api
         self._elapsed += dt
 
-        # 结算判定
+        # 结算判定：命中数即整数返回值（level），进触发器的选择记录
         if self._hits >= self._need:
-            api.finish(True, {"hits": self._hits, "need": self._need,
-                              "time": round(self._elapsed, 2),
-                              "misses": self._misses})
+            api.finish({"level": self._hits, "hits": self._hits,
+                        "need": self._need,
+                        "time": round(self._elapsed, 2),
+                        "misses": self._misses})
             return
         remaining = _TIME_LIMIT - self._elapsed
         if remaining <= 0:
-            api.finish(False, {"hits": self._hits, "need": self._need,
-                               "time": _TIME_LIMIT, "misses": self._misses})
+            api.finish({"level": self._hits, "hits": self._hits,
+                        "need": self._need,
+                        "time": _TIME_LIMIT, "misses": self._misses})
             return
 
         # 目标生成与过期

@@ -9,9 +9,9 @@ pywebview（Windows 上走系统自带的 WebView2）强制 ``webview.start()`` 
 - 打包运行：``<App>.exe --mini-game-host <session.html> <目标关数> <结果.json>``
   （由 ``main.main`` 的前置分支路由到 :func:`run`）
 
-页面里的 ``bridge.js`` 在胜负结算时调用 ``js_api.report(json)``；本进程把结果
+页面里的 ``bridge.js`` 在结算时调用 ``js_api.report(json)``；本进程把结果
 原样写到结果文件，随后关窗退出（``webview.start()`` 返回、进程结束）。用户直接
-关掉游戏窗口 = 不写文件 = 父进程按「无结果」处理，不执行胜负分支。
+关掉游戏窗口 = 不写文件 = 父进程按「无结果」处理，不记返回值。
 
 ``--auto-result <json>`` 是冒烟钩子：窗口就绪后自动调用一次 ``report``，用于
 无人值守回归；正常玩法不会用到。

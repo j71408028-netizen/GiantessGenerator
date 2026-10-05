@@ -889,15 +889,16 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.show_casualties_switch = self._make_switch(ctrl, self.show_casualties_var)
 
         # 启动界面模式：只决定**下次启动**用哪套界面，点这里不重建窗口。
-        # 非 "mini" 一律按专业模式显示，与 app_shell.load_mode 的兜底一致。
-        from app_shell import MODE_MINI, UI_MODE_KEY
+        # 「退出时模式」跟随上次退出时所在的界面（app_shell.resolve_startup_mode）。
+        from app_shell import MODE_MINI, MODE_PRO, STARTUP_EXIT, STARTUP_MODE_KEY
         _, ctrl = self._make_row(self.disp_body, row, "启动界面模式")
         row += 1
-        startup_display = ("ME模式" if self.settings.get(UI_MODE_KEY) == MODE_MINI
-                           else "专业模式")
+        pref = self.settings.get(STARTUP_MODE_KEY, STARTUP_EXIT)
+        startup_display = {MODE_PRO: "专业模式",
+                           MODE_MINI: "ME模式"}.get(pref, "退出时模式")
         self.ui_mode_var = tk.StringVar(value=startup_display)
         self.ui_mode_button = self._make_cycle_button(
-            ctrl, ["专业模式", "ME模式"], self._on_ui_mode_changed,
+            ctrl, ["专业模式", "ME模式", "退出时模式"], self._on_ui_mode_changed,
             self.ui_mode_var)
 
         self._section_label(self.disp_body, row, "字体设置")
@@ -934,14 +935,18 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         这个选项**只影响启动**：点击只把选择写进设置，不重建窗口。界面重建会
         丢掉当前界面上的编辑状态，所以实时切换不放在设置页——那是导航栏底部
         「切换界面」的职责（见 ``MainWindowManager.prompt_switch_to_mini``）。
-        """
-        from app_shell import MODE_MINI, MODE_PRO, UI_MODE_KEY, save_mode
 
-        mode = MODE_MINI if value == "ME模式" else MODE_PRO
+        「退出时模式」意味着下次启动跟随上次退出时所在的界面——实际模式由
+        ``app_shell.switch_to`` 在每次切换时落盘（``ui_mode`` 键），这里不碰它。
+        """
+        from app_shell import (MODE_MINI, MODE_PRO, STARTUP_EXIT,
+                               STARTUP_MODE_KEY, save_startup_mode)
+
+        pref = {"专业模式": MODE_PRO, "ME模式": MODE_MINI}.get(value, STARTUP_EXIT)
         # 同步内存里的设置副本：本页「保存并返回」会把 settings 整份回写，
         # 不同步就会把这里刚选的值覆盖回旧值。
-        self.settings[UI_MODE_KEY] = mode
-        save_mode(mode)
+        self.settings[STARTUP_MODE_KEY] = pref
+        save_startup_mode(pref)
 
     def _story_recent_count_value(self) -> int:
         """剧情概要保留的最近段落数（1~200，非法输入回退到原值/20）。"""

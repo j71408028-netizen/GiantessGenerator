@@ -9,7 +9,7 @@ from dungeon.actions import (
     MINI_GAME_DEFAULT_ID, NEW_ACTIONS, VISUAL_FILTERS, VISUAL_FILTER_KEYS,
     action_label, normalize_action_type,
 )
-from dungeon.window.minigame import list_mini_games
+from dungeon.window.minigame import list_mini_games, mini_game_params
 from dungeon.chapters import (
     CHAPTER_ANY, CHAPTER_ANY_LABEL, CHAPTER_NONE, CHAPTER_NONE_LABEL, chapter_names,
 )
@@ -61,12 +61,16 @@ class TriggerEditDialog(BaseDialog):
         ),
         "mini_game": (
             "小游戏挑战：触发时进入小游戏，副本步进暂停。\n"
-            "py 后端（如「点击反应」）：在会话窗口内以覆盖层舞台进行，ESC 中止；\n"
-            "web 后端（如「逃离巨大娘」）：弹独立窗口进行（需 pywebview）。\n"
-            "目标关数：语义由游戏自定（点击反应=目标命中数，逃离巨大娘=目标关卡）。\n"
-            "胜利跳转 / 失败跳转：按结果进入对应章节，选“（离开章节）”则原地继续。\n"
+            "py 后端：在会话窗口内以覆盖层舞台进行，ESC 中止；\n"
+            "web 后端：弹独立窗口进行（需 pywebview，兼容通道）。\n"
+            "返回值：小游戏不区分胜负，结算时把游戏回传的整数（语义由游戏自定，\n"
+            "如达成关数/命中数）记入本触发器的选择记录；其他触发器可用\n"
+            "“选择:本触发器名称”按返回值判定（次数/占比/趋势/最后一次），\n"
+            "并执行跳转、插入等动作——分支不要配在小游戏自身。\n"
+            "结算后的重判不会重复触发本触发器（不会原地重启游戏）；\n"
+            "勾选“可再次触发”时，后续步进中条件仍成立会再次进入。\n"
             "注意：位于「结束章节」内的小游戏触发器会被跳过；结果会写入回放记录，\n"
-            "回放时不再进入游戏，直接按记录复现。"
+            "回放时不再进入游戏，直接按记录复现返回值。"
         ),
         "ending": (
             "（已迁移）本动作已改由「结束章节」承担：在章节编辑里勾选“结束章节”，"
@@ -325,10 +329,6 @@ class TriggerEditDialog(BaseDialog):
         frame = ctk.CTkFrame(parent, fg_color="transparent")
         row1 = ctk.CTkFrame(frame, fg_color="transparent")
         row1.pack(fill='x', pady=(2, 4))
-        ctk.CTkLabel(row1, text="目标关数:", font=self.UI_FONT).pack(side='left')
-        self.minigame_target_var = tk.StringVar(value="3")
-        ctk.CTkEntry(row1, textvariable=self.minigame_target_var,
-                     width=68, height=28, font=self.UI_FONT).pack(side='left', padx=(6, 16))
         ctk.CTkLabel(row1, text="小游戏:", font=self.UI_FONT).pack(side='left')
         game_ids = [gid for gid, _label, _backend in list_mini_games()] \
             or [MINI_GAME_DEFAULT_ID]
@@ -337,22 +337,102 @@ class TriggerEditDialog(BaseDialog):
             else game_ids[0])
         ctk.CTkComboBox(row1, values=game_ids, variable=self.minigame_game_var,
                         state="readonly", width=160, height=28,
-                        font=self.UI_FONT).pack(side='left', padx=(6, 0))
+                        font=self.UI_FONT,
+                        command=self._rebuild_minigame_params).pack(
+            side='left', padx=(6, 0))
 
-        branch_rows = [("胜利跳转:", "minigame_win_var"), ("失败跳转:", "minigame_lose_var")]
-        goto_values = [self.GOTO_LEAVE_LABEL] + self.chapter_names
-        for label_text, var_name in branch_rows:
-            row = ctk.CTkFrame(frame, fg_color="transparent")
-            row.pack(fill='x', pady=(2, 4))
-            ctk.CTkLabel(row, text=label_text, font=self.UI_FONT).pack(side='left')
-            var = tk.StringVar(value=self.GOTO_LEAVE_LABEL)
-            setattr(self, var_name, var)
-            ctk.CTkComboBox(row, values=goto_values, variable=var,
-                            state="readonly", width=200, height=28,
-                            font=self.UI_FONT).pack(side='left', padx=(6, 0))
-        ctk.CTkLabel(frame, text="选择“（离开章节）”表示该结果不改变章节，原地继续。",
-                     font=self.UI_FONT_SMALL, text_color=TRIGGER_HINT).pack(anchor='w', pady=(2, 0))
+        # 参数区：按所选小游戏 manifest.params 动态生成（切换游戏即重建）
+        self.minigame_param_vars = {}
+        self.minigame_params_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        self.minigame_params_frame.pack(fill='x', pady=(2, 4))
+        self._rebuild_minigame_params()
+
+        ctk.CTkLabel(frame,
+                     text="小游戏不区分胜负：结算回传的整数（如达成关数）记入本触发器的\n"
+                          "选择记录，跳转等分支由其他触发器用“选择:本触发器名称”判定。",
+                     font=self.UI_FONT_SMALL, text_color=TRIGGER_HINT
+                     ).pack(anchor='w', pady=(2, 0))
         return frame
+
+    def _rebuild_minigame_params(self, *_args):
+        """按当前所选小游戏的参数声明重建参数控件。
+
+        值来源优先级：显式传入的 action_data（回填已有触发器时）→
+        重建前控件里已填的值（切换游戏时保留同名键）→ 参数默认值。
+        """
+        frame = getattr(self, "minigame_params_frame", None)
+        if frame is None:
+            return
+        prev_values = {}
+        for key, (var, _ptype) in getattr(self, "minigame_param_vars", {}).items():
+            try:
+                prev_values[key] = var.get()
+            except Exception:
+                pass
+        source = next((a for a in _args if isinstance(a, dict)), None)
+        for child in frame.winfo_children():
+            child.destroy()
+        self.minigame_param_vars = {}
+
+        params = mini_game_params(self.minigame_game_var.get())
+        if not params:
+            ctk.CTkLabel(frame, text="该小游戏没有可配参数。",
+                         font=self.UI_FONT_SMALL, text_color=TRIGGER_HINT
+                         ).pack(anchor='w')
+            return
+
+        def initial(key, default):
+            if source is not None and key in source:
+                return source[key]
+            if key in prev_values:
+                return prev_values[key]
+            return default
+
+        for param in params:
+            key = str(param.get("key") or "").strip()
+            ptype = str(param.get("type") or "str")
+            label = str(param.get("label") or key)
+            lo, hi = param.get("min"), param.get("max")
+            if ptype in ("int", "float") and lo is not None and hi is not None:
+                label = f"{label} ({lo}~{hi})"
+            default = param.get("default", "" if ptype == "str" else 0)
+            if ptype == "bool":
+                value = initial(key, default)
+                if isinstance(value, str):
+                    value = value.strip().lower() in ("1", "true", "yes", "是")
+                var = tk.BooleanVar(value=bool(value))
+                ctk.CTkCheckBox(frame, text=label, variable=var,
+                                font=self.UI_FONT).pack(anchor='w', pady=(2, 2))
+                self.minigame_param_vars[key] = (var, ptype)
+                continue
+            row = ctk.CTkFrame(frame, fg_color="transparent")
+            row.pack(fill='x', pady=(2, 2))
+            ctk.CTkLabel(row, text=f"{label}:", font=self.UI_FONT).pack(side='left')
+            var = tk.StringVar()
+            value = initial(key, default)
+            var.set("" if value is None else str(value))
+            ctk.CTkEntry(row, textvariable=var, width=110, height=28,
+                         font=self.UI_FONT).pack(side='left', padx=(6, 0))
+            self.minigame_param_vars[key] = (var, ptype)
+
+    def _minigame_params_to_data(self, data):
+        """把参数区当前值按声明类型写进 action_data（解析失败的键省略）。"""
+        for key, (var, ptype) in getattr(self, "minigame_param_vars", {}).items():
+            try:
+                if ptype == "bool":
+                    data[key] = bool(var.get())
+                    continue
+                raw = str(var.get()).strip()
+                if raw == "":
+                    continue
+                if ptype == "int":
+                    data[key] = int(float(raw))
+                elif ptype == "float":
+                    data[key] = float(raw)
+                else:
+                    data[key] = raw
+            except (TypeError, ValueError):
+                continue
 
     def _effect_label_to_key(self, label: str) -> str:
         for key, item_label in VISUAL_FILTERS:
@@ -491,9 +571,9 @@ class TriggerEditDialog(BaseDialog):
         base_keys = list(dict.fromkeys(
             self.evolution_names + ["介入度", "破坏性", "总伤亡", "总计数", "间隔计数",
                                     "节内计数", "伤亡数组"]))
-        # 只有选项分支触发器才有选择数组可供判定
+        # 维护选择数组（整数记录）的触发器：选项分支 + 小游戏（返回值=达成关数）
         base_keys += [f"选择:{t['name']}" for t in self.all_triggers
-                      if t.get("name") and t.get("action_type") == "option"]
+                      if t.get("name") and t.get("action_type") in ("option", "mini_game")]
         for index in range(3):
             row = ctk.CTkFrame(frame, fg_color="transparent")
             row.pack(fill='x', pady=3)
@@ -596,7 +676,7 @@ class TriggerEditDialog(BaseDialog):
         needs_target = key.startswith("选择:") and code in ("ratio", "trend", "last")
         needs_window = code == "trend"
         if needs_target:
-            row["target_widget"].configure(placeholder_text="目标选项编号")
+            row["target_widget"].configure(placeholder_text="目标编号")
             row["target_widget"].grid()
         else:
             row["target_widget"].grid_remove()
@@ -751,9 +831,7 @@ class TriggerEditDialog(BaseDialog):
             data["chapter"] = self._goto_label_to_scope(self.goto_var.get())
         elif action_type == "mini_game":
             data["game"] = self.minigame_game_var.get().strip() or MINI_GAME_DEFAULT_ID
-            data["target_level"] = self.minigame_target_var.get().strip()
-            data["win_goto"] = self._goto_label_to_scope(self.minigame_win_var.get())
-            data["lose_goto"] = self._goto_label_to_scope(self.minigame_lose_var.get())
+            self._minigame_params_to_data(data)
         elif action_type == "ending":
             data["name"] = self.ending_name_var.get().strip()
             data["intrusion_delta"] = self.ending_intrusion_var.get().strip()
@@ -792,12 +870,9 @@ class TriggerEditDialog(BaseDialog):
             else:
                 self.goto_var.set(self._goto_scope_to_label(scope))
         elif action_type == "mini_game":
-            self.minigame_target_var.set(str(action_data.get("target_level", 3)))
             game_id = str(action_data.get("game") or MINI_GAME_DEFAULT_ID)
             self.minigame_game_var.set(game_id)
-            for var, branch in (("minigame_win_var", "win_goto"),
-                                ("minigame_lose_var", "lose_goto")):
-                getattr(self, var).set(self._goto_scope_to_label(action_data.get(branch) or ""))
+            self._rebuild_minigame_params(action_data)
         elif action_type == "ending":
             self.ending_name_var.set(action_data.get("name") or action_data.get("ending_text") or "")
             self._load_ending_deltas(action_data)
@@ -821,10 +896,8 @@ class TriggerEditDialog(BaseDialog):
         self._set_action_template("goto", "新跳转", {"chapter": default_target})
 
     def _mini_game_template(self):
-        default_target = self.chapter_names[0] if self.chapter_names else ""
         self._set_action_template("mini_game", "新小游戏", {
             "game": MINI_GAME_DEFAULT_ID, "target_level": 3,
-            "win_goto": default_target, "lose_goto": "",
         })
 
     def _load_ending_deltas(self, action_data):
@@ -1029,10 +1102,10 @@ class TriggerEditDialog(BaseDialog):
             return
         allowed_keys = set(self.evolution_names) | {"介入度", "破坏性", "总伤亡", "总计数",
                                                    "间隔计数", "节内计数", "伤亡数组"}
-        # 只有选项分支触发器才维护选择数组
+        # 维护选择数组（整数记录）的触发器：选项分支 + 小游戏（返回值=达成关数）
         allowed_keys |= {f"选择:{t['name']}" for t in self.all_triggers
-                         if t.get("name") and t.get("action_type") == "option"}
-        if action_type == "option":
+                         if t.get("name") and t.get("action_type") in ("option", "mini_game")}
+        if action_type in ("option", "mini_game"):
             allowed_keys.add(f"选择:{name}")
         allowed_comparators = {">=", "<=", ">", "<", "==", "!="}
         for rule in rules:

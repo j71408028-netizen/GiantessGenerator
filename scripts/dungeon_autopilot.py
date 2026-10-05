@@ -1221,27 +1221,35 @@ class _MiniGameHost(ScriptedHost):
 
 
 def scene_mini_game():
-    """mini_game 触发器：胜负分支跳转、结果落回放、中断不清章节。
+    """mini_game 触发器：整数返回值落选择记录、关联 goto 同步跳转、中断不清章节。
 
-    流程：第一步进后触发「小游戏·开场」（胜利 → 跳「胜利章」）；
-    第二次触发发生在「胜利章」（无结果 → 挂起解除、原地继续）。
+    流程：第一步进后触发「小游戏·开场」（返回值 3 → 关联 goto 触发器按
+    「选择:小游戏·开场」同一步内跳「返回值章」）；第二次触发发生在
+    「返回值章」（无结果 → 挂起解除、原地继续）。小游戏自身不配任何跳转。
     """
     host = _MiniGameHost([
-        {"won": True, "level": 3},   # 触发器一：胜利
-        None,                        # 触发器二：用户关窗，无结果
+        {"level": 3},   # 触发器一：结算返回值 3
+        None,           # 触发器二：用户关窗，无结果
     ])
     # 单句段落：一次 click 恰好完成一次步进（多句段落要多次点击逐句揭示）
     _AI.paragraphs = ["街道在脚下震颤。", "人群开始骚动。", "她低头笑了。"]
     _AI.index = 0
     config = _scenario_config()
-    config["chapters"] = [{"name": "开场", "start": True}, {"name": "胜利章"}]
+    config["chapters"] = [{"name": "开场", "start": True}, {"name": "返回值章"}]
     config["triggers"] = [
+        # 只结算一次：否则结算后的重判会立刻再次触发
         {"name": "小游戏·开场", "chapter": "开场", "action_type": "mini_game",
-         "action_data": {"game": "web_stub", "target_level": 3,
-                         "win_goto": "胜利章", "lose_goto": ""}},
-        {"name": "小游戏·胜利章", "chapter": "胜利章", "action_type": "mini_game",
-         "action_data": {"game": "web_stub", "target_level": 1,
-                         "win_goto": "", "lose_goto": ""}},
+         "action_data": {"game": "web_stub", "target_level": 3},
+         "repeatable": False},
+        # 置于关联 goto 之前：结算后的重判里先因章节不符跳过，下一步才触发
+        {"name": "小游戏·返回值章", "chapter": "返回值章", "action_type": "mini_game",
+         "action_data": {"game": "web_stub", "target_level": 1}},
+        # 结算重判与步进判定同一套条件：返回值 3 → 跳「返回值章」
+        {"name": "结算跳转", "chapter": "开场", "action_type": "goto",
+         "condition": {"operator": "and", "rules": [
+             {"key": "选择:小游戏·开场", "metric": "last", "target": 3,
+              "comparator": "==", "value": 3}]},
+         "action_data": {"chapter": "返回值章"}},
     ]
     win, result = _make_window(
         [("click", 1), ("sleep", 1.5), ("check", _check_mini_game_win),
@@ -1260,16 +1268,18 @@ def scene_mini_game():
 
 
 def _check_mini_game_win(win):
-    assert win.current_chapter == "胜利章", win.current_chapter
+    assert win.current_chapter == "返回值章", win.current_chapter
     assert win.pending_mini_game is None, win.pending_mini_game
     records = [e for e in win.replay_data
                if e.get("kind") == "trigger" and e.get("action_type") == "mini_game"]
-    assert records and records[0].get("game_result", {}).get("won") is True, records
+    assert records and records[0].get("game_result") == {"level": 3}, records
+    assert records[0].get("choice_value") == 3, records[0]
+    assert win.trigger_choices.get("小游戏·开场") == [3], win.trigger_choices
     assert any(h.get("type_str") == "【小游戏】" for h in win.story_history)
 
 
 def _check_mini_game_abort(win):
-    assert win.current_chapter == "胜利章", win.current_chapter
+    assert win.current_chapter == "返回值章", win.current_chapter
     assert win.pending_mini_game is None, win.pending_mini_game
     records = [e for e in win.replay_data
                if e.get("kind") == "trigger" and e.get("action_type") == "mini_game"]
@@ -1277,10 +1287,12 @@ def _check_mini_game_abort(win):
 
 
 def scene_mini_game_py():
-    """py 后端小游戏（覆盖层舞台）：打开 / 结算走胜负分支 / ESC 中止。
+    """py 后端小游戏（覆盖层舞台）：打开 / 结算记返回值 / ESC 中止。
 
     游戏用数据包 reaction（点击反应）；结果由检查钩子在帧线程直接调
     ``api.finish`` 回传，等价于玩家达成的结算，覆盖同一条结果管线。
+    小游戏不区分胜负：跳转由关联的 goto 触发器按「选择:小游戏·开场」
+    的返回值完成（结算后同一步内生效）。
     """
     host = ScriptedHost()
     # 单句段落：一次 click 恰好完成一次步进（多句段落要多次点击逐句揭示）
@@ -1296,14 +1308,22 @@ def scene_mini_game_py():
          ("close", None)],
         explore=False, host=host,
         config_overrides={
-            "chapters": [{"name": "开场", "start": True}, {"name": "胜利章"}],
+            "chapters": [{"name": "开场", "start": True}, {"name": "返回值章"}],
             "triggers": [
+                # 只结算一次：否则结算后的重判会立刻再次触发
                 {"name": "小游戏·开场", "chapter": "开场", "action_type": "mini_game",
-                 "action_data": {"game": "reaction", "target_level": 1,
-                                 "win_goto": "胜利章", "lose_goto": ""}},
-                {"name": "小游戏·胜利章", "chapter": "胜利章", "action_type": "mini_game",
-                 "action_data": {"game": "reaction", "target_level": 30,
-                                 "win_goto": "", "lose_goto": ""}},
+                 "action_data": {"game": "reaction", "target_level": 1},
+                 "repeatable": False},
+                # 置于关联 goto 之前：结算后的重判里先因章节不符跳过，下一步才触发
+                {"name": "小游戏·返回值章", "chapter": "返回值章",
+                 "action_type": "mini_game",
+                 "action_data": {"game": "reaction", "target_level": 30}},
+                # 结算重判与步进判定同一套条件：返回值 1 → 跳「返回值章」
+                {"name": "结算跳转", "chapter": "开场", "action_type": "goto",
+                 "condition": {"operator": "and", "rules": [
+                     {"key": "选择:小游戏·开场", "metric": "last", "target": 1,
+                      "comparator": "==", "value": 1}]},
+                 "action_data": {"chapter": "返回值章"}},
             ]})
     check("小游戏py：场景断言全部通过",
           bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
@@ -1320,16 +1340,19 @@ def _check_mgpy_stage_open(win):
 def _check_mgpy_finish_win(win):
     stage = win._mini_game_stage
     assert stage is not None, "结算前舞台应仍在"
-    stage._api.finish(True, {"level": 1, "hits": 1})
+    stage._api.finish({"level": 1, "hits": 1})
 
 
 def _check_mgpy_win_applied(win):
     assert win._mini_game_stage is None, "结算后舞台应已销毁"
-    assert win.current_chapter == "胜利章", win.current_chapter
+    assert win.current_chapter == "返回值章", win.current_chapter
     assert win.pending_mini_game is None, win.pending_mini_game
+    # 返回值进了选择记录，关联 goto 触发器在同一步内生效
+    assert win.trigger_choices.get("小游戏·开场") == [1], win.trigger_choices
     records = [e for e in win.replay_data
                if e.get("kind") == "trigger" and e.get("action_type") == "mini_game"]
-    assert records and records[0].get("game_result", {}).get("won") is True, records
+    assert records and records[0].get("game_result", {}).get("level") == 1, records
+    assert records[0].get("choice_value") == 1, records[0]
     assert any(h.get("type_str") == "【小游戏】" for h in win.story_history)
 
 
@@ -1348,7 +1371,76 @@ def _check_mgpy_esc_abort(win):
 
 def _check_mgpy_abort_applied(win):
     assert win._mini_game_stage is None, "中止后舞台应已销毁"
-    assert win.current_chapter == "胜利章", win.current_chapter
+    assert win.current_chapter == "返回值章", win.current_chapter
+    assert win.pending_mini_game is None, "中止后挂起态应已解除"
+
+
+def scene_mini_game_repeat():
+    """可再次触发的小游戏：结算后回副本主页面（不原地重启），后续步进可再进。
+
+    回归用例：结算后的重判会跳过刚结算的触发器本身——否则条件恒成立的
+    自动触发器会在结算瞬间把游戏重新打开，玩家永远回不到副本主页面。
+    """
+    host = ScriptedHost()
+    _AI.paragraphs = ["街道在脚下震颤。", "人群开始骚动。", "她低头笑了。"]
+    _AI.index = 0
+    win, result = _make_window(
+        [("click", 1), ("sleep", 1.5),
+         ("check", _check_mgrepeat_open), ("check", _check_mgrepeat_finish),
+         ("sleep", 1.0), ("check", _check_mgrepeat_returned),
+         ("click", 1), ("sleep", 1.5),
+         ("check", _check_mgrepeat_reopen), ("check", _check_mgrepeat_esc),
+         ("sleep", 0.5), ("check", _check_mgrepeat_cleared),
+         ("close", None)],
+        explore=False, host=host,
+        config_overrides={
+            "chapters": [{"name": "开场", "start": True}],
+            "triggers": [
+                # repeatable=True + 无条件：触发器语义上随时可进
+                {"name": "小游戏·挑战", "chapter": "开场", "action_type": "mini_game",
+                 "action_data": {"game": "reaction", "target_level": 1}},
+            ]})
+    check("小游戏repeat：场景断言全部通过",
+          bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
+          win._check_results)
+
+
+def _check_mgrepeat_open(win):
+    stage = win._mini_game_stage
+    assert stage is not None, "小游戏舞台未打开"
+    assert stage._game is not None and stage._game.id == "reaction", stage._game
+
+
+def _check_mgrepeat_finish(win):
+    stage = win._mini_game_stage
+    assert stage is not None, "结算前舞台应仍在"
+    stage._api.finish({"level": 2, "hits": 2})
+
+
+def _check_mgrepeat_returned(win):
+    assert win._mini_game_stage is None, "结算后应回到副本主页面，而不是原地重启"
+    assert win.pending_mini_game is None, win.pending_mini_game
+    assert win.trigger_choices.get("小游戏·挑战") == [2], win.trigger_choices
+    records = [e for e in win.replay_data
+               if e.get("kind") == "trigger" and e.get("action_type") == "mini_game"]
+    assert len(records) == 1 and records[0].get("choice_value") == 2, records
+
+
+def _check_mgrepeat_reopen(win):
+    stage = win._mini_game_stage
+    assert stage is not None, "可再次触发的触发器应在后续步进中重新进入"
+    records = [e for e in win.replay_data
+               if e.get("kind") == "trigger" and e.get("action_type") == "mini_game"]
+    assert len(records) == 2, records
+
+
+def _check_mgrepeat_esc(win):
+    assert win._mini_game_stage is not None, "ESC 前舞台应仍在"
+    assert win._minigame_escape() is True, "ESC 应被小游戏消费"
+
+
+def _check_mgrepeat_cleared(win):
+    assert win._mini_game_stage is None, "中止后舞台应已销毁"
     assert win.pending_mini_game is None, "中止后挂起态应已解除"
     records = [e for e in win.replay_data
                if e.get("kind") == "trigger" and e.get("action_type") == "mini_game"]
@@ -1376,8 +1468,8 @@ def scene_mini_game_escape():
             "chapters": [{"name": "开场", "start": True}],
             "triggers": [
                 {"name": "小游戏·开场", "chapter": "开场", "action_type": "mini_game",
-                 "action_data": {"game": "escape_giantess", "target_level": 2,
-                                 "win_goto": "", "lose_goto": ""}},
+                 "action_data": {"game": "escape_giantess", "target_level": 2},
+                 "repeatable": False},
             ]})
     check("小游戏escape：场景断言全部通过",
           bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
@@ -1420,6 +1512,7 @@ SCENES = {
     "mini-game": scene_mini_game,
     "mini-game-escape": scene_mini_game_escape,
     "mini-game-py": scene_mini_game_py,
+    "mini-game-repeat": scene_mini_game_repeat,
     "session-close": scene_session_close,
     "entry-cancel": scene_entry_cancel,
     "entry-start": scene_entry_start,

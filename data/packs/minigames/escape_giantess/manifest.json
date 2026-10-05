@@ -4,6 +4,9 @@
   "backend": "py",
   "entry": "game.py",
   "params": [
-    {"key": "target_level", "label": "目标关数", "type": "int", "default": 3, "min": 1, "max": 30}
+    {"key": "target_level", "label": "目标关数", "type": "int", "default": 3, "min": 1, "max": 30},
+    {"key": "difficulty", "label": "难度", "type": "int", "default": 1, "min": 1, "max": 30},
+    {"key": "sweep_scale", "label": "扫掠体尺寸倍率", "type": "float", "default": 1.0, "min": 0.5, "max": 2.5},
+    {"key": "giantess_height", "label": "巨大娘身高（米，0=取角色数据）", "type": "float", "default": 0.0, "min": 0.0, "max": 150000.0}
   ]
 }
