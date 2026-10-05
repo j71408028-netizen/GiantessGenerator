@@ -64,7 +64,26 @@ class IntroPanel(ctk.CTkFrame):
             self.pack(fill='x', padx=5, pady=(0, 5))
             self.is_expanded = True
 
+    # ---------- 聊天入口 ----------
+    def _toggle_chat(self):
+        if self.generator_panel is not None:
+            self.generator_panel.toggle_chat_panel()
+
+    def set_chat_badge(self, count: int):
+        """未读消息徽标：有未读时在聊天按钮左侧亮一个红点。"""
+        if count > 0 and self._is_state_mode():
+            self.chat_badge_label.configure(text="●")
+            self.chat_badge_label.pack(side='right', padx=(0, 2))
+        else:
+            self.chat_badge_label.configure(text="")
+            self.chat_badge_label.pack_forget()
+
     def refresh_display(self):
+        # 聊天入口仅在角色状态模式显示（创建参数模式没有可聊天的角色）
+        if self._is_state_mode():
+            self.chat_btn.pack(side='right', padx=(0, 6))
+        else:
+            self.chat_btn.pack_forget()
         if self._is_state_mode():
             state = self.generator_panel.current_state
             visible = state.intro_visible if state else ""
@@ -216,6 +235,18 @@ class IntroPanel(ctk.CTkFrame):
             font=ui_fonts.ui_font(10, "bold"), text_color=FB_BLUE,
             height=0)
 
+        # 聊天入口（仅角色状态模式可用）：打开右栏聊天面板
+        self.chat_badge_label = ctk.CTkLabel(nick_row, text="",
+            font=ui_fonts.ui_font(10, "bold"), text_color=INTRO_ERR, height=0)
+
+        self.chat_btn = ctk.CTkButton(
+            nick_row, text="💬 聊天", font=ui_fonts.ui_font(10),
+            fg_color=FB_CHIP_BG, text_color=FB_BLUE,
+            hover_color=FB_CHIP_HOVER, border_width=0,
+            corner_radius=14, width=56, height=24,
+            command=self._toggle_chat
+        )
+
         self.intro_mode_btn = ctk.CTkButton(
             nick_row, text="✏️ 编辑", font=ui_fonts.ui_font(10),
             fg_color=FB_CHIP_BG, text_color=FB_BLUE,
@@ -223,6 +254,11 @@ class IntroPanel(ctk.CTkFrame):
             corner_radius=14, width=50, height=24, command=self._toggle_edit
         )
         self.intro_mode_btn.pack(side='right')
+        # 聊天按钮压在编辑按钮左侧；非状态模式下隐藏（无角色不可聊天）
+        self.chat_btn.pack(side='right', padx=(0, 6))
+        self.chat_btn.pack_forget()
+        self.chat_badge_label.pack(side='right', padx=(0, 2))
+        self.chat_badge_label.pack_forget()
 
         intro_row = ctk.CTkFrame(intro_text_frame, fg_color="transparent")
         intro_row.pack(fill='x')

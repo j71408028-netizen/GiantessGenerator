@@ -17,6 +17,8 @@ from tkinter import filedialog
 
 from ai import resolve_ai_config
 from models import BodyPreset, CharacterSnapshot, Personality
+from services import chat_events
+from services.chat_service import pending_char_messages
 from services.challenge_service import ChallengeService
 from ui.common import appearance
 from ui.mini import pixel as px
@@ -71,6 +73,8 @@ class MiniApp:
         self._screen = None
         self._message_payload = None
         self._closing = False
+        self._unread_chat = {}       # giantess_id -> 未读回复数
+        self._chat_service = None
         # 正在跑的副本窗口（由宿主端口登记）。挂件关闭时若它还在，要先停掉
         # DPG，否则独立视口会拖住进程。
         self._active_dungeon_window = None
@@ -78,6 +82,8 @@ class MiniApp:
         self._apply_window()
         self._build_main()
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        # 聊天事件广播：后台线程发来，经 after 投递回主线程刷新未读
+        chat_events.subscribe(self._on_chat_event)
         # 首帧之后再掷出第一次调查，保证窗口先出现，不会让启动显得卡顿。
         self.root.after(80, self._first_investigate)
 
@@ -173,6 +179,9 @@ class MiniApp:
         px.PixelButton(bar, "▤", lambda: self.push_screen("characters"),
                        tone="text_dim", width=26, height=22).pack(
             side='right', padx=(2, 4), pady=4)
+        self.chat_btn = px.PixelButton(bar, "✉", self.open_chat,
+                                       tone="text_dim", width=26, height=22)
+        self.chat_btn.pack(side='right', padx=(2, 4), pady=4)
         px.PixelButton(bar, "☰", lambda: self.push_screen("settings"),
                        tone="text_dim", width=26, height=22).pack(
             side='right', pady=4)
@@ -270,10 +279,69 @@ class MiniApp:
             return AIScreen(self.root, self)
         if key == "challenge":
             return ChallengeScreen(self.root, self)
+        if key == "chat":
+            from ui.mini.screens import ChatScreen
+            return ChatScreen(self.root, self)
         if key == "message":
             text, buttons, tone, title = self._message_payload
             return MessageScreen(self.root, self, text, buttons, tone, title)
         raise ValueError(f"未知屏幕: {key}")
+
+    # ==================== 聊天 ====================
+    def chat_service(self):
+        """聊天服务（懒加载；角色历史按 giantess_id 天然隔离）。"""
+        if self._chat_service is None:
+            from services.chat_service import ChatService
+            self._chat_service = ChatService()
+            # 启动投递调度器（接管上次会话遗留的 queued 消息；进程级单例）
+            from services.chat_delivery import get_scheduler
+            get_scheduler(self._chat_service)
+        return self._chat_service
+
+    def open_chat(self):
+        """打开聊天屏：清掉当前角色的未读并亮/灭标题栏徽标。"""
+        if self.current_state is None:
+            self.notify("还没有载入角色，先创建或载入一位再来聊天。",
+                        title="聊天")
+            return
+        self._unread_chat.pop(self.current_state.giantess_id, None)
+        self._refresh_chat_badge()
+        self.push_screen("chat")
+
+    def _refresh_chat_badge(self):
+        unread = sum(self._unread_chat.values())
+        self.chat_btn.configure(
+            text="✉●" if unread else "✉",
+            text_color=px.color("accent") if unread else px.color("text_dim"))
+
+    def _on_chat_event(self, event):
+        """聊天事件（后台线程）：投递回主线程累计未读。"""
+        if self._closing:
+            return
+        try:
+            self.root.after(0, lambda: self._handle_chat_event(event))
+        except Exception:
+            pass
+
+    def _handle_chat_event(self, event):
+        giantess_id = event.get("giantess_id")
+        if not giantess_id:
+            return
+        # 聊天屏正开着：消息在屏上直接渲染并由控制器标记已读，无需徽标
+        if (self._screen_stack and self._screen_stack[-1] == "chat"
+                and self.current_state is not None
+                and giantess_id == self.current_state.giantess_id):
+            return
+        # 徽标按存档重算：已投递但玩家未读的角色消息数（事件只是触发器）
+        chat_state = self.chat_service().load_chat(giantess_id, blocking=False)
+        if chat_state is None:
+            return
+        unread = len(pending_char_messages(chat_state))
+        if unread:
+            self._unread_chat[giantess_id] = unread
+        else:
+            self._unread_chat.pop(giantess_id, None)
+        self._refresh_chat_badge()
 
     # ==================== 消息 / 确认 ====================
     def notify(self, text: str, tone: str = "accent", title: str = "提示"):
@@ -471,6 +539,12 @@ class MiniApp:
         self.report_view.clear()
         self.state_card.update_state(state)
         self._set_mode("state")
+        # 离线积压的已投递未读回复：点亮标题栏 ✉ 徽标（按存档重算）
+        chat_state = self.chat_service().load_chat(giantess_id, blocking=False)
+        self._unread_chat[giantess_id] = (
+            len(pending_char_messages(chat_state))
+            if chat_state is not None else 0)
+        self._refresh_chat_badge()
         self._set_status(f"载入 {state.name}　{state.height:.1f} 米　"
                          f"行动点 {state.action_points}")
 
@@ -535,6 +609,8 @@ class MiniApp:
         if state is None:
             return
         self._character_repo.delete(state.giantess_id)
+        self._unread_chat.pop(state.giantess_id, None)
+        self._refresh_chat_badge()
         name = state.name
         self.unload_character(confirm=False)
         self._set_status(f"已删除 {name}")

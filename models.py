@@ -1,6 +1,7 @@
 from typing import List, Dict, Optional
 from dataclasses import dataclass, field, fields, replace
 import datetime
+import uuid
 
 @dataclass
 class Landmark:
@@ -319,3 +320,145 @@ class ReportData:
     step_destruction: float = 0.0
     # 本次报告锚定的角色位置（完整地址）；空表示未锚定
     position: str = ""
+
+
+@dataclass
+class ChatMessage:
+    """聊天记录中的一条消息。
+
+    role 为 "user"（玩家发送）或 "char"（角色回复）；read 标记对方是否
+    已读（仅对 user 消息有意义）；silent 为"已读不回"：对方已读但未回复，
+    此时本条 user 消息后不会紧跟 char 消息。
+
+    生命周期字段（AI 已生成 ≠ 已送达 ≠ 玩家已读，见 docs/chat_delivery.md）：
+    - id / batch_id / sequence：稳定身份与"一次决策多条消息"的分组；
+    - status：角色消息 queued → delivered → read；user 消息恒为空串
+      （沿用 read/silent 表达"角色是否看到/是否已读不回"）；
+    - available_at：计划展示时间（queued 消息必填），delivered_at /
+      read_at 为实际到达与被读时间；
+    - seen_by_char_at：角色看到本条 user 消息的时间（含已读不回）。
+    旧档迁移：缺 id 补 UUID；角色消息缺 status 视为 read（早已展示过）。
+    """
+    role: str
+    text: str
+    created_at: str = field(default_factory=lambda: datetime.datetime.now().isoformat())
+    read: bool = False
+    silent: bool = False
+    id: str = ""
+    batch_id: str = ""
+    sequence: int = 0
+    status: str = ""
+    available_at: str = ""
+    delivered_at: str = ""
+    read_at: str = ""
+    seen_by_char_at: str = ""
+    silent_reason_internal: str = ""
+
+    def __post_init__(self):
+        if not self.id:
+            self.id = uuid.uuid4().hex
+        # 旧档角色消息没有 status：历史上已完整展示，直接视为已读，
+        # 避免迁移后全体误报未读；新消息由服务层显式写入 status。
+        if self.role == "char" and not self.status:
+            self.status = "read"
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ChatMessage":
+        allowed = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in allowed})
+
+
+@dataclass
+class ChatParams:
+    """角色的纯聊天参数（只存聊天域，不进主档案，不污染既有字段）。
+
+    首次聊天前由 AI 依据人设（公开+隐藏介绍）一次性决定，之后不再更改；
+    三项均取 0/1/2 三档（各档含义见 services.chat_service 的档位表）：
+    - online 在线强度：决定回复延迟（读/打字延迟的档位倍率）；
+    - warmup 预热速率：决定聊天中态度 ops 的步长倍率；
+    - boundary 聊天边界：决定已读不回倾向与主动搭话的间隔门槛。
+    介入度/破坏性/行动点数等既有字段由聊天逻辑直接复用（决定谈及人类时
+    的态度与此刻的活力），不在此重复存储。
+    """
+    online: int = 1
+    warmup: int = 1
+    boundary: int = 1
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ChatParams":
+        allowed = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in allowed})
+
+
+@dataclass
+class Topic:
+    """聊天话题（docs/chat_delivery.md 阶段三）。
+
+    角色与玩家之间的一段连续对话主题，由 AI 在协议里通过
+    topic.action（continue/start/switch/end）自主开启、切换与结束；
+    服务层施加硬约束（最大轮数、超时收束、列表容量）。
+    status 为 active（进行中）或 ended；end_reason 记录结束方式：
+    natural（AI 主动收尾）/ switched（切换到新话题）/ stale（超时或
+    超轮数被服务层强制收束）。
+    """
+    id: str = ""
+    title: str = ""
+    status: str = "active"
+    source: str = ""           # user | character | event
+    started_at: str = ""
+    last_activity_at: str = ""
+    ended_at: str = ""
+    end_reason: str = ""
+    turn_count: int = 0
+
+    def __post_init__(self):
+        if not self.id:
+            self.id = uuid.uuid4().hex
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Topic":
+        allowed = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in allowed})
+
+
+@dataclass
+class ChatState:
+    """角色的聊天域数据，独立存档于 data/archives/<giantess_id>/chat.json
+    （聊天写入频繁，与主档案 info.json 分离，避免频繁重写演化表）。
+
+    attitude 为聊天态度值（-100~100）：驱动角色的回复意愿与语气，
+    低于 REVEAL_ATTITUDE（见 services.chat_service）时不注入隐藏介绍；
+    memory 为早期对话的压缩摘要与 AI 留下的 memory_note 累积；
+    user_nick 为角色对玩家的称呼（聊天域内独立，不改主档案 nick）；
+    chat_params 为纯聊天参数（首次聊天前由 AI 一次性决定，见 ChatParams）；
+    topics / active_topic_id 为话题状态机（见 Topic）；
+    consumed_event_ids 为已消费经历事件的确定性 id（见
+    services.experience_events），防止同一新闻/经历被反复提起。
+    """
+    giantess_id: str
+    messages: List[ChatMessage] = field(default_factory=list)
+    memory: str = ""
+    attitude: int = 0
+    user_nick: str = ""
+    last_active_at: str = ""
+    chat_params: Optional[ChatParams] = None
+    topics: List[Topic] = field(default_factory=list)
+    active_topic_id: str = ""
+    consumed_event_ids: List[str] = field(default_factory=list)
+
+    def __post_init__(self):
+        self.messages = [
+            m if isinstance(m, ChatMessage) else ChatMessage.from_dict(m)
+            for m in (self.messages or [])
+        ]
+        self.topics = [
+            t if isinstance(t, Topic) else Topic.from_dict(t)
+            for t in (self.topics or [])
+        ]
+        if isinstance(self.chat_params, dict):
+            self.chat_params = ChatParams.from_dict(self.chat_params)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ChatState":
+        allowed = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in allowed})

@@ -13,7 +13,10 @@ import tkinter as tk
 
 from ai import PROVIDER_DEFAULTS, create_client
 from logic import format_size
+from models import ChatMessage
 from paths import APP_VERSION
+from services.chat_delivery import ChatDeliveryController
+from services.chat_service import should_reconcile
 from ui.mini import pixel as px
 
 
@@ -319,6 +322,246 @@ class ChallengeScreen(Screen):
         # 先退掉确认屏再启动副本窗口，副本结束返回时直接回到主界面。
         self.app.pop_screen()
         self.app.launch_challenge()
+
+
+# ==================== 聊天 ====================
+class ChatScreen(Screen):
+    """与当前角色私聊的整窗聊天屏。
+
+    消息行靠左（角色）/ 靠右（玩家）；"已读不回"只保留为内部状态，界面不标注。
+    回复节奏由服务层与投递控制器负责（docs/chat_delivery.md）：AI 决策后回复
+    以 queued 入列并排定 available_at，本屏通过共用的 ChatDeliveryController
+    到点重载、重渲染，期间显示"对方正在输入…"，渲染后统一标记玩家已读；界面
+    只画 delivered/read 的角色消息。撤回窗口 = AI 应答完成之前（角色已"看到"
+    即关闭，物理删除，视为没看到）。打开聊天时自动触发离线补话（有未读→
+    回复未读；间隔够久→允许主动搭话），无补话条 UI。聊天对象是主界面当前
+    载入的角色，换对象先回角色档案屏载入另一位。AI 请求在后台线程执行。
+    """
+
+    TITLE = "聊天"
+
+    def _build(self, body):
+        state = self.app.current_state
+        if state is None:
+            px.label(body, "还没有载入角色。", tone="text_dim", size=11).pack(
+                anchor='w', pady=(10, 2))
+            px.label(body, "先创建或载入一位少女，再来找她聊天。",
+                     tone="text_off", size=10).pack(anchor='w')
+            return
+
+        self.state = state
+        self.chat_state = self.app.chat_service().load_chat(state.giantess_id)
+        self._pending = False
+        self._recall_requested = False
+        self._pending_row = None
+        self._recall_btn = None
+
+        nick = f"（{state.nick}）" if state.nick else ""
+        px.label(body, f"{state.name}{nick}　态度 {self.chat_state.attitude:+d}",
+                 tone="text_dim", size=10).pack(anchor='w', pady=(0, 4))
+
+        self.listing = px.ScrollFrame(body, fill="ink_alt", border="line")
+        self.listing.pack(fill='both', expand=True)
+        self._render_messages()
+
+        self.status = px.label(body, "", tone="text_off", size=10)
+        self.status.pack(anchor='w', pady=(4, 0))
+
+        row = px.transparent(body)
+        row.pack(fill='x', pady=(2, 0))
+        row.columnconfigure(0, weight=1)
+        self.input_var = tk.StringVar()
+        entry = px.entry(row, textvariable=self.input_var, height=26)
+        entry.grid(row=0, column=0, sticky='ew')
+        entry.bind("<Return>", lambda _e: self._send())
+        self.send_btn = px.PixelButton(row, "发送", self._send, tone="ok",
+                                       size=12, width=58, height=26)
+        self.send_btn.grid(row=0, column=1, padx=(4, 0))
+
+        # 打开聊天时先后台预热聊天参数（首次聊天前由 AI 一次性决定，失败
+        # 静默——发送时会正式报错），再自动补话：
+        # 有未读→回复未读；无未读且间隔够久→可能主动搭话
+        # 投递节奏控制器：到点重载/重渲染/"正在输入"/标记已读
+        self._delivery = ChatDeliveryController(
+            self.app.chat_service(), after=self.after,
+            on_reload=self._on_delivery_reload,
+            on_status=self._on_delivery_status)
+        self._delivery.attach(state)
+        self.after(80, self._prewarm_then_catchup)
+
+    # ---------- 投递节奏（与专业模式共用 ChatDeliveryController） ----------
+    def _on_delivery_reload(self, chat_state):
+        if not self.winfo_exists():
+            return
+        self.chat_state = chat_state
+        self._render_messages()
+        # 已投递消息已在本屏渲染：清标题栏徽标
+        self.app._unread_chat.pop(self.state.giantess_id, None)
+        self.app._refresh_chat_badge()
+
+    def _on_delivery_status(self, kind: str):
+        if not self.winfo_exists():
+            return
+        self._set_status("对方正在输入…" if kind == "typing" else "")
+
+    def _prewarm_then_catchup(self):
+        if self.state is None or self.chat_state is None:
+            return
+        if self.chat_state.chat_params is not None:
+            self._auto_catchup()
+            return
+        state, chat_state = self.state, self.chat_state
+
+        def worker():
+            self.app.chat_service().ensure_chat_params(state, chat_state)
+            self.after(0, self._auto_catchup)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    # ---------- 自动补话（统一社交决策） ----------
+    def _auto_catchup(self):
+        if self._pending:
+            return
+        if should_reconcile(self.state, self.chat_state):
+            self._run_reconcile()
+
+    def _run_reconcile(self):
+        self._pending = True
+        self.send_btn.configure(state='disabled')
+        self._set_status("对方正在输入…")
+        state, chat_state = self.state, self.chat_state
+
+        def worker():
+            result = self.app.chat_service().reconcile(state, chat_state)
+            self.after(0, lambda: self._catchup_done(result))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _catchup_done(self, result):
+        self._pending = False
+        if not self.winfo_exists():
+            return
+        self.send_btn.configure(state='normal')
+        if result.get("error"):
+            self._set_status(result["error"], tone="danger")
+            return
+        if result.get("ops_applied") and self.app.current_state is not None:
+            self.app.state_card.update_state(self.app.current_state)
+        # 回复已 queued 入列：交给投递控制器接管展示节奏
+        self._delivery.refresh()
+
+    # ---------- 渲染 ----------
+    def _render_messages(self):
+        for widget in self.listing.body.winfo_children():
+            widget.destroy()
+        self._pending_row = None
+        self._recall_btn = None
+        for message in self.chat_state.messages:
+            # 角色消息只画已投递/已读的：queued 由控制器到点后再出现
+            if message.role == "char" and message.status not in ("delivered", "read"):
+                continue
+            self._append_row(message)
+        self.listing.body.after(30, self._scroll_bottom)
+
+    def _append_row(self, message, recallable: bool = False):
+        is_user = message.role == "user"
+        row = px.transparent(self.listing.body)
+        row.pack(fill='x', pady=1)
+        line = px.label(row, message.text,
+                        tone="text" if is_user else "accent",
+                        size=11, wraplength=250, justify='left', anchor='w')
+        if is_user:
+            line.pack(anchor='e', padx=(30, 2))
+            if recallable:
+                # 撤回窗口：角色"看到"之前，最后一条玩家消息可撤回
+                self._pending_row = row
+                self._recall_btn = px.PixelButton(
+                    row, "撤回", self._recall, tone="text_dim",
+                    size=10, width=34, height=18)
+                self._recall_btn.pack(anchor='e', padx=(0, 2))
+        else:
+            line.pack(anchor='w', padx=(2, 30))
+        self.listing.bind_wheel(row)
+
+    def _scroll_bottom(self):
+        if self.winfo_exists():
+            self.listing.canvas.yview_moveto(1.0)
+
+    def _set_status(self, text: str, tone: str = "text_off"):
+        if self.winfo_exists():
+            self.status.configure(text=text, text_color=px.color(tone))
+
+    # ---------- 收发 ----------
+    def _send(self):
+        if self._pending:
+            return
+        text = self.input_var.get().strip()
+        if not text:
+            return
+        self.input_var.set("")
+        self._pending = True
+        self._recall_requested = False
+        self.send_btn.configure(state='disabled')
+        self._set_status("")
+        self._append_row(ChatMessage(role="user", text=text), recallable=True)
+        self._scroll_bottom()
+
+        state, chat_state = self.state, self.chat_state
+
+        def worker():
+            try:
+                result = self.app.chat_service().send_message(
+                    state, chat_state, text)
+            except Exception as e:
+                result = {"error": str(e), "reply_messages": [],
+                          "ops_applied": {}}
+            self.after(0, lambda: self._send_done(result))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _recall(self):
+        """撤回最后一条玩家消息（仅角色看到之前有效）。"""
+        if not self._pending:
+            return
+        self._recall_requested = True
+        if self._pending_row is not None:
+            self._pending_row.destroy()
+            self._pending_row = None
+        self._set_status("撤回中…")
+
+    def _send_done(self, result):
+        self._pending = False
+        if not self.winfo_exists():
+            return
+        self.send_btn.configure(state='normal')
+        if self._recall_requested:
+            # 角色尚未"看到"：整段对话从历史中移除（含到达中的回复）
+            self._recall_requested = False
+            self.app.chat_service().recall_exchange(
+                self.chat_state, result.get("user_message"),
+                result.get("reply_message"))
+            self._delivery.refresh()
+            self._set_status("已撤回")
+            self.after(2000, lambda: self._set_status(""))
+            return
+        if result.get("error"):
+            self._set_status(result["error"], tone="danger")
+            return
+        # AI 已应答 = 角色"看到"，撤回窗口关闭；回复（可能多条）已 queued
+        # 入列，展示节奏交给投递控制器
+        self._expire_recall()
+        if result.get("ops_applied") and self.app.current_state is not None:
+            self.app.state_card.update_state(self.app.current_state)
+        self._delivery.refresh()
+
+    # ---------- 回复节奏 ----------
+    def _expire_recall(self):
+        if not self.winfo_exists():
+            return
+        if self._recall_btn is not None:
+            self._recall_btn.destroy()
+            self._recall_btn = None
+        self._pending_row = None
 
 
 # ==================== 消息 / 确认 ====================

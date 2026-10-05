@@ -64,8 +64,10 @@ class MiniStateCard(px.Panel):
 
         buttons = px.transparent(self)
         buttons.grid(row=4, column=1, sticky='ew', padx=(0, 6), pady=(2, 6))
+        px.small_button(buttons, "聊天", self.app.open_chat,
+                        tone="report", width=54).pack(side='left', padx=(0, 2))
         px.small_button(buttons, "导出", self.app.export_character,
-                        width=54).pack(side='left', padx=(0, 2))
+                        width=54).pack(side='left', padx=2)
         px.small_button(buttons, "删除", self.app.delete_character,
                         tone="danger", width=54).pack(side='left', padx=2)
         px.small_button(buttons, "新建", self.app.unload_character,

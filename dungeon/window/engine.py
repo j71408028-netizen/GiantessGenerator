@@ -7,7 +7,7 @@ from dungeon import process_log
 from dungeon.chapters import find_chapter, is_terminating_chapter, overflow_jump_target
 from dungeon.details import build_detail_query_prompt, parse_detail_queries
 from dungeon.models import DungeonTextType
-from dungeon.response import extract_stream_text, parse_final_json
+from dungeon.response import canonical_history_entry, extract_stream_text, parse_final_json
 from dungeon.splitter import split_full_text, split_stream_units, strip_speaker_markers
 from logic import apply_size_unlock_updates, compute_casualty
 
@@ -95,23 +95,28 @@ class DungeonStoryEngine:
                 self.story_history.append(current_item)
 
                 if pregen is None:
-                    stream_generator = self.ai_client.generate_stream(self.messages, temperature=0.8)
+                    # 空响应重试一次：流式路径对空串无处兜底，且空响应
+                    # 偶发（实测约 1/20），重试对用户不可见（首趟没上屏）
+                    for _attempt in range(2):
+                        stream_generator = self.ai_client.generate_stream(self.messages, temperature=0.8)
 
-                    for chunk in stream_generator:
-                        if self._closing:
-                            return
-                        full_response_buffer += chunk
+                        for chunk in stream_generator:
+                            if self._closing:
+                                return
+                            full_response_buffer += chunk
 
-                        partial_text = extract_stream_text(full_response_buffer)
-                        if partial_text is not None:
-                            # 内置分句器：首句流式显示，完整即定格；后续完成句排队待点击
-                            self._update_stream_units(current_item, partial_text)
-                        else:
-                            cleaned_buf = full_response_buffer.replace("```json", "").replace("```", "").strip()
-                            if not cleaned_buf.startswith("{"):
-                                current_item["text"] = cleaned_buf
+                            partial_text = extract_stream_text(full_response_buffer)
+                            if partial_text is not None:
+                                # 内置分句器：首句流式显示，完整即定格；后续完成句排队待点击
+                                self._update_stream_units(current_item, partial_text)
+                            else:
+                                cleaned_buf = full_response_buffer.replace("```json", "").replace("```", "").strip()
+                                if not cleaned_buf.startswith("{"):
+                                    current_item["text"] = cleaned_buf
 
-                        self._schedule_text_update()
+                            self._schedule_text_update()
+                        if full_response_buffer.strip():
+                            break
 
                     if self._closing:
                         return
@@ -134,7 +139,11 @@ class DungeonStoryEngine:
                 # 首句定稿：带说话人（Solea/Bulla 对话分支）就该念出来
                 self._speak_item(current_item)
 
-                self.messages.append({"role": "assistant", "content": full_response_buffer})
+                # 对话历史中的 assistant 回合一律存规范 JSON 形状（见
+                # canonical_history_entry）：原始响应跑格式时若原样入史，
+                # 模型会模仿纯文本导致格式漂移自我强化
+                self.messages.append({"role": "assistant", "content": canonical_history_entry(
+                    ai_text, direction, custom_directions)})
                 window = self._message_window_size()
                 if len(self.messages) > window + 1:
                     self.messages = [self.messages[0]] + self.messages[-window:]

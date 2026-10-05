@@ -57,6 +57,23 @@ class OpenAICompatibleClient:
     def generate(self, messages, temperature=0.8):
         return "".join(c for c in self.generate_stream(messages, temperature) if c)
 
+    def generate_once(self, messages, temperature=0.8, max_tokens: Optional[int] = None):
+        """非流式生成：一次返回完整文本（聊天等不需要打字机效果的场景）。"""
+        kwargs = {"model": self.model, "messages": messages,
+                  "temperature": temperature, "stream": False}
+        if max_tokens:
+            kwargs["max_tokens"] = max_tokens
+        response = self.client.chat.completions.create(**kwargs)
+        choices = getattr(response, "choices", None)
+        if not choices:
+            return ""
+        message = getattr(choices[0], "message", None)
+        content = getattr(message, "content", None)
+        if content:
+            return content
+        refusal = getattr(message, "refusal", None)
+        return refusal or ""
+
     def test_connection(self):
         try:
             self.client.chat.completions.create(

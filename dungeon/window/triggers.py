@@ -13,6 +13,7 @@ from dungeon.actions import (EMPTY_ACTIONS, MINI_GAME_DEFAULT_ID,
 from dungeon.chapters import (find_chapter, is_terminating_chapter,
                               matches_scope, sensitivity_amount)
 from dungeon.models import DungeonState, DungeonTextType
+from dungeon.response import canonical_history_entry
 from dungeon.rules import TriggerRules
 from dungeon.window.minigame import BACKEND_PY, resolve_mini_game
 
@@ -578,8 +579,11 @@ class TriggerHandler:
         self._update_text_display()
         self._animate_reveal(anim_item, inserted_text)
 
-        # 与一般段落一样进入对话历史，后续 AI 生成时可见
-        self.messages.append({"role": "assistant", "content": item["text"]})
+        # 与一般段落一样进入对话历史，后续 AI 生成时可见。
+        # 用规范 JSON 形状（dungeon.response.canonical_history_entry）：
+        # 纯文本的 assistant 回合会让模型模仿，引发格式漂移
+        self.messages.append({"role": "assistant", "content": canonical_history_entry(
+            inserted_text, 0, {})})
         window = self._message_window_size()
         if len(self.messages) > window + 1:
             self.messages = [self.messages[0]] + self.messages[-window:]

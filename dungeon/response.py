@@ -32,6 +32,20 @@ def extract_stream_text(response_text: str):
         return raw_value.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
 
 
+def canonical_history_entry(text: str, direction: int,
+                            custom_directions: dict) -> str:
+    """把解析结果规范化为协议 JSON 文本，用作对话历史中的 assistant 消息。
+
+    历史里一旦混入纯文本的 assistant 回合（原始响应跑格式、或触发器插入段），
+    模型会模仿历史继续输出纯文本，格式漂移自我强化——实测高介入度剧情下
+    JSON 服从率会从 100% 跌到 20%。因此历史一律存规范形状，与原始响应
+    是否合规无关。
+    """
+    return json.dumps({"text": text, "direction": direction,
+                       "custom_directions": custom_directions or {}},
+                      ensure_ascii=False)
+
+
 def parse_final_json(response_text: str, custom_names: set[str]):
     cleaned = response_text.strip()
     if cleaned.startswith("```json"):

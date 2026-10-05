@@ -12,6 +12,9 @@ from ui.exploration.creation_params import CreationParamsPanel
 from ui.exploration.select_character import SelectCharacterPanel
 from ui.exploration.intro import IntroPanel
 from ui.exploration.report import ReportPanel
+from ui.exploration.chat_panel import ChatPanel
+from services import chat_events
+from services.chat_service import ChatService, pending_char_messages
 from ui.common.dialogs import BaseDialog
 from ui.common.theme import (
     EXP_BG, EXP_BORDER, EXP_BORDER_STRONG, EXP_HOVER,
@@ -38,11 +41,21 @@ class ExplorationPanel(ctk.CTkFrame):
         self.current_panel = "params"
         self.current_state = None
         self._cached_params_intro = None
+        self._chat_open = False
+        self._unread_chat = 0
+        self._chat_service = ChatService()
+        # 启动投递调度器（接管上次会话遗留的 queued 消息；进程级单例）
+        from services.chat_delivery import get_scheduler
+        get_scheduler(self._chat_service)
 
         self._build_ui()
 
         self.update_world_setting(self.context.world_setting)
         self.refresh_style_hint()
+
+        # 聊天事件广播：后台线程发来，经 after 投递回主线程刷新徽标
+        chat_events.subscribe(self._on_chat_event)
+        self.bind("<Destroy>", self._on_chat_events_detach, add="+")
 
     # ---------- UI 构建 ----------
     def _build_ui(self):
@@ -243,10 +256,73 @@ class ExplorationPanel(ctk.CTkFrame):
         self._build_result_area(right_frame)
 
     def _build_result_area(self, parent):
-        # 右侧大容器（报告正文 + 详细尺寸）已拆分为独立组件
+        # 右侧大容器（报告正文 + 详细尺寸）已拆分为独立组件；
+        # 聊天面板与报告面板共用同一格，切换显示。
         self.report_panel = ReportPanel(parent, self.app, self.context,
                                         self.params_panel, host=self)
         self.report_panel.grid(row=1, column=0, sticky='nsew', padx=5, pady=(0, 4))
+        self.chat_panel = ChatPanel(parent, self.app, host=self,
+                                    chat_service=self._chat_service)
+        self.chat_panel.grid(row=1, column=0, sticky='nsew', padx=5, pady=(0, 4))
+        self.chat_panel.grid_remove()
+
+    # ---------- 聊天 ----------
+    def toggle_chat_panel(self):
+        """介绍条「💬 聊天」入口：在右栏的聊天面板与报告面板之间切换。"""
+        if self.current_state is None:
+            return
+        if self._chat_open:
+            self.close_chat_panel()
+        else:
+            self._open_chat_panel()
+
+    def _open_chat_panel(self):
+        self._chat_open = True
+        self._unread_chat = 0
+        self.intro_panel.set_chat_badge(0)
+        self.chat_panel.set_state(self.current_state)
+        self.report_panel.grid_remove()
+        self.chat_panel.grid()
+
+    def close_chat_panel(self):
+        if not self._chat_open:
+            return
+        self._chat_open = False
+        self.chat_panel.grid_remove()
+        self.report_panel.grid()
+
+    def on_chat_ops_applied(self):
+        """AI 在聊天中改动了角色属性：刷新状态面板与介绍条。"""
+        if self.current_state is not None and self.current_panel == "state":
+            self.state_panel.update_state(self.current_state)
+            self.intro_panel.refresh_display()
+
+    def _on_chat_event(self, event):
+        """聊天事件（后台线程）：投递回主线程处理。"""
+        try:
+            self.after(0, lambda: self._handle_chat_event(event))
+        except Exception:
+            pass
+
+    def _handle_chat_event(self, event):
+        if event.get("giantess_id") != (
+                self.current_state.giantess_id if self.current_state else ""):
+            return
+        # AI 在聊天中改动了角色属性：刷新状态面板与介绍条
+        if event.get("ops_applied") and self.current_panel == "state":
+            self.state_panel.update_state(self.current_state)
+            self.intro_panel.refresh_display()
+        # 聊天面板关闭时：按存档重算玩家未读的角色消息（徽标唯一依据）
+        if not self._chat_open:
+            chat_state = self._chat_service.load_chat(
+                self.current_state.giantess_id, blocking=False)
+            if chat_state is not None:
+                self._unread_chat = len(pending_char_messages(chat_state))
+                self.intro_panel.set_chat_badge(self._unread_chat)
+
+    def _on_chat_events_detach(self, event):
+        if str(event.type) == "Destroy" and event.widget is self:
+            chat_events.unsubscribe(self._on_chat_event)
 
     # ---------- 面板切换 ----------
     def _show_panel(self, panel):
@@ -285,6 +361,9 @@ class ExplorationPanel(ctk.CTkFrame):
     def switch_to_params_panel(self):
         self._loading_character = False
         self.state_panel.stop_auto_recovery()
+        self.close_chat_panel()
+        self._unread_chat = 0
+        self.intro_panel.set_chat_badge(0)
 
         # 先完成内部创建或更新，再进行视图切换，避免主题/面板切换闪烁
         self.current_panel = "params"
@@ -329,10 +408,23 @@ class ExplorationPanel(ctk.CTkFrame):
         if self.current_state is not None:
             self.intro_panel.refresh_display()
             self.intro_panel.refresh_image_display()
+        # 换了角色：未读徽标按存档重算（已投递但玩家未读的角色消息）；
+        # 聊天面板开着时重载为新角色的历史
+        pending = 0
+        if self.current_state is not None:
+            chat_state = self._chat_service.load_chat(
+                self.current_state.giantess_id, blocking=False)
+            pending = len(pending_char_messages(chat_state)) \
+                if chat_state is not None else 0
+        self._unread_chat = pending
+        self.intro_panel.set_chat_badge(pending)
+        if self._chat_open and self.current_state is not None:
+            self.chat_panel.set_state(self.current_state)
 
     def switch_to_select_panel(self):
         self._loading_character = False
         self.state_panel.stop_auto_recovery()
+        self.close_chat_panel()
         self.intro_panel.pack_forget()
 
         # 先完成内部创建或更新，再整体切换到占据整个左栏的选择面板
