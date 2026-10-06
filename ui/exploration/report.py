@@ -8,9 +8,10 @@ from paths import data_dir
 
 import customtkinter as ctk
 
+from core import imaging
 from core.logic import ALL_PART_NAMES, format_size
-from services.image_service import ImageService
 from core.models import CharacterSnapshot
+from ui.common.ctk_image import clear_ctk_label_image, format_image
 from ui.common.theme import (
     REPORT_PANEL_BG, REPORT_HEADER_BG, REPORT_BORDER, REPORT_BORDER_STRONG,
     REPORT_HOVER, REPORT_TEXT_MUTED, REPORT_PLACEHOLDER, REPORT_TAG_BODY,
@@ -175,7 +176,7 @@ class ReportPanel(ctk.CTkFrame):
         self.result_text.delete("1.0", "end")
         self.result_text.configure(state='disabled')
         self._clear_details_table()
-        ImageService.clear_ctk_label_image(self.details_image_label)
+        clear_ctk_label_image(self.details_image_label)
         self.details_image_label.configure(text="")
         self._img_cache.clear()
         self.last_report = None
@@ -376,15 +377,15 @@ class ReportPanel(ctk.CTkFrame):
         uploaded_path = self.params_panel.get_uploaded_image_path()
         if not uploaded_path and self.last_report and self.last_report.uploaded_image_path:
             uploaded_path = self.last_report.uploaded_image_path
-        pil_img = ImageService.load_from_path(uploaded_path)
+        pil_img = imaging.load_from_path(uploaded_path)
 
         if pil_img is not None:
-            ctk_img = ImageService.format_image(pil_img)
+            ctk_img = format_image(pil_img)
             bg_color = self.details_image_label.cget("fg_color")
             self.details_image_label.configure(image=ctk_img, text="", fg_color=bg_color)
             self._img_cache.append(ctk_img)
         else:
-            ImageService.clear_ctk_label_image(self.details_image_label)
+            clear_ctk_label_image(self.details_image_label)
             self.details_image_label.configure(text="", fg_color="transparent")
 
         self._render_details_table(body_parts, height)

@@ -10,7 +10,7 @@
 | 层 | 位置 | 内容 | 约束 |
 |---|---|---|---|
 | `infra` | `paths.py` | 路径解析 | 不依赖任何第一方模块 |
-| `core` | `core/` | `models` `address_model` `logic` `behavior_runtime` `ai` | 只能依赖 `infra` |
+| `core` | `core/` | `models` `address_model` `logic` `behavior_runtime` `ai` `appearance` `imaging` | 只能依赖 `infra` |
 | `dungeon` | `dungeon/*.py` | 副本领域定义与规则（schema / terms / chapters / rules / validate …） | 依赖 `core` `infra`；`dungeon/window/**` 另算 |
 | `persistence` | `persistence/` | 仓库层 | 依赖 `core` `dungeon` `infra` |
 | `services` | `services/` | 服务层；**含 `services/exploration/`（探索编排）** | 依赖 `persistence` 及以下 |
@@ -30,6 +30,12 @@
 
 守卫覆盖范围：`tests/check_import_graph.py`（全局层间方向 + 下层禁 UI 框架）、
 `check_dungeon_layering.py`（dungeon 内部两层）、`check_mini_layering.py`（挂件层禁 CTk）。
+
+**下层禁 UI 框架的口径**（2026-10-06 阶段 3.2.3 收窄）：`infra` / `core` / `persistence` /
+`services` 一律不得引入 `tkinter` / `_tkinter` / `customtkinter` / `dearpygui`；**`PIL` 不在
+整包禁列**，只禁它里面直通 Tk 的两个桥 `PIL.ImageTk` / `PIL.ImageGrab`。纯图像处理（裁剪 /
+缩放 / 缩略图 / base64）没有窗口依赖，`persistence` 做头像缩略图、`services.preview` 画
+剪影都要用，整包禁掉只会逼出「下层反向依赖服务层」的假例外。
 
 ## 2. 进度
 
@@ -120,10 +126,11 @@ logic.py -> core/logic.py              context.py -> core/context.py
    又不在 `requirements.txt` 声明里，直接判失败（合法的可选依赖与自塞 `sys.path` 的本地
    模块写在该脚本的 `UNDECLARED_ALLOWED`）。同目录兄弟模块现在也纳入第一方校验。
 
-## 4. 已登记的例外（11 → 7，仍在减少中）
+## 4. 已登记的例外（11 → 0：**已全部消除**）
 
-全部在 `tests/check_import_graph.py` 的 `KNOWN_EXCEPTIONS` 里，每条带 `why` 与 `plan`。
-守卫会在例外指向的文件不存在时判**配置错误**（强制搬迁后清理），并在例外未触发时提示可删。
+原 11 条全部登记在 `tests/check_import_graph.py` 的 `KNOWN_EXCEPTIONS` 里，每条带 `why` 与
+`plan`。守卫会在例外指向的文件不存在时判**配置错误**（强制搬迁后清理），并在例外未触发时
+提示可删。**阶段 3.2.3 后该表已清空**，矩阵与禁用项已能覆盖全仓；表本身留作将来登记新例外用。
 
 ### 4.1 阶段 3.2.1 已彻底消除（2026-10-06，4 条）
 
@@ -438,6 +445,7 @@ GUI / 集成回归（`--smoke`，两个 GUI 自检**不可并发**）：
 - 不合并 `services/preview`（原 body_preview）与 `ui/exploration/creation_params_dlg.py` 的**两份预览
   实现**（§4 已记）——S4 若走 (A) 会顺带换掉其中一处调用，但**合并实现**是独立一步；
 - 不动 `services/image_service.py`（例外 #8，`ui → services → ctk` 绕行链）——它属于 §3 第 3 条；
+  （**追记：2026-10-06 阶段 3.2.3 已处理**——按依赖拆成 `core/imaging.py` + `ui/common/ctk_image.py`，见 §4.3）；
 - `A` 里的 `state_service` / `creation_service` / `name_repo` / `news_service` 是**持有**
   而非**拥有**：`ExplorationCatalog` 只把它们聚在一起供上层取用，生命周期不变。
 

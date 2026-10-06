@@ -9,9 +9,10 @@ import ui.common.dialogs
 
 import customtkinter
 import customtkinter as ctk
+from core import imaging
 from core.logic import get_predefined_tags
-from services.image_service import ImageService
 from services.state_service import StateService
+from ui.common.ctk_image import clear_ctk_label_image, format_avatar
 from ui.common.widgets import CTkScrollableDropdownFrame
 from ui.common.theme import (
     INTRO_PANEL_BG, INTRO_BORDER, INTRO_BORDER_STRONG, INTRO_HOVER,
@@ -142,7 +143,7 @@ class IntroPanel(ctk.CTkFrame):
         if path == self._avatar_cache_path and self._avatar_ctk_image is not None:
             self._apply_cached_avatar()
             return
-        self._show_avatar(ImageService.load_from_path(path))
+        self._show_avatar(imaging.load_from_path(path))
         self._avatar_cache_path = path if self._avatar_ctk_image is not None else None
 
     def _apply_cached_avatar(self):
@@ -153,7 +154,7 @@ class IntroPanel(ctk.CTkFrame):
     def _show_avatar(self, pil_img):
         if pil_img is not None:
             try:
-                self._avatar_ctk_image = ImageService.format_avatar(pil_img)
+                self._avatar_ctk_image = format_avatar(pil_img)
                 self._apply_cached_avatar()
             except Exception:
                 self._clear_image_safe()
@@ -166,7 +167,7 @@ class IntroPanel(ctk.CTkFrame):
         for lbl in (self.avatar_label, getattr(self, 'edit_avatar_label', None)):
             if lbl is None:
                 continue
-            ImageService.clear_ctk_label_image(lbl)
+            clear_ctk_label_image(lbl)
             try:
                 lbl.configure(text="👤", font=("Segoe UI", 24))
             except Exception:

@@ -7,8 +7,8 @@ from PIL import Image
 
 from ui.common.widgets import ClickableCard
 from persistence.character_repo import CharacterRepo
+from core import imaging
 from core.logic import format_size
-from services.image_service import ImageService
 from ui.common.theme import (
     SELECT_PANEL_BG, SELECT_BORDER, SELECT_BORDER_STRONG, SELECT_HOVER,
     SELECT_TEXT, SELECT_TEXT_SOFT, SELECT_TEXT_MUTED, SELECT_TITLE,
@@ -207,7 +207,7 @@ text_color=SELECT_TEXT_SOFT
         if abspath in self._img_cache:
             return self._img_cache[abspath]
         try:
-            pil_img = ImageService.load_from_path(abspath)
+            pil_img = imaging.load_from_path(abspath)
             if pil_img is None:
                 return None
             w, h = pil_img.size

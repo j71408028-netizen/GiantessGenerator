@@ -115,15 +115,21 @@ data/
 - **根目录已冻结**：只剩 `paths.py`（位于依赖图最底层）与入口 / 应用壳
   （`main.py`、`app_shell.py`、`main_window_manager.py`）。
   领域模型已收编进 `core/`（`models`、`address_model`、`logic`、`behavior_runtime`、
-  `ai`）。**不再新增任何根目录 Python 模块**：新代码按职责放入对应包。
+  `ai`、`appearance`、`imaging`）。**不再新增任何根目录 Python 模块**：新代码按职责放入对应包。
 - **分层方向由自检强制**：`infra` → `core` → `dungeon` → `persistence` → `services`
   → `ui` → `app`（另有 `dungeon/window/**` 特例）。
-  `python tests/check_import_graph.py` 越界即失败，现存例外逐条登记在该脚本的
-  `KNOWN_EXCEPTIONS` 里。重构计划与交接见 [docs/refactor_plan.md](docs/refactor_plan.md)。
+  `python tests/check_import_graph.py` 越界即失败，**当前「已登记例外」为空表**
+  （原 11 条已随阶段 3.2 全部消除）。重构计划与交接见
+  [docs/refactor_plan.md](docs/refactor_plan.md)。
+- **下层禁 UI 框架的口径**：`infra` / `core` / `persistence` / `services` 不得引入
+  `tkinter` / `customtkinter` / `dearpygui`；`PIL` **不禁整包**，只禁 `PIL.ImageTk` /
+  `PIL.ImageGrab` 这两个直通 Tk 的桥——纯图像处理不碰窗口，`persistence` 做头像缩略图、
+  `services/preview` 画剪影都要用它。CTk 包装（`CTkImage`）住在 `ui/common/ctk_image.py`。
 - **`core` 的约束**：只能依赖 `paths`，**当前零例外**（原先唯一那条
   `behavior_runtime.py` 延迟导入 `persistence.world_pack` 已随行为包解析器下移删除）。
   `core/appearance.py`（外观模式的唯一来源）也住在这里——它零依赖，却被两套界面与
-  `services/preview` 同时读取，放最底层才不需要反向例外。探索编排
+  `services/preview` 同时读取，放最底层才不需要反向例外。`core/imaging.py`（纯图像
+  处理）同理。探索编排
   （`ExplorationContext`）**属服务层**，住在 `services/exploration/`——它曾放在
   `core/context.py` 并因此需要一条双向豁免，阶段 3.1 已把它整层迁走、豁免一并删除；
   不要再把它搬回 `core/`。

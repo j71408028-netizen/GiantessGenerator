@@ -18,8 +18,8 @@ from typing import Any, Dict
 
 from services.exploration.context import ExplorationContext
 from persistence import PersonalityRepo, PresetRepo
+from core import imaging
 from services.preview import render_preset_preview_image
-from services.image_service import ImageService
 from ui.mini import pixel as px
 
 # 规模档位 -> 随机巨大化的 10^x 区间；原版的两个滑杆由这一行取代。
@@ -121,7 +121,7 @@ class MiniParamsPanel(px.Panel):
     def refresh_preview(self):
         """重画左侧形象：优先用已选图片，否则按当前身材预设画剪影。"""
         if self.uploaded_image_path:
-            image = ImageService.load_from_path(self.uploaded_image_path)
+            image = imaging.load_from_path(self.uploaded_image_path)
         else:
             image = render_preset_preview_image(self.current_preset())
         if image is None:

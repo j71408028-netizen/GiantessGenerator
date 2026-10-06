@@ -98,54 +98,35 @@ BASE_ALLOWED = {
 # 三、UI 框架禁令（下层不得引入窗口框架）
 # --------------------------------------------------------------------------
 # dungeon/ 的领域层与窗口层由 check_dungeon_layering 负责，这里不重复。
+#
+# ⚠️ **PIL 不在整包禁列**（2026-10-06 阶段 3.2.3 收窄）：纯图像处理（裁剪 / 缩放 /
+# 缩略图 / base64）没有窗口依赖——``persistence.character_repo`` 要生成头像缩略图、
+# ``services.preview`` 要渲染身材剪影——把 PIL 整包禁掉只会逼出「下层反向依赖服务层」
+# 的假例外。真正要防的是 PIL 里**直通 Tk 的两个桥**：
+#   · ``ImageTk``   —— 把 PIL 图转成 tk 可显示的 PhotoImage，等于偷用窗口框架；
+#   · ``ImageGrab`` —— 抓屏，需窗口环境。
+# 因此顶层名禁 tkinter / _tkinter / customtkinter / dearpygui，PIL 只禁这两个子模块。
 FRAMEWORK_LAYERS = {"infra", "core", "persistence", "services"}
 UI_FRAMEWORKS = {
-    "tkinter", "_tkinter", "customtkinter", "dearpygui", "PIL",
+    "tkinter", "_tkinter", "customtkinter", "dearpygui",
+}
+# 顶层名不禁、但特定子模块要禁的框架（PIL 只放行纯图像部分）。
+UI_FRAMEWORK_SUBMODULES = {
+    "PIL.ImageTk", "PIL.ImageGrab",
 }
 
 # --------------------------------------------------------------------------
 # 四、已登记例外
 # --------------------------------------------------------------------------
 # kind="layer"     ：src 依赖 dst（模块前缀），跨层方向不合矩阵
-# kind="framework" ：src 引入了 dst（框架顶层名），下层不得碰 UI 框架
+# kind="framework" ：src 引入了 dst（框架顶层名或子模块名），下层不得碰 UI 框架
 # src 是相对仓库根的文件路径（搬迁后若路径失效，守卫会报配置错误）。
-KNOWN_EXCEPTIONS = [
-    dict(
-        kind="layer",
-        src="persistence/character_repo.py",
-        dst="services.image_service",
-        why="仓库层要生成头像缩略图（persistence -> services）",
-        plan="阶段 3 把纯图像处理下移到 core，仓库层只依赖它",
-    ),
-    dict(
-        kind="framework",
-        src="persistence/character_repo.py",
-        dst="PIL",
-        why="生成缩略图需要解码图片",
-        plan="阶段 3 随纯图像处理一起下移到 core",
-    ),
-    dict(
-        kind="framework",
-        src="services/image_service.py",
-        dst="customtkinter",
-        why="服务层里混着界面逻辑（ui.common.dialogs 反向依赖它）",
-        plan="阶段 3 拆出纯图像部分，界面部分上移回 ui",
-    ),
-    dict(
-        kind="framework",
-        src="services/image_service.py",
-        dst="PIL",
-        why="图像处理本体",
-        plan="阶段 3 随拆分保留在 core 侧",
-    ),
-    dict(
-        kind="framework",
-        src="services/preview/__init__.py",
-        dst="PIL",
-        why="预览剪影绘制本体",
-        plan="阶段 3 保留在 core 侧",
-    ),
-]
+#
+# **当前为空**（阶段 3.2.3）：11 条例外已全部消除——core 侧由 3.2.1（下移/内联）与
+# 3.2.2（回调注入 / 共享词表下移）清零，最后 5 条依附于 ``services/image_service``
+# 的例外随图像层拆分（纯图像下移 ``core.imaging``、CTk 包装上移 ``ui/common/ctk_image``）
+# 一并消除。保留这张表供将来按同一格式登记新例外。
+KNOWN_EXCEPTIONS = []
 
 
 # --------------------------------------------------------------------------
@@ -197,7 +178,13 @@ def resolve_relative(path, level, module, alias):
 
 
 def collect_imports(path):
-    """返回 [(绝对模块名, 行号, 是否函数内延迟导入)]；源码不可解析时返回 None。"""
+    """返回 [(绝对模块名, 行号, 是否函数内延迟导入, 被导入符号名元组)]。
+
+    ``from X import a, b`` 的第 4 项是 ``(a, b)``——框架禁令要能识别
+    ``from PIL import ImageTk`` 这种「顶层名合法、子模块越界」的写法；直接
+    ``import`` 语句恒为空元组。第一方层间检查只看前两项，不受影响。
+    源码不可解析时返回 None。
+    """
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     except (SyntaxError, UnicodeDecodeError):
@@ -213,21 +200,41 @@ def collect_imports(path):
         lazy = id(node) not in module_level
         if isinstance(node, ast.Import):
             for alias in node.names:
-                found.append((alias.name, node.lineno, lazy))
+                found.append((alias.name, node.lineno, lazy, ()))
         elif isinstance(node, ast.ImportFrom):
+            names = tuple(alias.name for alias in node.names)
             if node.level:
                 if node.module:
                     target = resolve_relative(path, node.level, node.module, None)
                     if target:
-                        found.append((target, node.lineno, lazy))
+                        found.append((target, node.lineno, lazy, ()))
                 else:
                     for alias in node.names:
                         target = resolve_relative(path, node.level, None, alias.name)
                         if target:
-                            found.append((target, node.lineno, lazy))
+                            found.append((target, node.lineno, lazy, ()))
             elif node.module:
-                found.append((node.module, node.lineno, lazy))
+                found.append((node.module, node.lineno, lazy, names))
     return found
+
+
+def _framework_hit(target, subnames):
+    """返回被命中的 UI 框架名；未命中返回 None。
+
+    两种命中方式：
+    - 顶层名在 ``UI_FRAMEWORKS`` 里（tkinter / customtkinter / dearpygui …）；
+    - ``import PIL.ImageTk`` 或 ``from PIL import ImageTk`` 这类**子模块**命中
+      ``UI_FRAMEWORK_SUBMODULES``（PIL 只禁这两个直通 Tk 的桥）。
+    """
+    top = target.split(".")[0]
+    if top in UI_FRAMEWORKS:
+        return target
+    probes = {target} | {f"{target}.{name}" for name in subnames}
+    for banned in UI_FRAMEWORK_SUBMODULES:
+        for probe in probes:
+            if probe == banned or probe.startswith(banned + "."):
+                return probe
+    return None
 
 
 def _exception_key(exc):
@@ -302,7 +309,7 @@ def main() -> int:
     for path, src_layer, imports in modules:
         rel = path.relative_to(ROOT).as_posix()
         allowed = BASE_ALLOWED[src_layer] | {src_layer}
-        for target, lineno, lazy in imports:
+        for target, lineno, lazy, subnames in imports:
             dst_layer = layer_of_module(target)
             if dst_layer is not None:
                 edge_count += 1
@@ -318,15 +325,16 @@ def main() -> int:
                 })
                 continue
             # 非第一方：只看下层有没有偷用 UI 框架
-            top = target.split(".")[0]
-            if src_layer in FRAMEWORK_LAYERS and top in UI_FRAMEWORKS:
-                exc = _match_exception("framework", rel, target)
+            hit = (_framework_hit(target, subnames)
+                   if src_layer in FRAMEWORK_LAYERS else None)
+            if hit:
+                exc = _match_exception("framework", rel, hit)
                 if exc:
                     hits[_exception_key(exc)] += 1
                     continue
                 violations.append({
                     "file": rel, "lineno": lineno, "target": target,
-                    "src": src_layer, "dst": f"UI 框架 {top}", "lazy": lazy,
+                    "src": src_layer, "dst": f"UI 框架 {hit}", "lazy": lazy,
                 })
 
     stale = [e for e in KNOWN_EXCEPTIONS if hits[_exception_key(e)] == 0]

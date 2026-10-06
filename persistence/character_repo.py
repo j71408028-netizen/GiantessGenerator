@@ -5,9 +5,8 @@ import shutil
 from dataclasses import asdict
 from typing import Optional
 
+from core import imaging
 from core.models import CharacterSnapshot
-
-from services.image_service import ImageService
 
 
 class CharacterRepo:
@@ -62,7 +61,7 @@ class CharacterRepo:
                 img = Image.open(source_path)
                 if getattr(img, "is_animated", False):
                     img.seek(0)
-                resized = ImageService.resize_low_resolution(img)
+                resized = imaging.resize_low_resolution(img)
                 if resized.mode not in ("RGB", "RGBA"):
                     resized = resized.convert("RGB")
                 dest = os.path.join(avatar_dir, f"{next_num}.png")

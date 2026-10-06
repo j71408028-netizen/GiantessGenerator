@@ -10,9 +10,9 @@
 
 import tkinter as tk
 
+from core import imaging
 from core.logic import SIZE_DISPLAY, format_size, get_size_category
 from core.models import CharacterSnapshot
-from services.image_service import ImageService
 from services.state_service import StateService
 from ui.mini import pixel as px
 
@@ -107,7 +107,7 @@ class MiniStateCard(px.Panel):
     def _refresh_sprite(self, state: CharacterSnapshot):
         path = self.app.context.character_repo.get_avatar_abspath(
             state.giantess_id, state.avatar_path)
-        pil_image = ImageService.load_from_path(path)
+        pil_image = imaging.load_from_path(path)
         if pil_image is None:
             self._clear_sprite()
             return

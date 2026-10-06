@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """角色卡导出数据（阶段 3.1 / S1 从 ``core/context.py`` 抽出）。
 
-这两个函数原本是 ``ExplorationContext`` 的方法，只用到 ``services.image_service``
+这两个函数原本是 ``ExplorationContext`` 的方法，只用到 ``core.imaging``
 与 ``services.creation_service``，与探索上下文的其余状态无关，因此抽成模块级
 函数而不是再建一个类。
 
@@ -20,8 +20,8 @@ def build_export_card_data(name: str, nick: str, original_height: float,
                            selected_tags: list, birthday: str,
                            uploaded_image_path: str) -> dict:
     """构建角色卡导出数据字典"""
-    from services.image_service import ImageService
-    image_b64 = ImageService.file_to_base64(uploaded_image_path) or None
+    from core import imaging
+    image_b64 = imaging.file_to_base64(uploaded_image_path) or None
     return {
         "version": "2.0",
         "name": name,

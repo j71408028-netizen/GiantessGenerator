@@ -7,7 +7,7 @@ import tkinter as tk
 import customtkinter as ctk
 from PIL import Image, ImageTk
 
-from services.image_service import ImageService
+from core import imaging
 from paths import icon_dir
 from ui.common import fonts as ui_fonts
 from ui.common.theme import (
@@ -626,7 +626,7 @@ class ImageCropDialog(BaseDialog):
 
     def _confirm(self):
         r = self._ratio if self._mode == self.MODE_BACKGROUND else self._ratio_var.get()
-        cropped = ImageService.crop_aspect(self._original, r, self._offset_var.get())
+        cropped = imaging.crop_aspect(self._original, r, self._offset_var.get())
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
         cropped.save(tmp, format='PNG')
         tmp.close()
