@@ -8,7 +8,7 @@ intro 面板、副本提示词、探索上下文等各处自行拼接。本模�
 
 from core.logic import format_size
 from core.models import CharacterSnapshot
-from services.scale_reference import (destruction_level_text,
+from core.scale_reference import (destruction_level_text,
                                       intrusion_level_text,
                                       size_definition_text)
 
