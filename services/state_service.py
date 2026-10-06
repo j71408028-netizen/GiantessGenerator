@@ -234,7 +234,7 @@ class StateService:
         兼容入口并委托；行为包仍可按 ``"StateService.recover_evolution"``
         覆盖整套恢复流程。
         """
-        from services.character_service.offline import OfflineService
+        from services.character.offline import OfflineService
         OfflineService().recover_offline(state, now)
 
     # ==================== 行动点数 ====================

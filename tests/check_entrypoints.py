@@ -21,7 +21,7 @@
 
 扫描仓库里的模块，凡是 import **第一方**模块（顶层名是本仓库的包或模块），
 就要求目标真实存在。典型事故：``from services.archive_export import ...``
-而该模块实际在 ``services/character_service/archive_export.py``——同包内的错误
+而该模块实际在 ``services/character/archive_export.py``——同包内的错误
 路径不会被其它自检覆盖（它们校验的是另一条路径），只有真正走到那段代码时才抛
 ``ModuleNotFoundError``。
 

@@ -405,7 +405,7 @@ class GiantessStatePanel(ctk.CTkFrame):
             file_path = file_path.rsplit(".", 1)[0] + ".html"
             lower = file_path.lower()
         if lower.endswith(".html"):
-            from services.character_service.archive_export import export_character_mhtml
+            from services.character.archive_export import export_character_mhtml
             try:
                 export_character_mhtml(state, file_path,
                                        show_casualties=self._show_casualties())

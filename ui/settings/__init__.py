@@ -22,7 +22,7 @@ from persistence.world_pack import list_behavior_packs
 from dungeon.terms import is_default_scenario
 from services.challenges import ChallengeService
 from services import ui_mode
-from services.character_service.news import DEFAULT_NEWS_TABLE, NewsService
+from services.news import DEFAULT_NEWS_TABLE, NewsService
 from ui.common.widgets import (
     CollapsibleBlock, StyleListBox, CycleOptionButton, ScrollableComboBox,
 )

@@ -20,7 +20,7 @@ from typing import Optional
 
 from core.models import CharacterSnapshot, OfflineDetail
 from core.logic import compute_casualty
-from services.character_service.rhythm import RhythmService
+from services.character.rhythm import RhythmService
 
 
 # 离线恢复参数

@@ -201,7 +201,7 @@ def main():
         check("可按 id 重新载入角色",
               app.current_state is not None and app.current_state.name == "冒烟少女")
 
-        from services.character_service.archive_export import export_character_mhtml
+        from services.character.archive_export import export_character_mhtml
         export_dir = os.path.join(archives_dir, state.giantess_id, "导出")
         os.makedirs(export_dir, exist_ok=True)
         card_path = os.path.join(export_dir, "角色卡.chara.json")
