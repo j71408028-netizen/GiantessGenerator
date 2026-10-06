@@ -56,8 +56,8 @@ BUILD_DIR = ROOT / "build"
 #: ``developer_tools/`` 是随时可弃的探针集合（.gitignore 掉），让它拖垮正式自检
 #: 没有意义。
 EXCLUDED_DIRS = {
-    "__pycache__", ".git", ".idea", ".workbuddy", ".venv-build", ".venv-macos",
-    "data", "dist", "build", "developer_tools",
+    "__pycache__", ".git", ".idea", ".workbuddy", ".venv", ".venv-build",
+    ".venv-macos", "data", "dist", "build", "developer_tools",
 }
 
 #: 出现这些名字就认为模块在**动态**创建全局量，名字级校验对它失效
