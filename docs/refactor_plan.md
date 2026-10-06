@@ -1,7 +1,8 @@
 # 目录分层重构：现状与交接
 
-> **2026-10-06。阶段 0 – 3.2 与 §4.1（拆 `core/logic.py`）、§4.2（整理 `services/`）
-> 已全部落地，守卫的「已登记例外」是一张空表**；剩下的只有 §4.3 – §4.5。本文件原名《目录重构计划》，
+> **2026-10-06。阶段 0 – 3.2 与 §4.1（拆 `core/logic.py`）、§4.2（整理 `services/`）、
+> §4.3（`app/` 包）已全部落地，守卫的「已登记例外」是一张空表**；剩下的只有
+> §4.4 – §4.5。本文件原名《目录重构计划》，
 > 规划部分已执行完，现转为**持续维护的交接文档**——路径沿用 `docs/refactor_plan.md`
 > 不改名，免得 README 与工作笔记里的链接断掉。文中所有数字与结论都是实测的，不是设想。
 
@@ -31,7 +32,7 @@
 | `services` | `services/` | 服务层；**含 `services/exploration/`（探索编排）** | + `persistence` |
 | `dungeon_window` | `dungeon/window/**` | 副本会话窗口（Dear PyGui） | + `services`；**禁** `tkinter` / `ui.*` |
 | `ui` | `ui/` | 专业界面（CTk）+ 挂件界面（原生 tkinter） | + `dungeon_window` |
-| `app` | `main.py` `app_shell.py` `main_window_manager.py` | 入口与应用壳 | 全部；**不被任何人依赖** |
+| `app` | `main.py`（字面量入口，留根目录）+ `app/`（`shell` / `window_manager`） | 入口与应用壳 | 全部；**不被任何人依赖** |
 
 **`orchestration` 层已删除**（阶段 3.1）。它曾是 `core/context.py` 的专属层，用来给
 `ExplorationContext` 这个 God object 开一条全图唯一的**双向**豁免。归位办法不是"把类拆小"
@@ -57,7 +58,7 @@
 ### 1.3 当前实测数字（2026-10-06）
 
 ```
-[check_import_graph] 已检查 157 个模块，592 条第一方依赖边
+[check_import_graph] 已检查 158 个模块，592 条第一方依赖边
 [check_import_graph] PASSED：层间依赖方向与 UI 框架禁令均无未登记越界
 KNOWN_EXCEPTIONS = []          # 原 11 条已全部消除
 tests/run_checks.py            # 13/13
@@ -132,6 +133,7 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 | **3.2.3** | `3c0737f` | **图像层拆分**，消除最后 5 条例外，`KNOWN_EXCEPTIONS` 清空 | 5 → 0；与 HEAD 旧实现 **83 项逐字节一致** |
 | **4.1** 拆 `core/logic.py` | `9c50786` | 578 行杂物间按职责拆为 `core/logic/{sizing,quips,simulation,text}`，`__init__.py` 薄壳再导出 19 个公开名，29 个引用文件 import 零改动；`@behavior_hook("logic",…)` scope 一个字未动 | 探针比对 19 个公开名源码 + 11 个 hook key **逐字节一致**；13/13；边 586 → 595、模块 150 → 154（拆分机械上升，无新跨层依赖） |
 | **4.2** 整理 `services/` | `d5e2b9e`…`2d97d01`（7 个提交） | 十个散文件按域归位：`scale_reference` 上浮 `core/`；`chat/` 收编 persona / experience_events；建 `worlds/`、`challenges/` 两域包（`helpers.py` 拆散删除）；`news` 独立附加功能包；`character_service` 改名 `character`（边界收窄）；`services/__init__` 门面清零改层说明。`creation_service` / `state_service` / `ui_mode` 留顶层（行为包 import 契约 / 3.2.2 判例） | 每步 grep 零残留 + 13/13；边 595 → 592（删 4 条门面死边）、模块 154 → 157（新门面 / imports 文件登记）；收口：smoke_mini 全部通过、autopilot --in-process 100/100 |
+| **4.3** `app/` 包 + smoke_switch 断言修复 | `8f0229a`…`859e880`（2 个提交） | `app_shell.py` → `app/shell.py`、`main_window_manager.py` → `app/window_manager.py`，`main.py` 留根目录（构建脚本字面量入口）；守卫 ROOT_MODULE_LAYERS 删两项、PACKAGE_LAYERS 加 `"app": "app"`。顺带修 smoke_switch 两条陈旧断言（设置页「启动界面模式」写 `ui_startup` 不碰 `ui_mode`；按钮文案「⇄ ME模式」） | grep 零残留 + 13/13；边 592 不变、模块 157→158；`smoke_switch` **50/50**（47/49 基线回满，断言拆细后总数 +1）、`invalid command name` 0 条 |
 | **顺带** | `93de7ae` | `ui/settings/`、`ui/quip/`、`ui/landmark/`、`ui/challenge/`、`services/chat/`、`services/preview/`、`dungeon/audio/` 包内分组；`tests/` 命名统一为 `check_*` / `smoke_*` | — |
 
 > ⚠️ **一个可追溯性瑕疵**：阶段 0 / 1 / 2 / 3.1 的成果在本轮之前**从未入库**，
@@ -167,19 +169,15 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 契约红线保留备忘：`services/creation_service.py` / `services/state_service.py` 的模块
 路径是行为包 import 契约（`docs/world_pack_behaviors.md` 示例），**不得改名**。
 
-### 4.3 搬 `app` 层进 `app/` 包
+### 4.3 搬 `app` 层进 `app/` 包（**已完成**，2026-10-06）
 
-`app_shell.py`（399 行）→ `app/shell.py`，`main_window_manager.py`（674 行）→
-`app/window_manager.py`；**`main.py` 留在根目录**（它是构建脚本里的字面量入口）。
-
-同步守卫：`ROOT_MODULE_LAYERS` 删这两项、`PACKAGE_LAYERS` 加 `"app": "app"`；
-`main.py` 里对 `app_shell` 的引用（含热切换时对 `switch_to` 的接线）一并改。
+见 §3 历程表与提交 `8f0229a` / `859e880`。`main.py` 是构建脚本里的字面量入口，
+**留在根目录**，别搬。
 
 ### 4.4 两个小尾巴
 
-- **`tests/smoke_switch.py` 有 2 条陈旧断言**（与重构无关，见 §7 第 5 条），修完基线可回
-  49/49。
 - 文档里的数字偶尔会陈旧（如 autopilot 的项数），改的时候顺手对一下。
+- ~~smoke_switch 的 2 条陈旧断言~~ 已随 §4.3 修复，基线 **50/50**。
 
 ### 4.5 可选：文档改名
 
@@ -216,7 +214,7 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 | `python tests/run_checks.py` | **离线 13 项，提交前必跑** | 纯静态，不需要显示器 |
 | `python tests/run_checks.py --smoke` | 追加 GUI 冒烟（3 个） | **两个 GUI 自检不可并发** |
 | `python tests/smoke_mini.py` | 挂件全链路（75 项）+ 真实副本窗口 | 需显示器 |
-| `python tests/smoke_switch.py` | 界面热切换 5 轮 | 改切换 / 收尾逻辑后必跑；当前 47/49（§7 第 5 条） |
+| `python tests/smoke_switch.py` | 界面热切换 5 轮 | 改切换 / 收尾逻辑后必跑；当前 50/50 |
 | `python scripts/dungeon_autopilot.py --in-process` | 11 场景 **100 项**，最强回归 | stdout 在报告文件里，别只看终端 |
 
 `run_checks` 按前缀自动发现：`check_*.py` 离线、`smoke_*.py` 需显示器。新增脚本放进对应
@@ -303,7 +301,7 @@ docs: 重写目录分层交接文档
    要不要补清理逻辑。
 4. 要不要把**报告黄金样本**回归固化进 `tests/`（固定种子 + 固定角色 → 存 `report_text` /
    `detail_text` 基线逐字节比对）。3.1 与 3.2 都用临时脚本做过，**还没进仓**。
-5. **`tests/smoke_switch.py` 有 2 条陈旧断言**（与重构无关）：
+5. ~~`tests/smoke_switch.py` 有 2 条陈旧断言~~ **已解决**（2026-10-06 随 §4.3 修复，基线 50/50）：
    - 「设置里选挂件模式会写进设置」仍在调 `_on_ui_mode_changed("挂件模式")` 并断言
      `load_mode() == MODE_MINI`；但设置页早已重做为「启动界面模式」，选项是
      `["专业模式", "ME模式", "退出时模式"]`，写的是 `ui_startup`（`save_startup_mode`），

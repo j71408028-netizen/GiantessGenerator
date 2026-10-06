@@ -112,8 +112,8 @@ data/
 
 ## 仓库结构约定
 
-- **根目录已冻结**：只剩 `paths.py`（位于依赖图最底层）与入口 / 应用壳
-  （`main.py`、`app_shell.py`、`main_window_manager.py`）。
+- **根目录已冻结**：只剩 `paths.py`（位于依赖图最底层）与字面量入口
+  `main.py`（构建脚本写死）；应用壳本体在 `app/` 包（`shell` / `window_manager`）。
   领域模型已收编进 `core/`（`models`、`address_model`、`logic`、`behavior_runtime`、
   `ai`、`appearance`、`imaging`）。**不再新增任何根目录 Python 模块**：新代码按职责放入对应包。
 - **分层方向由自检强制**：`infra` → `core` → `dungeon` → `persistence` → `services`
