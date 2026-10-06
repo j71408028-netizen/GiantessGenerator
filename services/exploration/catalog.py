@@ -27,7 +27,7 @@ from persistence.character_repo import CharacterRepo
 from persistence.settings_repo import SettingsRepo
 from services.exploration.detail_pools import build_detail_pools
 from services.creation_service import CreationService
-from services.character_service.news import DEFAULT_NEWS_TABLE, NewsService
+from services.news import DEFAULT_NEWS_TABLE, NewsService
 from services.state_service import StateService
 
 

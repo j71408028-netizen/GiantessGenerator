@@ -1,3 +1,11 @@
+"""角色近况动态（附加功能，2026-10-06 自 character_service/ 独立成包）。
+
+按 CSV 表（可替换）为角色生成近况新闻，供探索目录聚合与设置页编辑。
+独立成包的定版理由：news 是"附加数据源"性质的功能，与角色自身的
+长时行为（离线结算、节奏、档案导入导出，见 ``services/character/``）
+正交——character 包只收角色自身长时行为。
+"""
+
 import csv
 import datetime
 import os
