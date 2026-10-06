@@ -32,7 +32,7 @@ from persistence import (
     CharacterRepo, ScenarioRepo, LandmarkRepo, PersonalityRepo, PresetRepo,
     QuipRepo, SettingsRepo,
 )
-from services.world_service import WorldManager
+from services.worlds import WorldManager
 from ui.mini import pixel as px
 from ui.mini.app import MiniApp
 from ui.mini.report_view import COMPARE_MARK

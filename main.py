@@ -12,7 +12,7 @@ from services.exploration.context import ExplorationContext
 from main_window_manager import MainWindowManager
 from persistence import SettingsRepo, LandmarkRepo, PresetRepo, PersonalityRepo
 from persistence import QuipRepo, ScenarioRepo, CharacterRepo
-from services.world_service import WorldManager
+from services.worlds import WorldManager
 from ui.common.loading import LoadingWindow
 from ui.common.splash import splash_process
 from ui.common.theme import DEFAULT_PALETTE, apply_palette

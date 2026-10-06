@@ -5,7 +5,7 @@ import tkinter as tk
 
 import customtkinter as ctk
 
-import services.address_registry as address_registry
+import services.worlds.address_registry as address_registry
 import ui.common.dialogs
 from core.models import Landmark
 from persistence.landmark_repo import LandmarkRepo, DEFAULT_LANDMARK_STYLE

@@ -14,7 +14,7 @@ from paths import icon_dir
 from persistence import QuipRepo, ScenarioRepo, CharacterRepo
 from persistence import SettingsRepo, LandmarkRepo, PresetRepo, PersonalityRepo
 from services.challenges import ChallengeService
-from services.world_service import WorldManager
+from services.worlds import WorldManager
 from ui.challenge import ChallengeModePanel
 from ui.exploration.exp_frame import ExplorationPanel
 from ui.landmark import LandmarkCardManager

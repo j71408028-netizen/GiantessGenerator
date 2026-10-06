@@ -13,7 +13,7 @@ import tkinter as tk
 
 import customtkinter as ctk
 
-import services.address_registry as address_registry
+import services.worlds.address_registry as address_registry
 import ui.common.dialogs
 from ui.common.dialogs import BaseDialog
 from ui.common import fonts as ui_fonts

@@ -76,7 +76,7 @@ def bootstrap():
     """
     from paths import ensure_cwd
     from persistence import SettingsRepo
-    from services.world_service import WorldManager
+    from services.worlds import WorldManager
 
     ensure_cwd()
 
