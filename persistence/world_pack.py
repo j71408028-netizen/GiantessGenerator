@@ -94,19 +94,6 @@ def list_behavior_packs(data_dir: str = "data") -> List[str]:
     return sorted(names)
 
 
-def resolve_behavior_source(root: str, name: str) -> Optional[str]:
-    """在 root 下解析行为包路径：优先目录，其次兼容旧版单文件 ``<name>.py``。"""
-    if not name or not root:
-        return None
-    directory = os.path.join(root, name)
-    if os.path.isdir(directory):
-        return directory
-    legacy = os.path.join(root, f"{name}.py")
-    if os.path.isfile(legacy):
-        return legacy
-    return None
-
-
 def installed_dir(data_dir: str, world_id: str) -> str:
     """返回世界包解压后的部署目录 <数据目录>/worlds/<world_id>/。"""
     return os.path.join(worlds_dir(data_dir), world_id)

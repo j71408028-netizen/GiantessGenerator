@@ -112,23 +112,35 @@ logic.py -> core/logic.py              context.py -> core/context.py
    `validate_scenarios.py` → `check_scenarios.py`、`smoke_test_mini.py` → `smoke_mini.py`、
    `smoke_test_switch.py` → `smoke_switch.py`、`mini_game_smoke.py` → `smoke_mini_game.py`。
 
-## 4. 已登记的 11 条例外
+## 4. 已登记的例外（11 → 7，仍在减少中）
 
 全部在 `tests/check_import_graph.py` 的 `KNOWN_EXCEPTIONS` 里，每条带 `why` 与 `plan`。
 守卫会在例外指向的文件不存在时判**配置错误**（强制搬迁后清理），并在例外未触发时提示可删。
+
+### 4.1 阶段 3.2.1 已彻底消除（2026-10-06，4 条）
+
+| 原 # | 原位置 | 原越界 | 消除办法 |
+|---|---|---|---|
+| 3 | `core/behavior_runtime.py:92` | `core → persistence.world_pack` | `resolve_behavior_source`（11 行纯 `os.path`）**下移**进 `core/behavior_runtime.py`；`persistence/world_pack.py` 不再定义它，`services/world_service.py` 改从 core 引入。运行时那边本来就在拼 `installed/behaviors` 路径，解析器与它同属一件事 |
+| 5 | `services/preview/__init__.py:18` | `services → ui` | `ui/common/appearance.py` → **`core/appearance.py`**（零 import，6 处引用改 `from core import appearance`）。放最底层是唯一不需要反向例外的位置 |
+| 6 | `services/creation_service.py:256` | `services → ui` | 改调 `services.preview.render_body_preview_to_file`（与界面那份**逐字节一致**，见 4.3） |
+| 10 | `services/preview/__init__.py:13` | 引入 `tkinter` | 绘制配方与画布**解耦**：那个 `tk.Canvas` 基类**全仓无任何实例化点**，改名为 `BodyPreviewPainter`（纯对象 + 6 个图元原语由子类实现），模块彻底不 import tkinter |
+
+> **原计划第 10 条的写法要修正**：它写的是「把 `BodyPreviewCanvas` 上移 `ui/mini`」，
+> 但实测它只被同模块的 PIL 子类当绘制配方用，**没有任何界面代码引用它**——挂件用的是
+> `render_preset_preview_image()`，专业界面那份是 `creation_params_dlg.py` 里**自带
+> tk 画布的独立拷贝**。所以正确的减法是去 tk 化，不是把没人用的控件搬进界面层。
+
+### 4.2 剩余 7 条（本轮继续消除，见 3.2.2 / 3.2.3）
 
 | # | 位置 | 越界 | 性质 |
 |---|---|---|---|
 | 1 | `ui/settings/__init__.py:893,942` | `ui → app_shell` | 设置页「界面模式」直接调外壳切换函数 |
 | 2 | `ui/mini/app.py:895` | `ui → app_shell` | 挂件标题栏「⇄」同上 |
-| 3 | `core/behavior_runtime.py:92` | `core → persistence` | 延迟导入世界包解析器 |
 | 4 | `persistence/character_repo.py:10` | `persistence → services` | 生成头像缩略图 |
-| 5 | `services/preview/__init__.py:18` | `services → ui` | 读 `ui.common.appearance` |
-| 6 | `services/creation_service.py:256` | `services → ui` | 延迟调用专业版预览渲染 |
 | 7 | `persistence/character_repo.py:61` | 引入 `PIL` | 缩略图解码 |
 | 8 | `services/image_service.py:7` | 引入 `customtkinter` | **服务层里混着界面逻辑** |
 | 9 | `services/image_service.py:8` | 引入 `PIL` | 图像处理本体 |
-| 10 | `services/preview/__init__.py:13` | 引入 `tkinter` | 用 `ImageTk` 交给挂件界面 |
 | 11 | `services/preview/__init__.py:16` | 引入 `PIL` | 预览剪影绘制 |
 
 第 8 条最值钱：`services/image_service.py` 用 CTk，而 `ui/common/dialogs.py` 又反向依赖它，
@@ -136,7 +148,16 @@ logic.py -> core/logic.py              context.py -> core/context.py
 
 `services/preview/__init__.py` 的 docstring 自己写着「服务层不必反向依赖 UI 层」，还刻意把调色板
 写成字面量以避免拉进 CTk——作者有分层意识，只是第 5 条漏了。它和
-`ui/exploration/creation_params_dlg.py` 里的同款画法是**两份重复实现**，消除例外时应顺便合并。
+`ui/exploration/creation_params_dlg.py` 里的同款画法是**两份重复实现**，消除第 8/9 条时应顺便合并。
+
+### 4.3 阶段 3.2.1 的验证证据
+
+| 判据 | 结果 |
+|---|---|
+| `tests/run_checks.py` | 13/13 ✅ |
+| `tests/check_import_graph.py` | PASSED；例外 11 → 7，依赖边 583 → 582（唯一少的那条正是被删除的 `core → persistence` 延迟导入）✅ |
+| 预览渲染逐字节回归 | 亮/暗 × 4 组身高共 **8 组 PNG 逐字节一致**（`PREVIEW IDENTICAL`）✅ |
+| `tests/smoke_mini.py` | 通过 ✅ |
 
 ## 5. 两条红线（违反会静默失效，不会报错）
 

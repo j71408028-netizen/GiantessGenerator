@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.logic import get_comparisons
 from paths import data_dir, ensure_cwd
-from ui.common import appearance
+from core import appearance
 from services.exploration.context import ExplorationContext
 from persistence import (
     CharacterRepo, ScenarioRepo, LandmarkRepo, PersonalityRepo, PresetRepo,

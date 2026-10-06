@@ -168,7 +168,7 @@ def run_mini(boot):
         挂件版本就是 DPI 非感知进程，被 CTk 设成感知之后再切过来的必须显式切回线程
         非感知，否则同一份像素尺寸只剩一半大（详见 ``ui.mini.dpi``）。
         """
-    from ui.common import appearance
+    from core import appearance
     from ui.mini import dpi
     from app_shell import take_request
 

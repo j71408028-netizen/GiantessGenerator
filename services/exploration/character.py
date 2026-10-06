@@ -263,9 +263,8 @@ class CharacterAssembler:
         if not state.body_parts or state.height <= 0:
             return ""
         try:
-            # 延迟 import：body_preview 顶层会拉进 tkinter / PIL，本模块的其它
-            # 方法（尺寸解锁、副本数据）并不需要它们，放在顶层会扩大导入足迹。
-            # 它依赖 ui.common.appearance 读明暗模式（已登记的 services -> ui 例外）。
+            # 延迟 import：services.preview 顶层会拉进 PIL，本模块的其它方法
+            # （尺寸解锁、副本数据）并不需要它，放在顶层会扩大导入足迹。
             from services.preview import render_body_preview_to_file
             tmp_fd, tmp_path = tempfile.mkstemp(suffix=".png")
             os.close(tmp_fd)

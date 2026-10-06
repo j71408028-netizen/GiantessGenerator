@@ -15,9 +15,14 @@
 ``tests/check_import_graph.py`` 会拒绝任何把它放回 ``core/`` 的尝试。
 
 **分层**：``core`` 只能依赖 ``infra``（``paths``），不得 import
-``persistence`` / ``services`` / ``dungeon`` / ``ui``。唯一的越界例外是
-``behavior_runtime.py`` 延迟导入 ``persistence.world_pack``（行为包解析器），
-逐条列在 ``tests/check_import_graph.py`` 的 ``KNOWN_EXCEPTIONS`` 里。
+``persistence`` / ``services`` / ``dungeon`` / ``ui``。**2026-10-06 阶段 3.2 起本包
+零例外**（原先 ``behavior_runtime.py`` 延迟导入 ``persistence.world_pack`` 的那条已随
+``resolve_behavior_source`` 下移而删除）；例外逐条登记在
+``tests/check_import_graph.py`` 的 ``KNOWN_EXCEPTIONS`` 里。
+
+``appearance.py``（外观模式的唯一来源）也住在这里：它零 import，却被两套界面与服务层
+同时读取，放最底层是唯一能让所有调用方都合法引用它的位置。别因为它「像界面概念」而
+挪回 ``ui/``。
 
 **行为包 hook key 不是模块路径**：``logic.py`` 里的
 ``@behavior_hook("logic", "format_size")`` 拼出的 key 是 ``"logic.format_size"``，

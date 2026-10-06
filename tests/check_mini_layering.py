@@ -8,14 +8,15 @@
 - 引入 ``customtkinter`` —— 启动被拖慢、打包体积变大，且挂件刻意不用它的圆角与
   主题机制，混用只会让两套控件风格打架；
 - 引入 ``ui.common.theme`` —— 该模块顶层 ``import ui.common.ctk_patch``，会连带
-  拉起 customtkinter；配色应当走 ``ui.common.appearance`` + ``ui.mini.pixel``；
+  拉起 customtkinter；配色应当走 ``core.appearance`` + ``ui.mini.pixel``；
 - 引入 ``ui.common.fonts`` —— 那里的 ``ui_font()`` 给专业版用磅值，挂件要的是
   负数像素字号，两边不能共用；
 - 引入 ``ui.common.widgets`` / ``dialogs`` / ``managers`` —— 都是 CTk 控件或面向
   专业界面的弹窗，挂件一律用整窗换屏代替弹窗。
 
-允许：``ui.mini.*`` 自身、``ui.common.appearance``（模式广播，纯 Python）、
-``ui.common.tk_host``（副本窗口的宿主端口适配，是挂件与 dungeon 层之间的桥）。
+允许：``ui.mini.*`` 自身、``ui.common.tk_host``（副本窗口的宿主端口适配，是挂件与
+dungeon 层之间的桥）。外观模式住在 ``core.appearance``（零依赖，2026-10-06 从
+``ui/common/`` 下移），不属于 ``ui.*``，因此不受本白名单约束。
 
 退出码：0 = 通过；1 = 存在越界依赖。
 """
@@ -34,10 +35,9 @@ FORBIDDEN_ROOTS = {
     "ui": "见 ALLOWED_UI 白名单以外的界面模块",
 }
 
-# ui.* 里挂件可以碰的两个例外
+# ui.* 里挂件可以碰的例外（外观模式已下移 core.appearance，不再需要在此登记）
 ALLOWED_UI = {
     "ui.mini",
-    "ui.common.appearance",
     "ui.common.tk_host",
 }
 
@@ -104,7 +104,7 @@ def main() -> int:
         print(f"[check_mini_layering] FAILED {len(violations)} 处越界依赖")
         return 1
     print("[check_mini_layering] PASSED：挂件层无 customtkinter / ui.common.theme "
-          "依赖，只经 appearance 与 tk_host 对外接触")
+          "依赖，只经 tk_host 与 core 层对外接触")
     return 0
 
 

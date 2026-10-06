@@ -112,31 +112,10 @@ UI_FRAMEWORKS = {
 KNOWN_EXCEPTIONS = [
     dict(
         kind="layer",
-        src="core/behavior_runtime.py",
-        dst="persistence.world_pack",
-        why="行为运行时延迟导入世界包解析器（core -> persistence）",
-        plan="把世界包解析器下移或改为由调用方注入",
-    ),
-    dict(
-        kind="layer",
         src="persistence/character_repo.py",
         dst="services.image_service",
         why="仓库层要生成头像缩略图（persistence -> services）",
         plan="阶段 3 把纯图像处理下移到 core，仓库层只依赖它",
-    ),
-    dict(
-        kind="layer",
-        src="services/preview/__init__.py",
-        dst="ui.common.appearance",
-        why="预览渲染要读当前外观模式（services -> ui）",
-        plan="把 appearance 下移到 core 或 infra（纯 Python，不拉 CTk）",
-    ),
-    dict(
-        kind="layer",
-        src="services/creation_service.py",
-        dst="ui.exploration.creation_params_dlg",
-        why="创建服务延迟调用专业版预览渲染（services -> ui）",
-        plan="阶段 3 与 body_preview 合并后删除该调用",
     ),
     dict(
         kind="layer",
@@ -172,13 +151,6 @@ KNOWN_EXCEPTIONS = [
         dst="PIL",
         why="图像处理本体",
         plan="阶段 3 随拆分保留在 core 侧",
-    ),
-    dict(
-        kind="framework",
-        src="services/preview/__init__.py",
-        dst="tkinter",
-        why="用 ImageTk 把预览图交给挂件界面",
-        plan="阶段 3 拆掉该模块或让它只产出 PIL 图像",
     ),
     dict(
         kind="framework",

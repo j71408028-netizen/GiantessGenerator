@@ -20,7 +20,7 @@ from core.models import BodyPreset, CharacterSnapshot, Personality
 from services.chat import events as chat_events
 from services.chat import pending_char_messages
 from services.challenge_service import ChallengeService
-from ui.common import appearance
+from core import appearance
 from ui.mini import pixel as px
 from ui.mini.investigation import Investigation, Investigator
 from ui.mini.params_panel import MiniParamsPanel

@@ -120,8 +120,10 @@ data/
   → `ui` → `app`（另有 `dungeon/window/**` 特例）。
   `python tests/check_import_graph.py` 越界即失败，现存例外逐条登记在该脚本的
   `KNOWN_EXCEPTIONS` 里。重构计划与交接见 [docs/refactor_plan.md](docs/refactor_plan.md)。
-- **`core` 的约束**：只能依赖 `paths`。唯一越界例外是 `core/behavior_runtime.py`
-  延迟导入 `persistence.world_pack`（已登记）。探索编排
+- **`core` 的约束**：只能依赖 `paths`，**当前零例外**（原先唯一那条
+  `behavior_runtime.py` 延迟导入 `persistence.world_pack` 已随行为包解析器下移删除）。
+  `core/appearance.py`（外观模式的唯一来源）也住在这里——它零依赖，却被两套界面与
+  `services/preview` 同时读取，放最底层才不需要反向例外。探索编排
   （`ExplorationContext`）**属服务层**，住在 `services/exploration/`——它曾放在
   `core/context.py` 并因此需要一条双向豁免，阶段 3.1 已把它整层迁走、豁免一并删除；
   不要再把它搬回 `core/`。

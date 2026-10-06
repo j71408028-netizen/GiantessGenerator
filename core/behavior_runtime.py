@@ -30,6 +30,26 @@ from typing import Any, Callable, Dict, Optional
 _DEFAULTS: Dict[str, Callable] = {}
 
 
+def resolve_behavior_source(root: str, name: str) -> Optional[str]:
+    """在 root 下解析行为包路径：优先目录，其次兼容旧版单文件 ``<name>.py``。
+
+    纯 ``os.path`` 逻辑，原本住在 ``persistence/world_pack.py``；行为运行时在
+    ``load_pack`` 里需要它，而那构成一条 ``core -> persistence`` 反向边（守卫例外 #3）。
+    它描述的是「行为包在部署目录里怎么定位」，与行为运行时同属一件事，故下移到本模块；
+    ``persistence`` 侧不再定义它（``services/world_service.py`` 改为从本模块 import——
+    ``services -> core`` 是合法边）。
+    """
+    if not name or not root:
+        return None
+    directory = os.path.join(root, name)
+    if os.path.isdir(directory):
+        return directory
+    legacy = os.path.join(root, f"{name}.py")
+    if os.path.isfile(legacy):
+        return legacy
+    return None
+
+
 class BehaviorRuntime:
     """行为覆盖注册表：保存行为包对服务静态方法的覆盖实现。
 
@@ -89,7 +109,6 @@ class BehaviorRuntime:
         if not packs:
             return
         pack_name = packs[0]
-        from persistence.world_pack import resolve_behavior_source
         source = resolve_behavior_source(
             os.path.join(installed, "behaviors"), pack_name)
         world_id = manifest.world_id or "unknown"

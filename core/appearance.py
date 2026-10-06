@@ -3,6 +3,12 @@
 纯 tkinter 没有「外观模式」这回事：每个控件在创建时就把颜色定死了，切换主题必须
 自己重刷。本模块因此只做两件事——记住当前模式、在模式变化时广播一次——具体怎么
 重刷由订阅者决定（见 ``ui.mini.pixel`` 的配色登记表与 ``services.preview``）。
+
+**为什么住在 ``core/``**：本模块零 import，却同时被两套界面（``ui/mini/app.py``、
+``ui/mini/pixel.py``）与服务层（``services/preview``）读取。放在最底层是唯一能让所有
+调用方都合法引用它的位置——此前它在 ``ui/common/``，逼得 ``services/preview`` 不得不
+登记一条 ``services -> ui`` 反向例外（2026-10-06 阶段 3.2 下移后删除）。
+不要为了「它看起来像界面概念」而把它挪回 ``ui``。
 """
 
 MODE_LIGHT = "Light"

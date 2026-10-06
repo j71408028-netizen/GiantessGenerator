@@ -4,18 +4,21 @@
 身材的自定义对话框，但「未上传立绘时用身材预览图当头像」仍需要这套画法，
 因此把它单独放在服务层，供 CreationService 与 ExplorationContext 调用。
 
-注意：本模块目前只服务挂件界面，与 ``ui.exploration.creation_params_dlg`` 里的
-同款画法是两份。差异只有一处——本模块在暗色模式下会对颜色做亮度衰减
-（``_PREVIEW_DARK_DIM``），专业版不做。合并两份之前先决定这个衰减要不要保留。
+**本模块只依赖 PIL，不依赖 tkinter**：绘制配方（``BodyPreviewPainter``）与具体画布
+解耦，服务层唯一的实现是画到 PIL 图片的 ``BodyPreviewPilCanvas``。暗色模式经
+``core.appearance`` 读取（该模块零依赖，故不存在 services -> ui 反向边）。
+
+注意：本模块与 ``ui.exploration.creation_params_dlg`` 里的同款画法是两份。差异只有
+一处——本模块在暗色模式下会对颜色做亮度衰减（``_PREVIEW_DARK_DIM``），专业版不做。
+合并两份之前先决定这个衰减要不要保留。
 """
 
 import math
-import tkinter as tk
 from typing import List, Optional
 
 from PIL import Image, ImageDraw
 
-from ui.common import appearance
+from core import appearance
 
 # 立绘配色：与主题调色板（assets/theme/*.json 的 vars 段）逐值一致，这里写成
 # 字面量是为了让服务层不必反向依赖 UI 层——``ui.common.theme`` 会连带导入
@@ -86,38 +89,29 @@ _PART_PARAMS = {
 
 
 
-class BodyPreviewCanvas(tk.Canvas):
-    """轻量级正面身材比例预览（已迁移角色画法，修正鞋子绘制与腿长计算方法）"""
+class BodyPreviewPainter:
+    """身材预览的绘制配方：只描述「画什么」，不决定「画到哪」。
 
-    def __init__(self, parent, width: int = 300, height: int = 410, **kwargs):
+    全部绘制只经 6 个图元原语完成——``create_oval`` / ``create_polygon`` /
+    ``create_line`` / ``delete`` / ``winfo_width`` / ``winfo_height``——由子类实现。
+    本类**不依赖 tkinter**：服务层只有 ``BodyPreviewPilCanvas`` 一个实现（把图元画到
+    PIL 图片），专业界面那份自带 tk 画布的拷贝在 ``ui/exploration/creation_params_dlg``。
+
+    此前本类继承 ``tk.Canvas``，于是 ``import tkinter`` 被拖进服务层（守卫例外 #10）。
+    但那个 tk 画布**全仓没有任何实例化点**——它只是绘制配方的宿主，因此去 tk 化即可，
+    不必把类搬进界面层。
+    """
+
+    def __init__(self, width: int = 300, height: int = 410):
         self.preview_width = width
         self.preview_height = height
         self._current_values: Optional[dict] = None
-        self._redraw_job = None
         self._dark = appearance.is_dark()
-
-        super().__init__(
-            parent,
-            width=width,
-            height=height,
-            highlightthickness=0,
-            borderwidth=0,
-            **kwargs,
-        )
-        self.bind("<Configure>", self._on_configure)
 
     def update_values(self, values: dict):
         """更新参数并请求重绘。"""
         self._current_values = dict(values)
         self.refresh()
-
-    def _on_configure(self, _event=None):
-        if self._redraw_job is not None:
-            try:
-                self.after_cancel(self._redraw_job)
-            except tk.TclError:
-                pass
-        self._redraw_job = self.after_idle(self.refresh)
 
     def poly(self, points, fill, outline=VIEW_OUTLINE, width=1.5, **kwargs):
         return self.create_polygon(points, fill=fill, outline=outline, width=width,
@@ -127,24 +121,24 @@ class BodyPreviewCanvas(tk.Canvas):
         return self.create_line(points, fill=fill, width=width, smooth=True,
                                 capstyle="round", joinstyle="round", **kwargs)
 
-    # ---- 暗色模式曝光衰减：所有绘制颜色统一经此折算（越亮衰减越大） ----
-    def _dim_kwargs(self, kwargs):
-        if not self._dark:
-            return kwargs
-        for key in ("fill", "outline"):
-            color = kwargs.get(key)
-            if color and _preview_dim_color(color) != color:
-                kwargs[key] = _preview_dim_color(color)
-        return kwargs
-
+    # ---- 图元原语：由子类实现 ----
     def create_oval(self, *args, **kwargs):
-        return super().create_oval(*args, **self._dim_kwargs(kwargs))
+        raise NotImplementedError
 
     def create_polygon(self, *args, **kwargs):
-        return super().create_polygon(*args, **self._dim_kwargs(kwargs))
+        raise NotImplementedError
 
     def create_line(self, *args, **kwargs):
-        return super().create_line(*args, **self._dim_kwargs(kwargs))
+        raise NotImplementedError
+
+    def delete(self, *args):
+        raise NotImplementedError
+
+    def winfo_width(self) -> int:
+        raise NotImplementedError
+
+    def winfo_height(self) -> int:
+        raise NotImplementedError
 
     # ==================== 绘制拆分主入口与子方法 ====================
     def refresh(self):
@@ -772,8 +766,8 @@ _PREVIEW_AA = 4             # 超采样倍数：放大渲染后缩回目标尺�
 _PREVIEW_DESIGN_W = _CANVAS_W   # 线宽按设计宽等比放大
 
 
-class BodyPreviewPilCanvas(BodyPreviewCanvas):
-    """把 BodyPreviewCanvas 的绘制逻辑重定向到 PIL 图片，用于把身材预览生成为 PNG。
+class BodyPreviewPilCanvas(BodyPreviewPainter):
+    """把 BodyPreviewPainter 的绘制逻辑重定向到 PIL 图片，用于把身材预览生成为 PNG。
 
     复用父类全部部件绘制方法（refresh 及各 _draw_* 方法），仅把画布图元
     create_oval / create_polygon / create_line 改写为绘制到 PIL ImageDraw。
@@ -886,7 +880,7 @@ class BodyPreviewPilCanvas(BodyPreviewCanvas):
         self._image = Image.new("RGBA", (self._canvas_width, self._canvas_height),
                                 self._background)
         self._draw = ImageDraw.Draw(self._image, "RGBA")
-        BodyPreviewCanvas.refresh(self)
+        BodyPreviewPainter.refresh(self)
 
 
 def body_ratio_values(body_parts: dict, height: float) -> dict:

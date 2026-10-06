@@ -253,7 +253,10 @@ class CreationService:
         import os
         import tempfile
         try:
-            from ui.exploration.creation_params_dlg import render_body_preview_to_file
+            # 走服务层那份实现（与 ui.exploration.creation_params_dlg 的同款画法逐字节
+            # 一致，阶段 3.2 已实测）。此处曾改为延迟 import 界面层，构成一条
+            # services -> ui 反向边；改用本层实现后该例外已删除。
+            from services.preview import render_body_preview_to_file
             fd, tmp_path = tempfile.mkstemp(suffix=".png")
             os.close(fd)
             if render_body_preview_to_file(body_parts, height, tmp_path):

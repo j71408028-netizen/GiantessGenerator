@@ -22,14 +22,13 @@ from persistence.world_pack import (
     WorldState,
     installed_dir,
     load_manifest_file,
-    resolve_behavior_source,
     save_manifest_file,
     validate_archive,
     worlds_dir,
 )
 from dungeon.terms import (LEGACY_SCENARIO_RESOURCE_KEY, SCENARIO_RESOURCE_KEY,
                            is_default_scenario)
-from core.behavior_runtime import get_runtime
+from core.behavior_runtime import get_runtime, resolve_behavior_source
 
 _MEMBER_TRAVERSAL_RE = re.compile(r"(^|/)\s*\.\.\s*(/|$)")
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")

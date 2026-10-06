@@ -144,7 +144,7 @@ def build_professional(boot):
 def build_mini(boot):
     """构建挂件模式界面。"""
     import tkinter as tk
-    from ui.common import appearance
+    from core import appearance
     from ui.mini.app import MiniApp
 
     settings = boot["settings"]

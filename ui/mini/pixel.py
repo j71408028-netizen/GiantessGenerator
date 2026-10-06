@@ -23,7 +23,7 @@ from tkinter import font as tkfont
 
 from PIL import Image, ImageTk
 
-from ui.common import appearance
+from core import appearance
 
 # ==================== 调色板 ====================
 # 每个色号都是 (亮色, 暗色) 二元组；纯 tkinter 控件只接受具体颜色，
