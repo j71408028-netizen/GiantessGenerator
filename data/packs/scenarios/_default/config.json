@@ -242,7 +242,7 @@
       "max_paragraphs": 99,
       "overflow_target": "",
       "background": {
-        "image_path": "images\\screenshot-20251021-223043.jpg",
+        "image_path": "images/screenshot-20251021-223043.jpg",
         "smooth_transition": true
       },
       "bgm": {},
