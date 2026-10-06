@@ -188,6 +188,9 @@ class DungeonWindowUI:
 
         dpg.setup_dearpygui()
         dpg.show_viewport()
+        # Linux/X11：Tk 与 GLFW 同进程时，随后恢复/切换 UI 可能处理到
+        # 已销毁的顶层窗口事件；先装上兼容处理器，避免 Xlib 直接退出。
+        dpg_state.install_x11_error_guard()
 
         self._correct_viewport_size_to_main()
         self._relayout()

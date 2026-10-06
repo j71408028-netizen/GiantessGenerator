@@ -32,10 +32,65 @@ import 期就把 dearpygui 拉进 ``sys.modules``，于是「模块已导入」�
 让位——DPG 的上下文与视口都是单例，两局之间必须一拆一建。
 """
 
+import sys
+
 #: 保活视口的标题（从不显示，仅用于人工排查时辨认，如按标题 FindWindowW）
 PARK_TITLE = "GiantessKeepAlive"
 
 _STATE = {"alive": False, "ever_created": False}
+
+#: Linux/X11 兼容处理器：Tk 与 DPG/GLFW 同进程时，Tk 可能在事件循环里
+#: 处理到别家已销毁窗口的事件，Xlib 默认错误处理器会直接把进程结束。
+#: 这里只用于抑制这类预期内的陈旧窗口错误；处理器本身必须保持强引用。
+_X11_ERROR_GUARD = None
+
+
+def install_x11_error_guard() -> bool:
+    """安装一个宽松的 X11 同步错误处理器（仅 Linux/X11）。
+
+    Dear PyGui/GLFW 与 Tk 共用 X server 时，宿主 Tk 的事件泵会收到并处理
+    其它顶层窗口的旧事件；当这些窗口已经销毁，Tk 内部查询会触发 BadWindow，
+    而 Xlib 默认处理器会直接 ``exit(1)``——表现为冒烟测试里的 X Error 硬崩。
+    这是一个兼容性保护，不是业务错误处理；重复调用会重新覆盖当前处理器，
+    防止后续 GLFW/DPG 生命周期把它换掉。
+    """
+    global _X11_ERROR_GUARD
+    if not sys.platform.startswith("linux"):
+        return False
+    try:
+        import ctypes
+        import ctypes.util
+
+        if _X11_ERROR_GUARD is None:
+            lib_name = ctypes.util.find_library("X11") or "libX11.so.6"
+            x11 = ctypes.CDLL(lib_name)
+            handler_type = ctypes.CFUNCTYPE(
+                ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
+            state = {"count": 0}
+
+            def _handle(display, event):
+                state["count"] += 1
+                if state["count"] <= 3:
+                    try:
+                        from dungeon import process_log
+                        process_log.log(
+                            "[X11] 已忽略预期的陈旧窗口错误"
+                            f"（第 {state['count']} 次）")
+                    except Exception:
+                        pass
+                return 0
+
+            handler = handler_type(_handle)
+            _X11_ERROR_GUARD = (x11, handler, state)
+
+        x11, handler, _state = _X11_ERROR_GUARD
+        x11.XSetErrorHandler.argtypes = [ctypes.c_void_p]
+        x11.XSetErrorHandler.restype = ctypes.c_void_p
+        x11.XSetErrorHandler(handler)
+        return True
+    except Exception as e:
+        print(f"[Warning] 安装 X11 错误兼容处理器失败: {e}")
+        return False
 
 
 def is_alive() -> bool:
@@ -81,6 +136,7 @@ def park_context() -> bool:
         # 所以对使用者完全不可见，也不占桌面。
         dpg.create_viewport(title=PARK_TITLE, width=64, height=48)
         dpg.setup_dearpygui()
+        install_x11_error_guard()
     except Exception as e:
         print(f"[Warning] 建立 DPG 保活视口失败: {e}")
         return False

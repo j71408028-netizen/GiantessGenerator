@@ -114,6 +114,7 @@ class TkHost(HostPort):
                 pass
 
     def show_window(self):
+        self._install_x11_error_guard()
         widget = self.widget
         if widget is None:
             return
@@ -126,11 +127,27 @@ class TkHost(HostPort):
             pass
 
     # ---------------- 事件泵 ----------------
+    @staticmethod
+    def _install_x11_error_guard():
+        """Linux/X11 兼容：Tk 事件循环可能处理到 DPG 已销毁窗口的旧事件。"""
+        if not sys.platform.startswith("linux"):
+            return
+        try:
+            from dungeon.window import dpg_state
+            # 普通挂件早期还没有 DPG 时不要扩大处理范围；只在进程已经建过
+            # DPG 上下文后，才进入这套 X11 兼容保护。
+            if not dpg_state.was_created():
+                return
+            dpg_state.install_x11_error_guard()
+        except Exception:
+            pass
+
     def pump_events(self):
         widget = self.widget
         update = getattr(widget, "update", None)
         if not callable(update):
             return
+        self._install_x11_error_guard()
         try:
             update()
         except Exception:
