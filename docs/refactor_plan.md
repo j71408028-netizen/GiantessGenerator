@@ -1,7 +1,7 @@
 # 目录分层重构：现状与交接
 
 > **2026-10-06。阶段 0 – 3.2 与 §4.1（拆 `core/logic.py`）已全部落地，守卫的
-> 「已登记例外」是一张空表**；剩下的只有 §4.2 – §4.4。本文件原名《目录重构计划》，
+> 「已登记例外」是一张空表**；剩下的只有 §4.2 – §4.5。本文件原名《目录重构计划》，
 > 规划部分已执行完，现转为**持续维护的交接文档**——路径沿用 `docs/refactor_plan.md`
 > 不改名，免得 README 与工作笔记里的链接断掉。文中所有数字与结论都是实测的，不是设想。
 
@@ -160,7 +160,70 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 
 都不是"必须做"——重构的主干已经完成。按建议顺序：
 
-### 4.2 搬 `app` 层进 `app/` 包
+### 4.2 整理 `services/` 目录（§4.3 的前置，2026-10-06 定版）
+
+**问题**：三种组织范式并存——新范式包（`exploration/`，有门面有文档）、旧包
+（`character_service/`，`__init__.py` 是空的；名字的旧语义「任何建立在持久化角色之上
+的行为」已失真——聊天支撑件同样建立在持久化角色之上却散在外面）、外加 10 个散文件。
+
+**契约红线**（执行时逐条对照）：
+
+1. 钩子 key（`"CreationService.*"` ×2、`"StateService.*"` ×14）是 `scope.name` 字面量，
+   与文件路径无关，搬家安全；scope 一个字不许改。
+2. `services/creation_service.py` 与 `services/state_service.py` 的**模块路径本身**是
+   行为包契约——`docs/world_pack_behaviors.md` 的示例教行为包作者
+   `from services.creation_service import CreationService`，已部署行为包可能照此
+   import → **两文件留顶层不动**（定版：不收编、无 shim 税）。
+3. `developer_tools/debug_archive_preview.py` 引用
+   `services.character_service.archive_export`——改名步骤必须同步它，否则
+   `check_entrypoints` 的全仓悬空 import 检查会挂。
+4. `data/`、`scripts/`、`build/` 已实测零 services 路径引用。
+
+**目标结构**（§2.4 按实际内容定归属；三条定版决策：`scale_reference` 上浮 core——
+将来供 dungeon 与外部工具，core 是能让最多方合法引用的最底层（`appearance` 判例）；
+`news` 独立成附加功能包——与角色长时行为正交；creation / state 留原位）：
+
+```
+services/
+  __init__.py            # 门面清零：只剩 docstring（现 6 个 re-export 仅 3 处在用）
+  creation_service.py    # 留顶层 —— 行为包契约 + 跨域共用核心服务
+  state_service.py       # 留顶层 —— 同上（dungeon 也直接用）
+  ui_mode.py             # 留顶层 —— 3.2.2 判例，理由已写在模块 docstring
+  preview/               # 不动
+  exploration/
+    + detail_pools       # ← helpers.build_detail_pools（唯一消费者是 catalog）
+  chat/
+    + experience_events  # ← 散文件收编（chat_delivery.md 阶段四的事件流）
+    + persona            # ← character_persona.py
+  worlds/                # 新包：world_service + address_registry（地址注册表即世界包选址）
+  challenges/            # 新包：challenge_service + helpers 的 3 个挑战包函数
+  character/             # ← character_service/ 改名，只留角色自身长时行为
+                         #   （archive_export / offline / rhythm + 门面 docstring 写明边界）
+  news/                  # 新包（news.py → __init__.py，同 preview/ 构型）：
+                         #   NewsService + DEFAULT_NEWS_TABLE
+core/
+  scale_reference.py     # ← 上浮（现内容只依赖 core.logic 的两个名字，零窗口依赖）
+```
+
+**执行步骤**（一次一件事，每步一提交）：
+
+| 步 | 提交 | 动作 | 引用点改写 |
+|---|---|---|---|
+| 1 | `refactor(core)` | `scale_reference.py` 上浮 `core/` | character_persona、chat |
+| 2 | `refactor(services)` | `chat/` 收编 experience_events、character_persona | chat_delivery.md 的路径引用 |
+| 3 | `refactor(services)` | 建 `challenges/`，helpers 的 3 个挑战包函数并入；`build_detail_pools` → `exploration/`；删 `helpers.py` | ui/landmark、ui/quip 改直连 |
+| 4 | `refactor(services)` | 建 `worlds/` 收编 world_service + address_registry | main 三件套 |
+| 5 | `refactor(services)` | `news` 独立成 `services/news/` 包 | ui/settings、exploration/catalog |
+| 6 | `refactor(services)` | `character_service/` → `character/` + 门面 docstring | state_service 延迟 import、ui/exploration/giantess_state、ui/mini/app、smoke_mini、developer_tools 一处 |
+| 7 | `refactor(services)` | `services/__init__.py` 门面清零 | ui/settings 的 `from services import ui_mode` 改直连 |
+| 8 | `docs` | README 结构约定、chat_delivery.md、本文件记录完成 | — |
+
+每步固定动作：`git mv` → grep 零残留 → `run_checks` 13/13 → **核对边数不变**
+（全是纯位移、无拆分——与 §4.1 的「机械上升」判据不同）。全部完成后跑
+`smoke_mini`（75 项）+ `autopilot --in-process`（100 项）收口。守卫零改动：
+`PACKAGE_LAYERS` 按一级包归层，services / core 下的新子包自动归层。
+
+### 4.3 搬 `app` 层进 `app/` 包
 
 `app_shell.py`（399 行）→ `app/shell.py`，`main_window_manager.py`（674 行）→
 `app/window_manager.py`；**`main.py` 留在根目录**（它是构建脚本里的字面量入口）。
@@ -168,13 +231,13 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 同步守卫：`ROOT_MODULE_LAYERS` 删这两项、`PACKAGE_LAYERS` 加 `"app": "app"`；
 `main.py` 里对 `app_shell` 的引用（含热切换时对 `switch_to` 的接线）一并改。
 
-### 4.3 两个小尾巴
+### 4.4 两个小尾巴
 
 - **`tests/smoke_switch.py` 有 2 条陈旧断言**（与重构无关，见 §7 第 5 条），修完基线可回
   49/49。
 - 文档里的数字偶尔会陈旧（如 autopilot 的项数），改的时候顺手对一下。
 
-### 4.4 可选：文档改名
+### 4.5 可选：文档改名
 
 本文件叫 `refactor_plan.md` 已名不副实（规划已执行完）。若改名为 `refactor_handoff.md`，
 需同步 README（2 处）与 `.workbuddy/memory/` 里的引用。**不改也完全可行**，别为了改名而断链。
@@ -305,7 +368,7 @@ docs: 重写目录分层交接文档
      `"  ⇄  ME模式"`。
 
    所以跑 `smoke_switch.py` 是 **47/49**。要修就得先确认这两处的预期语义（改测试还是改界面）。
-6. 本文件是否改名为 `refactor_handoff.md`（§4.4）。
+6. 本文件是否改名为 `refactor_handoff.md`（§4.5）。
 
 ---
 
