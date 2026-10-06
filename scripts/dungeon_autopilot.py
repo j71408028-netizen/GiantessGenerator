@@ -871,7 +871,13 @@ def scene_callback_thread():
     帧循环的线程。此前 DPG 默认把回调派发到工作线程，与 window 层线程约定
     冲突，靠 ui._build_ui 的 manual_callback_management + 帧循环
     run_callbacks 收拢（见 window.md §2.2 / §4）。
+
+    ``SendMessage(WM_KEYDOWN)`` 是 Win32 专有；非 Windows 没有等价直投路径，
+    因此本场景在非 Windows 上按不适用跳过，而不是把平台差异记成失败。
     """
+    if not sys.platform.startswith("win"):
+        print("  SKIP callback-thread：SendMessage/WM_KEYDOWN 为 Win32 专有，非 Windows 不适用")
+        return
     win = AutopilotWindow(
         None, name="自检角色", nick="", height=100.0, personality=_Personality(),
         preset=None, greed=0, original_height=1.6, intro_hidden="", intro_visible="",
