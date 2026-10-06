@@ -379,7 +379,7 @@ class NullTrack(AudioTrack):
 if os.name == "nt":
     _TRACK_BACKENDS = (MciTrack, MiniaudioTrack)
 else:
-    _TRACK_BACKENDS = (MiniaudioTrack)
+    _TRACK_BACKENDS = (MiniaudioTrack,)
 
 
 def set_backends(backends):
