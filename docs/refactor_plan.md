@@ -1,7 +1,7 @@
 # 目录分层重构：现状与交接
 
-> **2026-10-06。阶段 0 – 3.2 与 §4.1（拆 `core/logic.py`）已全部落地，守卫的
-> 「已登记例外」是一张空表**；剩下的只有 §4.2 – §4.5。本文件原名《目录重构计划》，
+> **2026-10-06。阶段 0 – 3.2 与 §4.1（拆 `core/logic.py`）、§4.2（整理 `services/`）
+> 已全部落地，守卫的「已登记例外」是一张空表**；剩下的只有 §4.3 – §4.5。本文件原名《目录重构计划》，
 > 规划部分已执行完，现转为**持续维护的交接文档**——路径沿用 `docs/refactor_plan.md`
 > 不改名，免得 README 与工作笔记里的链接断掉。文中所有数字与结论都是实测的，不是设想。
 
@@ -57,7 +57,7 @@
 ### 1.3 当前实测数字（2026-10-06）
 
 ```
-[check_import_graph] 已检查 154 个模块，595 条第一方依赖边
+[check_import_graph] 已检查 157 个模块，592 条第一方依赖边
 [check_import_graph] PASSED：层间依赖方向与 UI 框架禁令均无未登记越界
 KNOWN_EXCEPTIONS = []          # 原 11 条已全部消除
 tests/run_checks.py            # 13/13
@@ -131,6 +131,7 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 | **3.2.2** | `13dc554` | 消除 2 条 `ui → app_shell`；新建 `services/ui_mode.py`；顺手修掉 tests 改名漏掉的断链 | 7 → 5；`check_entrypoints` 加硬「未知顶层名」检查 |
 | **3.2.3** | `3c0737f` | **图像层拆分**，消除最后 5 条例外，`KNOWN_EXCEPTIONS` 清空 | 5 → 0；与 HEAD 旧实现 **83 项逐字节一致** |
 | **4.1** 拆 `core/logic.py` | `9c50786` | 578 行杂物间按职责拆为 `core/logic/{sizing,quips,simulation,text}`，`__init__.py` 薄壳再导出 19 个公开名，29 个引用文件 import 零改动；`@behavior_hook("logic",…)` scope 一个字未动 | 探针比对 19 个公开名源码 + 11 个 hook key **逐字节一致**；13/13；边 586 → 595、模块 150 → 154（拆分机械上升，无新跨层依赖） |
+| **4.2** 整理 `services/` | `d5e2b9e`…`2d97d01`（7 个提交） | 十个散文件按域归位：`scale_reference` 上浮 `core/`；`chat/` 收编 persona / experience_events；建 `worlds/`、`challenges/` 两域包（`helpers.py` 拆散删除）；`news` 独立附加功能包；`character_service` 改名 `character`（边界收窄）；`services/__init__` 门面清零改层说明。`creation_service` / `state_service` / `ui_mode` 留顶层（行为包 import 契约 / 3.2.2 判例） | 每步 grep 零残留 + 13/13；边 595 → 592（删 4 条门面死边）、模块 154 → 157（新门面 / imports 文件登记）；收口：smoke_mini 全部通过、autopilot --in-process 100/100 |
 | **顺带** | `93de7ae` | `ui/settings/`、`ui/quip/`、`ui/landmark/`、`ui/challenge/`、`services/chat/`、`services/preview/`、`dungeon/audio/` 包内分组；`tests/` 命名统一为 `check_*` / `smoke_*` | — |
 
 > ⚠️ **一个可追溯性瑕疵**：阶段 0 / 1 / 2 / 3.1 的成果在本轮之前**从未入库**，
@@ -160,68 +161,11 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 
 都不是"必须做"——重构的主干已经完成。按建议顺序：
 
-### 4.2 整理 `services/` 目录（§4.3 的前置，2026-10-06 定版）
+### 4.2 整理 `services/` 目录（**已完成**，2026-10-06）
 
-**问题**：三种组织范式并存——新范式包（`exploration/`，有门面有文档）、旧包
-（`character_service/`，`__init__.py` 是空的；名字的旧语义「任何建立在持久化角色之上
-的行为」已失真——聊天支撑件同样建立在持久化角色之上却散在外面）、外加 10 个散文件。
-
-**契约红线**（执行时逐条对照）：
-
-1. 钩子 key（`"CreationService.*"` ×2、`"StateService.*"` ×14）是 `scope.name` 字面量，
-   与文件路径无关，搬家安全；scope 一个字不许改。
-2. `services/creation_service.py` 与 `services/state_service.py` 的**模块路径本身**是
-   行为包契约——`docs/world_pack_behaviors.md` 的示例教行为包作者
-   `from services.creation_service import CreationService`，已部署行为包可能照此
-   import → **两文件留顶层不动**（定版：不收编、无 shim 税）。
-3. `developer_tools/debug_archive_preview.py` 引用
-   `services.character_service.archive_export`——改名步骤必须同步它，否则
-   `check_entrypoints` 的全仓悬空 import 检查会挂。
-4. `data/`、`scripts/`、`build/` 已实测零 services 路径引用。
-
-**目标结构**（§2.4 按实际内容定归属；三条定版决策：`scale_reference` 上浮 core——
-将来供 dungeon 与外部工具，core 是能让最多方合法引用的最底层（`appearance` 判例）；
-`news` 独立成附加功能包——与角色长时行为正交；creation / state 留原位）：
-
-```
-services/
-  __init__.py            # 门面清零：只剩 docstring（现 6 个 re-export 仅 3 处在用）
-  creation_service.py    # 留顶层 —— 行为包契约 + 跨域共用核心服务
-  state_service.py       # 留顶层 —— 同上（dungeon 也直接用）
-  ui_mode.py             # 留顶层 —— 3.2.2 判例，理由已写在模块 docstring
-  preview/               # 不动
-  exploration/
-    + detail_pools       # ← helpers.build_detail_pools（唯一消费者是 catalog）
-  chat/
-    + experience_events  # ← 散文件收编（chat_delivery.md 阶段四的事件流）
-    + persona            # ← character_persona.py
-  worlds/                # 新包：world_service + address_registry（地址注册表即世界包选址）
-  challenges/            # 新包：challenge_service + helpers 的 3 个挑战包函数
-  character/             # ← character_service/ 改名，只留角色自身长时行为
-                         #   （archive_export / offline / rhythm + 门面 docstring 写明边界）
-  news/                  # 新包（news.py → __init__.py，同 preview/ 构型）：
-                         #   NewsService + DEFAULT_NEWS_TABLE
-core/
-  scale_reference.py     # ← 上浮（现内容只依赖 core.logic 的两个名字，零窗口依赖）
-```
-
-**执行步骤**（一次一件事，每步一提交）：
-
-| 步 | 提交 | 动作 | 引用点改写 |
-|---|---|---|---|
-| 1 | `refactor(core)` | `scale_reference.py` 上浮 `core/` | character_persona、chat |
-| 2 | `refactor(services)` | `chat/` 收编 experience_events、character_persona | chat_delivery.md 的路径引用 |
-| 3 | `refactor(services)` | 建 `challenges/`，helpers 的 3 个挑战包函数并入；`build_detail_pools` → `exploration/`；删 `helpers.py` | ui/landmark、ui/quip 改直连 |
-| 4 | `refactor(services)` | 建 `worlds/` 收编 world_service + address_registry | main 三件套 |
-| 5 | `refactor(services)` | `news` 独立成 `services/news/` 包 | ui/settings、exploration/catalog |
-| 6 | `refactor(services)` | `character_service/` → `character/` + 门面 docstring | state_service 延迟 import、ui/exploration/giantess_state、ui/mini/app、smoke_mini、developer_tools 一处 |
-| 7 | `refactor(services)` | `services/__init__.py` 门面清零 | ui/settings 的 `from services import ui_mode` 改直连 |
-| 8 | `docs` | README 结构约定、chat_delivery.md、本文件记录完成 | — |
-
-每步固定动作：`git mv` → grep 零残留 → `run_checks` 13/13 → **核对边数不变**
-（全是纯位移、无拆分——与 §4.1 的「机械上升」判据不同）。全部完成后跑
-`smoke_mini`（75 项）+ `autopilot --in-process`（100 项）收口。守卫零改动：
-`PACKAGE_LAYERS` 按一级包归层，services / core 下的新子包自动归层。
+规划与执行记录见 §3 历程表；目标结构的活文档是 `services/__init__.py` 的域分布表。
+契约红线保留备忘：`services/creation_service.py` / `services/state_service.py` 的模块
+路径是行为包 import 契约（`docs/world_pack_behaviors.md` 示例），**不得改名**。
 
 ### 4.3 搬 `app` 层进 `app/` 包
 
