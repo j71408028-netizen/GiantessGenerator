@@ -14,7 +14,7 @@
   （continue/start/switch/end）自主开启、切换与结束话题；服务层注入
   当前话题上下文，并施加硬约束（最大轮数、超时收束、容量截断）；
 - 离线恢复统一入口 reconcile（阶段四）：打开聊天时合并处理回复积压、
-  未消费的经历事件（新闻/位置/演化/结局，见 services.experience_events）
+  未消费的经历事件（新闻/位置/演化/结局，见 services.chat.experience_events）
   与主动搭话——一次 AI 决策，或回应、或开题、或沉默；成功后才标记
   已读与消费事件，失败保持原状下次继续；
 - 属性操作白名单（轻度）：attitude（聊天态度，聊天域内）、
@@ -56,8 +56,8 @@ from core.models import (ChatMessage, ChatParams, ChatState, CharacterSnapshot,
 from persistence.character_repo import CharacterRepo
 from persistence.chat_repo import ChatRepo
 from services.chat import events as chat_events
-from services.character_persona import build_character_persona
-from services.experience_events import (collect_experience_events,
+from services.chat.persona import build_character_persona
+from services.chat.experience_events import (collect_experience_events,
                                         consume_experience_events,
                                         events_for_prompt)
 from services.state_service import StateService

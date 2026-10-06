@@ -433,7 +433,7 @@ class ChatState:
     chat_params 为纯聊天参数（首次聊天前由 AI 一次性决定，见 ChatParams）；
     topics / active_topic_id 为话题状态机（见 Topic）；
     consumed_event_ids 为已消费经历事件的确定性 id（见
-    services.experience_events），防止同一新闻/经历被反复提起。
+    services.chat.experience_events），防止同一新闻/经历被反复提起。
     """
     giantess_id: str
     messages: List[ChatMessage] = field(default_factory=list)

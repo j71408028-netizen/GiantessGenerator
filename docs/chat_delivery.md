@@ -209,7 +209,7 @@ Topic
 
 ## 10. 阶段四：经历事件与 reconcile（已实施）
 
-### 经历事件（services/experience_events.py）
+### 经历事件（services/chat/experience_events.py）
 
 从角色档案收集四类事件，每条有**确定性 id**（kind + 内容 md5 前缀），
 消费记录存 `ChatState.consumed_event_ids`（repo 侧保留最近 200 个），
