@@ -36,19 +36,13 @@
 
 import sys
 
-MODE_PRO = "pro"
-MODE_MINI = "mini"
+from services.ui_mode import MODE_MINI, MODE_PRO, resolve_startup_mode, save_mode
 
-#: 「退出时模式」：启动偏好的一种——跟随上次退出时所在的界面
-STARTUP_EXIT = "exit"
-
-#: 界面模式在 settings 里的键；记录的是**实际所在**的模式（切换界面时落盘），
-#: 「退出时模式」这个启动偏好读的就是它。缺省按调用方传入的 default_mode 决定。
-UI_MODE_KEY = "ui_mode"
-
-#: 启动偏好在 settings 里的键；取值 MODE_PRO / MODE_MINI / STARTUP_EXIT。
-#: 只由设置页的「启动界面模式」写入，决定跟随设置启动的入口（main.py）。
-STARTUP_MODE_KEY = "ui_startup"
+# 注：界面模式的取值（``MODE_PRO`` / ``MODE_MINI`` / ``STARTUP_EXIT``）与「启动界面
+# 模式」偏好的读写（含 ``UI_MODE_KEY`` / ``STARTUP_MODE_KEY``）住在
+# ``services/ui_mode.py``——那是两套界面与外壳共用的词表，ui 层要能**直接读写**它而
+# 不必 import 本模块（设置页曾为此踩过 ``ui -> app`` 越界，阶段 3.2.2 已改）。
+# 本模块只保留**切换机制**：销毁根窗口、登记待处理请求、清理跨根全局状态。
 
 # 待处理的切换请求。两套界面都通过 switch_to() 写入，由 run_app 的循环读取。
 _PENDING = {"mode": None}
@@ -70,69 +64,6 @@ def take_request():
     mode = _PENDING["mode"]
     _PENDING["mode"] = None
     return mode
-
-
-def load_mode(default: str = MODE_PRO) -> str:
-    """读取设置里记录的界面模式。"""
-    from persistence import SettingsRepo
-    try:
-        mode = (SettingsRepo().load() or {}).get(UI_MODE_KEY)
-    except Exception:
-        mode = None
-    return mode if mode in (MODE_PRO, MODE_MINI) else default
-
-
-def save_mode(mode: str) -> None:
-    """把界面模式写入设置，下次启动沿用。失败只打印告警，不阻断切换。"""
-    from persistence import SettingsRepo
-    try:
-        repo = SettingsRepo()
-        settings = repo.load()
-        settings[UI_MODE_KEY] = mode
-        repo.save(settings)
-    except Exception as e:
-        print(f"[Warning] 保存界面模式失败: {e}")
-
-
-def load_startup_mode() -> str:
-    """读取设置里的启动偏好；未设置或缺省按「退出时模式」处理。"""
-    from persistence import SettingsRepo
-    try:
-        pref = (SettingsRepo().load() or {}).get(STARTUP_MODE_KEY)
-    except Exception:
-        pref = None
-    return pref if pref in (MODE_PRO, MODE_MINI, STARTUP_EXIT) else STARTUP_EXIT
-
-
-def save_startup_mode(pref: str) -> None:
-    """把启动偏好写入设置。失败只打印告警，不阻断。"""
-    from persistence import SettingsRepo
-    try:
-        repo = SettingsRepo()
-        settings = repo.load()
-        settings[STARTUP_MODE_KEY] = pref
-        repo.save(settings)
-    except Exception as e:
-        print(f"[Warning] 保存启动界面模式失败: {e}")
-
-
-def resolve_startup_mode(default: str = MODE_PRO) -> str:
-    """按启动偏好解析出本次启动的界面模式。
-
-    - 偏好是固定模式（专业/ME）：直接用它，**不看** ``ui_mode``——这是固定
-      偏好的意义所在，中途切换过界面也不影响下次启动；
-    - 偏好是「退出时模式」（含未设置的老存档）：读 ``ui_mode``。它由
-      :func:`switch_to` 在每次切换时落盘，正常退出后保留的正是退出时所在的
-      界面，无需在关闭流程里再补一次（两个关闭协议都以 ``os._exit(0)`` 收尾，
-      关闭钩子里落盘本就不可靠）。
-
-    两套都解析不出来时回退到 ``default``。
-    """
-    pref = load_startup_mode()
-    if pref in (MODE_PRO, MODE_MINI):
-        return pref
-    mode = load_mode(default)
-    return mode if mode in (MODE_PRO, MODE_MINI) else default
 
 
 # ==================== 引导 ====================
@@ -445,8 +376,8 @@ def run_app(initial_mode: str = None, default_mode: str = MODE_PRO) -> None:
     """按界面模式启动，并在两套界面之间来回切换，直到使用者关闭窗口。
 
     ``initial_mode`` 非空时**固定**首次启动用它。为空时按设置里的启动
-    偏好解析（见 :func:`resolve_startup_mode`），即跟随设置项的 ``main.py``。
-    每套界面返回后读取一次切换请求：有就重建另一套，没有就结束进程。
+    偏好解析（见 :func:`services.ui_mode.resolve_startup_mode`），即跟随设置项的
+    ``main.py``。每套界面返回后读取一次切换请求：有就重建另一套，没有就结束进程。
     """
     mode = initial_mode or resolve_startup_mode(default_mode)
 

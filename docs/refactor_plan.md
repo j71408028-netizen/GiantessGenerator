@@ -112,6 +112,14 @@ logic.py -> core/logic.py              context.py -> core/context.py
    `validate_scenarios.py` → `check_scenarios.py`、`smoke_test_mini.py` → `smoke_mini.py`、
    `smoke_test_switch.py` → `smoke_switch.py`、`mini_game_smoke.py` → `smoke_mini_game.py`。
 
+   ⚠️ **改名漏了一处 import，两个月后才发现（2026-10-06 阶段 3.2.2 顺手修掉）**：
+   `smoke_switch.py` 里 `import smoke_test_mini as mini_smoke` 没跟着改，导致它**从改名起
+   一直断在第 2 轮**（`ModuleNotFoundError`）。表现极具误导性——异常打到 stderr 排在文件
+   开头，而模块级 `print` 有缓冲，日志看起来就是「跑到一半卡死」。
+   **`tests/check_entrypoints.py` 已加硬**：顶层 import 名若既不是仓库模块、也不是标准库、
+   又不在 `requirements.txt` 声明里，直接判失败（合法的可选依赖与自塞 `sys.path` 的本地
+   模块写在该脚本的 `UNDECLARED_ALLOWED`）。同目录兄弟模块现在也纳入第一方校验。
+
 ## 4. 已登记的例外（11 → 7，仍在减少中）
 
 全部在 `tests/check_import_graph.py` 的 `KNOWN_EXCEPTIONS` 里，每条带 `why` 与 `plan`。
@@ -131,12 +139,24 @@ logic.py -> core/logic.py              context.py -> core/context.py
 > `render_preset_preview_image()`，专业界面那份是 `creation_params_dlg.py` 里**自带
 > tk 画布的独立拷贝**。所以正确的减法是去 tk 化，不是把没人用的控件搬进界面层。
 
-### 4.2 剩余 7 条（本轮继续消除，见 3.2.2 / 3.2.3）
+### 4.2 阶段 3.2.2 已彻底消除（2026-10-06，2 条）
+
+> ⚠️ **原计划对这两条的写法要分两半看**：原写「改为注入回调 on_switch_ui」。实测两条的
+> 性质并不相同，因此用了两种解法。
+
+| 原 # | 原位置 | 原越界 | 消除办法 |
+|---|---|---|---|
+| 1 | `ui/settings/__init__.py:893,942` | `ui → app_shell` | **下移共享词表**：新建 `services/ui_mode.py`，装 `MODE_PRO` / `MODE_MINI` / `STARTUP_EXIT` / `UI_MODE_KEY` / `STARTUP_MODE_KEY` 与 `label_of` / `pref_of_label` + 三个读写函数（原先散在 `app_shell` 里）。设置页现在 `from services import ui_mode`——读写的本就是**设置项**，与同页的主题/字体/伤亡开关同类，注入回调反而绕远；顺带并把「专业模式/ME模式/退出时模式」这份文案表从两处硬编码收成一处 |
+| 2 | `ui/mini/app.py:895` | `ui → app_shell` | **注入回调**：`MiniApp(..., switch_ui=...)`，接线在 `main.run_mini`（app 层，ui 与外壳之间唯一的接线处）。这条必须是注入——它调的是 `switch_to`，那是**机制**（销毁根窗口 + 登记请求 + 落盘），不是偏好；缺省 `None` 时界面提示「界面切换未接线」而不是静默失败 |
+
+`app_shell` 随之只剩切换机制（`switch_to` / `request_switch` / `take_request` / 根窗口修复与
+全局清理），不再是界面模式的词表宿主。调用点同步改到 `services.ui_mode`：`main.py`、
+`main_window_manager.py`、`tests/smoke_switch.py`、`persistence/settings_repo.py`（注释）。
+
+### 4.3 剩余 5 条（见 3.2.3）
 
 | # | 位置 | 越界 | 性质 |
 |---|---|---|---|
-| 1 | `ui/settings/__init__.py:893,942` | `ui → app_shell` | 设置页「界面模式」直接调外壳切换函数 |
-| 2 | `ui/mini/app.py:895` | `ui → app_shell` | 挂件标题栏「⇄」同上 |
 | 4 | `persistence/character_repo.py:10` | `persistence → services` | 生成头像缩略图 |
 | 7 | `persistence/character_repo.py:61` | 引入 `PIL` | 缩略图解码 |
 | 8 | `services/image_service.py:7` | 引入 `customtkinter` | **服务层里混着界面逻辑** |
@@ -150,14 +170,15 @@ logic.py -> core/logic.py              context.py -> core/context.py
 写成字面量以避免拉进 CTk——作者有分层意识，只是第 5 条漏了。它和
 `ui/exploration/creation_params_dlg.py` 里的同款画法是**两份重复实现**，消除第 8/9 条时应顺便合并。
 
-### 4.3 阶段 3.2.1 的验证证据
+### 4.4 验证证据（3.2.1 / 3.2.2）
 
-| 判据 | 结果 |
-|---|---|
-| `tests/run_checks.py` | 13/13 ✅ |
-| `tests/check_import_graph.py` | PASSED；例外 11 → 7，依赖边 583 → 582（唯一少的那条正是被删除的 `core → persistence` 延迟导入）✅ |
-| 预览渲染逐字节回归 | 亮/暗 × 4 组身高共 **8 组 PNG 逐字节一致**（`PREVIEW IDENTICAL`）✅ |
-| `tests/smoke_mini.py` | 通过 ✅ |
+| 判据 | 3.2.1 | 3.2.2 |
+|---|---|---|
+| `tests/run_checks.py` | 13/13 ✅ | 13/13 ✅ |
+| `tests/check_import_graph.py` | PASSED；例外 11 → 7，依赖边 583 → 582（少的正是被删除的 `core → persistence` 延迟导入）✅ | PASSED；例外 7 → 5，依赖边 582 → 583（新增 `services/ui_mode.py` 被 4 处引用，抵掉删除的 3 条 `ui → app_shell`）✅ |
+| 预览渲染逐字节回归 | 亮/暗 × 4 组身高共 **8 组 PNG 逐字节一致**（`PREVIEW IDENTICAL`）✅ | 不涉及 |
+| `tests/smoke_mini.py` | 通过（75 项）✅ | 不涉及 |
+| `tests/smoke_switch.py` | 不涉及 | 47/49（那 2 项是 §7 第 7 条的陈旧断言，与本步无关）⚠️ |
 
 ## 5. 两条红线（违反会静默失效，不会报错）
 

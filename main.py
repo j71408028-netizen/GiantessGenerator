@@ -228,8 +228,18 @@ def run_mini(boot):
     # 之后再切线程也改不了已存在的窗口。见 ui.mini.dpi 的说明。
     with dpi.virtualized_dpi():
         root = tk.Tk()
+
+        def _switch_ui(mode, save=None):
+            """把界面切换交给外壳：本层（app）是 ui 与外壳之间唯一的接线处。
+
+            挂件标题栏的「⇄」经注入回调走到这里——ui 层因此不必 import
+            ``app_shell``（见 ``ui.mini.app.MiniApp`` 的 ``switch_ui`` 参数）。
+            """
+            from app_shell import switch_to
+            switch_to(root, mode, save=save)
+
         from ui.mini.app import MiniApp
-        MiniApp(root, context, world_manager, settings_repo)
+        MiniApp(root, context, world_manager, settings_repo, switch_ui=_switch_ui)
         root.mainloop()
 
     # 窗口销毁后 mainloop 返回：取一次切换请求交给外壳处理。
@@ -431,7 +441,8 @@ def run_professional(boot):
 
 
 def main():
-    """入口：跟随「启动界面模式」设置启动（见 app_shell.resolve_startup_mode）。
+    """入口：跟随「启动界面模式」设置启动
+    （见 ``services.ui_mode.resolve_startup_mode``）。
     """
     if "--mini-game-host" in sys.argv:
         # 打包模式：内置小游戏子进程经应用可执行文件路由到这里
@@ -439,8 +450,8 @@ def main():
         from ui.common.mini_game_host import run as run_mini_game_host
         run_mini_game_host(sys.argv)
         return
-    from app_shell import MODE_PRO, run_app
-    run_app(default_mode=MODE_PRO)
+    from app_shell import run_app
+    run_app()
 
 
 if __name__ == "__main__":

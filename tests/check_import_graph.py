@@ -118,20 +118,6 @@ KNOWN_EXCEPTIONS = [
         plan="阶段 3 把纯图像处理下移到 core，仓库层只依赖它",
     ),
     dict(
-        kind="layer",
-        src="ui/settings/__init__.py",
-        dst="app_shell",
-        why="设置页「界面模式」直接调用外壳的切换函数（ui -> app）",
-        plan="改为注入回调 on_switch_ui，界面层不再 import 外壳",
-    ),
-    dict(
-        kind="layer",
-        src="ui/mini/app.py",
-        dst="app_shell",
-        why="挂件标题栏「⇄」直接调用外壳的切换函数（ui -> app）",
-        plan="同上，随 ui 层回调化一起消除",
-    ),
-    dict(
         kind="framework",
         src="persistence/character_repo.py",
         dst="PIL",

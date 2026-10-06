@@ -46,13 +46,18 @@ def default_preset() -> BodyPreset:
 class MiniApp:
     """桌面挂件版界面管理器。"""
 
-    def __init__(self, root, context, world_manager, settings_repo):
+    def __init__(self, root, context, world_manager, settings_repo, *, switch_ui=None):
         self.root = root
         self.context = context
         self.settings = context.settings
         self.world_manager = world_manager
 
         self._settings_repo = settings_repo
+        # 界面切换由外壳**注入**：ui 层不得 import ``app_shell``（阶段 3.2.2 前
+        # 标题栏的「⇄」直接 import 外壳，构成一条 ui -> app 越界边）。本层只说
+        # 「切到哪个模式」，销毁根窗口 / 登记切换请求 / 落盘由外壳的实现负责，
+        # 接线在 ``main.run_mini``。缺省 None 表示不提供切换入口。
+        self._switch_ui = switch_ui
         self._landmark_repo = context.landmark_repo
         self._quip_repo = context.quip_repo
         self._preset_repo = context.preset_repo
@@ -892,8 +897,13 @@ class MiniApp:
         外壳随后会重建一个 ``customtkinter`` 根窗口并启动专业界面——同进程、
         同一份 ``data/``，只是界面层换掉。
         """
-        from app_shell import MODE_PRO, switch_to
+        # 模式取值走共享词表，切换动作走注入回调（ui 层不 import 应用外壳）。
+        from services.ui_mode import MODE_PRO
 
+        if self._switch_ui is None:
+            self.notify("界面切换未接线，无法切到专业模式。",
+                        tone="danger", title="无法切换")
+            return
         # 副本视口是独立顶层窗口，切换界面会把它连同 Tk 根一起带走，
         # 会话结果无从回收，因此进行中直接拒绝切换。
         if self._active_dungeon_window is not None:
@@ -902,7 +912,7 @@ class MiniApp:
             return
         self._closing = True
         self.state_card.stop_auto_recovery()
-        switch_to(self.root, MODE_PRO, save=self._save_settings)
+        self._switch_ui(MODE_PRO, self._save_settings)
 
     def on_closing(self):
         if self._closing:

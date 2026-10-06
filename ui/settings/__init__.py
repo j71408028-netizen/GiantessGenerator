@@ -21,6 +21,7 @@ from persistence.name_repo import NameRepo, DEFAULT_NAME_TABLE
 from persistence.world_pack import list_behavior_packs
 from dungeon.terms import is_default_scenario
 from services.challenge_service import ChallengeService
+from services import ui_mode
 from services.character_service.news import DEFAULT_NEWS_TABLE, NewsService
 from ui.common.widgets import (
     CollapsibleBlock, StyleListBox, CycleOptionButton, ScrollableComboBox,
@@ -889,17 +890,15 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.show_casualties_switch = self._make_switch(ctrl, self.show_casualties_var)
 
         # 启动界面模式：只决定**下次启动**用哪套界面，点这里不重建窗口。
-        # 「退出时模式」跟随上次退出时所在的界面（app_shell.resolve_startup_mode）。
-        from app_shell import MODE_MINI, MODE_PRO, STARTUP_EXIT, STARTUP_MODE_KEY
+        # 「退出时模式」跟随上次退出时所在的界面
+        # （见 services.ui_mode.resolve_startup_mode）。
         _, ctrl = self._make_row(self.disp_body, row, "启动界面模式")
         row += 1
-        pref = self.settings.get(STARTUP_MODE_KEY, STARTUP_EXIT)
-        startup_display = {MODE_PRO: "专业模式",
-                           MODE_MINI: "ME模式"}.get(pref, "退出时模式")
-        self.ui_mode_var = tk.StringVar(value=startup_display)
+        pref = self.settings.get(ui_mode.STARTUP_MODE_KEY, ui_mode.STARTUP_EXIT)
+        self.ui_mode_var = tk.StringVar(value=ui_mode.label_of(pref))
         self.ui_mode_button = self._make_cycle_button(
-            ctrl, ["专业模式", "ME模式", "退出时模式"], self._on_ui_mode_changed,
-            self.ui_mode_var)
+            ctrl, [label for label, _pref in ui_mode.STARTUP_CHOICES],
+            self._on_ui_mode_changed, self.ui_mode_var)
 
         self._section_label(self.disp_body, row, "字体设置")
         row += 1
@@ -939,14 +938,12 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         「退出时模式」意味着下次启动跟随上次退出时所在的界面——实际模式由
         ``app_shell.switch_to`` 在每次切换时落盘（``ui_mode`` 键），这里不碰它。
         """
-        from app_shell import (MODE_MINI, MODE_PRO, STARTUP_EXIT,
-                               STARTUP_MODE_KEY, save_startup_mode)
-
-        pref = {"专业模式": MODE_PRO, "ME模式": MODE_MINI}.get(value, STARTUP_EXIT)
+        # 词表与落盘都在共享的 services.ui_mode（ui 层不得 import 应用外壳）。
+        pref = ui_mode.pref_of_label(value)
         # 同步内存里的设置副本：本页「保存并返回」会把 settings 整份回写，
         # 不同步就会把这里刚选的值覆盖回旧值。
-        self.settings[STARTUP_MODE_KEY] = pref
-        save_startup_mode(pref)
+        self.settings[ui_mode.STARTUP_MODE_KEY] = pref
+        ui_mode.save_startup_mode(pref)
 
     def _story_recent_count_value(self) -> int:
         """剧情概要保留的最近段落数（1~200，非法输入回退到原值/20）。"""

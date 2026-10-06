@@ -29,7 +29,15 @@
 
 - ``import a.b`` / ``from a.b import c``：``a/b.py`` 或 ``a/b/__init__.py`` 必须存在；
 - ``from a.b import c`` 里的 ``c``：``a/b/c.py`` 存在即通过；否则要求 ``a/b`` 的源码在
-  **顶层**绑定过 ``c``（class / def / 赋值 / 再导出），都没有才判为悬空。
+  **顶层**绑定过 ``c``（class / def / 赋值 / 再导出），都没有才判为悬空；
+- **同目录的兄弟模块也算第一方**（脚本式自检互相 import 走的这条路：``tests/`` 里的
+  ``import smoke_mini``），按「引用文件所在目录」解析；
+- **未知顶层名**：既不是仓库模块、也不是标准库或 ``requirements.txt`` 里声明的依赖，
+  就直接判失败。这类名字十有八九是改了模块名忘了改引用——``import smoke_test_mini``
+  在 ``tests/smoke_test_mini.py`` 改名成 ``smoke_mini.py`` 之后就长这样：解析不到，
+  又不在依赖表里，于是被当成第三方放过去。它让热切换自检**从那次改名起一直断在第 2 轮**，
+  而表现只是「日志跑到一半没了」（模块级 ``print`` 有缓冲，异常在最后），极易误读成卡死。
+  合法的例外（可选依赖、脚本自己塞 sys.path 的本地模块）写在 ``UNDECLARED_ALLOWED``。
 
 相对导入（``from . import``）由 Python 自行解析，不在此处判。
 
@@ -61,6 +69,27 @@ ENTRY_RE = re.compile(r'^\s*\$?ENTRY\s*=\s*"([^"]+)"', re.M | re.I)
 ICON_RE = re.compile(r'--icon\s+"?([^"\s]+)"?')
 #: ``--add-data "assets;assets"``（Windows，分号）/ ``--add-data "assets:assets"``（POSIX，冒号）
 ADDDATA_RE = re.compile(r'--add-data\s+"?([^";\s]+)[;:]')
+
+#: 发行名 -> import 名的特例（其余同名）。
+DIST_TO_IMPORT = {
+    "Pillow": "PIL",
+    "pywebview": "webview",
+}
+
+#: 未写进 requirements.txt 但**合法**的顶层名 -> 理由。
+#: 不在此表、又不在 stdlib、也不在仓库里的顶层名，只可能是「改了模块名忘了改引用」
+#: 或「装了新依赖没写进 requirements」——两者都要等真正走到那段代码才炸。
+UNDECLARED_ALLOWED = {
+    "numpy": "graphviz 可选依赖（布局计算），不装也能跑",
+    "soundfile": "miniaudio 的可选解码后端",
+    "game": "scripts/escape_sim.py 先把内置小游戏目录塞进 sys.path 再 import",
+}
+
+#: 跨平台标准库补充：本机是 Windows，跑在 macOS/Linux 上时这些名字不在
+#: stdlib_module_names 里，不补会被误判成未知依赖。
+PLATFORM_STDLIB = {
+    "winreg", "msvcrt", "winsound", "_winapi", "nt", "posix", "fcntl", "termios",
+}
 
 
 def _norm(path: str) -> str:
@@ -109,6 +138,19 @@ def _first_party_tops():
     return tops
 
 
+def _sibling_tops(path: Path):
+    """同一目录下的兄弟模块名。
+
+    脚本式自检之间就是这么互相 import 的（``tests/smoke_switch.py`` 里
+    ``import smoke_mini``）：靠的是「脚本所在目录在 sys.path 上」。
+    若只把「仓库包 + 根目录模块」当第一方，这类引用会被当成第三方**静默跳过**——
+    tests 改名（``smoke_test_mini`` → ``smoke_mini``）时就这么漏掉了一处 import，
+    热切换自检从那以后一直断在第 2 轮（表现为 ``ModuleNotFoundError`` 加一个
+    只跑到一半的日志，很容易被误读成「卡住」）。
+    """
+    return {p.stem for p in path.parent.glob("*.py")}
+
+
 def _module_file(name: str):
     """把点分模块名解析成文件；不存在返回 None。"""
     base = ROOT.joinpath(*name.split("."))
@@ -116,6 +158,74 @@ def _module_file(name: str):
         if candidate.is_file():
             return candidate
     return None
+
+
+def _resolve_module(name: str, path: Path):
+    """解析点分模块名：先按仓库根解析，再按引用文件所在目录（兄弟模块）。"""
+    found = _module_file(name)
+    if found is not None:
+        return found
+    base = path.parent.joinpath(*name.split("."))
+    for candidate in (base.with_suffix(".py"), base / "__init__.py"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _ident(name: str) -> str:
+    """把名字归一成标识符形态再比：``Pillow``/``pillow``、``edge-tts``/``edge_tts`` 同一。"""
+    return name.strip().lower().replace("-", "_")
+
+
+def _declared_tops():
+    """requirements.txt 里声明的依赖（发行名与 import 名都收，按标识符规范化）。"""
+    declared = set()
+    req = ROOT / "requirements.txt"
+    if not req.is_file():
+        return declared
+    for line in req.read_text(encoding="utf-8").splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        dist = re.split(r"[<>=!~\[\s;]", line, maxsplit=1)[0].strip()
+        if not dist:
+            continue
+        for name in (dist, DIST_TO_IMPORT.get(dist, dist)):
+            declared.add(_ident(name))
+    return declared
+
+
+def _stdlib_tops():
+    return set(sys.stdlib_module_names) | set(sys.builtin_module_names) | PLATFORM_STDLIB
+
+
+def _unknown_imports(path: Path, tree, known: set, declared: set):
+    """顶层名「既不是仓库模块、也不是标准库、也没写在 requirements.txt」的 import。
+
+    这类名字十有八九是**改了模块名忘了改引用**——``import smoke_test_mini``
+    在 ``tests/smoke_test_mini.py`` 改名成 ``smoke_mini.py`` 之后就是这样：
+    它既不是仓库模块（解析不到）也不是已声明依赖，只会被当成第三方放过去，
+    直到那条分支被真正走到才抛 ``ModuleNotFoundError``。
+    """
+    allowed = _stdlib_tops() | declared | set(UNDECLARED_ALLOWED)
+    allowed = {_ident(name) for name in allowed}
+    known = {_ident(name) for name in known}
+    problems = []
+    for node in ast.walk(tree):
+        targets = []
+        if isinstance(node, ast.Import):
+            targets = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            targets = [node.module]
+        for target in targets:
+            top = target.split(".")[0]
+            if _ident(top) in known or _ident(top) in allowed:
+                continue
+            problems.append(
+                f"{path.relative_to(ROOT).as_posix()}:{node.lineno}: "
+                f"'{top}' 既不是仓库模块、也不是标准库或 requirements.txt 里的依赖"
+                f" — 疑似改名残留引用或漏声明的依赖")
+    return problems
 
 
 def _top_level_names(path: Path):
@@ -175,8 +285,12 @@ def _iter_py_files():
 
 
 def check_imports():
-    """校验第一方 import 目标存在。返回 (检查项数, 问题列表)。"""
+    """校验第一方 import 目标存在，并拦下「未知顶层名」的 import。
+
+    返回 (检查项数, 问题列表)。
+    """
     tops = _first_party_tops()
+    declared = _declared_tops()
     checked = 0
     problems = []
     for path in _iter_py_files():
@@ -186,23 +300,25 @@ def check_imports():
         except (SyntaxError, UnicodeDecodeError) as e:
             problems.append(f"{rel}: 源码无法解析（{type(e).__name__}）")
             continue
+        # 同目录的兄弟模块也算第一方（脚本式自检互相 import 走的就是这条路）
+        known = tops | _sibling_tops(path)
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    if alias.name.split(".")[0] not in tops:
+                    if alias.name.split(".")[0] not in known:
                         continue
                     checked += 1
-                    if _module_file(alias.name) is None:
+                    if _resolve_module(alias.name, path) is None:
                         problems.append(
                             f"{rel}:{node.lineno}: import 的模块不存在 -> {alias.name}")
             elif isinstance(node, ast.ImportFrom):
                 # 相对导入交给 Python 解析；无模块名的 `from . import x` 跳过
                 if node.level != 0 or not node.module:
                     continue
-                if node.module.split(".")[0] not in tops:
+                if node.module.split(".")[0] not in known:
                     continue
                 checked += 1
-                target = _module_file(node.module)
+                target = _resolve_module(node.module, path)
                 if target is None:
                     problems.append(
                         f"{rel}:{node.lineno}: from 的模块不存在 -> {node.module}")
@@ -213,11 +329,12 @@ def check_imports():
                 if bound is None or dynamic:
                     continue
                 for alias in node.names:
-                    if _module_file(f"{node.module}.{alias.name}") is not None:
+                    if _resolve_module(f"{node.module}.{alias.name}", path) is not None:
                         continue
                     if alias.name not in bound:
                         problems.append(
                             f"{rel}:{node.lineno}: {node.module} 里没有 '{alias.name}'")
+        problems += _unknown_imports(path, tree, known, declared)
     return checked, problems
 
 

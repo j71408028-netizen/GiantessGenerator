@@ -135,7 +135,7 @@ class MainWindowManager:
         启动用哪套界面，不重建窗口——窗口重建会丢弃当前界面上的编辑状态，所以
         真正动手前必须在这里明确确认一次。
         """
-        from app_shell import MODE_MINI
+        from services.ui_mode import MODE_MINI
 
         # 副本视口是独立顶层窗口，切换界面会把它连同 Tk 根一起带走，
         # 会话结果无从回收，因此进行中直接拒绝切换（先于确认框，避免白问一次）。

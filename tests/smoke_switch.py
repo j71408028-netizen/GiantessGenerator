@@ -142,7 +142,12 @@ def build_professional(boot):
 
 
 def build_mini(boot):
-    """构建挂件模式界面。"""
+    """构建挂件模式界面。
+
+    ``switch_ui`` 按 ``main.run_mini`` 的接线注入——挂件标题栏的「⇄」经这个回调
+    走到外壳（ui 层不直接 import ``app_shell``）。自检必须照着接线，否则第 2 轮
+    「跑过副本再切回专业」会走到界面里的「未接线」分支而切不动。
+    """
     import tkinter as tk
     from core import appearance
     from ui.mini.app import MiniApp
@@ -155,8 +160,13 @@ def build_mini(boot):
     appearance.set_mode(settings.get("theme_mode", "Light"))
 
     root = tk.Tk()
+
+    def _switch_ui(mode, save=None):
+        from app_shell import switch_to
+        switch_to(root, mode, save=save)
+
     app = MiniApp(root, _build_context(boot), boot["world_manager"],
-                  boot["settings_repo"])
+                  boot["settings_repo"], switch_ui=_switch_ui)
     root.update_idletasks()
     return root, app
 
@@ -180,12 +190,12 @@ def mini_phase(boot):
 def _run_real_dungeon(app, root):
     """真实拉起一局副本：AI 指向不可达地址、帧循环限帧、弹框换成记录型。
 
-    ``smoke_test_mini`` 里已有这套桩件（参数与签名一致性也由它保证），这里直接用，
+    ``smoke_mini`` 里已有这套桩件（参数与签名一致性也由它保证），这里直接用，
     免得两处各写一份；它跑完会把新增的副本产物搬出 ``data/``。
 
     可重复调用（第 2、5 轮各一次）：桩只要装一次，重复装会把真类也替换成桩。
     """
-    import smoke_test_mini as mini_smoke
+    import smoke_mini as mini_smoke
     from app_shell import _root_needs_repair
     from dungeon.window import dpg_state
 
@@ -291,7 +301,8 @@ def _mini_style(app):
 
 def main():
     import app_shell
-    from app_shell import MODE_MINI, MODE_PRO, _release_global_state
+    from app_shell import _release_global_state
+    from services.ui_mode import MODE_MINI, MODE_PRO, load_mode
 
     user_dir, backup = _backup_user_files()
     try:
@@ -313,14 +324,14 @@ def main():
         if panel_ok:
             manager.settings_panel._on_ui_mode_changed("挂件模式")
             check("设置里选挂件模式会写进设置",
-                  app_shell.load_mode() == MODE_MINI, str(app_shell.load_mode()))
+                  load_mode() == MODE_MINI, str(load_mode()))
             check("设置里选挂件模式不销毁窗口（当前仍是专业界面）",
                   bool(root.winfo_exists()))
             check("设置里选挂件模式不登记切换请求",
                   app_shell.take_request() is None)
             manager.settings_panel._on_ui_mode_changed("专业模式")
             check("设置里能改回专业模式",
-                  app_shell.load_mode() == MODE_PRO, str(app_shell.load_mode()))
+                  load_mode() == MODE_PRO, str(load_mode()))
 
         # 实时切换走导航栏底部的「切换界面」按钮：点它先弹确认框，
         # 再用 after 定时触发，走真实的 mainloop → 销毁 → 返回路径。
@@ -341,7 +352,7 @@ def main():
 
         request = app_shell.take_request()
         check("切换请求指向挂件模式", request == MODE_MINI, str(request))
-        saved = app_shell.load_mode()
+        saved = load_mode()
         check("界面模式已落盘", saved == MODE_MINI, str(saved))
 
         # ---------- 第 2 轮：挂件模式 → 跑一局真实副本 → 切回专业 ----------
@@ -394,7 +405,7 @@ def main():
 
         request = app_shell.take_request()
         check("切换请求指回专业模式", request == MODE_PRO, str(request))
-        check("界面模式已落盘", app_shell.load_mode() == MODE_PRO)
+        check("界面模式已落盘", load_mode() == MODE_PRO)
 
         # ---------- 第 3 轮：切回专业模式（第 2 次构建） ----------
         print("\n[3] 切回专业模式（第 2 次构建）")
