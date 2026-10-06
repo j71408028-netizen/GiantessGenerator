@@ -153,13 +153,18 @@ data/
   因此 `.gitignore` 用 `/build/*` + 显式放行两个脚本目录，而不是整体忽略 `build/`。
   按设计决策**不单独打包某个启动模式**：曾有的 `main_mini.py` 固定入口与构建脚本的
   Mini 开关已移除，将来拓展启动器形式时从 git 历史恢复即可。
+- **提交信息用约定式提交**（2026-10-06 起）：`<type>(<scope>): <subject>`，`type` 用英文
+  小写（`feat` / `fix` / `refactor` / `docs` / `test` / `chore` / `build` …），`scope` 写
+  子系统（`core` / `services` / `ui` / `mini` / `tests` …），正文用中文。大型结构迭代已
+  结束，历史上 `20261006阶段3.2.3：…` 那种阶段前缀不再使用。类型表与示例见
+  [docs/refactor_plan.md](docs/refactor_plan.md) §6。
 
 ## 相关文档
 
 - [副本文档索引](docs/Dungeon/README.md)：`docs/Dungeon/` 六篇副本开发文档的入口与「按任务查」表
 - [地址系统操作说明](docs/address_system.md)：地标 / 描述风格的地址申领、注册与匹配规则
 - [世界包行为包开发指南](docs/world_pack_behaviors.md)：行为包的开发流程、注册 API 与可覆盖目标
-- [目录重构计划与交接](docs/refactor_plan.md)：分层结构、搬迁进度、已登记例外与操作手册
+- [目录分层交接](docs/refactor_plan.md)：分层现状与硬约束、重构历程索引、剩余待办、操作手册与提交规范
 
 
 ## 免责声明
