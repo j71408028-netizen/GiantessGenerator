@@ -13,7 +13,7 @@ from services.exploration.context import ExplorationContext
 from paths import icon_dir
 from persistence import QuipRepo, ScenarioRepo, CharacterRepo
 from persistence import SettingsRepo, LandmarkRepo, PresetRepo, PersonalityRepo
-from services.challenge_service import ChallengeService
+from services.challenges import ChallengeService
 from services.world_service import WorldManager
 from ui.challenge import ChallengeModePanel
 from ui.exploration.exp_frame import ExplorationPanel

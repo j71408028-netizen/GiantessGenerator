@@ -19,7 +19,7 @@ from core.ai import resolve_ai_config
 from core.models import BodyPreset, CharacterSnapshot, Personality
 from services.chat import events as chat_events
 from services.chat import pending_char_messages
-from services.challenge_service import ChallengeService
+from services.challenges import ChallengeService
 from core import appearance
 from ui.mini import pixel as px
 from ui.mini.investigation import Investigation, Investigator

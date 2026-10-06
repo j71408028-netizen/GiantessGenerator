@@ -7,7 +7,7 @@ import customtkinter as ctk
 
 from core.ai import resolve_ai_config
 from dungeon.terms import scenario_config_of, scenario_id_of
-from services.challenge_service import ChallengeService
+from services.challenges import ChallengeService
 from core.models import Personality, BodyPreset
 from core.address_model import world_of
 from ui.common.widgets import ClickableCard, CollapsibleBlock, StyleListBox, CTkScrollableDropdownFrame

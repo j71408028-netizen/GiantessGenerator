@@ -9,7 +9,7 @@ import re
 from core.logic import SIZE_CATEGORIES, SIZE_DISPLAY
 from persistence import QuipRepo
 from persistence.quip_repo import DEFAULT_QUIP_STYLE
-from services import get_challenge_packs, import_quip_challenge_pack
+from services.challenges import get_challenge_packs, import_quip_challenge_pack
 from ui.common.managers import TreeviewManager, CardManager
 from ui.common.widgets import ClickableCard, CTkScrollableDropdownFrame
 from ui.common.dialogs import BaseDialog

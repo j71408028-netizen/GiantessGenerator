@@ -20,7 +20,7 @@ from persistence import PresetRepo, PersonalityRepo
 from persistence.name_repo import NameRepo, DEFAULT_NAME_TABLE
 from persistence.world_pack import list_behavior_packs
 from dungeon.terms import is_default_scenario
-from services.challenge_service import ChallengeService
+from services.challenges import ChallengeService
 from services import ui_mode
 from services.character_service.news import DEFAULT_NEWS_TABLE, NewsService
 from ui.common.widgets import (

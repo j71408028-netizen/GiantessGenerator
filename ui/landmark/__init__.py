@@ -9,7 +9,7 @@ import services.address_registry as address_registry
 import ui.common.dialogs
 from core.models import Landmark
 from persistence.landmark_repo import LandmarkRepo, DEFAULT_LANDMARK_STYLE
-from services import get_challenge_packs, import_landmark_challenge_pack
+from services.challenges import get_challenge_packs, import_landmark_challenge_pack
 from ui.common.dialogs import BaseDialog
 from ui.common.managers import CardManager
 from ui.common.widgets import ClickableCard, CTkScrollableDropdownFrame

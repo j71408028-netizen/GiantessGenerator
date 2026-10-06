@@ -1,34 +1,12 @@
+"""挑战包导入：列出可用挑战包与把地标/描述数据导入对应仓库。
+
+原 ``services/helpers.py`` 拆散归位（§4.2 步骤 3），与 ChallengeService 同包；
+包内建包说明见 ``services/challenges/__init__.py``。
+"""
+
 import os
-import re
 
-from services.challenge_service import ChallengeService
-
-
-def build_detail_pools(quips):
-    pattern = r'\[([a-e]):(\d+):([^\]]+)\]'
-    pools = {}
-    for size_cat, matrix in quips.items():
-        pools[size_cat] = {}
-        for (i, d), quip_dicts in matrix.items():
-            for qd in quip_dicts:
-                text = qd["text"]
-                style = qd["style"]
-                if style not in pools[size_cat]:
-                    pools[size_cat][style] = {}
-                matches = re.findall(pattern, text)
-                for letter, num, content in matches:
-                    if content.strip().upper() == "MARK":
-                        continue
-                    if letter not in pools[size_cat][style]:
-                        pools[size_cat][style][letter] = {}
-                    if num not in pools[size_cat][style][letter]:
-                        pools[size_cat][style][letter][num] = set()
-                    pools[size_cat][style][letter][num].add(content)
-        for style, letters in pools[size_cat].items():
-            for letter, nums in letters.items():
-                for num, cont_set in nums.items():
-                    pools[size_cat][style][letter][num] = list(cont_set)
-    return pools
+from services.challenges.service import ChallengeService
 
 
 def get_challenge_packs(settings_repo):
