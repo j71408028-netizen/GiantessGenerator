@@ -24,7 +24,7 @@
 每轮检查：
   - 界面确实建起来了，控件可布局、可刷新；
   - 切换请求被正确登记，且模式已落盘；
-  - **实时切换入口是导航栏底部的「切换界面」按钮**（点它先弹确认框，这里把
+  - **实时切换入口是导航栏底部的「⇄ ME模式」按钮**（点它先弹确认框，这里把
     弹框换成记录型再驱动按钮回调）；设置页的「启动界面模式」只写设置、
     **不**销毁窗口、**不**登记切换请求；
   - 挂件建窗时本线程是 **DPI 非感知**的（``ui.mini.dpi``）：挂件那套像素尺寸
@@ -227,7 +227,7 @@ def _run_real_dungeon(app, root):
 def _stub_ui_dialogs(confirm=True):
     """把专业模式的弹框换成记录型，返回调用记录。
 
-    导航栏「切换界面」会先弹确认框——自检不能真弹（模态窗口会把事件循环堵死），
+    导航栏「⇄ ME模式」按钮会先弹确认框——自检不能真弹（模态窗口会把事件循环堵死），
     所以按记录型替换，顺便可以断言「确实问过」。
     """
     import ui.common.dialogs as dlg
@@ -303,7 +303,8 @@ def _mini_style(app):
 def main():
     import app.shell as app_shell
     from app.shell import _release_global_state
-    from services.ui_mode import MODE_MINI, MODE_PRO, load_mode
+    from services.ui_mode import (MODE_MINI, MODE_PRO, STARTUP_EXIT,
+                                  load_mode, load_startup_mode)
 
     user_dir, backup = _backup_user_files()
     try:
@@ -323,25 +324,28 @@ def main():
             panel_ok, panel_detail = False, f"{type(e).__name__}: {e}"
         check("设置页可构建", panel_ok, panel_detail)
         if panel_ok:
-            manager.settings_panel._on_ui_mode_changed("挂件模式")
-            check("设置里选挂件模式会写进设置",
-                  load_mode() == MODE_MINI, str(load_mode()))
-            check("设置里选挂件模式不销毁窗口（当前仍是专业界面）",
-                  bool(root.winfo_exists()))
-            check("设置里选挂件模式不登记切换请求",
-                  app_shell.take_request() is None)
-            manager.settings_panel._on_ui_mode_changed("专业模式")
-            check("设置里能改回专业模式",
+            manager.settings_panel._on_ui_mode_changed("ME模式")
+            check("设置里选 ME 模式写进启动偏好",
+                  load_startup_mode() == MODE_MINI, str(load_startup_mode()))
+            check("启动偏好不碰实际模式键（ui_mode 仍是专业）",
                   load_mode() == MODE_PRO, str(load_mode()))
+            check("设置里选 ME 模式不销毁窗口（当前仍是专业界面）",
+                  bool(root.winfo_exists()))
+            check("设置里选 ME 模式不登记切换请求",
+                  app_shell.take_request() is None)
+            manager.settings_panel._on_ui_mode_changed("退出时模式")
+            check("设置里能改回退出时模式",
+                  load_startup_mode() == STARTUP_EXIT, str(load_startup_mode()))
 
-        # 实时切换走导航栏底部的「切换界面」按钮：点它先弹确认框，
+        # 实时切换走导航栏底部的「⇄ ME模式」按钮：点它先弹确认框，
         # 再用 after 定时触发，走真实的 mainloop → 销毁 → 返回路径。
         dialog_calls = _stub_ui_dialogs(True)
         switch_btn = getattr(manager.nav_bar, "ui_switch_btn", None)
-        check("导航栏带切换界面按钮", switch_btn is not None)
+        check("导航栏带界面切换按钮", switch_btn is not None)
         if switch_btn is not None:
-            check("切换按钮文案标明是换界面",
-                  "切换界面" in _button_text(switch_btn), _button_text(switch_btn))
+            check("切换按钮文案标明是换到另一套界面",
+                  "⇄" in _button_text(switch_btn) and "ME模式" in _button_text(switch_btn),
+                  _button_text(switch_btn))
         root.after(300, manager.nav_bar._on_ui_switch_clicked)
         root.deiconify()
         root.mainloop()
