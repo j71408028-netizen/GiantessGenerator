@@ -1,9 +1,9 @@
 # 目录分层重构：现状与交接
 
-> **2026-10-06。阶段 0 – 3.2 已全部落地，守卫的「已登记例外」是一张空表**；剩下的只有
-> 可选深化（§4）。本文件原名《目录重构计划》，规划部分已执行完，现转为**持续维护的
-> 交接文档**——路径沿用 `docs/refactor_plan.md` 不改名，免得 README 与工作笔记里的链接断掉。
-> 文中所有数字与结论都是实测的，不是设想。
+> **2026-10-06。阶段 0 – 3.2 与 §4.1（拆 `core/logic.py`）已全部落地，守卫的
+> 「已登记例外」是一张空表**；剩下的只有 §4.2 – §4.4。本文件原名《目录重构计划》，
+> 规划部分已执行完，现转为**持续维护的交接文档**——路径沿用 `docs/refactor_plan.md`
+> 不改名，免得 README 与工作笔记里的链接断掉。文中所有数字与结论都是实测的，不是设想。
 
 按需求查：
 
@@ -57,7 +57,7 @@
 ### 1.3 当前实测数字（2026-10-06）
 
 ```
-[check_import_graph] 已检查 150 个模块，586 条第一方依赖边
+[check_import_graph] 已检查 154 个模块，595 条第一方依赖边
 [check_import_graph] PASSED：层间依赖方向与 UI 框架禁令均无未登记越界
 KNOWN_EXCEPTIONS = []          # 原 11 条已全部消除
 tests/run_checks.py            # 13/13
@@ -69,7 +69,7 @@ tests/run_checks.py            # 13/13
 
 ### 2.1 `@behavior_hook` 的 scope 不是模块路径 ⚠️ 最高优先
 
-`core/logic.py` 里有 12 处、`core/behavior_runtime.py` 有 1 处
+`core/logic/`（四子模块合计）里有 12 处、`core/behavior_runtime.py` 有 1 处
 `@behavior_hook("logic", "format_size")`。`behavior_hook(scope, name)` 把 key 拼成
 `f"{scope}.{name}"`，**scope 是写死的字面量，与文件在哪个模块无关**。
 
@@ -130,6 +130,7 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 | **3.2.1** | `6f3d996` | 消除 4 条例外（`core → persistence`、两条 `services → ui`、`services` 引 `tkinter`） | 11 → 7；预览渲染亮/暗 × 4 组身高共 8 组 PNG **逐字节一致** |
 | **3.2.2** | `13dc554` | 消除 2 条 `ui → app_shell`；新建 `services/ui_mode.py`；顺手修掉 tests 改名漏掉的断链 | 7 → 5；`check_entrypoints` 加硬「未知顶层名」检查 |
 | **3.2.3** | `3c0737f` | **图像层拆分**，消除最后 5 条例外，`KNOWN_EXCEPTIONS` 清空 | 5 → 0；与 HEAD 旧实现 **83 项逐字节一致** |
+| **4.1** 拆 `core/logic.py` | `9c50786` | 578 行杂物间按职责拆为 `core/logic/{sizing,quips,simulation,text}`，`__init__.py` 薄壳再导出 19 个公开名，29 个引用文件 import 零改动；`@behavior_hook("logic",…)` scope 一个字未动 | 探针比对 19 个公开名源码 + 11 个 hook key **逐字节一致**；13/13；边 586 → 595、模块 150 → 154（拆分机械上升，无新跨层依赖） |
 | **顺带** | `93de7ae` | `ui/settings/`、`ui/quip/`、`ui/landmark/`、`ui/challenge/`、`services/chat/`、`services/preview/`、`dungeon/audio/` 包内分组；`tests/` 命名统一为 `check_*` / `smoke_*` | — |
 
 > ⚠️ **一个可追溯性瑕疵**：阶段 0 / 1 / 2 / 3.1 的成果在本轮之前**从未入库**，
@@ -158,20 +159,6 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 ## 4. 剩余待办
 
 都不是"必须做"——重构的主干已经完成。按建议顺序：
-
-### 4.1 拆 `core/logic.py`（578 行 / 27 个文件引用）
-
-杂物间，按职责分四组：
-
-| 组 | 内容 |
-|---|---|
-| 尺寸与常量 | `ALL_PART_NAMES` / `SIZE_CATEGORIES` / `SIZE_DISPLAY` / `format_size` / `length_unit_label` / `get_size_category` / `build_size_description` |
-| quip 标签与选取 | `replace_quip_tags` / `select_quip_with_budget` / `get_comparisons` / `get_predefined_tags` |
-| 模拟计算 | `compute_casualty` / `compute_environment_factor` / `apply_size_unlock_updates` |
-| 文本屏蔽 | 其余 |
-
-**红线**：`@behavior_hook("logic", …)` 的 scope 一个字不改（§2.1）。拆完留一个
-`core/logic.py` 薄壳**再导出**全部公开名，调用点零改动；确认无误后再考虑是否逐个改调用点。
 
 ### 4.2 搬 `app` 层进 `app/` 包
 
