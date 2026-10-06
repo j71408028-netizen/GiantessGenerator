@@ -1,19 +1,18 @@
-# 目录分层重构：现状与交接
+# 架构与分层（architecture）
 
-> **2026-10-06。阶段 0 – 3.2 与 §4.1（拆 `core/logic.py`）、§4.2（整理 `services/`）、
-> §4.3（`app/` 包）已全部落地，守卫的「已登记例外」是一张空表**；剩下的只有
-> §4.4 – §4.5。本文件原名《目录重构计划》，
-> 规划部分已执行完，现转为**持续维护的交接文档**——路径沿用 `docs/refactor_plan.md`
-> 不改名，免得 README 与工作笔记里的链接断掉。文中所有数字与结论都是实测的，不是设想。
+> **本文件2026-10-06 起成为常驻架构文档**：讲清楚这个仓库
+> **现在**长什么样、哪些契约不能碰、怎么安全地动它。文件名由 `refactor_plan.md`
+> 改来（非当时设想的`refactor_handoff.md`）。 文中所有数字均为实测，不是设想。
 
 按需求查：
 
-| 你想… | 去哪 |
-|---|---|
-| 动手搬代码 / 新增包 / 加删守卫 | §1 现状与约束 → §5 操作手册 |
-| 搞清楚某次改动**为什么**这么做 | §3 历程索引 → §8 可复用拆法 |
-| 接着往下做 | §4 剩余待办 |
-| 提交代码 | §6 提交规范 |
+| 你想… | 去哪                 |
+|---|--------------------|
+| 弄清分层 / 守卫 / 目录现状 | §1 现状              |
+| 改代码前核对红线 | §2 硬约束             |
+| 搞清某个结构**为什么**这样 | §3 历程索引 → §7 可复用拆法 |
+| 动手搬代码 / 新增包 / 加删守卫 | §5 操作手册            |
+| 提交代码 | §6 提交规范            |
 
 ---
 
@@ -26,22 +25,17 @@
 | 层 | 位置 | 内容 | 可以依赖 |
 |---|---|---|---|
 | `infra` | `paths.py` | 路径解析 | 无 |
-| `core` | `core/` | 领域模型：`models` `address_model` `logic` `behavior_runtime` `ai` `appearance` `imaging` | `infra` |
+| `core` | `core/` | 领域模型与共享基础：`models` `address_model` `logic`（子包） `behavior_runtime` `ai` `appearance` `imaging` `scale_reference` | `infra` |
 | `dungeon` | `dungeon/*.py` | 副本领域定义与规则（schema / terms / chapters / rules / validate …） | `infra` `core` |
 | `persistence` | `persistence/` | 仓库层 | + `dungeon` |
-| `services` | `services/` | 服务层；**含 `services/exploration/`（探索编排）** | + `persistence` |
+| `services` | `services/` | 服务层；按子域分包（`exploration` 探索编排 / `chat` 聊天 / `worlds` 世界包 / `challenges` 挑战包 / `character` 角色长时行为 / `news` 近况 / `preview` 剪影渲染），顶层只留行为包契约服务 `creation_service` / `state_service` 与 `ui_mode`（§2.5） | + `persistence` |
 | `dungeon_window` | `dungeon/window/**` | 副本会话窗口（Dear PyGui） | + `services`；**禁** `tkinter` / `ui.*` |
 | `ui` | `ui/` | 专业界面（CTk）+ 挂件界面（原生 tkinter） | + `dungeon_window` |
 | `app` | `main.py`（字面量入口，留根目录）+ `app/`（`shell` / `window_manager`） | 入口与应用壳 | 全部；**不被任何人依赖** |
 
-**`orchestration` 层已删除**（阶段 3.1）。它曾是 `core/context.py` 的专属层，用来给
-`ExplorationContext` 这个 God object 开一条全图唯一的**双向**豁免。归位办法不是"把类拆小"
-而是**整层搬走**：`ExplorationContext` 连同拆出的六个职责子系统一起迁进
-`services/exploration/`，于是 `ui → services` 与 `services → persistence/core` 两侧都落回
-既有合法边，豁免不再需要。**不要再把它搬回 `core/`**——守卫会直接判越界。
-
-**根目录已冻结**：只剩上表里的 `paths.py` 与三个 `app` 文件。新增根目录 `.py` 会被守卫直接
-判失败（`ROOT_MODULE_LAYERS` 既是层归属表，也是白名单）。
+**根目录已冻结**：只剩 `paths.py` 与字面量入口 `main.py` 两个文件（构建脚本写死了
+`main.py`，不能搬走）。新增根目录 `.py` 会被守卫直接判失败（`ROOT_MODULE_LAYERS`
+既是层归属表，也是白名单）。
 
 ### 1.2 三道守卫的分工
 
@@ -91,7 +85,6 @@ data/static/behaviors/imperial_units/imperial_units.py:45
   Git Bash 的 `rm` 也不进回收站。
 - 清理测试产物一律「移到系统临时区」：`shutil.move(path, tempfile.mkdtemp())`
   （见 `tests/smoke_mini.py::_discard`）。
-- 搬迁代码时 `data/` 里的 `.py`（行为包）**不要改**——那是用户可替换的内容。
 
 ### 2.3 下层禁 UI 框架的口径（PIL 只禁两个桥）
 
@@ -118,6 +111,15 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 
 新增越界**不许直接塞进 `KNOWN_EXCEPTIONS` 就走**——先想清楚能不能靠"按依赖定层"解决。
 
+### 2.5 行为包契约的 import 路径不能改名 ⚠️
+
+钩子 key（§2.1）与模块路径是**两回事**，但后者同样是契约：`docs/world_pack_behaviors.md`
+的示例教行为包作者写 `from services.creation_service import CreationService`，
+`core/behavior_runtime.py` 的模块文档也引用了它——已部署行为包（用户数据区，git 不可见）
+可能照此 import。因此 **`services/creation_service.py` 与 `services/state_service.py`
+两个文件不得改名、不得收编进子包**（除非留 shim，那是一笔永久的税，别轻易决定）。
+`services/` 整理（2026-10-06）据此把它们留在顶层，理由记录在 `services/__init__.py`。
+
 ---
 
 ## 3. 已完成的重构（历程索引）
@@ -136,10 +138,6 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 | **4.3** `app/` 包 + smoke_switch 断言修复 | `8f0229a`…`859e880`（2 个提交） | `app_shell.py` → `app/shell.py`、`main_window_manager.py` → `app/window_manager.py`，`main.py` 留根目录（构建脚本字面量入口）；守卫 ROOT_MODULE_LAYERS 删两项、PACKAGE_LAYERS 加 `"app": "app"`。顺带修 smoke_switch 两条陈旧断言（设置页「启动界面模式」写 `ui_startup` 不碰 `ui_mode`；按钮文案「⇄ ME模式」） | grep 零残留 + 13/13；边 592 不变、模块 157→158；`smoke_switch` **50/50**（47/49 基线回满，断言拆细后总数 +1）、`invalid command name` 0 条 |
 | **顺带** | `93de7ae` | `ui/settings/`、`ui/quip/`、`ui/landmark/`、`ui/challenge/`、`services/chat/`、`services/preview/`、`dungeon/audio/` 包内分组；`tests/` 命名统一为 `check_*` / `smoke_*` | — |
 
-> ⚠️ **一个可追溯性瑕疵**：阶段 0 / 1 / 2 / 3.1 的成果在本轮之前**从未入库**，
-> 2026-10-06 一次性以 `93de7ae`「检查点」提交（127 项）。所以 `git log --follow` 会把
-> 这些迁移都算在检查点那次提交上，而不是某个专门的提交。往后按 §6 一次一件事提交。
-
 ### 3.1 五条值得记住的判断
 
 1. **按依赖定层**（§2.4）——`image_service` 拆分是标准判例。
@@ -156,33 +154,6 @@ data/static/behaviors/imperial_units/imperial_units.py:45
    保留原方法名与属性名。⚠️ **两个属性必须有 setter**——`ui/challenge.py` 会直接赋值
    `context.selected_styles` / `selected_quip_styles` 再调 `reload_merged_data()`；
    只写只读 `@property` 会让赋值**悄悄创建实例属性**盖住真值，随后读到旧值，静默失效。
-
----
-
-## 4. 剩余待办
-
-都不是"必须做"——重构的主干已经完成。按建议顺序：
-
-### 4.2 整理 `services/` 目录（**已完成**，2026-10-06）
-
-规划与执行记录见 §3 历程表；目标结构的活文档是 `services/__init__.py` 的域分布表。
-契约红线保留备忘：`services/creation_service.py` / `services/state_service.py` 的模块
-路径是行为包 import 契约（`docs/world_pack_behaviors.md` 示例），**不得改名**。
-
-### 4.3 搬 `app` 层进 `app/` 包（**已完成**，2026-10-06）
-
-见 §3 历程表与提交 `8f0229a` / `859e880`。`main.py` 是构建脚本里的字面量入口，
-**留在根目录**，别搬。
-
-### 4.4 两个小尾巴
-
-- 文档里的数字偶尔会陈旧（如 autopilot 的项数），改的时候顺手对一下。
-- ~~smoke_switch 的 2 条陈旧断言~~ 已随 §4.3 修复，基线 **50/50**。
-
-### 4.5 可选：文档改名
-
-本文件叫 `refactor_plan.md` 已名不副实（规划已执行完）。若改名为 `refactor_handoff.md`，
-需同步 README（2 处）与 `.workbuddy/memory/` 里的引用。**不改也完全可行**，别为了改名而断链。
 
 ---
 
@@ -220,21 +191,9 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 `run_checks` 按前缀自动发现：`check_*.py` 离线、`smoke_*.py` 需显示器。新增脚本放进对应
 类别即可，无需登记清单。
 
-**环境注意**：
-
-- 带依赖的解释器是 `C:/Users/M/AppData/Local/Programs/Python/Python313/python.exe`
-  （managed 的那个不一定装了项目依赖）。
-- Bash 工具的 shim 会破坏 `PATH`，命令前先 `export PATH="/usr/bin:/bin:/mingw64/bin:$PATH"`。
-- **GUI 自检的退出码在沙箱里不可信**：跑过 `tk.Tk()` 的进程 `os._exit` 有时不返回，表现为
-  「永远 running」或莫名的 99，查下来进程其实已退。**以日志内容为准**。
-- 临时探针别用 `os._exit(0)` 收尾，用
-  `ctypes.windll.kernel32.TerminateProcess(GetCurrentProcess(), 0)`；也别把多轮探针串成一条
-  `for` 命令（第一轮卡住后面全跑不到），每轮单独一个后台任务并各自重定向日志。
-
 ### 5.3 界面热切换与副本窗口
 
-改 `app_shell.py` 或副本收尾逻辑前，**先读 `.workbuddy/memory/` 当日的完整记录**
-（本地笔记，不在版本库里）与 `docs/Dungeon/window.md` §5-C2。那里有五个「会让进程直接死」
+改 `app/shell.py` 或副本收尾逻辑前，**先读`docs/Dungeon/window.md` §5-C2**，以避免「会让进程直接死」
 的陷阱：DPG 未建 context 时调 `is_dearpygui_running()` 段错误、跑完一局副本后 Tk 根不能再
 `destroy()`、保活视口 `park_context` / `unpark_context` 的顺序等等。
 
@@ -290,31 +249,7 @@ docs: 重写目录分层交接文档
 
 ---
 
-## 7. 待决问题
-
-1. `developer_tools/escape_giantess_web/` 与 `data/packs/minigames/escape_giantess/game.py`
-   是同一款游戏的两份，但前者被 gitignore——**谁是上游源码、谁是产物**？决定要不要把前者
-   纳入版本控制。
-2. `scripts/dungeon_autopilot.py`（1698 行，100 项）是主力回归但需要真实窗口：留在
-   `scripts/` 还是移进 `tests/` 由 `run_checks --smoke` 收录？
-3. `data/packs/challenges/` 是个冒烟测试留下的空目录（只移走了 `.chal` 没删目录），无害，
-   要不要补清理逻辑。
-4. 要不要把**报告黄金样本**回归固化进 `tests/`（固定种子 + 固定角色 → 存 `report_text` /
-   `detail_text` 基线逐字节比对）。3.1 与 3.2 都用临时脚本做过，**还没进仓**。
-5. ~~`tests/smoke_switch.py` 有 2 条陈旧断言~~ **已解决**（2026-10-06 随 §4.3 修复，基线 50/50）：
-   - 「设置里选挂件模式会写进设置」仍在调 `_on_ui_mode_changed("挂件模式")` 并断言
-     `load_mode() == MODE_MINI`；但设置页早已重做为「启动界面模式」，选项是
-     `["专业模式", "ME模式", "退出时模式"]`，写的是 `ui_startup`（`save_startup_mode`），
-     **故意不再碰 `ui_mode`**；
-   - 「切换按钮文案标明是换界面」断言按钮文案含「切换界面」，而导航栏按钮现在的文案是
-     `"  ⇄  ME模式"`。
-
-   所以跑 `smoke_switch.py` 是 **47/49**。要修就得先确认这两处的预期语义（改测试还是改界面）。
-6. 本文件是否改名为 `refactor_handoff.md`（§4.5）。
-
----
-
-## 8. 附：拆 God object 的可复用拆法（阶段 3.1 的经验）
+## 7. 附：拆 God object 的可复用拆法（阶段 3.1 的经验）
 
 将来再遇到"一个大类什么都管、被上下层同时引用"时，这套流程可以直接复用：
 

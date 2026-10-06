@@ -8,10 +8,11 @@
     behavior_runtime.py  -> core/behavior_runtime.py
     ai.py                -> core/ai.py
 
-``imaging.py``（2026-10-06 阶段 3.2.3）是后加的第 7 个模块：纯图像处理（裁剪 / 缩放 /
-缩略图 / base64），原先混在 ``services/image_service.py`` 里。它只依赖 PIL 与标准库，
-``persistence`` 与 ``services`` 都要用，所以放这一层；对应地，``PIL`` 已退出守卫的
-「下层禁 UI 框架」整包禁列，只禁 ``PIL.ImageTk`` / ``PIL.ImageGrab``。
+``imaging.py``（2026-10-06 阶段 3.2.3）与 ``scale_reference.py``（同日自 services/ 上浮，
+提示词参考数据，将来副本与外部工具也要读）是后加的两个模块：前者是纯图像处理
+（裁剪 / 缩放 / 缩略图 / base64），原先混在 ``services/image_service.py`` 里，只依赖
+PIL 与标准库；对应地，``PIL`` 已退出守卫的「下层禁 UI 框架」整包禁列，只禁
+``PIL.ImageTk`` / ``PIL.ImageGrab``。
 
 ``context.py``（``ExplorationContext``）曾同样被搬进本包，但**阶段 3.1 已把它整层
 迁走**：它跨越 core → persistence → services → ui 四层，在 ``core`` 里属于违规，守卫

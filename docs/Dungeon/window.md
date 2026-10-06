@@ -305,7 +305,7 @@ DungeonSessionWindow(...).run()                      # 不传 = HostPort()，无
 
 | 改动范围 | 先跑 |
 |---|---|
-| 关闭路径、收尾、入口阶段、生命周期、帧时钟、回调线程、章节背景音乐、章节对话语音物理效果、对话语音 | `python scripts/dungeon_autopilot.py`（11 场景 95 项断言，含 `text-components` 组件冒烟）；单场景 `--scene <名字> --isolate`，连开关窗 `--scene session-close --repeat 2 --isolate` |
+| 关闭路径、收尾、入口阶段、生命周期、帧时钟、回调线程、章节背景音乐、章节对话语音物理效果、对话语音 | `python scripts/dungeon_autopilot.py`（11 场景 100 项断言，含 `text-components` 组件冒烟）；单场景 `--scene <名字> --isolate`，连开关窗 `--scene session-close --repeat 2 --isolate` |
 | `_finalize` / `json_store` / `scenario_repo` | `python tests/check_dungeon_finalize.py`（无 GUI，32 项断言） |
 | 显示组件包 / 文本组件 / 组件参数 | `python tests/check_component_pack.py`（无 GUI，102 项断言：加载链、契约与服务面（替身 ctx + AST 越界扫描）、元数据与参数夹取、外部包覆盖、隐藏 DPG 上下文里的四钩子冒烟与控件无残留） |
 | 分句器 / 说话人标记 | `python tests/check_splitter.py` |
