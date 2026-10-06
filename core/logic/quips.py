@@ -1,16 +1,18 @@
+"""quip 标签与选取：预定义标签、占位符替换、地标对比挑选与预算选句。
+
+自 ``core/logic.py`` 按职责拆出（原文件现为薄壳 ``core/logic/__init__.py``）。
+``@behavior_hook`` 的 scope ``"logic"`` 是已部署行为包的公开契约，与文件位置无关，
+不得改动（见 ``docs/world_pack_behaviors.md``）。
+"""
+
 import math
 import random
 import re
-from typing import List, Dict, Optional, Set, Tuple, Iterable, Union
+from typing import Dict, List, Optional, Set, Tuple
 
-from core.models import Landmark
 from core.behavior_runtime import behavior_hook, get_runtime
-
-ALL_PART_NAMES = [
-    "身高", "步长", "腿长", "臂长", "胸宽", "脚长",
-    "脚踝高度", "膝盖高度", "大腿直径", "小臂直径",
-    "手掌长度", "食指长度", "食指直径", "指缝宽度", "指纹宽度"
-]
+from core.models import Landmark
+from core.logic.text import contains_blocked_word, should_skip_by_part_tags
 
 PREDEFINED_TAGS = [
     "涩涩", "裙装", "制服", "旅行", "地理测量",
@@ -28,137 +30,6 @@ def get_predefined_tags() -> List[str]:
     if impl is not None:
         return impl() if callable(impl) else impl
     return list(PREDEFINED_TAGS)
-
-
-SIZE_CATEGORIES = ["small", "medium", "large", "huge", "colossal"]
-SIZE_DISPLAY = {
-    "small": "7.5~50m", "medium": "50~300m",
-    "large": "300~1800m", "huge": "1800~10000m",
-    "colossal": "10~150km",
-}
-
-
-def normalize_blocked_words(words: Union[str, Iterable[str], None]) -> List[str]:
-    """将屏蔽词输入规范为非空字符串列表。字符串按逗号/顿号/分号/换行拆分。"""
-    if not words:
-        return []
-    if isinstance(words, str):
-        parts = re.split(r"[,，;；、\n]+", words)
-        return [p.strip() for p in parts if p.strip()]
-    return [str(w).strip() for w in words if str(w).strip()]
-
-
-@behavior_hook("logic", "contains_blocked_word")
-def contains_blocked_word(text: str, blocked_words: Union[str, Iterable[str], None]) -> bool:
-    """判断文本是否包含任一屏蔽词（大小写不敏感的子串匹配）。"""
-    words = normalize_blocked_words(blocked_words)
-    if not text or not words:
-        return False
-    lowered = text.lower()
-    return any(w.lower() in lowered for w in words)
-
-
-@behavior_hook("logic", "apply_size_unlock_updates")
-def apply_size_unlock_updates(unlocks: Dict[str, str], updates: Dict[str, str],
-                              info_update_rate: float = 0.5) -> Dict[str, str]:
-    """按报告正文描述规则写入部位解锁信息，返回新的解锁字典。
-
-    原解锁为空或 MEASURED 时直接写入新描述；原为详细文本且新描述非空时，
-    以 info_update_rate 概率覆写。
-    """
-    unlocks = dict(unlocks or {})
-    for part, new_desc in (updates or {}).items():
-        new_desc = (new_desc or "").strip()
-        if not new_desc:
-            continue
-        old = unlocks.get(part, "")
-        if old in ("", "MEASURED"):
-            unlocks[part] = new_desc
-        elif random.random() < info_update_rate:
-            unlocks[part] = new_desc
-    return unlocks
-
-
-@behavior_hook("logic", "compute_environment_factor")
-def compute_environment_factor(text: str) -> float:
-    """按文本中的环境关键词给出伤亡环境系数。"""
-    _HIGH_RISK_WORDS = ["城市", "街道", "楼", "建筑", "住宅", "市中心", "广场",
-                        "马路", "公路", "桥梁", "车站", "机场", "港口", "城镇",
-                        "村庄", "居民", "人群", "交通", "地铁", "铁路", "商场"]
-    _LOW_RISK_WORDS = ["野外", "森林", "山", "山脉", "海", "海洋", "湖", "河",
-                       "沙漠", "草原", "荒野", "丛林", "岛屿", "海岸", "山谷",
-                       "田野", "农田", "自然", "无人区"]
-    has_high = any(kw in text for kw in _HIGH_RISK_WORDS)
-    has_low = any(kw in text for kw in _LOW_RISK_WORDS)
-    if has_high and not has_low:
-        return 1.0 + 0.5 * random.random()
-    elif has_low and not has_high:
-        return 0.1 + 0.1 * random.random()
-    else:
-        return 0.3 + 0.3 * random.random()
-
-
-@behavior_hook("logic", "compute_casualty")
-def compute_casualty(height: float, step: float, destruction: float, text: str,
-                     env_factor: Optional[float] = None) -> float:
-    """计算一段文本的伤亡增量：0.015 × 身高² × 故事步长 × 破坏性 × 环境系数 × 碰撞系数。"""
-    if env_factor is None:
-        env_factor = compute_environment_factor(text)
-    collision_factor = max(0.0, math.log10(height))
-    return 0.01 * height * height * step * destruction * env_factor * collision_factor
-
-
-@behavior_hook("logic", "format_size")
-def format_size(size: float, base_size: float = None) -> str:
-    """根据基准身高(base_size)对齐小数位数的逻辑"""
-    ref_val = base_size if base_size is not None else size
-    if ref_val >= 10000:
-        km_ref = ref_val / 1000
-        if km_ref >= 100:
-            decimals = 1
-        elif km_ref >= 10:
-            decimals = 2
-        else:
-            decimals = 3
-        display_val = size / 1000
-        unit = "千米"
-    else:
-        if ref_val >= 1000:
-            decimals = 0
-        elif ref_val >= 100:
-            decimals = 1
-        else:
-            decimals = 2
-        display_val = size
-        unit = "米"
-    return f"{display_val:.{decimals}f} {unit}"
-
-
-@behavior_hook("logic", "length_unit_label")
-def length_unit_label() -> str:
-    """返回当前基础长度单位标签（默认“米”）。
-
-    行为包可覆盖此函数以全流程更换长度单位的显示名称，
-    例如返回“英尺”或幻想世界中的“里”等。界面输入/标签
-    （如创建参数面板的身高单位标签）会调用它来显示单位。
-    """
-    return "米"
-
-
-def get_size_category(height: float) -> str:
-    """根据身高返回大小类别"""
-    if height < 7.5 or height > 150000:
-        return ""
-    if height >= 10000:
-        return "colossal"
-    elif height >= 1800:
-        return "huge"
-    elif height >= 300:
-        return "large"
-    elif height >= 50:
-        return "medium"
-    else:
-        return "small"
 
 
 @behavior_hook("logic", "replace_quip_tags")
@@ -250,47 +121,6 @@ def replace_quip_tags(
             return random.choice(candidates) if candidates else orig_text
 
     return re.sub(r'\[([a-e]):(\d+):([^\]]+)\]', replacer, quip_text)
-
-
-@behavior_hook("logic", "should_skip_by_part_tags")
-def should_skip_by_part_tags(part: str, selected_tags: List[str], p: float) -> bool:
-    """按"摄影师请就位/细节控"标签偏好判断是否跳过该部位。
-
-    摄影师请就位偏好宏观部位（PHOTOGRAPHER_PARTS）；细节控偏好手部细节
-    （HANDY_PARTS）；两者同时选中时偏好二者并集。p 为单标签跳过基准概率，
-    由调用方按 skip_base_prob/(标签数+3) 计算，与 get_comparisons 一致。
-    """
-    # "摄影师请就位/细节控"标签偏好的部位集合
-    photographer_parts = {"身高", "腿长", "胸宽", "膝盖高度", "步长"}
-    handy_parts = {"食指长度", "手掌长度", "食指直径", "指纹宽度", "指缝宽度"}
-    if "摄影师请就位" in selected_tags and "细节控" in selected_tags:
-        return part not in (photographer_parts | handy_parts) and random.random() < 2 * p
-    if "摄影师请就位" in selected_tags:
-        return part not in photographer_parts and random.random() < p
-    if "细节控" in selected_tags:
-        return part not in handy_parts and random.random() < p
-    return False
-
-
-def comparison_lines(comp: Dict, height: float) -> Tuple[str, str]:
-    """把一条地标对比翻成报告里的两行文字，返回 ``(尺寸文本, 对比文本)``。
-
-    报告正文与挂件版「身高对比」开场共用同一套措辞——两处各写一遍迟早会写歪。
-    """
-    landmark = comp["landmark"]
-    size_str = format_size(comp["size"], base_size=height)
-    ratio = comp["ratio"]
-    suffix = "高" if landmark.dimension == "vertical" else (
-        "长" if landmark.horizontal_type == "length" else "宽")
-    if landmark.frequency == "unique":
-        compare_text = f"    └─ 约等于{landmark.name}{suffix}度的{ratio:.2f}倍"
-    elif ratio < 0.5:
-        compare_text = f"    └─ 尚不足{landmark.name}的{suffix}度"
-    elif ratio > 1.5:
-        compare_text = f"    └─ 完全超过{landmark.name}的{suffix}度"
-    else:
-        compare_text = f"    └─ 相当于{landmark.name}的{suffix}度"
-    return size_str, compare_text
 
 
 @behavior_hook("logic", "get_comparisons")
@@ -413,20 +243,6 @@ def get_comparisons(
         collected.sort(key=lambda x: x["size"], reverse=True)
 
     return collected
-
-
-@behavior_hook("logic", "_build_size_description")
-def build_size_description(quip_result: dict) -> str:
-    """由报告正文中的一条尺寸对比结果构造解锁描述（使用对应的事件描述 quip）。"""
-    quip_text = (quip_result.get("quip_text") or "").strip()
-    if quip_text:
-        return quip_text
-    size_str = quip_result.get("size_str", "")
-    compare_text = quip_result.get("compare_text", "")
-    compare_text = compare_text.strip().lstrip("└─ ").strip()
-    if compare_text:
-        return f"{size_str}，{compare_text}"
-    return size_str
 
 
 @behavior_hook("logic", "select_quip_with_budget")

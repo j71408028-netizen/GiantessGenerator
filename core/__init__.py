@@ -29,7 +29,9 @@
 同时读取，放最底层是唯一能让所有调用方都合法引用它的位置。别因为它「像界面概念」而
 挪回 ``ui/``。
 
-**行为包 hook key 不是模块路径**：``logic.py`` 里的
+**行为包 hook key 不是模块路径**：``core/logic/``（原 ``logic.py``，2026-10-06 §4.1
+按职责拆为 ``sizing`` / ``quips`` / ``simulation`` / ``text`` 四个子模块，
+``core/logic/__init__.py`` 薄壳再导出全部公开名）里的
 ``@behavior_hook("logic", "format_size")`` 拼出的 key 是 ``"logic.format_size"``，
 这个 key 是**已部署世界包行为包的公开契约**（示例见
 ``data/static/behaviors/imperial_units/``）。重命名本包或重排文件时，**不得**
