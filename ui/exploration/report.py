@@ -8,9 +8,9 @@ from paths import data_dir
 
 import customtkinter as ctk
 
-from logic import ALL_PART_NAMES, format_size
+from core.logic import ALL_PART_NAMES, format_size
 from services.image_service import ImageService
-from models import CharacterSnapshot
+from core.models import CharacterSnapshot
 from ui.common.theme import (
     REPORT_PANEL_BG, REPORT_HEADER_BG, REPORT_BORDER, REPORT_BORDER_STRONG,
     REPORT_HOVER, REPORT_TEXT_MUTED, REPORT_PLACEHOLDER, REPORT_TAG_BODY,

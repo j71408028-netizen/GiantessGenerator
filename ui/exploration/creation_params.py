@@ -9,11 +9,11 @@ from typing import Optional, Callable, Dict, Any
 
 import customtkinter as ctk
 
-from context import ExplorationContext
+from services.exploration.context import ExplorationContext
 
-from models import Personality, BodyPreset
+from core.models import Personality, BodyPreset
 from persistence import PresetRepo, PersonalityRepo
-from logic import format_size, length_unit_label
+from core.logic import format_size, length_unit_label
 from ui.common.widgets import CTkSegmentedControl
 from ui.exploration.creation_params_dlg import PersonalityCustomDialog, PresetCustomDialog
 from ui.common.theme import (

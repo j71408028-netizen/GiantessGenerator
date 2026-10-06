@@ -9,7 +9,7 @@ S1.5 之前，方案结构散落在三处：``scenario_repo._migrate`` / ``chapt
 3. 后续编辑器表单按字段声明渲染。
 
 ``chapters.normalize_*`` / ``_migrate`` 目前保持手写（行为经过实战），由
-``scripts/check_scenario_schema.py`` 守卫「schema 声明 ↔ normalize 产出」的字段
+``tests/check_scenario_schema.py`` 守卫「schema 声明 ↔ normalize 产出」的字段
 一致性，防止再次漂移。
 """
 
@@ -17,13 +17,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from dungeon.actions import VISUAL_FILTER_KEYS
-from dungeon.chapters import (DEFAULT_BGM_FADE_SECONDS, DEFAULT_BGM_VOLUME)
+from dungeon.audio.chapters import (DEFAULT_BGM_FADE_SECONDS, DEFAULT_BGM_VOLUME)
 from dungeon.coupling import COUPLING_LEVELS, DEFAULT_COUPLING_LEVEL
 from dungeon.models import DungeonTextType
-from dungeon.speech import (DEFAULT_OTHER_VOICES, DEFAULT_RATE,
+from dungeon.audio.speech import (DEFAULT_OTHER_VOICES, DEFAULT_RATE,
                             DEFAULT_VOICE_HER, DEFAULT_VOICE_PROTAGONIST,
                             DEFAULT_VOICE_VOLUME, normalize_voice)
-from dungeon.voice_fx import (ALL_PRESET_KEYS, DEFAULT_INTENSITY, INT_PARAMS,
+from dungeon.audio.voice_fx import (ALL_PRESET_KEYS, DEFAULT_INTENSITY, INT_PARAMS,
                               PARAM_LABELS, PARAM_RANGES, PRESET_NONE)
 
 TEXT_TYPE_KEYS = tuple(t.value for t in DungeonTextType)

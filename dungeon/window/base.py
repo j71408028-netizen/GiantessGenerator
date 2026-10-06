@@ -17,12 +17,12 @@ from collections import deque
 
 import dearpygui.dearpygui as dpg
 
-from ai import create_client
+from core.ai import create_client
 from dungeon import process_log
 from dungeon.audio import BgmPlayer
-from dungeon.speech import SpeechDirector, VoiceCaster, normalize_voice
+from dungeon.audio.speech import SpeechDirector, VoiceCaster, normalize_voice
 from dungeon.window.background import DungeonBackground
-from dungeon.chapters import normalize_chapters
+from dungeon.audio.chapters import normalize_chapters
 from dungeon.coupling import normalize_coupling_level
 from dungeon.window import dpg_state
 from dungeon.window.frame import FrameScheduler
@@ -35,7 +35,7 @@ from dungeon.prompts import DungeonPromptBuilder
 from dungeon.rules import EvolutionRules
 from dungeon.summary import StorySummarizer
 from dungeon.validate import format_diagnostics, has_errors, validate_scenario_config
-from logic import get_size_category
+from core.logic import get_size_category
 from services.state_service import StateService
 
 

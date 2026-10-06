@@ -18,8 +18,8 @@ import math
 import random
 from typing import Optional
 
-from models import CharacterSnapshot, OfflineDetail
-from logic import compute_casualty
+from core.models import CharacterSnapshot, OfflineDetail
+from core.logic import compute_casualty
 from services.character_service.rhythm import RhythmService
 
 

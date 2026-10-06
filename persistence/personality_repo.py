@@ -2,7 +2,7 @@ import csv
 import os
 from typing import List, Optional
 
-from models import Personality
+from core.models import Personality
 from paths import personalities_dir
 from persistence.static_table import format_float_parameter, parse_float_parameter
 

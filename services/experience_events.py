@@ -14,7 +14,7 @@
 
 import hashlib
 
-from models import CharacterSnapshot, ChatState
+from core.models import CharacterSnapshot, ChatState
 
 # 演化表只回看最近这么多条记录（更早的变化视为已被消化）
 EVOLUTION_LOOKBACK = 10

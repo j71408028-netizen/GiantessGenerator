@@ -2,7 +2,7 @@ import json
 import os
 from dataclasses import asdict
 
-from models import Landmark
+from core.models import Landmark
 
 
 DEFAULT_LANDMARK_STYLE = "ChineseMix"

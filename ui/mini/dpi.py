@@ -1,6 +1,6 @@
 """挂件窗口的 DPI 策略：让 Windows 像「独立挂件版」那样缩放本窗口。
 
-独立挂件版（``python main_mini.py``）从不调用 ``SetProcessDpiAwareness``，进程是
+ME 模式下从不调用 ``SetProcessDpiAwareness``，进程是
 **DPI 非感知**的，Windows 于是按系统缩放把窗口位图拉伸。挂件这套界面本来就按
 96 DPI 写死像素（``ui.mini.pixel`` 的负数像素字号 + 各处像素尺寸），被拉伸之后
 大小正好。

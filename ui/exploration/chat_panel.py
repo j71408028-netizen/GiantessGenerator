@@ -22,9 +22,9 @@ import threading
 
 import customtkinter as ctk
 
-from models import ChatMessage, CharacterSnapshot
-from services.chat_delivery import ChatDeliveryController
-from services.chat_service import (ChatService, should_reconcile,
+from core.models import ChatMessage, CharacterSnapshot
+from services.chat.delivery import ChatDeliveryController
+from services.chat import (ChatService, should_reconcile,
                                    unread_messages)
 from ui.common.theme import (
     FB_BLUE, FB_BTN, FB_BTN_HOVER, FB_CARD_BG, FB_CHIP_BG, FB_CHIP_HOVER,

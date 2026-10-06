@@ -6,7 +6,7 @@
    常驻框架包，随应用发布；
 2. **数据包** ``data/packs/minigames/<id>/``——``manifest.json`` 声明后端：
    - ``"py"``：``entry`` 指向的 Python 文件里**恰一个** MiniGame 子类，
-     运行时动态加载（契约由 ``scripts/check_minigame.py`` 守卫）；
+     运行时动态加载（契约由 ``tests/check_minigame.py`` 守卫）；
    - ``"web"``：``session.html``，交给宿主端口 ``launch_mini_game()``
      用子进程 pywebview 打开（兼容通道，见 ui/common/mini_game_host.py）。
 
@@ -17,11 +17,13 @@
 """
 
 import importlib.util
-import json
 import os
 
 from dungeon import process_log
 from dungeon.actions import MINI_GAME_DEFAULT_ID
+from dungeon.minigame_pack import (load_manifest as _load_manifest,
+                                   mini_game_params as _mini_game_params,
+                                   pack_root as _pack_root)
 from .base import GameAPI, MiniGame, clamp_dt  # noqa: F401  （作者只 import 本包）
 
 #: 支持的后端
@@ -74,25 +76,6 @@ class ResolvedMiniGame:
         return self.cls
 
 
-def _pack_root(game_id):
-    from paths import data_dir
-    return os.path.join(data_dir(), "packs", "minigames", str(game_id))
-
-
-def _load_manifest(root):
-    """读包目录的 manifest.json；不存在 / 解析失败返回 None（诊断交给校验器）。"""
-    path = os.path.join(root, "manifest.json")
-    if not os.path.isfile(path):
-        return None
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            manifest = json.load(fh)
-    except (OSError, ValueError) as exc:
-        process_log.log(f"[MiniGame] manifest 解析失败 {path}: {exc}")
-        return None
-    return manifest if isinstance(manifest, dict) else None
-
-
 def resolve_mini_game(game_id):
     """按 id 解析小游戏；找不到返回 None（调用方打日志并跳过触发器）。"""
     game_id = str(game_id or "").strip()
@@ -130,19 +113,8 @@ def resolve_mini_game(game_id):
 
 def mini_game_params(game_id):
     """小游戏的参数声明（``manifest.params`` / 内置类 ``params``），编辑器
-    据此动态生成表单。返回 ``[{key, label, type, default, min, max}, ...]``；
-    未知游戏返回 ``[]``。"""
-    game_id = str(game_id or "").strip()
-    if game_id in REGISTRY:
-        return [dict(p) for p in (getattr(REGISTRY[game_id], "params", ()) or ())]
-    root = _pack_root(game_id)
-    if not os.path.isdir(root):
-        return []
-    manifest = _load_manifest(root) or {}
-    params = manifest.get("params")
-    if not isinstance(params, list):
-        return []
-    return [p for p in params if isinstance(p, dict) and p.get("key")]
+    据此动态生成表单。读取逻辑在 ``dungeon.minigame_pack``（领域层）。"""
+    return _mini_game_params(game_id, REGISTRY)
 
 
 def list_mini_games():

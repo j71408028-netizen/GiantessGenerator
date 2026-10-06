@@ -51,7 +51,7 @@ def _open_challenge_pack(settings_repo, pack_name):
 
 
 def import_landmark_challenge_pack(settings_repo, pack_name, repo):
-    from models import Landmark
+    from core.models import Landmark
     data = _open_challenge_pack(settings_repo, pack_name)
     styles = data.get("landmark_styles", [])
     raw_data = data.get("landmark_data", {})

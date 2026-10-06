@@ -6,15 +6,15 @@ import ui.common.dialogs
 import customtkinter as ctk
 
 from dungeon.window import DungeonSessionWindow
-from ai import resolve_ai_config
+from core.ai import resolve_ai_config
 from ui.exploration.giantess_state import GiantessStatePanel
 from ui.exploration.creation_params import CreationParamsPanel
 from ui.exploration.select_character import SelectCharacterPanel
 from ui.exploration.intro import IntroPanel
 from ui.exploration.report import ReportPanel
 from ui.exploration.chat_panel import ChatPanel
-from services import chat_events
-from services.chat_service import ChatService, pending_char_messages
+from services.chat import events as chat_events
+from services.chat import ChatService, pending_char_messages
 from ui.common.dialogs import BaseDialog
 from ui.common.theme import (
     EXP_BG, EXP_BORDER, EXP_BORDER_STRONG, EXP_HOVER,
@@ -23,9 +23,9 @@ from ui.common.theme import (
     EXP_REPORT_HOVER, EXP_DUNGEON, EXP_DUNGEON_HOVER, EXP_STYLE_SELECTED_BORDER,
 )
 from ui.common import fonts as ui_fonts
-from models import CharacterSnapshot
-from context import ExplorationContext
-from address_model import world_of, distance_m, format_addr_verbose
+from core.models import CharacterSnapshot
+from services.exploration.context import ExplorationContext
+from core.address_model import world_of, distance_m, format_addr_verbose
 
 
 class ExplorationPanel(ctk.CTkFrame):
@@ -45,7 +45,7 @@ class ExplorationPanel(ctk.CTkFrame):
         self._unread_chat = 0
         self._chat_service = ChatService()
         # 启动投递调度器（接管上次会话遗留的 queued 消息；进程级单例）
-        from services.chat_delivery import get_scheduler
+        from services.chat.delivery import get_scheduler
         get_scheduler(self._chat_service)
 
         self._build_ui()

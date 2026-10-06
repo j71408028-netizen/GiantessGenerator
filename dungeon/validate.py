@@ -21,13 +21,13 @@ from dataclasses import dataclass
 from dungeon import schema
 from dungeon.actions import (ENDING_ACTION, VISUAL_FILTER_KEYS,
                              normalize_action_type)
-from dungeon.chapters import (BGM_SUPPORTED_EXTS, CHAPTER_NONE,
+from dungeon.audio.chapters import (BGM_SUPPORTED_EXTS, CHAPTER_NONE,
                               MAX_BGM_VOLUME, normalize_chapters)
 from dungeon.coupling import (BULLA, COUPLING_LEVEL_LABELS, COUPLING_LEVELS,
                               SOLEA, VELUM, normalize_coupling_level)
-from dungeon.speech import (DEFAULT_VOICE_VOLUME, MAX_VOICE_VOLUME,
+from dungeon.audio.speech import (DEFAULT_VOICE_VOLUME, MAX_VOICE_VOLUME,
                             normalize_rate)
-from dungeon.voice_fx import (MAX_INTENSITY, PARAM_LABELS, PARAM_RANGES,
+from dungeon.audio.voice_fx import (MAX_INTENSITY, PARAM_LABELS, PARAM_RANGES,
                               PRESETS_BY_KEY, PRESET_NONE, SLOT_KEYS,
                               SLOT_LABELS, SLOTS, needs_render,
                               preset_keys_for, render_available)
@@ -39,7 +39,7 @@ _LEVEL_ORDER = {"error": 0, "warning": 1, "info": 2}
 def _mini_game_params_safe(game_id: str) -> list:
     """小游戏参数声明（供校验用）；数据目录不可用时返回空列表。"""
     try:
-        from dungeon.window.minigame import mini_game_params
+        from dungeon.minigame_pack import mini_game_params
         return mini_game_params(game_id)
     except Exception:
         return []
@@ -91,7 +91,7 @@ def _mini_game_problem(game_id: str) -> str:
 
 
 # 已退场的旧版动作：只为了把「运行时静默跳过」变成作者能看见的**专项**提示
-# 而保留在这里。它们的职责早已由章节自身的属性承担（见 ``dungeon/chapters``），
+# 而保留在这里。它们的职责早已由章节自身的属性承担（见 ``dungeon/audio/chapters``），
 # 运行时既不认识也不执行——**不要**把它们加回 ``dungeon/actions.py`` 的
 # 运行时注册表。``sensitive`` 是 ``sensitivity`` 的早期写法，别名转换也已取消。
 # 值：中文展示名，编辑器列表与诊断文案共用同一份。

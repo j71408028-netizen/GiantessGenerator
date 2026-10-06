@@ -15,10 +15,10 @@ import sys
 import uuid
 from tkinter import filedialog
 
-from ai import resolve_ai_config
-from models import BodyPreset, CharacterSnapshot, Personality
-from services import chat_events
-from services.chat_service import pending_char_messages
+from core.ai import resolve_ai_config
+from core.models import BodyPreset, CharacterSnapshot, Personality
+from services.chat import events as chat_events
+from services.chat import pending_char_messages
 from services.challenge_service import ChallengeService
 from ui.common import appearance
 from ui.mini import pixel as px
@@ -291,10 +291,10 @@ class MiniApp:
     def chat_service(self):
         """聊天服务（懒加载；角色历史按 giantess_id 天然隔离）。"""
         if self._chat_service is None:
-            from services.chat_service import ChatService
+            from services.chat import ChatService
             self._chat_service = ChatService()
             # 启动投递调度器（接管上次会话遗留的 queued 消息；进程级单例）
-            from services.chat_delivery import get_scheduler
+            from services.chat.delivery import get_scheduler
             get_scheduler(self._chat_service)
         return self._chat_service
 
@@ -565,7 +565,7 @@ class MiniApp:
             file_path = file_path.rsplit(".", 1)[0] + ".html"
             lower = file_path.lower()
         if lower.endswith(".html"):
-            from services.archive_export import export_character_mhtml
+            from services.character_service.archive_export import export_character_mhtml
             try:
                 export_character_mhtml(
                     state, file_path,

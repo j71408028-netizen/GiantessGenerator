@@ -1,7 +1,7 @@
 import datetime
 import os
 
-from models import ChatState
+from core.models import ChatState
 from persistence.json_store import load_json_with_backup, write_json_atomic
 
 # 聊天记录上限：超过后从最旧的开始丢弃（丢弃部分应先压缩进 memory，

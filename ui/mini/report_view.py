@@ -14,8 +14,8 @@ import datetime
 import os
 import tkinter as tk
 
-from logic import ALL_PART_NAMES, format_size, comparison_lines, get_comparisons
-from models import CharacterSnapshot, ReportData
+from core.logic import ALL_PART_NAMES, format_size, comparison_lines, get_comparisons
+from core.models import CharacterSnapshot, ReportData
 from paths import data_dir
 from ui.mini import pixel as px
 

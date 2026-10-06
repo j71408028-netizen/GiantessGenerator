@@ -9,7 +9,7 @@ import ui.common.dialogs
 
 import customtkinter
 import customtkinter as ctk
-from logic import get_predefined_tags
+from core.logic import get_predefined_tags
 from services.image_service import ImageService
 from services.state_service import StateService
 from ui.common.widgets import CTkScrollableDropdownFrame

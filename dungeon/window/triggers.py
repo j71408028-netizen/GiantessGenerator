@@ -10,7 +10,7 @@ import random
 from dungeon import process_log
 from dungeon.actions import (EMPTY_ACTIONS, MINI_GAME_DEFAULT_ID,
                              VISUAL_FILTER_KEYS, normalize_action_type)
-from dungeon.chapters import (find_chapter, is_terminating_chapter,
+from dungeon.audio.chapters import (find_chapter, is_terminating_chapter,
                               matches_scope, sensitivity_amount)
 from dungeon.models import DungeonState, DungeonTextType
 from dungeon.response import canonical_history_entry

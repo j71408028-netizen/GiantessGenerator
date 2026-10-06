@@ -18,7 +18,7 @@ import dearpygui.dearpygui as dpg
 from PIL import Image
 
 from dungeon import process_log
-from dungeon.chapters import normalize_chapters
+from dungeon.audio.chapters import normalize_chapters
 from dungeon.terms import scenario_id_of
 
 _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp")

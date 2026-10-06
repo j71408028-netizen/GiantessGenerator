@@ -17,7 +17,7 @@
                 self._x += 200 * dt
             self.api.draw_circle((self._x, 100), 20, (255, 200, 60, 255))
 
-约束（``scripts/check_minigame.py`` 强制）：
+约束（``tests/check_minigame.py`` 强制）：
 
 - **禁止 import dearpygui**：绘制一律走 :class:`GameAPI` 的薄包装，drawlist、
   纹理生命周期、帧时钟都由运行时（``stage.py``）管；

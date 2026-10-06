@@ -103,7 +103,7 @@ class DungeonComponent:
     运行期），``note`` 只作为编辑器提示。
 
     **组件服务面**（组件访问窗口的唯一入口，实现见 dungeon/window/components.py
-    的 ComponentHandler；替身实现见 scripts/check_component_pack.py）：
+    的 ComponentHandler；替身实现见 tests/check_component_pack.py）：
 
     - 只读状态：``ctx.story_history`` / ``ctx.dungeon_state`` /
       ``ctx.evolution_attrs`` / ``ctx.name``；

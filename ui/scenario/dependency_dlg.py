@@ -15,7 +15,7 @@ import graphviz as gv
 from PIL import Image
 
 from dungeon.actions import action_label, normalize_action_type
-from dungeon.chapters import scope_label
+from dungeon.audio.chapters import scope_label
 from ui.common.dialogs import BaseDialog
 from ui.common.fonts import graphviz_font
 from ui.common.theme import (

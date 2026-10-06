@@ -56,7 +56,7 @@ class MyGame(MiniGame):
 | 输入 | `key_down("a"…"z"/"space"/"up"/…)` / `mouse_pos()` / `mouse_down()`（游戏侧是轮询语义；底层由运行时的键鼠 down/release **handler 维护状态表**——DPG 的 `is_key_down` 在手动渲染下不更新，实测不可用，且字母/数字键常量非 ASCII 码） |
 | 服务 | `finish(won, result)`（结算，重复调用无效） / `hud(text)` / `notify(msg)` / `read_state("章节"/"介入度"/…)`（只读副本状态快照） |
 
-**硬性约束**（`scripts/check_minigame.py`，CI 门禁）：禁 import DPG / tkinter /
+**硬性约束**（`tests/check_minigame.py`，CI 门禁）：禁 import DPG / tkinter /
 threading / subprocess / PIL；禁 `print`；禁触碰私有面 `api._`。
 贴图加载是运行时职责（`api.draw_image("贴图.png", pmin, pmax)`，相对包目录）。
 
@@ -77,12 +77,12 @@ threading / subprocess / PIL；禁 `print`；禁触碰私有面 `api._`。
 
 | 脚本 | 覆盖 | 命令 |
 |---|---|---|
-| `check_minigame.py` | 包契约（manifest / py 代码 AST 扫描） | `python scripts/check_minigame.py` |
+| `check_minigame.py` | 包契约（manifest / py 代码 AST 扫描） | `python tests/check_minigame.py` |
 | `dungeon_autopilot.py --scene mini-game` | web 后端链路（桩包）：结果回传 / 胜负分支 / 回放 | `python scripts/dungeon_autopilot.py --scene mini-game` |
 | `dungeon_autopilot.py --scene mini-game-py` | py 后端链路：覆盖层舞台打开 / 结算分支 / ESC 中止 | `python scripts/dungeon_autopilot.py --scene mini-game-py` |
 | `dungeon_autopilot.py --scene mini-game-escape` | escape 移植版真渲染冒烟：离屏纹理上传 / 每帧绘制 / 中止 | `python scripts/dungeon_autopilot.py --scene mini-game-escape` |
 | `escape_sim.py` | escape 无头模拟（无显示器可跑）：地图生成 / 连通性 / bot 实跑结算 | `python scripts/escape_sim.py` |
-| `mini_game_smoke.py` | web 后端真窗口桥接（需显示器 + pywebview） | `python scripts/mini_game_smoke.py` |
+| `smoke_mini_game.py` | web 后端真窗口桥接（需显示器 + pywebview） | `python tests/smoke_mini_game.py` |
 
 内置参考实现：`data/packs/minigames/reaction/`（点击反应，~100 行）；
 `data/packs/minigames/escape_giantess/`（逃离巨大娘 py 移植版，~2500 行，

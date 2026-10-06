@@ -5,7 +5,7 @@ import shutil
 from dataclasses import asdict
 from typing import Optional
 
-from models import CharacterSnapshot
+from core.models import CharacterSnapshot
 
 from services.image_service import ImageService
 

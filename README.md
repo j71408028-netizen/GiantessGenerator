@@ -64,7 +64,7 @@ python main.py
 | 观感 | 圆角卡片 + 主题色 | 低像素风：直角硬描边、点阵字、方块进度条                   |
 
 
-固定模式的启动器不看设置项，但启动之后仍可在两套界面间热切换。ME模式会在你没显式设过时补上几个默认值（暗色、常驻置顶、报告自动归档、用身材预览图当头像），不会覆盖你在专业模式下改过的设置。也可以在**应用内直接热切换**，不必重启：专业模式点导航栏底部的「⇄ 切换界面」，ME模式点标题栏的「⇄」。切换会销毁旧窗口、在原进程里重建另一套界面，数据目录与进程都不变。副本进行中不允许切换。
+入口只有 `python main.py`（`app_shell.run_app` 的薄壳）：按设置里的「启动界面模式」启动，之后仍可在两套界面间热切换。不单独打包某个启动模式；两套界面共用同一份数据与进程模型。ME模式会在你没显式设过时补上几个默认值（暗色、常驻置顶、报告自动归档、用身材预览图当头像），不会覆盖你在专业模式下改过的设置。也可以在**应用内直接热切换**，不必重启：专业模式点导航栏底部的「⇄ 切换界面」，ME模式点标题栏的「⇄」。切换会销毁旧窗口、在原进程里重建另一套界面，数据目录与进程都不变。副本进行中不允许切换。
 
 进入副本的方式两边不同：专业模式在副本窗口的入口页选方案，ME模式由「调查」先掷好方案、按键直接进（跳过入口选择页）。两条路径共用同一个副本引擎。
 
@@ -110,11 +110,48 @@ data/
 
 世界包可在激活期间接管各数据源，并可通过**行为包**覆盖角色创建与状态服务的静态方法实现。
 
+## 仓库结构约定
+
+- **根目录已冻结**：只剩 `paths.py`（位于依赖图最底层）与入口 / 应用壳
+  （`main.py`、`app_shell.py`、`main_window_manager.py`）。
+  领域模型已收编进 `core/`（`models`、`address_model`、`logic`、`behavior_runtime`、
+  `ai`）。**不再新增任何根目录 Python 模块**：新代码按职责放入对应包。
+- **分层方向由自检强制**：`infra` → `core` → `dungeon` → `persistence` → `services`
+  → `ui` → `app`（另有 `dungeon/window/**` 特例）。
+  `python tests/check_import_graph.py` 越界即失败，现存例外逐条登记在该脚本的
+  `KNOWN_EXCEPTIONS` 里。重构计划与交接见 [docs/refactor_plan.md](docs/refactor_plan.md)。
+- **`core` 的约束**：只能依赖 `paths`。唯一越界例外是 `core/behavior_runtime.py`
+  延迟导入 `persistence.world_pack`（已登记）。探索编排
+  （`ExplorationContext`）**属服务层**，住在 `services/exploration/`——它曾放在
+  `core/context.py` 并因此需要一条双向豁免，阶段 3.1 已把它整层迁走、豁免一并删除；
+  不要再把它搬回 `core/`。
+- **行为包 hook key 与模块路径解耦**：`@behavior_hook("logic", "format_size")` 拼出的
+  `"logic.format_size"` 是**已部署行为包的公开契约**（见 `data/static/behaviors/`），
+  重命名 `core/` 或重排文件时不得改成 `"core.logic.format_size"`。
+- **入口文件不可随意改名**：`build/windows/build_windows.ps1` 与
+  `build/macos/build_macos.sh` 把入口写成字面量。改名前先看
+  `python tests/check_entrypoints.py`（它同时校验入口、图标与 `--add-data` 源路径）。
+- **`tests/` 是常驻自检**，命名即分组，`python tests/run_checks.py` 按类别自动发现
+  （新增脚本放进对应类别即可，无需登记）：`check_*.py` 为守卫 / 行为自检（离线、
+  可进 CI 门禁）；`smoke_*.py` 为需要真实显示器的 GUI 冒烟（`--smoke` 追加）。
+  详见 [scripts/README.md](scripts/README.md) 同款约定表。
+- **`scripts/` 是开发者一次性工具区**（不入自检门禁）：真窗口自动驾驶
+  （`dungeon_autopilot.py`）、无头模拟（`escape_sim.py`）与数据迁移脚本，逐个用途见
+  [scripts/README.md](scripts/README.md)。要长期维护的回归请写成 `tests/` 脚本。
+- **`developer_tools/` 是本地实验区**（整目录被 .gitignore，随时可弃）：一次性探针、
+  模拟输出与半成品实验，不进版本控制、不参与自检；要转正的实验应迁入 `scripts/`
+  或 `tests/`。
+- **`build/` 里只有 `windows/` 与 `macos/` 入库**：PyInstaller 的产物目录同名，
+  因此 `.gitignore` 用 `/build/*` + 显式放行两个脚本目录，而不是整体忽略 `build/`。
+  按设计决策**不单独打包某个启动模式**：曾有的 `main_mini.py` 固定入口与构建脚本的
+  Mini 开关已移除，将来拓展启动器形式时从 git 历史恢复即可。
+
 ## 相关文档
 
 - [副本文档索引](docs/Dungeon/README.md)：`docs/Dungeon/` 六篇副本开发文档的入口与「按任务查」表
 - [地址系统操作说明](docs/address_system.md)：地标 / 描述风格的地址申领、注册与匹配规则
 - [世界包行为包开发指南](docs/world_pack_behaviors.md)：行为包的开发流程、注册 API 与可覆盖目标
+- [目录重构计划与交接](docs/refactor_plan.md)：分层结构、搬迁进度、已登记例外与操作手册
 
 
 ## 免责声明

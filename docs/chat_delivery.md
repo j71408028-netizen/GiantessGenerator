@@ -106,7 +106,7 @@ seen_by_char_at=…`，与改造前一致。
 读 / 打字延迟沿用原函数与在线强度分档倍率，服务层统一计算，
 UI 不再自行模拟节奏。
 
-## 5. 投递调度器（services/chat_delivery.py）
+## 5. 投递调度器（services/chat/delivery.py）
 
 `ChatDeliveryScheduler`：模块级单例（`get_scheduler()`），daemon 线程。
 

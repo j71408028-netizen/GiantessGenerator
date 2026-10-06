@@ -5,11 +5,11 @@ import ui.common.dialogs
 
 import customtkinter as ctk
 
-from context import ExplorationContext
-from models import CharacterSnapshot
+from services.exploration.context import ExplorationContext
+from core.models import CharacterSnapshot
 from persistence.character_repo import CharacterRepo
-from logic import format_size
-from address_model import format_addr_verbose
+from core.logic import format_size
+from core.address_model import format_addr_verbose
 from ui.common.theme import (
     STATE_BG, STATE_BORDER, STATE_BORDER_STRONG, STATE_HOVER,
     STATE_MENU_HOVER, STATE_TEXT, STATE_TEXT_SOFT, STATE_TEXT_MUTED,

@@ -7,7 +7,7 @@ from PIL import Image
 
 from ui.common.widgets import ClickableCard
 from persistence.character_repo import CharacterRepo
-from logic import format_size
+from core.logic import format_size
 from services.image_service import ImageService
 from ui.common.theme import (
     SELECT_PANEL_BG, SELECT_BORDER, SELECT_BORDER_STRONG, SELECT_HOVER,

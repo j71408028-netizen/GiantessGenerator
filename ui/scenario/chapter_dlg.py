@@ -5,12 +5,12 @@ import customtkinter as ctk
 
 import ui.common.dialogs
 from dungeon.actions import VISUAL_FILTERS
-from dungeon.chapters import (
+from dungeon.audio.chapters import (
     CHAPTER_COLOR_PRESETS, DEFAULT_BGM_FADE_SECONDS, DEFAULT_BGM_VOLUME,
     DEFAULT_MAX_PARAGRAPHS, DEFAULT_SENSITIVITY_ATTR, MAX_BGM_VOLUME,
     chapter_names, normalize_chapter,
 )
-from dungeon.voice_fx import (DEFAULT_INTENSITY, MAX_INTENSITY, PRESET_NONE,
+from dungeon.audio.voice_fx import (DEFAULT_INTENSITY, MAX_INTENSITY, PRESET_NONE,
                               SLOT_LABELS, SLOTS, label_of,
                               preset_keys_for)
 from ui.common.dialogs import BaseDialog

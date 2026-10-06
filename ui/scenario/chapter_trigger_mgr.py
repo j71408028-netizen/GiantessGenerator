@@ -7,11 +7,11 @@ import ui.common
 from dungeon.actions import (VISUAL_FILTERS, action_label,
                              normalize_action_type)
 from dungeon.validate import LEGACY_ACTIONS
-from dungeon.chapters import (
+from dungeon.audio.chapters import (
     CHAPTER_ANY, CHAPTER_NONE, CHAPTER_ANY_LABEL, CHAPTER_NONE_LABEL,
     default_chapter_color, shade_for_mode,
 )
-from dungeon.voice_fx import SLOTS, label_of
+from dungeon.audio.voice_fx import SLOTS, label_of
 from ui.common.managers import TreeviewManager
 from ui.common.theme import (
     SCRIPT_BORDER, SCRIPT_HOVER, SCRIPT_TEXT_SOFT, SCRIPT_OK,

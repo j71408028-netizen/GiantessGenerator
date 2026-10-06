@@ -16,7 +16,7 @@
 import os
 import shutil
 
-from dungeon.chapters import normalize_chapters
+from dungeon.audio.chapters import normalize_chapters
 from dungeon.coupling import normalize_coupling_level
 from dungeon.schema import (empty_scenario_config, normalize_text_component,
                             TEXT_COMPONENT_IDS)

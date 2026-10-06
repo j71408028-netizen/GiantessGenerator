@@ -29,7 +29,7 @@ from persistence.world_pack import (
 )
 from dungeon.terms import (LEGACY_SCENARIO_RESOURCE_KEY, SCENARIO_RESOURCE_KEY,
                            is_default_scenario)
-from behavior_runtime import get_runtime
+from core.behavior_runtime import get_runtime
 
 _MEMBER_TRAVERSAL_RE = re.compile(r"(^|/)\s*\.\.\s*(/|$)")
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")

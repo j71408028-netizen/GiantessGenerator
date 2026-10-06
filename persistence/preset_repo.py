@@ -3,7 +3,7 @@ import os
 from dataclasses import asdict
 from typing import List, Optional
 
-from models import BodyPreset
+from core.models import BodyPreset
 from paths import presets_dir
 from persistence.static_table import format_float_parameter, parse_float_parameter
 

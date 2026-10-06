@@ -37,7 +37,7 @@
 
 ## 3. 演化机制与公式
 
-### 3.1 报告步进（`StateService` + `context.py`）
+### 3.1 报告步进（`StateService` + `services/exploration/report.py`）
 
 每步步进权重 `步进`（由事件/探索决定）：
 

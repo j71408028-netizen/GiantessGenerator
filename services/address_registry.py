@@ -36,7 +36,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime
 
-from address_model import _REGION_RE, _WORLD_RE, cell_width_m, parse_full, split_address
+from core.address_model import _REGION_RE, _WORLD_RE, cell_width_m, parse_full, split_address
 from paths import data_dir
 
 GIST_ID = "da0b6204e57a411462f2d72e3e0f1997"

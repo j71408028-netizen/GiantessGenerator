@@ -1,6 +1,6 @@
 """副本领域模块：不依赖具体 UI 框架，也不依赖服务层。
 
-这里的 import 约束由 ``scripts/check_dungeon_layering.py`` 强制检查（CI/手工跑都行）：
+这里的 import 约束由 ``tests/check_dungeon_layering.py`` 强制检查（CI/手工跑都行）：
 
 - ``dungeon/`` **根下的模块**（models / rules / chapters / actions / coupling /
   prompts / response / splitter / summary / details / schema / validate …）是纯领域，

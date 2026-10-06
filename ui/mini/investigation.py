@@ -12,7 +12,7 @@ import random
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
-from logic import get_comparisons
+from core.logic import get_comparisons
 
 NO_WORLD_LABEL = "（无世界包）"
 EMPTY_LABEL = "（无）"

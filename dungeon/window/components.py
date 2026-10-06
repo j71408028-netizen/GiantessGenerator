@@ -13,7 +13,7 @@
 component_autoplay_on / text_font_tag / bold_font_tag / schedule / schedule_every /
 cancel_task / component`，另有覆盖层与工具服务的 `toggle_overlay` 等）。
 组件不得再读窗口私有属性（`_dpi_scale` / `_layout_w` / `_frame` / `_autoplay`…）；
-契约由 ``scripts/check_component_pack.py`` 的替身 ctx 强制——替身只实现服务面，
+契约由 ``tests/check_component_pack.py`` 的替身 ctx 强制——替身只实现服务面，
 组件一旦伸手摸私有一律在守卫里报错。
 """
 

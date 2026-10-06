@@ -23,7 +23,7 @@ from ui.common.theme import (
     ADDR_CLEAR_BORDER, ADDR_TEXT, ADDR_TEXT_SOFT, ADDR_TEXT_MUTED,
     ADDR_OK, ADDR_OK_HOVER, ADDR_ERR,
 )
-from address_model import validate_address_text, format_addr_verbose
+from core.address_model import validate_address_text, format_addr_verbose
 
 LEVEL_LABELS = ("世界观", "一级地域", "二级地域", "三级地域")
 CLEAR_OPT = "（不选此级，止于上一级）"

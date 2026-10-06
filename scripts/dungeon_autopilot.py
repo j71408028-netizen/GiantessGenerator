@@ -40,7 +40,7 @@ L3 的验收是帧时钟：每个场景结束后，窗口自有的 ``FrameSchedu
 
 输出：控制台一行 ASCII 结论 + UTF-8 报告文件路径（报告在临时目录，含全部明细）。
 
-与 ``scripts/check_dungeon_finalize.py`` 等无 GUI 脚本的关系：那些脚本覆盖纯逻辑，
+与 ``tests/check_dungeon_finalize.py`` 等无 GUI 脚本的关系：那些脚本覆盖纯逻辑，
 本脚本覆盖**只有真窗口才能覆盖的部分**——构造 → 步进 → 关闭的完整生命周期与
 DPG 上下文的创建/销毁。属于 GUI 冒烟层，需要显示器，不进无 GUI 的 CI 门禁。
 """

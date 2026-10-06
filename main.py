@@ -8,7 +8,7 @@ import customtkinter as ctk
 from paths import ensure_cwd
 import ui.common.ctk_patch  # noqa: F401  模式切换时同步刷新 CTk 控件 Frame 底色，避免几何重排露旧色
 from ui.common import fonts as ui_fonts
-from context import ExplorationContext
+from services.exploration.context import ExplorationContext
 from main_window_manager import MainWindowManager
 from persistence import SettingsRepo, LandmarkRepo, PresetRepo, PersonalityRepo
 from persistence import QuipRepo, ScenarioRepo, CharacterRepo

@@ -2,7 +2,7 @@
 
 纯 tkinter 没有「外观模式」这回事：每个控件在创建时就把颜色定死了，切换主题必须
 自己重刷。本模块因此只做两件事——记住当前模式、在模式变化时广播一次——具体怎么
-重刷由订阅者决定（见 ``ui.mini.pixel`` 的配色登记表与 ``services.body_preview``）。
+重刷由订阅者决定（见 ``ui.mini.pixel`` 的配色登记表与 ``services.preview``）。
 """
 
 MODE_LIGHT = "Light"

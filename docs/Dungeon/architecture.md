@@ -52,7 +52,7 @@
 
 ## 3. 分层与依赖规则
 
-约束写在 `dungeon/__init__.py`，由 `scripts/check_dungeon_layering.py` 用 AST 强制。
+约束写在 `dungeon/__init__.py`，由 `tests/check_dungeon_layering.py` 用 AST 强制。
 
 ### 3.1 领域层（`dungeon/` 包根）
 
@@ -224,14 +224,14 @@ dungeon/schema.py ──字段声明（FieldSpec）──┬──► ScenarioRe
    单一真相源                              ├──► dungeon/validate.py                  结构化诊断
                                            └──► ui/scenario/*                        编辑器表单（按声明渲染）
 normalize_chapter / ScenarioRepo._migrate（手写，行为经过实战）
-        └── 由 scripts/check_scenario_schema.py 守卫「声明 ↔ 产出」字段一致
+        └── 由 tests/check_scenario_schema.py 守卫「声明 ↔ 产出」字段一致
 ```
 
 | 时机 | 位置 | 力度 |
 |---|---|---|
 | 编辑器保存 | `ScenarioRepo.save_config()` | 计算并留存诊断（warning / info 不阻断） |
 | 副本启动前 | `window/base.py::_load_session_config()` | **error 阻止进入副本**，warning 打到控制台 |
-| 离线批量 / CI | `scripts/validate_scenarios.py` | 有 error 时退出码 1 |
+| 离线批量 / CI | `tests/check_scenarios.py` | 有 error 时退出码 1 |
 
 诊断分三级：`error`（悬空跳转目标、无起始章节、空选项列表…）/ `warning`（未知条件键、废弃动作、失效前置引用、资产缺失…）/ `info`（无结局路径、旧版字段、未知顶层键…）。
 
@@ -271,7 +271,7 @@ data/
 | GLFW 终止**之后**，当时的 Tk 根窗口不得 `destroy()` / `withdraw()`；收尾后必须补隐藏保活视口 | 终止**前** Tk 照常可用——收尾顺序刻意把 Tk 交互（恢复主窗口、弹框）放在 `destroy_context()` 之前；终止后那个根的窗口级命令会 0xC0000005 硬崩。保活视口把进程留在「Tk 根健康」状态，宿主的热切换才成立。`_finish_session()` / `_start_session()` 的顺序就是为此固定的 | [窗口文档](window.md) §5-C2 |
 | 写盘必走原子写 | 半截文件不可恢复 | 本文 §8 |
 | 剧本 / 运营术语不混用 | `scenario_*` = 方案，`dungeon_*` = 一局 | [术语表](domain_terms.md) |
-| 组件只读窗口状态 | 组件 ctx 即窗口实例，不反向写状态；**访问只经组件服务面**（`component_viewport` / `schedule*` / `session_waiting_for_input` / `component_top_inset` 等，C13），不读窗口私有属性 | `component_registry.py::DungeonComponent` 契约文档、`components.py::ComponentHandler`、`scripts/check_component_pack.py` |
+| 组件只读窗口状态 | 组件 ctx 即窗口实例，不反向写状态；**访问只经组件服务面**（`component_viewport` / `schedule*` / `session_waiting_for_input` / `component_top_inset` 等，C13），不读窗口私有属性 | `component_registry.py::DungeonComponent` 契约文档、`components.py::ComponentHandler`、`tests/check_component_pack.py` |
 
 ## 11. 显示组件包
 
@@ -286,7 +286,7 @@ text_nvl），`components` 列表只放其余组件（如属性条、过程日�
 三选一控件 + 卡片化管理。
 `ComponentRegistry(pack_dir=...)` 可显式指定**外部组件包目录**（入口文件名 `components.py`）
 整体替换常驻包，`registry.source` 记录实际生效来源；加载链与组件契约由无 GUI 守卫
-`scripts/check_component_pack.py` 断言（含隐藏 DPG 上下文里的四钩子冒烟）。
+`tests/check_component_pack.py` 断言（含隐藏 DPG 上下文里的四钩子冒烟）。
 配套约定：组件的展示名 / 说明写在**组件类**的 `label` / `description` 上（编辑器经
 `available_component_descriptions()` 取，`_COMPONENT_META` 只是兜底）；参数用
 `param_specs` 声明，`min` / `max` 在 `merge_params` 统一夹取；字号与字体候选链只在

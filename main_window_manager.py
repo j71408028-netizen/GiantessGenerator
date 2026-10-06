@@ -9,7 +9,7 @@ import customtkinter as ctk
 
 import ui.common.dialogs
 import ui.common.ctk_patch  # noqa: F401  模式切换时同步刷新 CTk 控件 Frame 底色，避免几何重排露旧色
-from context import ExplorationContext
+from services.exploration.context import ExplorationContext
 from paths import icon_dir
 from persistence import QuipRepo, ScenarioRepo, CharacterRepo
 from persistence import SettingsRepo, LandmarkRepo, PresetRepo, PersonalityRepo
@@ -19,7 +19,7 @@ from ui.challenge import ChallengeModePanel
 from ui.exploration.exp_frame import ExplorationPanel
 from ui.landmark import LandmarkCardManager
 from ui.navbar import NavigationBar
-from ui.quip_mgr import QuipCardManager
+from ui.quip import QuipCardManager
 from ui.scenario.sc_frame import ScenarioEditor
 from ui.settings import SettingsPanel
 from ui.exploration.news_dlg import NewsDialog

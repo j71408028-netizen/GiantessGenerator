@@ -2,7 +2,7 @@
 
 把 ``dungeon.window.host.HostPort`` 的端口逐一映射到 Tkinter 与
 ``ui.common.dialogs``：**所有 Tk 相关代码都留在本模块**，``dungeon/window/``
-因此不再依赖 UI 层（``scripts/check_dungeon_layering.py`` 会守住这条线）。
+因此不再依赖 UI 层（``tests/check_dungeon_layering.py`` 会守住这条线）。
 
 用法（在 Tk 回调里）：::
 

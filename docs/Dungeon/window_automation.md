@@ -68,7 +68,7 @@ L2 之后注入点更干净：宿主能力（尺寸/DPI、显隐、事件泵、�
 
 | 层 | 覆盖什么 | 状态 | 说明 |
 |---|---|---|---|
-| **L0 纯逻辑** | 收尾路径、原子写、schema、命名、分层 | 已有 | `scripts/check_*.py`，无 GUI，进 CI 门禁 |
+| **L0 纯逻辑** | 收尾路径、原子写、schema、命名、分层 | 已有 | `tests/check_*.py`，无 GUI，进 CI 门禁 |
 | **L1 无宿主自动驾驶** | 构造 → 运行 → 步进 → 关闭 → 落盘的完整生命周期 | **已落地** | `scripts/dungeon_autopilot.py`，`parent=None` 直起 DPG |
 | **L2 Tk 宿主 + 自动驾驶** | 宿主在会话期间不被冻结 | **场景已落地**（`tk-host`） | 「进程是否退出」这一项**不能断言**，见 §5 |
 | **L3 真实输入事件** | 鼠标 handler、键盘、F11、resize | 可选 | pywinauto / Win32 `SendInput`；多数可用 enqueue 同一回调替代 |

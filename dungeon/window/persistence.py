@@ -7,8 +7,8 @@ from dungeon import process_log
 from dungeon.window.host import (DIALOG_ASK, DIALOG_INFO, DIALOG_WARNING,
                                  HostPort)
 from paths import data_dir
-from logic import compute_casualty
-from models import CharacterSnapshot
+from core.logic import compute_casualty
+from core.models import CharacterSnapshot
 from persistence.json_store import load_json_with_backup, write_json_atomic, write_text_atomic
 from dungeon.terms import scenario_id_of
 from services.state_service import StateService

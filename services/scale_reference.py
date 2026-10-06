@@ -8,7 +8,7 @@
 本模块不重复定义。
 """
 
-from logic import SIZE_CATEGORIES, get_size_category
+from core.logic import SIZE_CATEGORIES, get_size_category
 
 
 # 体型与互动尺度（依据 Events.json 各体型条目与体型区间归纳）

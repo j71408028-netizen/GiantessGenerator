@@ -1,6 +1,6 @@
 {
   "initial_prompt": "在故事的开始，她仍然是正常的体型，高考完在家里百无聊赖。她将在故事进行中的提示位置巨大化，成为给定的体型大小。",
-  "coupling_level": "velum",
+  "coupling_level": "solea",
   "entry_action_cost": 0,
   "section_prompts": {
     "background": "",
@@ -55,31 +55,6 @@
   },
   "triggers": [
     {
-      "name": "新插入",
-      "condition": {
-        "operator": "and",
-        "rules": [
-          {
-            "key": "总计数",
-            "comparator": "==",
-            "value": 2
-          }
-        ]
-      },
-      "precondition_names": [],
-      "action_type": "insert",
-      "action_data": {
-        "type": "insert",
-        "text": "她好像有什么变化了。",
-        "text_type": "background",
-        "highlight": true,
-        "delayed": true
-      },
-      "repeatable": true,
-      "immutable": false,
-      "chapter": ""
-    },
-    {
       "name": "新选项",
       "condition": {
         "operator": "and",
@@ -116,6 +91,29 @@
       "repeatable": true,
       "immutable": false,
       "chapter": ""
+    },
+    {
+      "name": "新小游戏",
+      "chapter": "",
+      "condition": {
+        "operator": "and",
+        "rules": [
+          {
+            "key": "总计数",
+            "comparator": "==",
+            "value": 0
+          }
+        ]
+      },
+      "precondition_names": [],
+      "action_type": "mini_game",
+      "action_data": {
+        "type": "mini_game",
+        "game": "escape_giantess",
+        "target_level": "3"
+      },
+      "repeatable": true,
+      "immutable": false
     }
   ],
   "evolution_attrs": [
@@ -137,12 +135,11 @@
   ],
   "components": [
     "attr_bar",
-    "text"
+    "proc_log"
   ],
   "components_params": {
     "attr_bar": {
-      "title_text": "属性状态",
-      "title_color": [
+      "name_color": [
         255,
         225,
         150,
@@ -154,12 +151,117 @@
         245,
         255
       ],
-      "panel_width": 300,
-      "show_title": true
+      "panel_width": 480
     },
     "text": {
-      "show_overlay": true
+      "height_percent": 40,
+      "max_lines": 1,
+      "gradient_color": [
+        89,
+        13,
+        125,
+        128
+      ],
+      "label_color": [
+        255,
+        170,
+        210,
+        255
+      ],
+      "highlight_color": [
+        255,
+        200,
+        60,
+        255
+      ],
+      "show_indicator": true
+    },
+    "text_card": {
+      "width_percent": 70,
+      "max_lines": 1,
+      "bg_color": [
+        20,
+        24,
+        40,
+        190
+      ],
+      "border_color": [
+        255,
+        255,
+        255,
+        45
+      ],
+      "label_color": [
+        255,
+        170,
+        210,
+        255
+      ],
+      "highlight_color": [
+        255,
+        200,
+        60,
+        255
+      ],
+      "show_indicator": true
+    },
+    "proc_log": {
+      "panel_width": 460,
+      "scroll_height": 300,
+      "max_lines": 300
+    },
+    "text_nvl": {
+      "bg_color": [
+        8,
+        10,
+        18,
+        112
+      ],
+      "label_color": [
+        255,
+        170,
+        210,
+        255
+      ],
+      "highlight_color": [
+        255,
+        200,
+        60,
+        255
+      ],
+      "use_serif": true,
+      "show_indicator": true
     }
   },
-  "chapters": []
+  "chapters": [
+    {
+      "name": "起始",
+      "color": "#4338CA",
+      "start": true,
+      "ending": false,
+      "max_paragraphs": 99,
+      "overflow_target": "",
+      "background": {
+        "image_path": "images\\screenshot-20251021-223043.jpg",
+        "smooth_transition": true
+      },
+      "bgm": {},
+      "voice_fx": {
+        "her": {
+          "preset": "far_above",
+          "intensity": 60
+        }
+      },
+      "sensitivity": [],
+      "note": "",
+      "intrusion_delta": 0,
+      "destruction_delta": 0,
+      "casualty_step": 0,
+      "action_points_refund": 0,
+      "custom_deltas": {},
+      "icon_path": ""
+    }
+  ],
+  "protagonist_title": "",
+  "text_component": "text_nvl"
 }

@@ -10,7 +10,7 @@ from dungeon.actions import (
     action_label, normalize_action_type,
 )
 from dungeon.window.minigame import list_mini_games, mini_game_params
-from dungeon.chapters import (
+from dungeon.audio.chapters import (
     CHAPTER_ANY, CHAPTER_ANY_LABEL, CHAPTER_NONE, CHAPTER_NONE_LABEL, chapter_names,
 )
 # 旧版动作清单归校验器所有：这里只借来识别旧配置

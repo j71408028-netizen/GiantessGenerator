@@ -11,7 +11,7 @@ import shutil
 from tkinter import filedialog
 
 import ui.common.dialogs
-from dungeon.chapters import BGM_SUPPORTED_EXTS
+from dungeon.audio.chapters import BGM_SUPPORTED_EXTS
 from ui.common.dialogs import ImageCropDialog
 
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp")

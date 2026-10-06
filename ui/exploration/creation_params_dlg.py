@@ -6,8 +6,8 @@ import customtkinter as ctk
 
 from PIL import Image, ImageDraw
 
-from logic import ALL_PART_NAMES
-from models import Personality, BodyPreset
+from core.logic import ALL_PART_NAMES
+from core.models import Personality, BodyPreset
 from ui.common.dialogs import BaseDialog
 from ui.common import fonts as ui_fonts
 from ui.common.widgets import CTkScrollableDropdownFrame, CTkSegmentedControl

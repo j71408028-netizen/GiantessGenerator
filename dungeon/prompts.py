@@ -2,9 +2,9 @@ import math
 import random
 import re
 
-from logic import ALL_PART_NAMES, format_size, get_comparisons, replace_quip_tags, \
+from core.logic import ALL_PART_NAMES, format_size, get_comparisons, replace_quip_tags, \
     should_skip_by_part_tags, contains_blocked_word
-from .chapters import find_chapter, is_terminating_chapter
+from dungeon.audio.chapters import find_chapter, is_terminating_chapter
 from .coupling import (COMMON_OUTPUT_RULE, DEFAULT_COUPLING_LEVEL, coupling_prompts,
                        normalize_coupling_level, section_instruction)
 from .details import search_replay_details

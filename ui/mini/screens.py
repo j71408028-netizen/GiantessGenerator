@@ -11,12 +11,12 @@ import uuid
 
 import tkinter as tk
 
-from ai import PROVIDER_DEFAULTS, create_client
-from logic import format_size
-from models import ChatMessage
+from core.ai import PROVIDER_DEFAULTS, create_client
+from core.logic import format_size
+from core.models import ChatMessage
 from paths import APP_VERSION
-from services.chat_delivery import ChatDeliveryController
-from services.chat_service import should_reconcile
+from services.chat.delivery import ChatDeliveryController
+from services.chat import should_reconcile
 from ui.mini import pixel as px
 
 

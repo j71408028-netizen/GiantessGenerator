@@ -20,7 +20,7 @@
 | 我要改… | 先看 | 然后跑 |
 |---|---|---|
 | 方案配置字段 / 默认值 | `dungeon/schema.py`（单一真相源）+ [数据模型](script.md) §2、§4 | `check_scenario_schema.py` |
-| 校验规则（error / warning / info） | [数据模型](script.md) §9 | `check_scenario_schema.py`、`validate_scenarios.py` |
+| 校验规则（error / warning / info） | [数据模型](script.md) §9 | `check_scenario_schema.py`、`check_scenarios.py` |
 | 章节 / 触发器运行时行为 | [数据模型](script.md) §3、§5–§6 | `dungeon_autopilot.py` |
 | 演化、转移矩阵、段落步长 | [架构](architecture.md) §4 | `check_scenario_schema.py`（演化链路守卫） |
 | 窗口生命周期 / 关闭 / 收尾 | [窗口](window.md) §2、§3 | `dungeon_autopilot.py`、`check_dungeon_finalize.py` |
@@ -40,12 +40,13 @@
 |---|---|---|
 | `dungeon/*.py`（包根） | 领域层 | 纯逻辑；禁 import GUI / 服务层（AST 强制） |
 | `dungeon/window/*.py` | UI 层 | 唯一允许 DPG 的地方；宿主能力一律经 `host.py` |
+| `dungeon/minigame_pack.py` | 领域层 | 小游戏数据包读取（manifest / 参数声明），validate 与 window/minigame 共用 |
 | `dungeon/window/component_pack/` | 组件包 | 官方显示组件（文本栏三选一 / 属性条 / 过程日志），常驻 Python 包，惰性导入 |
 | `dungeon/window/host.py` | 端口 | `HostPort`：window 层向宿主索取能力的唯一出口 |
 | `ui/common/tk_host.py` | 宿主适配 | `TkHost`——window 层之外唯一的 Tk 细节所在地 |
 | `persistence/scenario_repo.py` | 持久化 | 方案读写、旧目录迁移、保存即校验 |
 | `ui/scenario/*` | 编辑器 | 按 `dungeon/schema.py` 的声明渲染表单 |
-| `scripts/*` | 自检 | 见 §4 |
+| `tests/*` | 离线自检（`tests/run_checks.py` 统一入口）；需显示器的自动驾驶脚本仍在 `scripts/` | 见 §4 |
 
 ## 4. 自检脚本索引
 
@@ -53,23 +54,23 @@
 
 | 脚本 | 覆盖 | 命令 |
 |---|---|---|
-| `check_dungeon_layering.py` | 分层守卫：领域层禁 import GUI/服务层/反向依赖 window；`window/` 禁 import `tkinter`/`customtkinter`/`ui` | `python scripts/check_dungeon_layering.py` |
-| `check_dungeon_window_contract.py` | 窗口契约守卫：`window/` 内禁 `threading.Timer`、禁无超时 `join`；`dpg.stop_dearpygui` / `create_context` / `destroy_context` 只在生命周期属主文件（base / ui / dpg_state）允许；禁 `start_dearpygui` / `set_exit_callback` / `minimize_viewport` | `python scripts/check_dungeon_window_contract.py` |
-| `check_scenario_schema.py` | schema 单一真相源（空模板 golden、字段漂移）+ 校验器规则 + 演化配置链路 | `python scripts/check_scenario_schema.py` |
-| `check_splitter.py` | 内置分句器：断点切分、流式幂等、`@说话人@` 标记解析与落盘净化 | `python scripts/check_splitter.py` |
-| `check_component_pack.py` | 显示组件包：加载链（常驻包来源 / 必需 id）、文本家族与 schema 一致、组件契约与服务面（替身 ctx 只实现服务面 + AST 扫 `ctx._x` 越界）、元数据 `label`/`description`、`param_specs` 结构与 `min/max` 夹取、tag 前缀冲突、组件包不 `print` 且类都登记进 `REGISTRY`、外部包覆盖、隐藏 DPG 上下文里的 `build/layout/refresh/destroy` 冒烟与控件无残留 | `python scripts/check_component_pack.py` |
-| `check_dungeon_finalize.py` | 原子写 / `.bak` / 损坏回退 + `_finalize` 完成与未完成两条路径 | `python scripts/check_dungeon_finalize.py` |
-| `check_scenario_naming.py` | 命名守卫（旧标识符残留）+ 兼容读与迁移行为 | `python scripts/check_scenario_naming.py` |
-| `validate_scenarios.py` | 离线批量校验所有 / 单个方案，有 error 时退出码 1 | `python scripts/validate_scenarios.py --errors-only` |
-| `check_platform_compat.py` | Windows 专有 API 使用点清单（发布 macOS 前必读） | `python scripts/check_platform_compat.py` |
+| `check_dungeon_layering.py` | 分层守卫：领域层禁 import GUI/服务层/反向依赖 window；`window/` 禁 import `tkinter`/`customtkinter`/`ui` | `python tests/check_dungeon_layering.py` |
+| `check_dungeon_window_contract.py` | 窗口契约守卫：`window/` 内禁 `threading.Timer`、禁无超时 `join`；`dpg.stop_dearpygui` / `create_context` / `destroy_context` 只在生命周期属主文件（base / ui / dpg_state）允许；禁 `start_dearpygui` / `set_exit_callback` / `minimize_viewport` | `python tests/check_dungeon_window_contract.py` |
+| `check_scenario_schema.py` | schema 单一真相源（空模板 golden、字段漂移）+ 校验器规则 + 演化配置链路 | `python tests/check_scenario_schema.py` |
+| `check_splitter.py` | 内置分句器：断点切分、流式幂等、`@说话人@` 标记解析与落盘净化 | `python tests/check_splitter.py` |
+| `check_component_pack.py` | 显示组件包：加载链（常驻包来源 / 必需 id）、文本家族与 schema 一致、组件契约与服务面（替身 ctx 只实现服务面 + AST 扫 `ctx._x` 越界）、元数据 `label`/`description`、`param_specs` 结构与 `min/max` 夹取、tag 前缀冲突、组件包不 `print` 且类都登记进 `REGISTRY`、外部包覆盖、隐藏 DPG 上下文里的 `build/layout/refresh/destroy` 冒烟与控件无残留 | `python tests/check_component_pack.py` |
+| `check_dungeon_finalize.py` | 原子写 / `.bak` / 损坏回退 + `_finalize` 完成与未完成两条路径 | `python tests/check_dungeon_finalize.py` |
+| `check_scenario_naming.py` | 命名守卫（旧标识符残留）+ 兼容读与迁移行为 | `python tests/check_scenario_naming.py` |
+| `check_scenarios.py` | 离线批量校验所有 / 单个方案，有 error 时退出码 1 | `python tests/check_scenarios.py --errors-only` |
+| `check_platform_compat.py` | Windows 专有 API 使用点清单（发布 macOS 前必读） | `python tests/check_platform_compat.py` |
 
 需显示器（GUI 冒烟层，不进无 GUI 门禁）：
 
 | 脚本 | 覆盖 | 命令 |
 |---|---|---|
 | `dungeon_autopilot.py` | 真窗口生命周期：构造 → `run()` → 步进 → 关闭 → 落盘（14 场景，含回调线程、章节背景音乐、章节对话语音物理效果、小游戏触发器（py 覆盖层舞台与 web 子进程两条链路的胜负分支与中断、escape 移植版真渲染冒烟）、对话语音与文本组件接管冒烟） | `python scripts/dungeon_autopilot.py` |
-| `mini_game_smoke.py` | 小游戏子进程链路（需显示器 + pywebview）：子进程自动结算回传 / 中断按无结果处理 | `python scripts/mini_game_smoke.py` |
-| `check_minigame.py` | 小游戏包契约：manifest（backend/entry/params）+ py 游戏代码（恰一个 MiniGame 子类、禁 DPG/线程/print、禁私有面 `api._`） | `python scripts/check_minigame.py` |
+| `smoke_mini_game.py` | 小游戏子进程链路（需显示器 + pywebview）：子进程自动结算回传 / 中断按无结果处理 | `python tests/smoke_mini_game.py` |
+| `check_minigame.py` | 小游戏包契约：manifest（backend/entry/params）+ py 游戏代码（恰一个 MiniGame 子类、禁 DPG/线程/print、禁私有面 `api._`） | `python tests/check_minigame.py` |
 | `escape_sim.py` | escape_giantess 无头模拟：地图生成 / 出生点连通性 / bot 实跑与自然结算（无显示器可跑） | `python scripts/escape_sim.py` |
 
 判定方式详见 [调试自动化](window_automation.md) §4：**看结论行，不看退出码**（默认如此；

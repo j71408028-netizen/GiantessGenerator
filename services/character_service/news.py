@@ -5,7 +5,7 @@ import random
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-from logic import get_size_category
+from core.logic import get_size_category
 from paths import data_dir
 
 

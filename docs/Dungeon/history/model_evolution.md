@@ -65,7 +65,7 @@
 
 由来：`transition_matrix` 与 `section_steps` 曾**只在 config.json 里生效、没进运行时**——
 作者在编辑器里改了，副本跑起来却用默认值。修法是让 `window/base.py::_init_session` 把它们传给
-`EvolutionRules`，并新增 `scripts/check_scenario_schema.py` 守卫这条链路。
+`EvolutionRules`，并新增 `tests/check_scenario_schema.py` 守卫这条链路。
 
 同一时期确立的还有：
 
@@ -82,6 +82,6 @@
 - **S3 死代码清理**：清掉旧动作类型的专属运行时分支、旧的调度与看门狗等。
 - **S4 分层修正**：`background` `dispatcher` `launcher` `component_registry` `components`
   从 `dungeon/` 包根迁回 `dungeon/window/`，包根成为字面意义的纯领域层；
-  随后由 `scripts/check_dungeon_layering.py` 用 AST 把这条线固定下来。
+  随后由 `tests/check_dungeon_layering.py` 用 AST 把这条线固定下来。
 
 现状的分层规则见 [架构说明](../architecture.md) §3。

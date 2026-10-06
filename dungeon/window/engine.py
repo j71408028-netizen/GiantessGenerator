@@ -4,12 +4,12 @@ import threading
 import time
 
 from dungeon import process_log
-from dungeon.chapters import find_chapter, is_terminating_chapter, overflow_jump_target
+from dungeon.audio.chapters import find_chapter, is_terminating_chapter, overflow_jump_target
 from dungeon.details import build_detail_query_prompt, parse_detail_queries
 from dungeon.models import DungeonTextType
 from dungeon.response import canonical_history_entry, extract_stream_text, parse_final_json
 from dungeon.splitter import split_full_text, split_stream_units, strip_speaker_markers
-from logic import apply_size_unlock_updates, compute_casualty
+from core.logic import apply_size_unlock_updates, compute_casualty
 
 
 class DungeonStoryEngine:

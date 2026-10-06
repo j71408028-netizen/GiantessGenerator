@@ -2,9 +2,9 @@ import hashlib
 import random
 from typing import Optional, Dict, Tuple
 
-from models import Personality, BodyPreset
+from core.models import Personality, BodyPreset
 from persistence.name_repo import NameRepo, DEFAULT_NAME_TABLE
-from behavior_runtime import behavior_hook
+from core.behavior_runtime import behavior_hook
 from persistence.static_table import weighted_choice
 
 

@@ -55,7 +55,7 @@
 | `dungeon/summary.py` | `StorySummarizer`：剧情压缩（概要 + 事实卡 + 关键事件）注入提示词 |
 | `dungeon/details.py` | 细节探究提问与回放检索 |
 | `dungeon/rules.py` `dungeon/models.py` | 演化规则、触发器条件规则、状态模型 |
-| `dungeon/actions.py` `dungeon/chapters.py` | 触发器 / 章节数据模型与动作注册表（见 [数据模型](script.md)） |
+| `dungeon/actions.py` `dungeon/audio/chapters.py` | 触发器 / 章节数据模型与动作注册表（见 [数据模型](script.md)） |
 | `dungeon/terms.py` | 领域术语与持久化契约常量（见 [术语表](domain_terms.md)） |
 | `dungeon/schema.py` `dungeon/validate.py` | 方案字段单一真相源 + 结构化校验器 |
 | `dungeon/process_log.py` | 过程日志：副本各处的过程消息（章节 / 触发器 / 预生成 / 收尾落盘……）经 `process_log.log()` 进入线程安全环形缓冲，窗口订阅后经帧时钟投递到「过程日志」面板；**副本层禁止再直接 `print`**（`host.py` 的无宿主弹框桩除外） |
@@ -246,19 +246,19 @@ run() → SessionResult
 
 | 编号 | 约束 | 原因 / 出处 | 验证 |
 |---|---|---|---|
-| **C1** | 任何「程序主动关闭副本窗口」都必须走 `base._request_close()`，业务代码不直接 `dpg.stop_dearpygui()` | 手动渲染下一次回调与下一帧之间隔着帧循环，`_request_close()` 直接 `stop_dearpygui()` 即可安全收尾；`FindWindowW` + `WM_CLOSE` 平台 hack 已整体删除 | `python scripts/check_dungeon_window_contract.py`（属主白名单）；`python scripts/dungeon_autopilot.py --scene session-close --isolate`（含 `--repeat 2`）；真应用手测「进入副本 → 返回 → 再进入副本」 |
-| **C2** | GLFW 被终止（`destroy_context()` / `unpark_context()`）**之前** Tk 照常可用——收尾顺序（恢复主窗口 → 弹框）正是刻意把 Tk 交互放在 `destroy_context()` **之前**；终止**之后**，当时存在的那个 Tk 根窗口**不能**再 `destroy()` / `withdraw()`（0xC0000005，无 traceback），`quit()` / `geometry()` / `attributes('-alpha')` / `winfo_*()` / `update()` 仍正常（完整矩阵见 `dungeon/window/dpg_state.py` 模块说明）；且**之后新建**的 `CTk` 根首次 `deiconify()` 同样硬崩——所以 `destroy_context()` 之后必须立刻补一个隐藏的保活视口（`dpg_state.park_context()`），下一局开头（宿主隐藏之后）由 `dpg_state.unpark_context()` 拆掉 | 硬崩的是「GLFW 终止**后**」的窗口级命令，不是「碰 Tk」本身（2026-09-28 复核矩阵，取代早先「销毁前碰 Tk 即崩」的过宽结论）。保活视口把进程留在「Tk 根窗口健康」状态，热切换（销毁旧根 → 建另一套根）才走得通；它从不 `show_viewport()`，对使用者完全不可见。顺序固定为：恢复主窗口 → join → `_handle_exit()` 弹框 → `destroy_context()` → 解除宿主登记 → `park_context()`；下一局为 `viewport_metrics()`（宿主仍可见时取）→ `hide_window()` → `unpark_context()` → `_build_ui()`（拆保活要排在藏宿主之后，否则 `withdraw` 会崩） | `scripts/smoke_test_switch.py` 第 2/5 轮（真跑两局副本 + 三次切换）；`scripts/dungeon_autopilot.py` |
+| **C1** | 任何「程序主动关闭副本窗口」都必须走 `base._request_close()`，业务代码不直接 `dpg.stop_dearpygui()` | 手动渲染下一次回调与下一帧之间隔着帧循环，`_request_close()` 直接 `stop_dearpygui()` 即可安全收尾；`FindWindowW` + `WM_CLOSE` 平台 hack 已整体删除 | `python tests/check_dungeon_window_contract.py`（属主白名单）；`python scripts/dungeon_autopilot.py --scene session-close --isolate`（含 `--repeat 2`）；真应用手测「进入副本 → 返回 → 再进入副本」 |
+| **C2** | GLFW 被终止（`destroy_context()` / `unpark_context()`）**之前** Tk 照常可用——收尾顺序（恢复主窗口 → 弹框）正是刻意把 Tk 交互放在 `destroy_context()` **之前**；终止**之后**，当时存在的那个 Tk 根窗口**不能**再 `destroy()` / `withdraw()`（0xC0000005，无 traceback），`quit()` / `geometry()` / `attributes('-alpha')` / `winfo_*()` / `update()` 仍正常（完整矩阵见 `dungeon/window/dpg_state.py` 模块说明）；且**之后新建**的 `CTk` 根首次 `deiconify()` 同样硬崩——所以 `destroy_context()` 之后必须立刻补一个隐藏的保活视口（`dpg_state.park_context()`），下一局开头（宿主隐藏之后）由 `dpg_state.unpark_context()` 拆掉 | 硬崩的是「GLFW 终止**后**」的窗口级命令，不是「碰 Tk」本身（2026-09-28 复核矩阵，取代早先「销毁前碰 Tk 即崩」的过宽结论）。保活视口把进程留在「Tk 根窗口健康」状态，热切换（销毁旧根 → 建另一套根）才走得通；它从不 `show_viewport()`，对使用者完全不可见。顺序固定为：恢复主窗口 → join → `_handle_exit()` 弹框 → `destroy_context()` → 解除宿主登记 → `park_context()`；下一局为 `viewport_metrics()`（宿主仍可见时取）→ `hide_window()` → `unpark_context()` → `_build_ui()`（拆保活要排在藏宿主之后，否则 `withdraw` 会崩） | `tests/smoke_switch.py` 第 2/5 轮（真跑两局副本 + 三次切换）；`scripts/dungeon_autopilot.py` |
 | **C3** | `__init__` 的每个构造参数都必须存到 `self` 上 | `_init_session()` 在入口阶段**迟到执行**（点「开始副本」时才跑），此时局部变量早已不可见；曾因漏存 `merged_quips` 导致「开始副本」必然 AttributeError | 构造后读属性 / `entry-start` 场景 |
 | **C4** | 跨线程 UI 更新走 `self._frame.call()`；禁止后台线程直接调 DPG | 帧时钟是窗口实例成员（随会话创建与停止），不是模块级单例；`stop()` 后 `call()` 返回 `False` 不抛异常 | `dungeon_autopilot.py` |
-| **C5** | 计时类逻辑不开线程，用 `every` / `after` 帧任务 | 旧实现各自靠 `_closing` 标志轮询退出、收尾时逐个 join；现在退出不需要 join | `python scripts/check_dungeon_window_contract.py`（禁 `threading.Timer`）；场景结束时断言 `threading.enumerate()` 无非 daemon 残留 |
+| **C5** | 计时类逻辑不开线程，用 `every` / `after` 帧任务 | 旧实现各自靠 `_closing` 标志轮询退出、收尾时逐个 join；现在退出不需要 join | `python tests/check_dungeon_window_contract.py`（禁 `threading.Timer`）；场景结束时断言 `threading.enumerate()` 无非 daemon 残留 |
 | **C6** | DPG 2.3.1 兼容性怪癖，见 §5.1 子表 | 实测结论 | 手测 + 自动驾驶 |
 | **C7** | 入口阶段与会话页共用 `bg_texture` / `bg_image_item` | 进入会话时 `_freeze_background` 把冻结帧设为 `_bg_pil_full`，后续 relayout 沿用冻结画面 | 手测入口 → 会话 |
-| **C8** | window 层不许 import `tkinter` / `customtkinter` / `ui`；宿主能力一律经 `HostPort`，见 §5.2 端口表 | 换 UI 框架只需换适配器；自检不再需要打桩 `ui.common.dialogs` | `scripts/check_dungeon_layering.py` |
+| **C8** | window 层不许 import `tkinter` / `customtkinter` / `ui`；宿主能力一律经 `HostPort`，见 §5.2 端口表 | 换 UI 框架只需换适配器；自检不再需要打桩 `ui.common.dialogs` | `tests/check_dungeon_layering.py` |
 | **C9** | 构造 / 复制 `DungeonState` 只用关键字参数 | 字段顺序会随迭代变化（`chapter_steps` 就是从中间插入的）；`clone()` 曾按位置传参导致伤亡数组被填成步长浮点数，于是**每一步** `_finish_step` 都抛 `'float' object is not iterable`——故事看着还在出字，但总计数不增长、触发器与结局永不触发 | 断言「回放记录是否增长」 |
-| **C10** | 写盘一律用原子写（`persistence/json_store.py`） | 半截文件不可恢复，`.bak` 是唯一回退；回放 / 报告按时间戳命名、本来不会被覆盖，调用时传 `backup=False` | `scripts/check_dungeon_finalize.py` |
-| **C11** | 术语不混用：`scenario_*` = 方案，`dungeon_*` = 一局 | 见 [术语表](domain_terms.md) 与 `dungeon/terms.py` | `scripts/check_scenario_naming.py` |
+| **C10** | 写盘一律用原子写（`persistence/json_store.py`） | 半截文件不可恢复，`.bak` 是唯一回退；回放 / 报告按时间戳命名、本来不会被覆盖，调用时传 `backup=False` | `tests/check_dungeon_finalize.py` |
+| **C11** | 术语不混用：`scenario_*` = 方案，`dungeon_*` = 一局 | 见 [术语表](domain_terms.md) 与 `dungeon/terms.py` | `tests/check_scenario_naming.py` |
 | **C12** | 任何 Tk 交互前必须调用 `self._discard_pending_quit()` | 用户通过视口原生关闭键（X）退出时，GLFW 销毁原生窗口会导致 Windows 在本线程队列中留下一条 `WM_QUIT`；它不会被 Tk 消费，却会让 Windows 停止合成 `WM_TIMER`，造成随后的收尾提示模态对话框（`wait_window`）以及主窗口所有 `after` 计时器彻底收不到事件而表现为**弹出提示对话框后主窗口卡死**；收尾时在 `show_window()` / 弹框前由端口抛弃该残留消息 | `python scripts/dungeon_autopilot.py --scene native-close --isolate` |
-| **C13** | 组件只经**组件服务面**访问窗口（`ctx.component_viewport / schedule / schedule_every / cancel_task / session_waiting_for_input / component_autoplay_on / text_font_tag / bold_font_tag / component_top_inset / component`），不得读窗口私有属性（`_dpi_scale` / `_layout_w` / `_frame` / `_autoplay`…） | 组件 ctx 就是窗口实例，摸私有零成本，一旦窗口侧改名即静默 AttributeError；契约的可执行版本是守卫里的**替身 ctx**（只实现服务面）与 AST 越界扫描 | `scripts/check_component_pack.py` |
+| **C13** | 组件只经**组件服务面**访问窗口（`ctx.component_viewport / schedule / schedule_every / cancel_task / session_waiting_for_input / component_autoplay_on / text_font_tag / bold_font_tag / component_top_inset / component`），不得读窗口私有属性（`_dpi_scale` / `_layout_w` / `_frame` / `_autoplay`…） | 组件 ctx 就是窗口实例，摸私有零成本，一旦窗口侧改名即静默 AttributeError；契约的可执行版本是守卫里的**替身 ctx**（只实现服务面）与 AST 越界扫描 | `tests/check_component_pack.py` |
 
 ### 5.1 C6：DPG 2.3.1 兼容性怪癖
 
@@ -306,12 +306,12 @@ DungeonSessionWindow(...).run()                      # 不传 = HostPort()，无
 | 改动范围 | 先跑 |
 |---|---|
 | 关闭路径、收尾、入口阶段、生命周期、帧时钟、回调线程、章节背景音乐、章节对话语音物理效果、对话语音 | `python scripts/dungeon_autopilot.py`（11 场景 95 项断言，含 `text-components` 组件冒烟）；单场景 `--scene <名字> --isolate`，连开关窗 `--scene session-close --repeat 2 --isolate` |
-| `_finalize` / `json_store` / `scenario_repo` | `python scripts/check_dungeon_finalize.py`（无 GUI，32 项断言） |
-| 显示组件包 / 文本组件 / 组件参数 | `python scripts/check_component_pack.py`（无 GUI，102 项断言：加载链、契约与服务面（替身 ctx + AST 越界扫描）、元数据与参数夹取、外部包覆盖、隐藏 DPG 上下文里的四钩子冒烟与控件无残留） |
-| 分句器 / 说话人标记 | `python scripts/check_splitter.py` |
-| 新增 import / 分层 | `python scripts/check_dungeon_layering.py`（窗口层含 `component_pack/` 子包） |
-| 新增 dpg 生命周期 / 线程调用（stop/create/destroy、Timer、join） | `python scripts/check_dungeon_window_contract.py`（C1 / C4 / C5 的机械可查部分） |
-| schema / 校验器 | `python scripts/check_scenario_schema.py`；批量校验 `python scripts/validate_scenarios.py --errors-only` |
+| `_finalize` / `json_store` / `scenario_repo` | `python tests/check_dungeon_finalize.py`（无 GUI，32 项断言） |
+| 显示组件包 / 文本组件 / 组件参数 | `python tests/check_component_pack.py`（无 GUI，102 项断言：加载链、契约与服务面（替身 ctx + AST 越界扫描）、元数据与参数夹取、外部包覆盖、隐藏 DPG 上下文里的四钩子冒烟与控件无残留） |
+| 分句器 / 说话人标记 | `python tests/check_splitter.py` |
+| 新增 import / 分层 | `python tests/check_dungeon_layering.py`（窗口层含 `component_pack/` 子包） |
+| 新增 dpg 生命周期 / 线程调用（stop/create/destroy、Timer、join） | `python tests/check_dungeon_window_contract.py`（C1 / C4 / C5 的机械可查部分） |
+| schema / 校验器 | `python tests/check_scenario_schema.py`；批量校验 `python tests/check_scenarios.py --errors-only` |
 
 无 GUI 守卫（`check_dungeon_layering.py` / `check_dungeon_finalize.py` / `check_splitter.py` 等）+
 真窗口冒烟（`dungeon_autopilot.py`）才算绿。判定方式见 [调试自动化](window_automation.md) §4：**按子进程输出判定，不看退出码**

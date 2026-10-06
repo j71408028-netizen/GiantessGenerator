@@ -3,13 +3,13 @@ import customtkinter as ctk
 import re
 import copy
 import os
-from dungeon.chapters import normalize_chapters
+from dungeon.audio.chapters import normalize_chapters
 from dungeon.coupling import (COUPLING_LEVELS, DEFAULT_COUPLING_LEVEL, VELUM,
                               coupling_initial_prompt,
                               coupling_label, normalize_coupling_level)
 from dungeon.rules import EvolutionRules
 from dungeon.schema import DEFAULT_TEXT_COMPONENT, normalize_text_component
-from dungeon.speech import (DEFAULT_OTHER_VOICES, DEFAULT_RATE, DEFAULT_VOICE_HER,
+from dungeon.audio.speech import (DEFAULT_OTHER_VOICES, DEFAULT_RATE, DEFAULT_VOICE_HER,
                             DEFAULT_VOICE_PROTAGONIST, DEFAULT_VOICE_VOLUME,
                             MAX_VOICE_VOLUME, RECOMMENDED_VOICES,
                             edge_tts_available, normalize_voice)

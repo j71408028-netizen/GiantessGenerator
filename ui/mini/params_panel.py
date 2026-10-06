@@ -16,9 +16,9 @@ import tkinter as tk
 from tkinter import filedialog
 from typing import Any, Dict
 
-from context import ExplorationContext
+from services.exploration.context import ExplorationContext
 from persistence import PersonalityRepo, PresetRepo
-from services.body_preview import render_preset_preview_image
+from services.preview import render_preset_preview_image
 from services.image_service import ImageService
 from ui.mini import pixel as px
 

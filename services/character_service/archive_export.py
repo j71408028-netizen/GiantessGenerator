@@ -16,10 +16,10 @@ import math
 import os
 import string
 
-from address_model import parse_full as _parse_addr, cell_width_m as _addr_cell_width, \
+from core.address_model import parse_full as _parse_addr, cell_width_m as _addr_cell_width, \
     format_addr_verbose as _format_addr_verbose
-from logic import ALL_PART_NAMES, format_size
-from models import CharacterSnapshot
+from core.logic import ALL_PART_NAMES, format_size
+from core.models import CharacterSnapshot
 from paths import data_dir, template_dir
 
 

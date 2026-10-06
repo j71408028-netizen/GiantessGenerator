@@ -7,7 +7,8 @@
 覆盖核心算法的实现，而无需修改主程序代码。可覆盖范围包括：
 
 - `CreationService` / `StateService` 的部分静态方法；
-- `logic.py` 中除 `get_size_category` 外的全部模块函数，以及 `PREDEFINED_TAGS` 常量。
+- `core/logic.py` 中除 `get_size_category` 外的全部模块函数，以及 `PREDEFINED_TAGS` 常量
+  （模块文件已迁入 `core/`，但注册用的键**仍是 `"logic.xxx"`**——键是稳定契约，不含包路径）。
 
 **核心规则**：
 

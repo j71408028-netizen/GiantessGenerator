@@ -37,11 +37,11 @@
 
 | 脚本 | 覆盖 |
 |---|---|
-| `scripts/check_scenario_naming.py` | AST 扫描旧标识符残留（`dungeon_id` / `DungeonRepo` 等）+ 兼容读与迁移行为自检 |
-| `scripts/check_scenario_schema.py` | schema 单一真相源 + 校验器规则自检 |
-| `scripts/check_dungeon_finalize.py` | 收尾路径回归 |
-| `scripts/check_dungeon_layering.py` | 领域层不得依赖 UI / 服务层的分层守卫 |
-| `scripts/validate_scenarios.py` | 离线批量校验所有方案 |
+| `tests/check_scenario_naming.py` | AST 扫描旧标识符残留（`dungeon_id` / `DungeonRepo` 等）+ 兼容读与迁移行为自检 |
+| `tests/check_scenario_schema.py` | schema 单一真相源 + 校验器规则自检 |
+| `tests/check_dungeon_finalize.py` | 收尾路径回归 |
+| `tests/check_dungeon_layering.py` | 领域层不得依赖 UI / 服务层的分层守卫 |
+| `tests/check_scenarios.py` | 离线批量校验所有方案 |
 
 命令：见 [副本文档索引](README.md) §4。
 

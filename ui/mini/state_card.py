@@ -10,8 +10,8 @@
 
 import tkinter as tk
 
-from logic import SIZE_DISPLAY, format_size, get_size_category
-from models import CharacterSnapshot
+from core.logic import SIZE_DISPLAY, format_size, get_size_category
+from core.models import CharacterSnapshot
 from services.image_service import ImageService
 from services.state_service import StateService
 from ui.mini import pixel as px

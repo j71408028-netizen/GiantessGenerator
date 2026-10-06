@@ -75,7 +75,7 @@
 | `loop` | bool | `true` | 循环播放 |
 | `fade_seconds` | float | `1.5` | 切换时的淡入淡出秒数（`0` = 硬切） |
 
-播放由领域模块 `dungeon/audio.py` 承担（**不依赖任何 UI 框架**）：Windows 走
+播放由领域模块 `dungeon/audio/`（包，`__init__` 即原 audio 模块）承担（**不依赖任何 UI 框架**）：Windows 走
 `winmm` 的 MCI（零依赖，mp3/wav/wma 同一套），非 Windows 退到 pygame（装了才用），
 两者都不可用时静音降级——**没有声音不该拖垮一局副本**。换曲走「旧曲淡出 → 关 →
 新曲从 0 淡入」，同一首曲子重复进入只挪音量、不从头重放；所有设备操作都在一条
@@ -291,7 +291,7 @@ MCI 的坑：`play <alias> repeat` 只有 mpegvideo（mp3 等）认，waveaudio�
 |---|---|---|
 | 编辑器保存 | `ScenarioRepo.save_config()` | 诊断记入 `last_diagnostics`，编辑器弹窗汇总 error |
 | 副本启动前 | `window/base.py::_load_session_config()` | error 级阻止进入 |
-| 离线批量 / CI | `scripts/validate_scenarios.py` | error 退出码 1 |
+| 离线批量 / CI | `tests/check_scenarios.py` | error 退出码 1 |
 
 ### 9.2 迁移与兼容
 
@@ -344,7 +344,7 @@ Solea / Bulla 耦合等级的对话分支会给每句台词标 `@说话人@`（�
 
 合成走 **edge-tts**（微软神经网络语音，**需要联网**，`pip install edge-tts`），
 是**可选依赖**：没装或网络失败只在日志里留一条，不出声不该拖垮一局副本——与
-背景音乐的降级策略一致。播放复用 `dungeon/audio.py` 的后端（MCI → pygame →
+背景音乐的降级策略一致。播放复用 `dungeon/audio` 的后端（MCI → pygame →
 静音占位）。
 
 线程模型同样沿用 `audio.py`：唯一一条后台线程串行处理「合成 → 播放」，

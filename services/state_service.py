@@ -1,8 +1,8 @@
 import datetime
 from typing import Optional, Tuple
 
-from models import CharacterSnapshot
-from behavior_runtime import behavior_hook
+from core.models import CharacterSnapshot
+from core.behavior_runtime import behavior_hook
 
 
 class StateService:
