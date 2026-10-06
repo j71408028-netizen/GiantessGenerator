@@ -29,7 +29,7 @@
 
 用法：
 
-    from app_shell import run_app
+    from app.shell import run_app
     run_app()                        # 按「启动界面模式」设置启动
                                      #（缺省「退出时模式」：跟随上次退出时所在界面）
 """

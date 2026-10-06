@@ -9,7 +9,7 @@ from paths import ensure_cwd
 import ui.common.ctk_patch  # noqa: F401  模式切换时同步刷新 CTk 控件 Frame 底色，避免几何重排露旧色
 from ui.common import fonts as ui_fonts
 from services.exploration.context import ExplorationContext
-from main_window_manager import MainWindowManager
+from app.window_manager import MainWindowManager
 from persistence import SettingsRepo, LandmarkRepo, PresetRepo, PersonalityRepo
 from persistence import QuipRepo, ScenarioRepo, CharacterRepo
 from services.worlds import WorldManager
@@ -170,7 +170,7 @@ def run_mini(boot):
         """
     from core import appearance
     from ui.mini import dpi
-    from app_shell import take_request
+    from app.shell import take_request
 
     # PyInstaller 打包 + multiprocessing 子进程必需。
     multiprocessing.freeze_support()
@@ -235,7 +235,7 @@ def run_mini(boot):
             挂件标题栏的「⇄」经注入回调走到这里——ui 层因此不必 import
             ``app_shell``（见 ``ui.mini.app.MiniApp`` 的 ``switch_ui`` 参数）。
             """
-            from app_shell import switch_to
+            from app.shell import switch_to
             switch_to(root, mode, save=save)
 
         from ui.mini.app import MiniApp
@@ -436,7 +436,7 @@ def run_professional(boot):
     root.mainloop()
 
     # 窗口销毁后 mainloop 返回：取一次切换请求交给外壳处理。
-    from app_shell import take_request
+    from app.shell import take_request
     return take_request()
 
 
@@ -450,7 +450,7 @@ def main():
         from ui.common.mini_game_host import run as run_mini_game_host
         run_mini_game_host(sys.argv)
         return
-    from app_shell import run_app
+    from app.shell import run_app
     run_app()
 
 

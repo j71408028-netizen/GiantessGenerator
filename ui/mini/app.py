@@ -53,7 +53,7 @@ class MiniApp:
         self.world_manager = world_manager
 
         self._settings_repo = settings_repo
-        # 界面切换由外壳**注入**：ui 层不得 import ``app_shell``（阶段 3.2.2 前
+        # 界面切换由外壳**注入**：ui 层不得 import 应用外壳（阶段 3.2.2 前
         # 标题栏的「⇄」直接 import 外壳，构成一条 ui -> app 越界边）。本层只说
         # 「切到哪个模式」，销毁根窗口 / 登记切换请求 / 落盘由外壳的实现负责，
         # 接线在 ``main.run_mini``。缺省 None 表示不提供切换入口。

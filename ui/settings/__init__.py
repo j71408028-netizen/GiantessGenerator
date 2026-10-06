@@ -936,7 +936,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         「切换界面」的职责（见 ``MainWindowManager.prompt_switch_to_mini``）。
 
         「退出时模式」意味着下次启动跟随上次退出时所在的界面——实际模式由
-        ``app_shell.switch_to`` 在每次切换时落盘（``ui_mode`` 键），这里不碰它。
+        ``app.shell.switch_to`` 在每次切换时落盘（``ui_mode`` 键），这里不碰它。
         """
         # 词表与落盘都在共享的 services.ui_mode（ui 层不得 import 应用外壳）。
         pref = ui_mode.pref_of_label(value)

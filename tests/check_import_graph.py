@@ -21,8 +21,8 @@
     services       服务层（含 services/exploration/ 的探索编排）
     dungeon_window 副本会话窗口（dungeon/window/**）
     ui             专业界面与挂件界面（ui/**）
-    app            应用壳（根目录 main / app_shell /
-                   main_window_manager）
+    app            应用壳（根目录入口 main + app/ 包：shell /
+                   window_manager）
 
 **`orchestration` 层已消失**（2026-10-06，阶段 3.1）。它曾用来给 ``core/context.py``
 的 ``ExplorationContext`` 开一条全图唯一的双向豁免：那个 God object 既被 ui 大量
@@ -54,19 +54,18 @@ EXCLUDE_DIRS = {
 # --------------------------------------------------------------------------
 # 一、层归属
 # --------------------------------------------------------------------------
-# 根目录模块 -> 层。阶段 2 已把领域模型收编进 core/，根目录只剩基础设施（paths）
-# 与应用壳（app）；app_shell / main_window_manager 计划迁往 app/ 包。
+# 根目录模块 -> 层。阶段 2 已把领域模型收编进 core/；§4.3 已把应用壳本体
+# 迁入 app/ 包，根目录只剩基础设施（paths）与字面量入口 main（构建脚本写死）。
 # 此表同时充当「根目录已冻结」的白名单：根目录新增 .py 必须先在这里登记。
 ROOT_MODULE_LAYERS = {
     "paths": "infra",
     "main": "app",
-    "app_shell": "app",
-    "main_window_manager": "app",
 }
 
 # 一级包 -> 层。一个特例在 _layer_from_parts 里判：
 #   dungeon/window/**    -> dungeon_window
 PACKAGE_LAYERS = {
+    "app": "app",
     "core": "core",
     "persistence": "persistence",
     "services": "services",

@@ -159,7 +159,7 @@ class MainWindowManager:
         本方法只做事、不提问：确认框由 :meth:`prompt_switch_to_mini` 负责，
         自检脚本因此可以直接调用它来驱动一次切换。
         """
-        from app_shell import switch_to
+        from app.shell import switch_to
 
         # 副本视口是独立顶层窗口，切换界面会把它连同 Tk 根一起带走，
         # 会话结果无从回收，因此进行中直接拒绝切换。

@@ -100,7 +100,8 @@ def _restore_user_files(user_dir, backup):
 
 def _build_context(boot):
     from services.exploration.context import ExplorationContext
-    repos = __import__("app_shell")._build_repos(boot["world_state"])
+    import app.shell as app_shell
+    repos = app_shell._build_repos(boot["world_state"])
     return ExplorationContext(
         settings=boot["settings"],
         landmark_repo=repos["landmark_repo"],
@@ -119,7 +120,7 @@ def build_professional(boot):
     import customtkinter as ctk
     from ui.common import fonts as ui_fonts
     from ui.common.theme import DEFAULT_PALETTE, apply_palette
-    from main_window_manager import MainWindowManager
+    from app.window_manager import MainWindowManager
 
     settings = boot["settings"]
     ctk.set_appearance_mode(settings.get("theme_mode", "Light"))
@@ -145,7 +146,7 @@ def build_mini(boot):
     """构建挂件模式界面。
 
     ``switch_ui`` 按 ``main.run_mini`` 的接线注入——挂件标题栏的「⇄」经这个回调
-    走到外壳（ui 层不直接 import ``app_shell``）。自检必须照着接线，否则第 2 轮
+    走到外壳（ui 层不直接 import 应用外壳）。自检必须照着接线，否则第 2 轮
     「跑过副本再切回专业」会走到界面里的「未接线」分支而切不动。
     """
     import tkinter as tk
@@ -162,7 +163,7 @@ def build_mini(boot):
     root = tk.Tk()
 
     def _switch_ui(mode, save=None):
-        from app_shell import switch_to
+        from app.shell import switch_to
         switch_to(root, mode, save=save)
 
     app = MiniApp(root, _build_context(boot), boot["world_manager"],
@@ -196,7 +197,7 @@ def _run_real_dungeon(app, root):
     可重复调用（第 2、5 轮各一次）：桩只要装一次，重复装会把真类也替换成桩。
     """
     import smoke_mini as mini_smoke
-    from app_shell import _root_needs_repair
+    from app.shell import _root_needs_repair
     from dungeon.window import dpg_state
 
     if not mini_smoke._REAL_WINDOW.get("cls"):
@@ -300,8 +301,8 @@ def _mini_style(app):
 # ==================== 主流程 ====================
 
 def main():
-    import app_shell
-    from app_shell import _release_global_state
+    import app.shell as app_shell
+    from app.shell import _release_global_state
     from services.ui_mode import MODE_MINI, MODE_PRO, load_mode
 
     user_dir, backup = _backup_user_files()
