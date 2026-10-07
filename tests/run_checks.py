@@ -24,6 +24,18 @@ import sys
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _HERE = os.path.join(_ROOT, "tests")
 
+# Windows 上 Python 的 stdout 编码跟随控制台（GitHub Actions 的 Windows runner
+# 是 cp1252），而各守卫的输出是中文——cp1252 编不了，print 直接
+# UnicodeEncodeError（Ubuntu 没这个问题，locale 本来就是 UTF-8）。把父进程与
+# 子进程的 IO 都钉在 UTF-8 上：
+# - 父进程 reconfigure（Python 3.7+，覆盖 PYTHONIOENCODING 等 locale 决定值）；
+# - 子进程经环境变量继承（PYTHONUTF8 对整个解释器生效）。
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8")
+
+_CHILD_ENV = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+
 
 def _discover(pattern):
     return sorted(os.path.basename(p) for p in glob.glob(os.path.join(_HERE, pattern)))
@@ -49,6 +61,7 @@ def main(argv):
         proc = subprocess.run(
             [sys.executable, os.path.join(_HERE, name)],
             cwd=_ROOT,
+            env=_CHILD_ENV,
         )
         if proc.returncode != 0:
             print(f"FAIL  {name} (exit {proc.returncode})")

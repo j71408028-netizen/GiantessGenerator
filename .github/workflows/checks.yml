@@ -8,6 +8,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Windows runner 的 Python stdout 编码跟随控制台（cp1252），编不了守卫输出的中文。
+# run_checks.py 已在进程内 reconfigure 并给子进程注入 PYTHONUTF8；这个工作流级
+# 变量兜住 CI 里直接跑单个守卫的 step（如 check_scenarios.py）。
+env:
+  PYTHONUTF8: "1"
+
 concurrency:
   group: checks-${{ github.ref }}
   cancel-in-progress: true
