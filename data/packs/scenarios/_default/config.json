@@ -71,9 +71,7 @@
           }
         ]
       },
-      "precondition_names": [
-        "新插入"
-      ],
+      "precondition_names": [],
       "action_type": "option",
       "action_data": {
         "type": "option",
@@ -263,5 +261,6 @@
     }
   ],
   "protagonist_title": "",
-  "text_component": "text_nvl"
+  "text_component": "text_nvl",
+  "ending_policy": "open"
 }

@@ -53,6 +53,7 @@ GOLDEN_EMPTY = {
     "protagonist_title": "",
     "text_component": "text",
     "entry_action_cost": 0,
+    "ending_policy": "required",
     "section_prompts": {"background": "", "branch": "", "dialog": "",
                         "interaction": "", "action": ""},
     "evolution_attrs": [
@@ -321,6 +322,28 @@ check("空 dict 报 error", has_errors(validate_scenario_config({})))
 check("无章节无触发器：提示无结局路径",
       any(d.level == "info" and "结局路径" in d.message
           for d in validate_scenario_config(schema.empty_scenario_config())))
+
+# ending_policy：作者显式声明开放式方案后不再提示"无结局路径"
+_open_config = schema.empty_scenario_config()
+_open_config["ending_policy"] = "open"
+_open_diags = validate_scenario_config(_open_config)
+check("ending_policy=open：不再提示无结局路径",
+      not [d for d in _open_diags if "结局路径" in d.message],
+      format_diagnostics(_open_diags))
+check("ending_policy 默认 required、归一化未知值",
+      schema.normalize_ending_policy(None) == "required"
+      and schema.normalize_ending_policy("OPEN") == "open"
+      and schema.normalize_ending_policy("随便") == "required")
+_bad_policy = schema.empty_scenario_config()
+_bad_policy["ending_policy"] = "开放式"
+check("ending_policy 非法值报 warning",
+      any(d.level == "warning" and d.path == "ending_policy"
+          for d in validate_scenario_config(_bad_policy)))
+_ending_config = schema.empty_scenario_config()
+_ending_config["ending_policy"] = "open"
+_ending_config["chapters"] = [{"name": "终幕", "ending": True}]
+check("有结束章节时 open 也不报无结局路径",
+      not [d for d in validate_scenario_config(_ending_config) if "结局路径" in d.message])
 
 # ---------------- 4b. 章节背景音乐 ----------------
 _bgm_tmp = tempfile.mkdtemp(prefix="scenario_bgm_")

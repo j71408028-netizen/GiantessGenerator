@@ -172,15 +172,19 @@ def validate_scenario_config(config, *, scenario_dir: str = None) -> list:
         add("warning", "chapters", f"标记了 {len(starts)} 个起始章节（{', '.join(starts)}），"
                                    f"运行时只会进入第一个")
 
-    # 结局可达性：既没有结束章节、也没有旧版结局触发器 = 永远无法正常收尾
+    # 结局可达性：既没有结束章节、也没有旧版结局触发器 = 永远无法正常收尾。
+    # 作者用 ``ending_policy: "open"`` 明确声明"本方案就是开放式"时不提示——
+    # 让 info 永远挂着的做法等于把设计选择报成缺陷（见 linux_compat_plan §2.2）。
     has_ending_trigger = any(
         normalize_action_type(t.get("action"),
                               t.get("action_data") if isinstance(t, dict) else None)
         == ENDING_ACTION
         for t in (config.get("triggers") or []) if isinstance(t, dict))
-    if not terminating and not has_ending_trigger:
+    ending_policy = schema.normalize_ending_policy(config.get("ending_policy"))
+    if not terminating and not has_ending_trigger and ending_policy != "open":
         add("info", "", "方案没有任何结局路径（无结束章节、无「结局」触发器）："
-                        "只能通过退出结束，不产生结局结算与结局索引")
+                        "只能通过退出结束，不产生结局结算与结局索引。"
+                        "若是有意为之，可把 ending_policy 设为 open 消除本提示")
 
     return diags
 
@@ -215,6 +219,12 @@ def _validate_top_level(config: dict, add) -> None:
         add("warning", "text_component",
             f"文本组件「{config.get('text_component')}」无效"
             f"（允许：{', '.join(schema.TEXT_COMPONENT_IDS)}），运行时回退为默认")
+    raw_policy = config.get("ending_policy")
+    if raw_policy is not None and schema.normalize_ending_policy(raw_policy) != str(
+            raw_policy).strip().lower():
+        add("warning", "ending_policy",
+            f"结局策略「{raw_policy}」无效"
+            f"（允许：{', '.join(schema.ENDING_POLICIES)}），运行时按默认处理")
     # 旧写法残留：文本组件曾在 components 列表里声明（text_component 字段接管后忽略）
     stale_text = [c for c in (config.get("components") or [])
                   if isinstance(c, str) and c in schema.TEXT_COMPONENT_IDS]

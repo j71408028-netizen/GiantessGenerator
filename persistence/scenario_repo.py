@@ -18,8 +18,8 @@ import shutil
 
 from dungeon.audio.chapters import normalize_chapters
 from dungeon.coupling import normalize_coupling_level
-from dungeon.schema import (empty_scenario_config, normalize_text_component,
-                            TEXT_COMPONENT_IDS)
+from dungeon.schema import (empty_scenario_config, normalize_ending_policy,
+                            normalize_text_component, TEXT_COMPONENT_IDS)
 from dungeon.validate import format_diagnostics, validate_scenario_config
 from dungeon.terms import (DEFAULT_SCENARIO_ID, LEGACY_SCENARIO_RESOURCE_KEY,
                            SCENARIO_CONFIG_NAME, SCENARIO_RESOURCE_KEY,
@@ -198,6 +198,9 @@ class ScenarioRepo:
             "coupling_level": normalize_coupling_level(config.get("coupling_level")),
             "protagonist_title": str(config.get("protagonist_title", "") or "").strip(),
             "entry_action_cost": max(0, int(config.get("entry_action_cost", 0) or 0)),
+            # 结局策略：作者对"本方案要不要结局"的显式声明（校验器据此决定是否提示）。
+            # 缺省 required——老方案语义不变，仍然会提示"没有结局路径"。
+            "ending_policy": normalize_ending_policy(config.get("ending_policy")),
             "section_prompts": config.get("section_prompts", {
                 "background": "", "branch": "", "dialog": "",
                 "interaction": "", "action": ""

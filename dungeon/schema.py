@@ -33,6 +33,18 @@ TEXT_TYPE_KEYS = tuple(t.value for t in DungeonTextType)
 TEXT_COMPONENT_IDS = ("text", "text_card", "text_nvl")
 DEFAULT_TEXT_COMPONENT = "text"
 
+#: 结局策略：``required`` = 方案应当有结局（没有就提示，默认）；
+#: ``open`` = 作者明确声明这是开放式方案（没有结局是设计，不再提示）。
+#: 这是给校验器看的**声明**，不是运行时行为开关——运行时只认结束章节 / 结局触发器。
+ENDING_POLICIES = ("required", "open")
+DEFAULT_ENDING_POLICY = "required"
+
+
+def normalize_ending_policy(value, default: str = DEFAULT_ENDING_POLICY) -> str:
+    """把任意来源的值归一化为合法结局策略；无法识别时返回 default。"""
+    text = str(value or "").strip().lower()
+    return text if text in ENDING_POLICIES else default
+
 
 def normalize_text_component(value, default: str = DEFAULT_TEXT_COMPONENT) -> str:
     """把任意来源的值归一化为合法文本组件 id；无法识别时返回 default。"""
@@ -64,6 +76,10 @@ SCENARIO_FIELDS = (
               choices=TEXT_COMPONENT_IDS,
               note="文本主组件三选一：text=底部渐变、text_card=底部卡片、text_nvl=全屏NVL"),
     FieldSpec("entry_action_cost", "int", "进入所需行动点数", 0, note="0 表示免费"),
+    FieldSpec("ending_policy", "enum", "结局策略", DEFAULT_ENDING_POLICY,
+              choices=ENDING_POLICIES,
+              note="required=方案应有结局（没有则校验提示）；"
+                   "open=明确声明开放式方案，校验不再提示无结局路径"),
     FieldSpec("section_prompts", "dict", "分节提示词"),
     FieldSpec("section_steps", "dict", "分节步长", None,
               note="缺项沿用该段落类型的默认步进值"),
@@ -210,6 +226,7 @@ def empty_scenario_config() -> dict:
         "protagonist_title": "",
         "text_component": DEFAULT_TEXT_COMPONENT,
         "entry_action_cost": 0,
+        "ending_policy": DEFAULT_ENDING_POLICY,
         "section_prompts": {key: "" for key in TEXT_TYPE_KEYS},
         "evolution_attrs": [
             {"type": "intrusion", "name": "介入度", "display_state": "collapse"},

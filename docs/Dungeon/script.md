@@ -283,7 +283,11 @@ MCI 的坑：`play <alias> repeat` 只有 mpegvideo（mp3 等）认，waveaudio�
 |---|---|
 | `error` | 悬空 goto / overflow_target、无起始章节、空选项列表 |
 | `warning` | 多起始章节、结束章节内的 option / goto、废弃动作与旧版字段、条件键 / 比较符 / 度量非法、转移矩阵行缺失与权重越界、背景图 / 结局图标缺失（需传 `scenario_dir`） |
-| `info` | 无结局路径、旧版顶层字段、未知顶层键、`voice` 未知子键、Velum 等级配了对话语音（不生效） |
+| `info` | 无结局路径（`ending_policy: "open"` 时不再提示）、旧版顶层字段、未知顶层键、`voice` 未知子键、Velum 等级配了对话语音（不生效） |
+
+**`ending_policy`**（顶层，`required` / `open`，默认 `required`）：作者对「本方案要不要结局」的显式声明。
+`required` 时没有结束章节、也没有「结局」触发器会给出 info；声明 `open`（开放式方案）即消除该提示。
+它只影响校验提示，运行时行为仍由结束章节 / 结局触发器决定。
 
 接入点：
 
