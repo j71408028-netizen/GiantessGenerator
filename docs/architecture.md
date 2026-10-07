@@ -182,7 +182,7 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 
 | 命令 | 用途 | 注意 |
 |---|---|---|
-| `python tests/run_checks.py` | **离线 13 项，提交前必跑** | 纯静态，不需要显示器 |
+| `python tests/run_checks.py` | **离线 15 项，提交前必跑** | 纯静态，不需要显示器 |
 | `python tests/run_checks.py --smoke` | 追加 GUI 冒烟（3 个） | **两个 GUI 自检不可并发** |
 | `python tests/smoke_mini.py` | 挂件全链路（75 项）+ 真实副本窗口 | 需显示器 |
 | `python tests/smoke_switch.py` | 界面热切换 5 轮 | 改切换 / 收尾逻辑后必跑；当前 50/50 |

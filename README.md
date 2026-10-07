@@ -31,7 +31,7 @@
 |---|---|---|
 | Windows 10/11 | ✅ 受支持 | 打包发行（`build/windows/build_windows.ps1`），系统自带 WebView2 支撑内置小游戏 |
 | macOS 12+ | ✅ 受支持 | 打包发行（`build/macos/build_macos.sh`） |
-| Linux · X11 会话 | ✅ 受支持 | 见下方「Linux（X11 / XWayland）」；Linux 打包脚本尚在补位 |
+| Linux · X11 会话 | ✅ 受支持 | 打包发行（`build/linux/build_linux.sh`，onedir + tar.gz，带打包自检）；见下方「Linux（X11 / XWayland）」 |
 | Linux · Wayland + XWayland | ⚠️ 可用 | 副本窗口经 XWayland 显示；窗口置顶依赖窗口管理器的 EWMH 支持 |
 | Linux · 纯 Wayland（无 XWayland） | ❌ 不支持 | 副本窗口（GLFW）无法创建 |
 
@@ -65,7 +65,7 @@ python main.py
 ### Linux（X11 / XWayland）
 
 ```bash
-sudo apt install python3-tk fontconfig        # Tk 图形组件与字体；发行版名不同时按包管理器替换
+sudo apt install python3-tk fontconfig fonts-noto-cjk   # Tk 图形组件、字体查询与中文字体；发行版名不同时按包管理器替换
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -75,16 +75,20 @@ python main.py
 ```
 
 ```bash
-# 离线自检（不需要显示器，13 项）
+# 离线自检（不需要显示器，15 项）
 .venv/bin/python tests/run_checks.py
 # GUI 冒烟（需要显示器或 xvfb）
 .venv/bin/python tests/smoke_switch.py
+
+# 打包（PyInstaller onedir → dist/GiantessGenerator + .tar.gz 目录包）
+bash build/linux/build_linux.sh
+# 打包 + 打包自检：在打包态里启动发布包、引导数据目录，并真开副本窗口跑五个场景
+bash build/linux/build_linux.sh --self-check
 ```
 
 Wayland 原生会话不在支持范围内：请在 **XWayland**（`XDG_SESSION_TYPE=wayland` 时的默认行为）下运行；
 纯 Wayland 合成器（如 sway 的纯 Wayland 后端）下副本窗口无法创建。X11 会话可直接使用。
-Linux 侧的兼容细节、限制与实测记录见 [docs/linux.md](docs/linux.md) 与
-[docs/linux_verification_log.md](docs/linux_verification_log.md)。
+Linux 侧的兼容细节、限制与实测记录见 [docs/linux.md](docs/linux.md)（含兼容计划与试跑检查记录附录）。
 
 ### 两套界面：专业模式与ME模式
 
@@ -162,7 +166,7 @@ data/
 └── worlds/         # 世界包（<world_id>/）；激活世界包时创建，可携带若干资源包和静态表并一键激活
 ```
 
-全部数据保存在本机；设置有备份 / 还原能力，程序自检也会先备份再还原。打包版的数据目录**不在安装位置**：Windows 为 `%LOCALAPPDATA%\GiantessGenerator\data`，macOS 为 `~/Library/Application Support/GiantessGenerator/data`。
+全部数据保存在本机；设置有备份 / 还原能力，程序自检也会先备份再还原。打包版的数据目录**不在安装位置**：Windows 为 `%LOCALAPPDATA%\GiantessGenerator\data`，macOS 为 `~/Library/Application Support/GiantessGenerator/data`，Linux 为 `$XDG_DATA_HOME/GiantessGenerator/data`（默认 `~/.local/share/GiantessGenerator/data`）。
 
 ---
 
@@ -199,7 +203,7 @@ data/
 - **`scripts/` 是开发者一次性工具区**（不入自检门禁）：真窗口自动驾驶
   （`dungeon_autopilot.py`）、无头模拟（`escape_sim.py`）与数据迁移脚本。要长期
   维护的回归请写成 `tests/` 脚本。
-- **`build/` 里只有 `windows/` 与 `macos/` 入库**：暂不支持单独打包某个启动模式。
+- **`build/` 里只有 `windows/`、`macos/` 与 `linux/` 入库**：暂不支持单独打包某个启动模式。
 - **提交信息用约定式提交**（2026-10-06 起）：`<type>(<scope>): <subject>`，`type`
   用英文小写（`feat` / `fix` / `refactor` / `docs` / `test` / `chore` / `build` …），
   `scope` 写子系统，正文用中文；类型表与示例见
@@ -224,9 +228,7 @@ data/
 
 **平台支持**
 
-- [Linux 支持说明](docs/linux.md)：X11/XWayland 支持范围、XInitThreads 引导、窗口置顶（EWMH）与降级、缺依赖表现、压测与已知限制
-- [Linux 试跑检查记录](docs/linux_verification_log.md)：逐项实测与修复证据链
-- [Linux 兼容计划](docs/linux_compat_plan.md)：三阶段推进计划、验收标准与风险登记
+- [Linux 支持说明](docs/linux.md)：X11/XWayland 支持范围、XInitThreads 引导、窗口置顶（EWMH）与降级、缺依赖表现、打包与已知限制——Linux 相关文档的单一归档（兼容计划与试跑检查记录见其附录 A / B）
 
 ## 免责声明
 

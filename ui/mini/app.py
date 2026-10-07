@@ -852,7 +852,7 @@ class MiniApp:
     def set_topmost(self, enabled: bool):
         """切换置顶。桌面环境写不进置顶时**如实处理并提示**，不假装成功。
 
-        这是 Linux/X11 置顶收口（docs/linux_compat_plan.md §2.4）的产品侧：GNOME
+        这是 Linux/X11 置顶收口（docs/linux.md 附录A §2.4）的产品侧：GNOME
         下 Tk 的 ``-topmost`` 会静默失效，用户需要一个明确的说法，而不是一个看起来
         开着、实际没生效的开关。
         """

@@ -130,7 +130,10 @@ python scripts/dungeon_autopilot.py --in-process                 # 当前进程�
 4. 断言、退出码、退出方式（自行退出 / 超时未出结论 / 结论已出但退出挂死）**分开汇报**，默认只有
    断言影响成败；`--require-clean-exit` 把「未自行干净退出」也判为失败（退出路径的环境复测用，
    见 §6 与 [宿主边界](window_host.md) §6）。
-5. CI：GUI 冒烟层单独一个 job（需要显示器），不要并进无 GUI 的门禁。
+5. CI：GUI 冒烟层单独一个 job（需要显示器），不要并进无 GUI 的门禁。已落地为
+   `.github/workflows/gui-smoke.yml`（每晚 + 手动：`xvfb-run` + 软件 GL 跑
+   `dungeon_autopilot --scene all --isolate`、`smoke_mini`、`smoke_switch`，并带一个
+   Linux 打包自检 job）。
 
 ### 4b. 长压测标准姿势：`--isolate` + 外层 watchdog
 
@@ -183,7 +186,7 @@ Linux 侧配合 `GIANTESS_X11=0` 做 XInitThreads 有效/无效对比（见
 3. **压测**：`--scene session-close --repeat N --isolate` 连续开关窗口 N 次，抓竞态与关闭路径的偶发问题——**已落地标准姿势**（§4b，含逐轮退出码统计与 XInitThreads 对照组）。
 4. **退出挂死**：已收敛为「长时会话累积的环境现象」，保留 `EXIT_GRACE` 兜底即可；真遇到先重启系统。
 5. **换宿主的验证**：想验证「换框架也能跑」，最省事的是写一个 `HostPort` 子类（如 asyncio / Qt 节拍）驱动窗口，`check_dungeon_layering.py` 会保证 window 层不再偷偷拉回 Tk。
-6. **CI**：GUI 冒烟层单独一个 job（需要显示器）。
+6. **CI**：GUI 冒烟层单独一个 job（需要显示器）——见 `.github/workflows/gui-smoke.yml`（每晚 xvfb + 软件 GL）。
 
 ## 7. 仍然需要人工的部分
 

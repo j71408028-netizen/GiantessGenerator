@@ -9,7 +9,7 @@
 装全，Linux 试跑就踩过）：本模块 import 期不再因为缺 networkx 直接抛
 ``ModuleNotFoundError``——那样连"检查依赖"按钮都点不动、只有一句 import 报错。
 改为 :func:`missing_dependencies` 显式报告，对话框内提示安装命令（见
-docs/linux_compat_plan.md §2.3-1）。
+docs/linux.md 附录A §2.3-1）。
 """
 import io
 import os
