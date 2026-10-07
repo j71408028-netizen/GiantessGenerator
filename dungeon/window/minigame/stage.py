@@ -123,7 +123,7 @@ class _PILCanvas:
 
     _UID = 0
 
-    def __init__(self, width, height, bg=None, root=None):
+    def __init__(self, width, height, bg=None, root=None, font_family=""):
         from PIL import Image, ImageDraw
         _PILCanvas._UID += 1
         self._uid = _PILCanvas._UID     # 纹理缓存键（id() 会被对象复用，不可靠）
@@ -131,6 +131,7 @@ class _PILCanvas:
         self._img = Image.new("RGBA", self._size, tuple(bg) if bg else (0, 0, 0, 0))
         self._draw = ImageDraw.Draw(self._img, "RGBA")
         self._root = root            # 相对路径基准（小游戏包目录）
+        self._font_family = font_family or ""   # 与会话同源的字体家族（可空）
         self._version = 0
 
     def _alpha(self, color):
@@ -242,7 +243,7 @@ class _PILCanvas:
         self._draw.line([x0, y0, x1, y1], fill=tuple(color), width=width)
 
     def draw_text(self, text, pos, color, size=18):
-        font = _pil_font(size)
+        font = _pil_font(size, self._font_family)
         self._version += 1
         self._draw.text((pos[0], pos[1]), str(text), font=font, fill=tuple(color))
 
@@ -266,28 +267,33 @@ class _PILCanvas:
 _PIL_FONTS = {}
 
 
-def _pil_font(size):
-    """按字号缓存 PIL 字体（与会话字体同一候选链；找不到回退内置字体）。"""
-    size = max(6, round(size))
-    font = _PIL_FONTS.get(size)
+def _pil_font(size, family=""):
+    """按 (字号, 家族) 缓存 PIL 字体：与会话字体走同一条候选链。
+
+    PIL 能指定集合（.ttc）内的 face 序号，所以用 :func:`resolve_font` 拿到的
+    序号就用（Noto CJK 因此是简中 face，而不是 DPG 只能取到的第 0 个 JP face）；
+    链上一个文件都没有时回退内置位图字体（没有中文字形）。
+    """
+    key = (max(6, round(size)), str(family or ""))
+    font = _PIL_FONTS.get(key)
     if font is not None:
         return font
     from PIL import ImageFont
+    from dungeon.window.fonts import resolve_font
     font = None
-    try:
-        from dungeon.window.fonts import BOLD_FONT_PATHS
-        for path in BOLD_FONT_PATHS:
-            if os.path.exists(path):
-                try:
-                    font = ImageFont.truetype(path, size)
-                    break
-                except Exception:
-                    continue
-    except Exception:
-        font = None
+    for bold in (True, False):
+        entry = resolve_font(family, bold=bold)
+        if not entry:
+            continue
+        path, index = entry
+        try:
+            font = ImageFont.truetype(path, key[0], index=index)
+            break
+        except Exception as exc:
+            process_log.log(f"[MiniGame] 字体加载失败 {path}: {exc}")
     if font is None:
         font = ImageFont.load_default()
-    _PIL_FONTS[size] = font
+    _PIL_FONTS[key] = font
     return font
 
 
@@ -381,7 +387,8 @@ class _StageGameAPI(GameAPI):
                        **kwargs)
 
     def offscreen(self, width, height, bg=None):
-        return _PILCanvas(width, height, bg=bg, root=self._stage._root)
+        return _PILCanvas(width, height, bg=bg, root=self._stage._root,
+                          font_family=self._stage.font_family)
 
     # ---- 输入（handler 维护的状态表；DPG 的 is_key_down /
     #      is_mouse_button_down 在手动渲染下不更新，实测不可用） ----
@@ -456,6 +463,11 @@ class _MiniGameStage:
         self._game = None
         self._play_rect = [0, 0, 0, 0]   # 游戏画面区域（窗口内居中）
         self._api = _StageGameAPI(self)
+
+    @property
+    def font_family(self):
+        """会话窗口的字体家族名（离屏画布与 DPG 文本用同一份设置，可空）。"""
+        return getattr(self._win, "dungeon_font", "") or ""
 
     # ---------------- 生命周期 ----------------
     def _compute_play_rect(self, win_w, win_h):

@@ -85,6 +85,10 @@ class DungeonWindowUI:
         # （经 dungeon_text_font 绑到组件文本项上），dungeon_bold_font 是粗体（可能 None）。
         font_path, bold_path = self._resolve_dungeon_font_files()
         if font_path:
+            # 记进过程日志：Linux 上「中文变豆腐块」多半是这里解析到了没有中文字形的
+            # 兜底字体（见 dungeon/window/fonts.py 的 Linux 说明），留一行便于定位。
+            process_log.log(f"[Dungeon] 副本字体 {font_path}"
+                            + (f"（粗体 {bold_path}）" if bold_path else ""))
             with dpg.font_registry():
                 default_font = dpg.add_font(font_path, round(UI_FONT_SIZE * self._dpi_scale))
                 text_font = dpg.add_font(font_path, round(TEXT_FONT_SIZE * self._dpi_scale))

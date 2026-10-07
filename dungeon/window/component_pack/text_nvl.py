@@ -1,14 +1,12 @@
 """全屏 NVL（text_nvl）：全屏半透明覆盖层上堆叠全部历史（阅读模式）"""
 
-import os
-
 import dearpygui.dearpygui as dpg
 
 from dungeon import process_log
 
 from .base import (_DEFAULT_LABEL_COLOR, _DEFAULT_TEXT_COLOR,
                    _HIGHLIGHT_COLOR, _TOOLBAR_MARGIN, _TextDisplayBase, _dim)
-from dungeon.window.fonts import SERIF_FONT_PATHS, TEXT_FONT_SIZE
+from dungeon.window.fonts import TEXT_FONT_SIZE, resolve_serif_font
 
 
 class NvlTextComponent(_TextDisplayBase):
@@ -53,18 +51,21 @@ class NvlTextComponent(_TextDisplayBase):
         """衬线字体只绑到 NVL 文本项，不动全局字体（找不到候选时返回 None）。
 
         ``add_font`` 必须建在字体注册表容器内（与 ``base._create_bold_font`` 同一
-        配方）：否则 DPG 抛错被吞掉，衬线选项静默失效。
+        配方）：否则 DPG 抛错被吞掉，衬线选项静默失效。候选链与解析规则在
+        ``dungeon/window/fonts.py``（窗口层唯一真相源）。
         """
         if not bool((self.params or {}).get("use_serif", True)):
             return None
+        entry = resolve_serif_font()
+        if not entry:
+            return None
+        path = entry[0]
         s = ctx.component_viewport()[0]
-        for path in SERIF_FONT_PATHS:
-            if os.path.exists(path):
-                try:
-                    with dpg.font_registry():
-                        return dpg.add_font(path, round(TEXT_FONT_SIZE * s))
-                except Exception as exc:
-                    process_log.log(f"[Components] 衬线字体加载失败 {path}: {exc}")
+        try:
+            with dpg.font_registry():
+                return dpg.add_font(path, round(TEXT_FONT_SIZE * s))
+        except Exception as exc:
+            process_log.log(f"[Components] 衬线字体加载失败 {path}: {exc}")
         return None
 
     def build(self, ctx):
