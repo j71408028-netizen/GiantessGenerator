@@ -132,6 +132,9 @@ class DungeonWindowBase:
         self._session_errors = []
         self._ending_thread = None
         self._closing = False
+        # 关闭请求落地标记：_request_close 只置位，帧循环在本轮回调批结束、
+        # 渲染前的帧边界上才真正 stop_dearpygui（见 _request_close / _run_frame_loop）
+        self._stop_requested = False
         self._text_update_pending = False
         self._text_item_tags = []
         # 帧时钟（L3）：时机在这里，重活在外面。取代原先的模块级单例 _dispatch：
@@ -320,7 +323,8 @@ class DungeonWindowBase:
             self._finish_session()
 
     def _run_frame_loop(self):
-        """手动驱动 DPG 渲染：泵宿主 → tick 帧时钟 → 检测关闭 → 渲染一帧 → 让位。
+        """手动驱动 DPG 渲染：泵宿主 → tick 帧时钟 → 执行回调批 → 落实关闭请求 →
+        检测关闭 → 渲染一帧 → 让位。
 
         每帧的顺序很关键：先 tick（跑到期的帧任务，再执行后台线程投递的 UI 更新），
         再判定是否已停止，最后渲染；反过来会让"关闭前最后一次更新"永远执行不到。
@@ -335,6 +339,15 @@ class DungeonWindowBase:
             # 控件/按键回调——DPG 默认把回调派发到工作线程，与「只有帧循环
             # 线程允许直接调用 DPG」的约定冲突；收进帧循环后回调与渲染同线程。
             dpg.run_callbacks(dpg.get_callback_queue())
+            # 关闭请求统一在这里落实（帧边界）：点击/按键回调就发生在上一行
+            # run_callbacks 的执行途中，若在 DPG 回调执行中途直接 stop_dearpygui，
+            # 上下文收尾不干净——实测「入口页返回」后进程会在 _dearpygui.pyd 内
+            # 崩溃（0xC0000005/0xC000041D）或视口僵尸残留。与 2026-09-13 用原生
+            # WM_CLOSE 延迟停止的修复同型：停止必须落在 DPG 回调批之外。
+            if self._stop_requested:
+                self._stop_requested = False
+                if dpg.is_dearpygui_running():
+                    dpg.stop_dearpygui()
             if not dpg.is_dearpygui_running():
                 # 用户点 X 或程序 stop：走与退出回调等价的清理
                 self._on_close()
@@ -397,6 +410,22 @@ class DungeonWindowBase:
         # 入口阶段点“返回”直接关闭窗口，不视为副本会话结束，跳过退出处理
         if self._closing and not getattr(self, "_exit_from_entry", False):
             self._handle_exit()
+
+        # destroy_context() 不会带走视口的原生窗口（DPG 2.3.1，见
+        # dpg_state.discard_viewport_windows）：本程序收尾后还要继续跑 Tk 主循环，
+        # 不显式销毁的话，那个不再渲染/不再响应回调的副本窗口就留在屏幕上
+        # ——使用者看到的就是「点了返回后卡死」，且它右上角的关闭键被点时会投出
+        # 一条无人清理的 WM_QUIT，把 Tk 计时器/模态框一起停摆。
+        # **必须赶在 destroy_context() 之前**：那之后 GLFW 的窗口过程已被释放，
+        # 再碰这个原生窗口会直接掀掉进程（0xC0000005）。临时标题与真实标题都试
+        # （窗口可能停在标题修正前）。
+        stale = dpg_state.discard_viewport_windows(self._temp_title, self._real_title)
+        if stale:
+            process_log.log(f"[Dungeon] 已清掉 {stale} 个副本视口窗口")
+        # 兜底再清一次残留退出消息：实测这条「程序内销毁视口窗口」的路径**不会**
+        # 留下 WM_QUIT（与用户点 X 不同，2026-10-07），但万一将来 GLFW/DPG 版本
+        # 改了行为，漏清就会重演 §5-C12 的「Tk 计时器/模态框全停摆」。
+        self._discard_pending_quit()
 
         try:
             dpg.destroy_context()
@@ -654,16 +683,18 @@ class DungeonWindowBase:
     def _request_close(self):
         """请求退出帧循环（可在任意回调内安全调用）。
 
-        L0 之后渲染由 :meth:`_run_frame_loop` 手动驱动，一帧只在两帧之间
-        的间隙被调用，因此直接 ``stop_dearpygui()`` 不会再打断渲染帧——
-        帧循环下一轮检测到 ``is_dearpygui_running() == False`` 就走正常收尾。
-        旧的 ``FindWindowW(标题) + PostMessageW(WM_CLOSE)`` 是 Windows 专有
-        hack（靠临时/真实两套窗口标题找句柄），已随手动渲染一并删除。
+        只置位 ``_stop_requested``，由帧循环在本轮回调批（run_callbacks）执行完、
+        渲染前的帧边界上统一 ``stop_dearpygui()``。
+
+        **不要**在这里直接 stop：点击/按键回调经 run_callbacks 在 DPG 的 C 层
+        执行途中，此时调用 stop 会让上下文收尾不干净——2026-09-13 曾因此
+        「窗口关闭后进程在 Tk 主循环中于 _dearpygui.pyd 内崩溃」，当时改投
+        WM_CLOSE 把停止挪进消息轮询；手动渲染架构（L0）曾以为「两帧间隙直接
+        stop 即可安全」，2026-10-07 实测从 DPG 回调内 stop 同样会破坏收尾
+        （真实应用「入口页返回」后延迟崩溃 / 视口僵尸残留），于是把停止统一
+        挪回帧边界。见 window.md §2.2 / §5-C1。
         """
-        try:
-            dpg.stop_dearpygui()
-        except Exception:
-            pass
+        self._stop_requested = True
 
     def request_close(self):
         """公开版 :meth:`_request_close`：宿主整体退出时停掉本窗口。

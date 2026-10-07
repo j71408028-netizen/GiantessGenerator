@@ -275,6 +275,39 @@ def _pending_quit() -> int:
     return 1 if found else 0
 
 
+#: 会话视口在 Windows 上用的临时标题（``base._temp_title``），按它找残留窗口
+_VP_TITLE = "DungeonSession"
+
+
+def _leftover_viewport_windows() -> int:
+    """本进程里还活着的副本视口原生窗口数（仅 Windows；非 Windows 恒为 0）。
+
+    守住「会话收尾必须把视口原生窗口带走」：DPG 2.3.1 的 ``destroy_context()``
+    不销毁该窗口（见 ``dungeon.window.dpg_state.discard_viewport_windows``），
+    而本程序收尾后仍继续跑 Tk——不显式销毁就会在屏幕上留下一个不再响应的副本
+    窗口（使用者看到的就是「点了返回后卡死」），且每跑一局累加一个。
+    """
+    if not sys.platform.startswith("win"):
+        return 0
+    import ctypes
+    import os
+    from ctypes import wintypes
+    user32 = ctypes.windll.user32
+    pid = os.getpid()
+    count = 0
+    prev = 0
+    for _ in range(32):
+        hwnd = user32.FindWindowExW(None, prev, None, _VP_TITLE)
+        if not hwnd:
+            break
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if owner.value == pid:
+            count += 1
+        prev = hwnd
+    return count
+
+
 class AutopilotWindow(DungeonSessionWindow):
     """按脚本自动操作的会话窗口。
 
@@ -505,6 +538,7 @@ def _written_files():
 # ---------------------------------------------------------------------------
 def scene_session_close():
     """挑战模式直进会话 → 步进 → 关闭：应落「未完成」回放与报告。"""
+    vp_before = _leftover_viewport_windows()
     win, result = _make_window([("click", 4), ("close", None)], explore=False)
     check("会话：宿主为脚本宿主", win.host is _HOST)
     check("会话：窗口已关闭", win._closing is True)
@@ -532,6 +566,9 @@ def scene_session_close():
     check("会话：像素工作者已收工", win._background.worker_alive is False)
     # 章节背景音乐：会话收尾必须静音且线程不再挂着（作者没配音乐也要成立）
     check("会话：背景音乐已收工", win._bgm.worker_alive is False)
+    # 同 entry-cancel：收尾必须把视口原生窗口带走，否则留下不再响应的副本窗口
+    vp_after = _leftover_viewport_windows()
+    check("会话：未留下副本视口原生窗口", vp_after <= vp_before, (vp_before, vp_after))
 
 
 def _write_silent_wav(path, seconds=0.2):
@@ -902,8 +939,9 @@ def scene_callback_thread():
 
 
 def scene_entry_cancel():
-    """入口页点「返回」：入口退出，不应落任何盘。"""
+    """入口页点「返回」：入口退出，不应落任何盘，也不该留下视口原生窗口。"""
     files_before = _written_files()
+    vp_before = _leftover_viewport_windows()
     win, result = _make_window([("cancel", None)], explore=True)
     check("入口返回：窗口已关闭", win._closing is True)
     check("入口返回：标记为入口退出", win._exit_from_entry is True)
@@ -914,6 +952,11 @@ def scene_entry_cancel():
           result.reason == "entry-cancelled" and result.cancelled, result)
     check("入口返回：帧时钟已停止", win._frame.running is False)
     check("入口返回：像素工作者已收工", win._background.worker_alive is False)
+    # DPG 2.3.1 的 destroy_context() 不销毁视口原生窗口；收尾必须显式清掉，
+    # 否则屏幕上会留下一个不再响应的副本窗口（2026-10-07「返回后卡死」根因）
+    vp_after = _leftover_viewport_windows()
+    check("入口返回：未留下副本视口原生窗口", vp_after <= vp_before,
+          (vp_before, vp_after))
 
 
 def scene_entry_start():

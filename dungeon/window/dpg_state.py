@@ -147,6 +147,63 @@ def _log_x11(message: str, error: bool = False) -> None:
             print("[X11] " + message)
 
 
+#: ``discard_viewport_windows`` 一次最多清理的原生窗口数（正常只会有一个）
+_MAX_VIEWPORT_WINDOWS = 16
+
+
+def discard_viewport_windows(*titles) -> int:
+    """销毁视口对应的原生窗口（仅 Windows，返回销毁数）。
+
+    **为什么需要它（2026-10-07 最小复现）**：DPG 2.3.1 在手动渲染流程里
+    ``destroy_context()`` **不会销毁视口对应的 GLFW 原生窗口**——窗口仍然存在、
+    仍然可见；随后的 ``create_context()``（``park_context``）也不会带走它。
+
+    典型 DPG 程序里这一点察觉不到：``destroy_context()`` 之后进程随即退出，
+    残留窗口由操作系统回收。但本程序在副本结束后**继续跑 Tk 主循环**，于是那个
+    不再渲染、也不再响应回调的副本窗口就留在屏幕上——使用者看到的就是
+    「点了返回后卡死」（DPG 窗口还能被右上角关闭键"表面关闭"）。更糟的是：用户
+    去点那个残留窗口的关闭键时，GLFW 会顺势往本线程队列投一条 ``WM_QUIT``，
+    而此刻已无人清理它（``_finish_session`` 早跑完了 ``discard_pending_quit``），
+    Windows 便不再合成 ``WM_TIMER``——Tk 的计时器与模态框一起停摆，主窗口
+    「卡死」（§5-C12 同型）。所以必须在收尾时把它清掉。
+
+    **必须在 ``destroy_context()`` 之前调用**：``destroy_context()`` 会把 GLFW
+    连同窗口过程（WndProc）一起收掉，此后任何触碰该原生窗口的操作
+    （``DestroyWindow`` / ``EnumWindows``）都会在已释放的 GLFW 数据上取址，
+    实测直接以 0xC0000005 掀掉进程（见 ``.workbuddy/memory/2026-10-07.md``）。
+    趁 GLFW 仍有效时销毁，与「用户点视口关闭键」走的是同一条受支持的销毁路径，
+    随后的 ``destroy_context()`` 对它就是空操作。
+
+    参数是判断依据的窗口标题（``base._temp_title`` / ``_real_title``）。按标题
+    连续 ``FindWindowW`` 直到找不到为止，最多 :data:`_MAX_VIEWPORT_WINDOWS` 个；
+    只销毁**本进程**的窗口（先核对 pid，避免误伤同名窗口）。
+    """
+    if not sys.platform.startswith("win"):
+        return 0
+    import ctypes
+    import os
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    pid = os.getpid()
+    removed = 0
+    for title in titles:
+        if not title:
+            continue
+        for _ in range(_MAX_VIEWPORT_WINDOWS):
+            hwnd = user32.FindWindowW(None, str(title))
+            if not hwnd:
+                break
+            owner = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+            if owner.value != pid:
+                break  # 同名但不是本进程的窗口：不再继续找，避免误伤
+            if not user32.DestroyWindow(hwnd):
+                break
+            removed += 1
+    return removed
+
+
 def is_alive() -> bool:
     """当前是否存在已创建的 DPG 上下文（含保活视口）。"""
     return _STATE["alive"]

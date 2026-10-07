@@ -13,8 +13,12 @@
 
 **B. DPG 生命周期调用（按「生命周期属主」文件白名单）**
 
-- ``dpg.stop_dearpygui`` 仅 ``base.py``（``_request_close``）与 ``dpg_state.py``
+- ``dpg.stop_dearpygui`` 仅 ``base.py``（帧循环边界）与 ``dpg_state.py``
   （保活视口拆装）允许——业务代码一律走 ``base._request_close()``（C1）。
+  且在 ``base.py`` 内还有位置约束：``_request_close`` **只允许置位**
+  ``_stop_requested``，真正的 ``stop_dearpygui()`` 只能出现在
+  ``_run_frame_loop`` 的回调批结束之后（在 DPG 回调执行中途 stop 会让上下文
+  收尾不干净：关闭后延迟崩溃 / 视口僵尸残留，2026-10-07 实测）。
 - ``dpg.start_dearpygui`` 全层禁用（L0：手动渲染帧循环，``start_dearpygui``
   会把宿主主循环堵死）。
 - ``dpg.set_exit_callback`` 全层禁用（C6：手动渲染下它只在 ``destroy_context()``
@@ -101,6 +105,45 @@ def check_module(path: Path):
     return violations
 
 
+def _function_stop_call_lines(tree: ast.Module):
+    """base.py 内 ``dpg.stop_dearpygui(...)`` 调用所在的函数名集合。"""
+    found = {}
+
+    class _Visitor(ast.NodeVisitor):
+        def __init__(self):
+            self.stack = []
+
+        def visit_FunctionDef(self, node):
+            self.stack.append(node.name)
+            self.generic_visit(node)
+            self.stack.pop()
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_Call(self, node):
+            name = _dpg_call_name(node)
+            if name == "stop_dearpygui" and self.stack:
+                fn = self.stack[-1]
+                found.setdefault(fn, node.lineno)
+            self.generic_visit(node)
+
+    _Visitor().visit(tree)
+    return found
+
+
+def check_base_stop_placement():
+    """C1 位置约束：``dpg.stop_dearpygui`` 只能出现在 ``_run_frame_loop`` 内。
+
+    ``_request_close`` 必须只置位 ``_stop_requested``，由帧循环在回调批结束后的
+    帧边界统一停止；在 DPG 回调执行中途 stop 会让上下文收尾不干净。
+    """
+    path = WINDOW_DIR / "base.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    found = _function_stop_call_lines(tree)
+    bad = {fn: ln for fn, ln in found.items() if fn != "_run_frame_loop"}
+    return bad
+
+
 def main() -> int:
     total = 0
     violations = []
@@ -110,13 +153,23 @@ def main() -> int:
             violations.append((path.relative_to(ROOT).as_posix(), lineno, what, why))
 
     print(f"[check_dungeon_window_contract] 已检查 dungeon/window/（含子包）{total} 个模块")
+    failures = 0
+    bad_stop = check_base_stop_placement()
+    if bad_stop:
+        failures += 1
+        for fn, ln in sorted(bad_stop.items(), key=lambda kv: kv[1]):
+            print(f"  FAIL dungeon/window/base.py:{ln}  dpg.stop_dearpygui 于 {fn}()"
+                  " — 停止只能落在 _run_frame_loop 的帧边界；_request_close 只置位"
+                  " _stop_requested（C1，2026-10-07）")
     if violations:
+        failures += 1
         for file, lineno, what, why in violations:
             print(f"  FAIL {file}:{lineno}  {what} — {why}")
-        print(f"[check_dungeon_window_contract] FAILED {len(violations)} 处违约调用")
+    if failures:
+        print(f"[check_dungeon_window_contract] FAILED：{failures} 类违约")
         return 1
     print("[check_dungeon_window_contract] PASSED：无 threading.Timer / 无超时 join，"
-          "DPG 生命周期调用均在属主文件内")
+          "DPG 生命周期调用均在属主文件内，stop_dearpygui 落在帧循环边界")
     return 0
 
 

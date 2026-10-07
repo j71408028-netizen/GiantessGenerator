@@ -112,24 +112,44 @@ class TkHost(HostPort):
                 scale, main_cw, main_ch)
 
     # ---------------- 宿主窗口显隐 ----------------
-    def hide_window(self):
+    def _window_widget(self):
+        """显隐操作的目标：宿主控件的**顶层窗口**。
+
+        ``self.widget`` 通常本身就是顶层（挂件版与挑战模式直接传根窗口，
+        ``hasattr(..., "withdraw")`` 为真），此时原样返回；但专业版探索页传进来
+        的是 ``ExplorationPanel``（``ctk.CTkFrame``）——**控件没有窗口级命令**
+        （``withdraw`` / ``deiconify`` 都是 ``Wm`` 的方法，只挂在 ``Tk`` /
+        ``Toplevel`` 上），拿控件显隐会**静默失效**：主窗口在副本运行期间一直
+        占屏，与 ``_start_session``「藏起宿主，避免两个窗口同时占屏」的设计相悖。
+        控件不具备窗口级命令时退回它所在的顶层窗口（``winfo_toplevel()``）。
+        """
         widget = self.widget
-        if widget is not None and hasattr(widget, "withdraw"):
-            try:
-                widget.withdraw()
-            except Exception:
-                pass
+        if widget is None:
+            return None
+        if hasattr(widget, "withdraw"):
+            return widget
+        root = self._root()
+        return root if hasattr(root, "withdraw") else None
+
+    def hide_window(self):
+        window = self._window_widget()
+        if window is None:
+            return
+        try:
+            window.withdraw()
+        except Exception:
+            pass
 
     def show_window(self):
         self._install_x11_error_guard()
-        widget = self.widget
-        if widget is None:
+        window = self._window_widget()
+        if window is None:
             return
         try:
-            if hasattr(widget, "deiconify"):
-                widget.deiconify()
-            if hasattr(widget, "lift"):
-                widget.lift()
+            if hasattr(window, "deiconify"):
+                window.deiconify()
+            if hasattr(window, "lift"):
+                window.lift()
         except Exception:
             pass
 

@@ -50,7 +50,7 @@
 | 性质 | 说明 |
 |---|---|
 | 宿主不冻结 | 帧循环每帧经端口 `pump_events()` 泵一次宿主事件 |
-| 关闭不依赖平台 | 程序化关闭只需 `dpg.stop_dearpygui()`（经 `_request_close()`），没有 WM_CLOSE 之类的平台 hack |
+| 关闭不依赖平台 | 程序化关闭只需 `dpg.stop_dearpygui()`（经 `_request_close()` 置位，帧循环在回调批结束后的帧边界统一落实） |
 | 时间源唯一 | `FrameScheduler`（`self._frame`）是 window 层唯一的时间源；计时类逻辑用帧任务，不开线程 |
 
 ## 3. 换宿主：能
@@ -67,7 +67,7 @@
 
 | 宿主 | 节拍源 | 需要实现的端口 |
 |---|---|---|
-| Tk（现状） | `while` + `root.update()` + `sleep(1/60)` | `parent.withdraw/deiconify` + `winfo_*` + ctypes DPI + `ui.common.dialogs` |
+| Tk（现状） | `while` + `root.update()` + `sleep(1/60)` | 宿主窗口显隐（`TkHost._window_widget()`：控件本身若没有窗口级命令，退回 `winfo_toplevel()`——专业模式传进来的 `ExplorationPanel` 是 `CTkFrame`，`withdraw`/`deiconify` 是 `Wm` 的方法，直接拿控件显隐会**静默失效**）+ `winfo_*` + ctypes DPI + `ui.common.dialogs` |
 | Qt | `while` + `QApplication.processEvents()`，或 `QTimer(16)` | `QWidget.hide/show` + `devicePixelRatioF()` + `QMessageBox` / `QFileDialog` |
 | 无框架脚本 / CI | `while` + `sleep` | 屏幕尺寸 + no-op + print |
 | Web / 其它进程 | 做不到（DPG 必须在本进程有 GLFW 窗口） | — |

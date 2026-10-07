@@ -18,7 +18,7 @@
 | §2 | 生命周期（构造 / 运行 / 帧循环 / 阶段 / 退出 / 收尾） |
 | §3 | 一步会话数据流 |
 | §4 | 线程与帧时钟 |
-| §5 | 约束清单（C1–C13） |
+| §5 | 约束清单（C1–C14） |
 | §6 | 自检命令 |
 
 ---
@@ -94,6 +94,7 @@ run() → SessionResult
 │  └─ _run_frame_loop()    # ← 手动渲染
 └─ _finish_session()    # _frame.stop() + 背景工作者 shutdown → 恢复主窗口 → join 结局线程 0.5s
    ├─ _closing 且非入口退出 → _handle_exit()   # 结局已触发时内部还会再 join 最长 15s（persistence._handle_exit）
+   ├─ dpg_state.discard_viewport_windows()   # 显式销毁视口原生窗口（**必须在 destroy_context 之前**，§5-C14）
    ├─ destroy_context() → _unregister_with_parent()
    └─ dpg_state.park_context()   # 补一个隐藏保活视口，Tk 根窗口才拿得回 destroy/withdraw（§5-C2）
 ```
@@ -103,11 +104,16 @@ run() → SessionResult
 
 ### 2.2 帧循环
 
-每帧顺序固定：`_pump_host_events()` → `self._frame.tick()` → `dpg.run_callbacks(dpg.get_callback_queue())` → 判 `dpg.is_dearpygui_running()` → `render_dearpygui_frame()`（+ `time.sleep(FRAME_INTERVAL)`，默认 1/60s）。
+每帧顺序固定：`_pump_host_events()` → `self._frame.tick()` → `dpg.run_callbacks(dpg.get_callback_queue())` → **落实关闭请求**（`_stop_requested` 置位时在帧边界 `stop_dearpygui()`）→ 判 `dpg.is_dearpygui_running()` → `render_dearpygui_frame()`（+ `time.sleep(FRAME_INTERVAL)`，默认 1/60s）。
 
 - 先 tick 后判关闭：保证「关闭前最后一次 UI 更新」不丢
 - 回调队列必须在渲染前于**本线程**执行完（DPG 默认把回调派发到工作线程，见 §4）；
-  回调里 `_request_close()` 停掉 DPG 后，同一轮的运行检查随即看到 not running，语义与回调在工作线程时一致
+  回调与渲染同线程，上面的约定才真正成立
+- **关闭请求在回调批结束后的帧边界才落实**（2026-10-07）：点击/按键回调就发生在
+  `run_callbacks` 的执行途中，在其中途直接 `stop_dearpygui()` 会让上下文收尾不干净——
+  实测「入口页返回」后进程在 `_dearpygui.pyd` 内延迟崩溃（0xC0000005/0xC000041D，
+  与 2026-09-13 修复过的旧症状同型）或视口僵尸残留（标题停在临时标题、收尾半途而废）。
+  因此 `_request_close()` 只置位，帧循环在本轮回调批执行完、渲染前统一停止
 - 判关闭放在渲染前：`stop_dearpygui()` 后不再白渲染一帧
 - 判定关闭**只能**用 `dpg.is_dearpygui_running()`（`is_viewport_ok()` 关闭后仍返回 True）
 
@@ -137,7 +143,7 @@ run() → SessionResult
 
 | 入口 | 路径 | 说明 |
 |---|---|---|
-| 入口页「返回」 | `_on_entry_cancel` → `_close_loop()` → `_request_close()` → `dpg.stop_dearpygui()` | 帧循环下一轮看到 not running，走 `_on_close` 清理 |
+| 入口页「返回」 | `_on_entry_cancel` → `_close_loop()` → `_request_close()` 置位 → 帧循环回调批结束后 `stop_dearpygui()` | 帧循环本轮回看到 not running，走 `_on_close` 清理 |
 | 会话中点窗口 X | DPG 原生关闭 | 同样由帧循环判定（**不再依赖 exit callback**，见 §5-C6） |
 | 回放播完 | `_replay_next_step` → `_request_close()` | 同「返回」 |
 | 会话未触发结局就退出 | `_handle_exit()` → `_finalize(completed=False)` | 落盘「未完成」回放与报告；**不**写 `endings.json`、不记挑战达成 |
@@ -246,7 +252,7 @@ run() → SessionResult
 
 | 编号 | 约束 | 原因 / 出处 | 验证 |
 |---|---|---|---|
-| **C1** | 任何「程序主动关闭副本窗口」都必须走 `base._request_close()`，业务代码不直接 `dpg.stop_dearpygui()` | 手动渲染下一次回调与下一帧之间隔着帧循环，`_request_close()` 直接 `stop_dearpygui()` 即可安全收尾；`FindWindowW` + `WM_CLOSE` 平台 hack 已整体删除 | `python tests/check_dungeon_window_contract.py`（属主白名单）；`python scripts/dungeon_autopilot.py --scene session-close --isolate`（含 `--repeat 2`）；真应用手测「进入副本 → 返回 → 再进入副本」 |
+| **C1** | 任何「程序主动关闭副本窗口」都必须走 `base._request_close()`，业务代码不直接 `dpg.stop_dearpygui()`；且停止动作由帧循环在**回调批结束后的帧边界**统一落实（`_request_close` 只置位） | 在 DPG 回调（`run_callbacks` 执行途中）直接 stop 会让上下文收尾不干净：2026-09-13 表现为「窗口关闭后进程在 Tk 主循环中于 _dearpygui.pyd 内崩溃」，当时改投 WM_CLOSE 延迟停止；2026-10-07 实测手动渲染架构下从入口页「返回」的回调内 stop 同样复现（关闭后延迟崩溃 0xC0000005/0xC000041D，或视口僵尸残留），于是把停止挪回帧边界，`_request_close` 只置 `_stop_requested` | `python tests/check_dungeon_window_contract.py`（属主白名单）；`python scripts/dungeon_autopilot.py --scene session-close --isolate`（含 `--repeat 2`）；真应用手测「进入副本 → 返回 → 再进入副本」 |
 | **C2** | GLFW 被终止（`destroy_context()` / `unpark_context()`）**之前** Tk 照常可用——收尾顺序（恢复主窗口 → 弹框）正是刻意把 Tk 交互放在 `destroy_context()` **之前**；终止**之后**，当时存在的那个 Tk 根窗口**不能**再 `destroy()` / `withdraw()`（0xC0000005，无 traceback），`quit()` / `geometry()` / `attributes('-alpha')` / `winfo_*()` / `update()` 仍正常（完整矩阵见 `dungeon/window/dpg_state.py` 模块说明）；且**之后新建**的 `CTk` 根首次 `deiconify()` 同样硬崩——所以 `destroy_context()` 之后必须立刻补一个隐藏的保活视口（`dpg_state.park_context()`），下一局开头（宿主隐藏之后）由 `dpg_state.unpark_context()` 拆掉 | 硬崩的是「GLFW 终止**后**」的窗口级命令，不是「碰 Tk」本身（2026-09-28 复核矩阵，取代早先「销毁前碰 Tk 即崩」的过宽结论）。保活视口把进程留在「Tk 根窗口健康」状态，热切换（销毁旧根 → 建另一套根）才走得通；它从不 `show_viewport()`，对使用者完全不可见。顺序固定为：恢复主窗口 → join → `_handle_exit()` 弹框 → `destroy_context()` → 解除宿主登记 → `park_context()`；下一局为 `viewport_metrics()`（宿主仍可见时取）→ `hide_window()` → `unpark_context()` → `_build_ui()`（拆保活要排在藏宿主之后，否则 `withdraw` 会崩） | `tests/smoke_switch.py` 第 2/5 轮（真跑两局副本 + 三次切换）；`scripts/dungeon_autopilot.py` |
 | **C3** | `__init__` 的每个构造参数都必须存到 `self` 上 | `_init_session()` 在入口阶段**迟到执行**（点「开始副本」时才跑），此时局部变量早已不可见；曾因漏存 `merged_quips` 导致「开始副本」必然 AttributeError | 构造后读属性 / `entry-start` 场景 |
 | **C4** | 跨线程 UI 更新走 `self._frame.call()`；禁止后台线程直接调 DPG | 帧时钟是窗口实例成员（随会话创建与停止），不是模块级单例；`stop()` 后 `call()` 返回 `False` 不抛异常 | `dungeon_autopilot.py` |
@@ -259,6 +265,7 @@ run() → SessionResult
 | **C11** | 术语不混用：`scenario_*` = 方案，`dungeon_*` = 一局 | 见 [术语表](domain_terms.md) 与 `dungeon/terms.py` | `tests/check_scenario_naming.py` |
 | **C12** | 任何 Tk 交互前必须调用 `self._discard_pending_quit()` | 用户通过视口原生关闭键（X）退出时，GLFW 销毁原生窗口会导致 Windows 在本线程队列中留下一条 `WM_QUIT`；它不会被 Tk 消费，却会让 Windows 停止合成 `WM_TIMER`，造成随后的收尾提示模态对话框（`wait_window`）以及主窗口所有 `after` 计时器彻底收不到事件而表现为**弹出提示对话框后主窗口卡死**；收尾时在 `show_window()` / 弹框前由端口抛弃该残留消息 | `python scripts/dungeon_autopilot.py --scene native-close --isolate` |
 | **C13** | 组件只经**组件服务面**访问窗口（`ctx.component_viewport / schedule / schedule_every / cancel_task / session_waiting_for_input / component_autoplay_on / text_font_tag / bold_font_tag / component_top_inset / component`），不得读窗口私有属性（`_dpi_scale` / `_layout_w` / `_frame` / `_autoplay`…） | 组件 ctx 就是窗口实例，摸私有零成本，一旦窗口侧改名即静默 AttributeError；契约的可执行版本是守卫里的**替身 ctx**（只实现服务面）与 AST 越界扫描 | `tests/check_component_pack.py` |
+| **C14** | 会话收尾必须显式销毁视口原生窗口——`_finish_session` 在 `destroy_context()` **之前**调用 `dpg_state.discard_viewport_windows(self._temp_title, self._real_title)`，且**只有它能在 destroy 之后碰任何 Win32 窗口函数** | DPG 2.3.1 的 `destroy_context()` **不销毁视口对应的 GLFW 原生窗口**（2026-10-07 最小复现：`IsWindow/IsWindowVisible` 在 destroy 之后仍为真，`park_context()` 也不会带走它）。典型 DPG 程序感知不到（destroy 后进程随即退出，窗口由 OS 回收），但本程序收尾后仍跑 Tk 主循环，于是那个不再渲染、不再响应回调的副本窗口**留在屏幕上**——就是使用者报的「启动界面点返回后卡死」（DPG 窗口还能被右上角关闭键"表面关闭"），且每局累加一个（实测 1→2）。更糟：用户去点这个残留窗口的 X 时 GLFW 投出无人清理的 `WM_QUIT`，把 Tk 计时器/模态框一起停摆（§5-C12 同型）。销毁**必须**排在 `destroy_context()` 之前——那之后 GLFW 的 WndProc 已释放，`DestroyWindow` / `EnumWindows` 会以 0xC0000005 掀掉进程（2026-10-07 实测；`FindWindowW` 尚可，`DestroyWindow` 崩）。趁 GLFW 有效时销毁等于走「用户点视口关闭键」这条受支持的销毁路径 | `python tests/run_checks.py`；`python scripts/dungeon_autopilot.py --scene entry-cancel` / `--scene session-close`（断言「返回/关闭后不再新增副本视口原生窗口」） |
 
 ### 5.1 C6：DPG 2.3.1 兼容性怪癖
 
