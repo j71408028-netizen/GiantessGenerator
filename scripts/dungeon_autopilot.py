@@ -91,11 +91,11 @@ os.makedirs(os.path.join(_DATA_ROOT, "user"), exist_ok=True)
 paths.data_dir = lambda: _DATA_ROOT
 
 # 内置小游戏包（py 后端按当前 data_dir 解析加载）也要进隔离数据目录，
-# mini-game-py 场景才能真的触发覆盖层舞台
+# mini-game-py 场景才能真的触发覆盖层舞台。用 resource_root() 而不是 __file__
+# 相对路径：打包态（PyInstaller）里入口脚本的 __file__ 不在 data/ 这棵树上。
 import shutil  # noqa: E402
 
-_MINIGAMES_SRC = os.path.join(os.path.dirname(os.path.dirname(
-    os.path.abspath(__file__))), "data", "packs", "minigames")
+_MINIGAMES_SRC = os.path.join(paths.resource_root(), "data", "packs", "minigames")
 if os.path.isdir(_MINIGAMES_SRC):
     shutil.copytree(_MINIGAMES_SRC, os.path.join(_DATA_ROOT, "packs", "minigames"))
 
@@ -1661,9 +1661,21 @@ def main():
                         help="把「未自行干净退出」（超时 / 退出挂死 / 非零退出码）也判为失败；"
                              "默认只汇报，因为退出挂死按 window_host.md §6 属于环境现象，"
                              "不作失败信号。适用于重启系统后复测退出路径")
+    parser.add_argument("--skip", action="append", default=[], metavar="SCENE",
+                        help="跳过指定场景（可重复）。给「已知会踩第三方原生崩溃」的场景"
+                             "留出口（如 text-components 在 Linux/X11 上复现 DPG/GLFW "
+                             "反复拆建上下文的 SIGSEGV，见 docs/linux.md 附录A §5），"
+                             "避免把环境风险记成产品失败")
     args = parser.parse_args()
 
-    names = sorted(SCENES) if args.scene == "all" else [args.scene]
+    skipped = set(args.skip)
+    unknown_skip = skipped - set(SCENES)
+    if unknown_skip:
+        parser.error("--skip 里有未知场景：" + ", ".join(sorted(unknown_skip)))
+    names = [name for name in (sorted(SCENES) if args.scene == "all" else [args.scene])
+             if name not in skipped]
+    if not names:
+        parser.error("--skip 把所有场景都跳过了，没有可跑的场景")
     # 全部场景默认开子进程；单场景想在子进程里跑（推荐：退出挂死由父进程兜底）用 --isolate
     if args.isolate or (args.scene == "all" and not args.in_process):
         _run_isolated(names, args.timeout, args.repeat,

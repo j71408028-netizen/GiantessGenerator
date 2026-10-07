@@ -13,12 +13,13 @@ ENV/
 
 # 构建 / 打包产物
 # 注意：build/ 既是 PyInstaller 的产物目录，又存放构建脚本（build/windows、
-# build/macos）。整体忽略 build/ 会把构建脚本一起吞掉——入口改名、图标路径写错
-# 都不会有人发现。因此只忽略 build/ 下一层（PyInstaller 的 build/<name>/ 与
-# *.spec 产物），并显式放行两个脚本目录。
+# build/macos、build/linux）。整体忽略 build/ 会把构建脚本一起吞掉——入口改名、
+# 图标路径写错都不会有人发现。因此只忽略 build/ 下一层（PyInstaller 的
+# build/<name>/ 与 *.spec 产物），并显式放行三个脚本目录。
 /build/*
 !/build/windows/
 !/build/macos/
+!/build/linux/
 dist/
 *.spec
 
