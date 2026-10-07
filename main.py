@@ -2,6 +2,13 @@ import multiprocessing
 import sys
 import traceback
 
+# Linux/X11：必须在**任何** X display 连接建立之前调 XInitThreads（Tk 与
+# Dear PyGui/GLFW 同进程共用 X server，libX11 默认不加锁是段错误/BadWindow 的
+# 经典成因）。因此这一段要留在 tkinter / dearpygui 之前，别往下挪。
+from ui.common.x11_boot import boot_x11  # noqa: E402
+
+boot_x11()
+
 import tkinter as tk
 import customtkinter as ctk
 

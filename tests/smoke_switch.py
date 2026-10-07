@@ -53,6 +53,12 @@ from paths import data_dir, ensure_cwd
 
 ensure_cwd()
 
+# Linux/X11：必须在 tkinter / dearpygui 建立 X 连接**之前**调 XInitThreads
+# （本脚本的 tkinter 都是函数内延迟 import，因此放在这里仍然足够早）。
+from ui.common.x11_boot import boot_x11  # noqa: E402
+
+boot_x11()
+
 _FAILURES = []
 _CHECKS = [0]
 

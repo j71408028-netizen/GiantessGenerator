@@ -19,23 +19,27 @@ import os
 import shutil
 import sys
 import tempfile
-import tkinter as tk
 import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.logic import get_comparisons
-from paths import data_dir, ensure_cwd
-from core import appearance
-from services.exploration.context import ExplorationContext
-from persistence import (
+# Linux/X11：必须在 tkinter / dearpygui 建立 X 连接**之前**调 XInitThreads。
+from ui.common.x11_boot import boot_x11  # noqa: E402
+
+boot_x11()
+
+from core.logic import get_comparisons  # noqa: E402
+from paths import data_dir, ensure_cwd  # noqa: E402
+from core import appearance  # noqa: E402
+from services.exploration.context import ExplorationContext  # noqa: E402
+from persistence import (  # noqa: E402
     CharacterRepo, ScenarioRepo, LandmarkRepo, PersonalityRepo, PresetRepo,
     QuipRepo, SettingsRepo,
 )
-from services.worlds import WorldManager
-from ui.mini import pixel as px
-from ui.mini.app import MiniApp
-from ui.mini.report_view import COMPARE_MARK
+from services.worlds import WorldManager  # noqa: E402
+from ui.mini import pixel as px  # noqa: E402
+from ui.mini.app import MiniApp  # noqa: E402
+from ui.mini.report_view import COMPARE_MARK  # noqa: E402
 
 
 def check(label, condition, detail=""):
@@ -113,6 +117,7 @@ def main():
 
         appearance.set_mode(settings.get("theme_mode", "Dark"))
 
+        import tkinter as tk  # 延迟到 boot_x11() 之后，保证 XInitThreads 先执行
         root = tk.Tk()
         app = MiniApp(root, context, world_manager, settings_repo)
         app.auto_answer = True          # 确认类交互直接答「是」，不弹屏

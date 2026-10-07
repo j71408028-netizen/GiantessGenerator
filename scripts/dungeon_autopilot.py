@@ -56,6 +56,11 @@ import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Linux/X11：必须在 tkinter / dearpygui 建立 X 连接**之前**调 XInitThreads。
+from ui.common.x11_boot import boot_x11  # noqa: E402
+
+boot_x11()
+
 _REPORT_DIR = tempfile.mkdtemp(prefix="dungeon_autopilot_")
 _REPORT_PATH = os.path.join(_REPORT_DIR, "report.txt")
 _log = open(_REPORT_PATH, "w", encoding="utf-8")

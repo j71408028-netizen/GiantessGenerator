@@ -49,6 +49,13 @@ class TkHost(HostPort):
     """
 
     def __init__(self, widget=None, owner=None, dialogs=None):
+        # Linux/X11：宿主适配器是「Tk 与 DPG 同进程」的接缝，在这里补一次
+        # XInitThreads 兜底（正常已由各入口文件最顶部调用，此调用是幂等的）。
+        try:
+            from ui.common.x11_boot import boot_x11
+            boot_x11()
+        except Exception:
+            pass
         self.widget = widget
         self.owner = owner
         self.dialogs = dialogs or _DEFAULT_DIALOGS
