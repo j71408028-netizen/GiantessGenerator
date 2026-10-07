@@ -47,9 +47,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 EXCLUDE_DIRS = {
-    "__pycache__", ".git", ".idea", ".workbuddy", ".venv-build", ".venv-macos",
+    "__pycache__", ".git", ".idea", ".workbuddy",
     "data", "dist", "developer_tools", "build", "assets",
 }
+
+#: 虚拟环境目录按前缀判定（``.venv`` / ``.venv-build`` / ``.venv-macos`` /
+#: ``.venv-buildlinux``…）：构建脚本每加一个平台就多一个名字，枚举必然漏。
+VIRTUALENV_PREFIXES = (".venv", "venv")
+VIRTUALENV_NAMES = {"env", "ENV"}
+
+
+def _is_excluded_dir(name):
+    return (name in EXCLUDE_DIRS or name in VIRTUALENV_NAMES
+            or name.startswith(VIRTUALENV_PREFIXES))
+
 
 # --------------------------------------------------------------------------
 # 一、层归属
@@ -284,7 +295,7 @@ def main() -> int:
     modules = []
     for path in sorted(ROOT.rglob("*.py")):
         rel_parts = path.relative_to(ROOT).parts
-        if any(part in EXCLUDE_DIRS for part in rel_parts):
+        if any(_is_excluded_dir(part) for part in rel_parts):
             continue
         layer = layer_of_file(path)
         if layer is None:

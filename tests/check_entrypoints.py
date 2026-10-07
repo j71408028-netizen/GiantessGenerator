@@ -14,8 +14,8 @@
 
 注：``build/`` 曾经被 ``.gitignore`` 的 ``build/`` 规则整体忽略，构建脚本因此没进
 版本控制，入口被删掉也没人发现（`main_mini.py` 就这样消失过）。现改为只忽略
-``/build/*`` 的产物并显式放行 ``build/windows/``、``build/macos/``。本项在
-``build/`` 不存在时跳过，不影响干净检出。
+``/build/*`` 的产物并显式放行 ``build/windows/``、``build/macos/``、``build/linux/``。
+本项在 ``build/`` 不存在时跳过，不影响干净检出。
 
 **B. 悬空 import**
 
@@ -56,9 +56,20 @@ BUILD_DIR = ROOT / "build"
 #: ``developer_tools/`` 是随时可弃的探针集合（.gitignore 掉），让它拖垮正式自检
 #: 没有意义。
 EXCLUDED_DIRS = {
-    "__pycache__", ".git", ".idea", ".workbuddy", ".venv", ".venv-build", ".venv-macos",
-    "data", "dist", "build", "developer_tools",
+    "__pycache__", ".git", ".idea", ".workbuddy", "data", "dist", "build", "developer_tools",
 }
+
+#: 虚拟环境目录：禁止按名字枚举。构建脚本按平台命名（``.venv`` / ``.venv-build`` /
+#: ``.venv-macos`` / ``.venv-buildlinux``…），枚举必然漏——历史上漏过 ``.venv``
+#: （1410 处误报）和 ``.venv-buildlinux``（6039 处误报），一律按前缀判定。
+VIRTUALENV_PREFIXES = (".venv", "venv")
+VIRTUALENV_NAMES = {"env", "ENV"}
+
+
+def _is_excluded_dir(name: str) -> bool:
+    return (name in EXCLUDED_DIRS or name in VIRTUALENV_NAMES
+            or name.startswith(VIRTUALENV_PREFIXES))
+
 
 #: 出现这些名字就认为模块在**动态**创建全局量，名字级校验对它失效
 DYNAMIC_MARKERS = {"globals", "locals", "vars", "exec", "eval", "setattr"}
@@ -278,7 +289,7 @@ def _top_level_names(path: Path):
 def _iter_py_files():
     for path in sorted(ROOT.rglob("*.py")):
         parts = path.relative_to(ROOT).parts[:-1]
-        if any(part in EXCLUDED_DIRS for part in parts):
+        if any(_is_excluded_dir(part) for part in parts):
             continue
         yield path
 

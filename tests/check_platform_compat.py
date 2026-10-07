@@ -15,7 +15,11 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXCLUDED_PARTS = {".venv", "__pycache__", ".idea", "build", "dist"}
+EXCLUDED_PARTS = {"__pycache__", ".idea", "build", "dist"}
+#: 虚拟环境目录按前缀判定：构建脚本按平台命名（.venv / .venv-build / .venv-macos /
+#: .venv-buildlinux…），枚举必然漏。
+VIRTUALENV_PREFIXES = (".venv", "venv")
+VIRTUALENV_NAMES = {"env", "ENV"}
 SAFE_PLATFORM_CONFIG_FILES = {Path("ui/common/fonts.py")}
 PATTERN = re.compile(
     r"ctypes\.windll|ctypes\.WinDLL|os\.startfile|"
@@ -37,7 +41,8 @@ GRAB_SET_PATTERN = re.compile(r"\.grab_set\s*\(")
 
 
 def is_excluded(path: Path) -> bool:
-    return any(part in EXCLUDED_PARTS for part in path.parts)
+    return any(part in EXCLUDED_PARTS or part in VIRTUALENV_NAMES
+               or part.startswith(VIRTUALENV_PREFIXES) for part in path.parts)
 
 
 def is_platform_guarded(lines: list[str], index: int) -> bool:

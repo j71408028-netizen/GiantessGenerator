@@ -31,7 +31,12 @@ FORBIDDEN_IDENTIFIERS = {
     "dungeon_config", "dungeon_key", "dungeon_editor", "ScriptManager", "script_mgr",
 }
 SKIP_DIRS = {"__pycache__", ".git", ".idea", ".workbuddy", "data", "developer_tools",
-             "docs", "build", "assets", ".venv"}
+             "docs", "build", "assets"}
+#: 虚拟环境目录按前缀跳过：构建脚本按平台命名（.venv / .venv-build / .venv-macos /
+#: .venv-buildlinux…），枚举必然漏。
+VIRTUALENV_PREFIXES = (".venv", "venv")
+VIRTUALENV_NAMES = {"env", "ENV"}
+
 
 _report_path = os.path.join(tempfile.mkdtemp(prefix="scenario_naming_"), "report.txt")
 _log = open(_report_path, "w", encoding="utf-8")
@@ -55,7 +60,9 @@ def scan_forbidden():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     hits = {}
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        dirnames[:] = [d for d in dirnames
+                       if d not in SKIP_DIRS and d not in VIRTUALENV_NAMES
+                       and not d.startswith(VIRTUALENV_PREFIXES)]
         for filename in filenames:
             if not filename.endswith(".py") or filename.startswith("_rename"):
                 continue
