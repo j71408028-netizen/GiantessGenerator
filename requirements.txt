@@ -2,10 +2,13 @@
 # platform-specific packaging scripts so normal development installs stay lean.
 customtkinter==6.0.0
 dearpygui==2.3.1
-Pillow>=10.0,<13.0
+Pillow>=10.0
 networkx>=3.0,<4.0
 graphviz>=0.20,<1.0
 openai>=2.0,<3.0
+# 必需：副本窗口背景合成、小游戏画布与挑战数值计算都直接 import（原先漏声明，
+# 只是开发机恰好装过；见 docs/linux_compat_plan.md §2.3-2）。
+numpy>=1.26
 # 可选：Solea/Bulla 对话的合成语音（联网）。没装只是不出声，副本照常能玩。
 edge-tts>=7.0
 # 可选：章节对话语音的物理效果（她 / 其他人两档）要用离线渲染时需要解码器，

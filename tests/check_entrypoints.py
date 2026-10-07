@@ -56,8 +56,8 @@ BUILD_DIR = ROOT / "build"
 #: ``developer_tools/`` 是随时可弃的探针集合（.gitignore 掉），让它拖垮正式自检
 #: 没有意义。
 EXCLUDED_DIRS = {
-    "__pycache__", ".git", ".idea", ".workbuddy", ".venv", ".venv-build",
-    ".venv-macos", "data", "dist", "build", "developer_tools",
+    "__pycache__", ".git", ".idea", ".workbuddy", ".venv", ".venv-build", ".venv-macos",
+    "data", "dist", "build", "developer_tools",
 }
 
 #: 出现这些名字就认为模块在**动态**创建全局量，名字级校验对它失效
@@ -80,7 +80,6 @@ DIST_TO_IMPORT = {
 #: 不在此表、又不在 stdlib、也不在仓库里的顶层名，只可能是「改了模块名忘了改引用」
 #: 或「装了新依赖没写进 requirements」——两者都要等真正走到那段代码才炸。
 UNDECLARED_ALLOWED = {
-    "numpy": "graphviz 可选依赖（布局计算），不装也能跑",
     "soundfile": "miniaudio 的可选解码后端",
     "game": "scripts/escape_sim.py 先把内置小游戏目录塞进 sys.path 再 import",
 }

@@ -28,8 +28,9 @@ $Name = "GiantessGenerator"
     --collect-all dearpygui `
     --collect-all PIL `
     --collect-all openai `
-    --collect-all zai `
     --collect-all networkx `
+    --collect-all numpy `
+    --collect-all webview `
     $Entry
 
 Write-Host "Created: $Root\dist\$Name\$Name.exe"

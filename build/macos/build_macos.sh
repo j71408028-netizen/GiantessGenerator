@@ -30,8 +30,9 @@ pyinstaller \
   --collect-all dearpygui \
   --collect-all PIL \
   --collect-all openai \
-  --collect-all zai \
   --collect-all networkx \
+  --collect-all numpy \
+  --collect-all webview \
   "$ENTRY"
 
 echo "Created: $ROOT/dist/$NAME.app"
