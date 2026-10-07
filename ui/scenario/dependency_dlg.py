@@ -4,15 +4,28 @@
 - 用 graphviz 将依赖图渲染成图片；
 - 在对话框中展示图片，并以红色高亮循环依赖中的触发器和边。
 依赖方向：边 A → B 表示“B 依赖 A”，即 A 是 B 的前置条件（A 必须先触发）。
+
+**缺依赖的降级**（networkx / graphviz 都在 requirements.txt 里，但不保证开发环境
+装全，Linux 试跑就踩过）：本模块 import 期不再因为缺 networkx 直接抛
+``ModuleNotFoundError``——那样连"检查依赖"按钮都点不动、只有一句 import 报错。
+改为 :func:`missing_dependencies` 显式报告，对话框内提示安装命令（见
+docs/linux_compat_plan.md §2.3-1）。
 """
 import io
 import os
 import shutil
 
 import customtkinter as ctk
-import networkx as nx
-import graphviz as gv
 from PIL import Image
+
+try:  # 可选：依赖图分析（缺了就只提示，不影响整仓可运行）
+    import networkx as nx
+except Exception:  # pragma: no cover - 环境相关
+    nx = None
+try:  # 可选：依赖图渲染
+    import graphviz as gv
+except Exception:  # pragma: no cover - 环境相关
+    gv = None
 
 from dungeon.actions import action_label, normalize_action_type
 from dungeon.audio.chapters import scope_label
@@ -25,6 +38,23 @@ from ui.common.theme import (
     GRAPH_EDGE_ERR, GRAPH_EDGE_NORMAL, GRAPH_NODE_ERR_BORDER, GRAPH_NODE_ERR_FILL,
     GRAPH_NODE_OUTLINE,
 )
+
+#: 缺依赖时的统一安装指引（与 requirements.txt 的注释同口径）
+INSTALL_HINT = "pip install -r requirements.txt"
+
+
+def missing_dependencies() -> list:
+    """返回缺失的 Python 依赖名列表（空列表 = 依赖齐全）。
+
+    ``graphviz`` 的 Python 包只负责生成 DOT；真正出图还要系统里有 ``dot``
+    可执行文件，那个在缺的时候由 :func:`_render_png` 单独报错。
+    """
+    missing = []
+    if nx is None:
+        missing.append("networkx")
+    if gv is None:
+        missing.append("graphviz")
+    return missing
 
 # 动作类型 → 节点填充色（展示名统一取 dungeon.actions 的注册表）
 _ACTION_FILL = {
@@ -63,7 +93,9 @@ def _find_dot():
 
 
 def _build_graph(triggers):
-    """返回 (DiGraph, 参与循环的节点集合, 各循环的节点列表)。"""
+    """返回 (DiGraph, 参与循环的节点集合, 各循环的节点列表)。缺 networkx 时抛异常。"""
+    if nx is None:
+        raise RuntimeError("缺少 networkx：" + INSTALL_HINT)
     G = nx.DiGraph()
     names = set()
     for t in triggers:
@@ -90,7 +122,9 @@ def _build_graph(triggers):
 
 
 def _render_png(triggers, G, cycle_nodes):
-    """渲染依赖图为 PNG 字节；dot 缺失时抛异常。"""
+    """渲染依赖图为 PNG 字节；缺 graphviz/dot 时抛异常（由调用方转成界面提示）。"""
+    if gv is None:
+        raise RuntimeError("缺少 graphviz：" + INSTALL_HINT)
     dot = _find_dot()
     if not dot:
         raise RuntimeError("未找到 Graphviz 的 dot 可执行文件")
@@ -151,9 +185,11 @@ class DependencyGraphDialog(BaseDialog):
         self.G = None
         self.cycle_nodes = set()
         self.cycles = []
+        self.graph_error = ""
         self.result = None
         self.transient(parent)
-        self.grab_set()
+        # 抓取延到窗口可见之后（X11 要求 viewable，见 BaseDialog._grab_deferred）
+        self._grab_deferred()
         self._build_ui()
         self._center_dialog(parent)
         self.wait_window()
@@ -171,15 +207,23 @@ class DependencyGraphDialog(BaseDialog):
                           command=self.destroy).pack(pady=10)
             return
 
-        # 分析依赖、检测循环
-        self.G, self.cycle_nodes, self.cycles = _build_graph(self.triggers)
+        # 分析依赖、检测循环（缺 networkx 时退化成"只有汇总、没有图"）
+        try:
+            self.G, self.cycle_nodes, self.cycles = _build_graph(self.triggers)
+        except Exception as exc:
+            self.graph_error = str(exc)
+        else:
+            self.graph_error = ""
 
         # 顶部汇总
         summary = self._build_summary()
+        if self.graph_error:
+            summary += "\n" + self.graph_error + "（装上依赖后重新打开本对话框即可出图）"
         self.summary_label = ctk.CTkLabel(
             main, text=summary, justify="left", wraplength=720,
             font=self.UI_FONT,
-            text_color=DEPENDENCY_ERR if self.cycle_nodes else DEPENDENCY_OK)
+            text_color=DEPENDENCY_ERR if (self.cycle_nodes or self.graph_error)
+            else DEPENDENCY_OK)
         self.summary_label.pack(fill='x', padx=4, pady=(0, 6))
 
         # 图例
@@ -216,6 +260,9 @@ class DependencyGraphDialog(BaseDialog):
         return "\n".join(lines)
 
     def _render_graph(self):
+        if self.graph_error:
+            self.render_status.configure(text=self.graph_error)
+            return
         try:
             png = _render_png(self.triggers, self.G, self.cycle_nodes)
             img = Image.open(io.BytesIO(png)).convert("RGBA")

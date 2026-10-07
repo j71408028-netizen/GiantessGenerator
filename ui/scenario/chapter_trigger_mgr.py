@@ -115,6 +115,18 @@ class ChapterTriggerManager(TreeviewManager):
         if not triggers:
             ui.common.dialogs.showwarning("检查依赖", "当前没有触发器，无需检查依赖。")
             return
+        from ui.scenario.dependency_dlg import (INSTALL_HINT,
+                                               missing_dependencies)
+        missing = missing_dependencies()
+        if missing:
+            # 缺依赖不再让 import 直接炸（Linux 试跑踩过），这里先说人话
+            ui.common.dialogs.showwarning(
+                "检查依赖",
+                "依赖关系检查需要以下组件，当前环境未安装：\n"
+                + "、".join(missing) + f"\n\n安装命令：{INSTALL_HINT}")
+            self.dep_status_label.configure(
+                text=f"缺少依赖：{'、'.join(missing)}", text_color=SCRIPT_ERR)
+            return
         from ui.scenario.dependency_dlg import DependencyGraphDialog
         dlg = DependencyGraphDialog(self, triggers)
         if getattr(dlg, "cycle_nodes", set()):
