@@ -541,6 +541,8 @@ class CycleRow(tk.Frame):
         self._choices = _normalize_choices(options)
         self._index = 0
         self._on_change = on_change
+        self._disabled = False
+        self._reason = ""
         self.columnconfigure(1, weight=1)
 
         label(self, title, tone="text_dim", size=size).grid(
@@ -590,16 +592,36 @@ class CycleRow(tk.Frame):
         return None
 
     def cycle(self):
-        if not self._choices:
+        if not self._choices or self._disabled:
             return
         self._index = (self._index + 1) % len(self._choices)
         self._sync()
         if self._on_change:
             self._on_change(self.get())
 
+    def set_disabled(self, disabled: bool, reason: str = ""):
+        """置灰本行（环境不支持时用）：按钮不可点，可选地把原因写进 tooltip 风格提示。
+
+        只提供最小能力——需求来自 Linux/X11 置顶不可用（见 ui/mini/topmost.py）：
+        与其让用户点一个永远无效的开关，不如明说"本桌面环境不支持"。
+        """
+        self._disabled = bool(disabled)
+        self._button.configure(state='disabled' if self._disabled else 'normal')
+        if reason:
+            self._reason = reason
+            self._button.configure(text_color="text_off")
+        else:
+            self._button.configure(text_color="text")
+        self._sync()
+
+    @property
+    def disabled(self) -> bool:
+        return self._disabled
+
     def _sync(self):
         text = self._choices[self._index][0] if self._choices else "—"
-        self._button.configure(text=f"◀ {text} ▶")
+        suffix = f"（{self._reason}）" if self._disabled and self._reason else ""
+        self._button.configure(text=f"◀ {text} ▶{suffix}")
 
 
 # ==================== 输入 / 文本 / 滚动 ====================

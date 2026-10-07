@@ -109,6 +109,10 @@ class SettingsScreen(Screen):
             tone="ok", button_width=110)
         topmost.set_value("开" if settings.get("always_on_top", True) else "关")
         topmost.pack(fill='x', pady=3)
+        # Linux/X11：桌面环境（窗口管理器）不支持 EWMH 置顶时把开关置灰并说明原因，
+        # 而不是留一个点了没反应的开关（见 ui/mini/topmost.py）。
+        if not self.app.topmost_available():
+            topmost.set_disabled(True, reason="本桌面环境不支持")
 
         avatar = px.CycleRow(
             body, "身材预览头像", ["开", "关"],

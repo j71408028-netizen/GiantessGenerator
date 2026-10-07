@@ -22,6 +22,7 @@ from services.chat import pending_char_messages
 from services.challenges import ChallengeService
 from core import appearance
 from ui.mini import pixel as px
+from ui.mini import topmost as topmost_ctl
 from ui.mini.investigation import Investigation, Investigator
 from ui.mini.params_panel import MiniParamsPanel
 from ui.mini.report_view import MiniReportView
@@ -103,7 +104,11 @@ class MiniApp:
         # 主窗口尚在映射前，DWM 会在窗口真正显示时把标题栏恢复成系统配色，
         # 因此映射后必须再刷一次（与对话框走的是同一条路）。
         self.root.bind("<Map>", lambda _e: self._apply_titlebar_theme(), add="+")
-        self.root.attributes("-topmost", bool(self.settings.get("always_on_top", True)))
+        # 置顶：X11 上窗口映射前写不进 _NET_WM_STATE_ABOVE（读回也验证不了），
+        # 因此映射后再落地一次；Windows/macOS 这次重复设置无害。
+        self.root.bind("<Map>", lambda _e: self._apply_topmost(
+            bool(self.settings.get("always_on_top", True))), add="+")
+        self._apply_topmost(bool(self.settings.get("always_on_top", True)))
 
     def _apply_titlebar_theme(self):
         if not sys.platform.startswith("win"):
@@ -121,6 +126,18 @@ class MiniApp:
                     hwnd, 19, ctypes.byref(value), ctypes.sizeof(value))
         except Exception:
             pass
+
+    def _apply_topmost(self, enabled: bool) -> bool:
+        """把「窗口置顶」落到窗口系统上，返回是否确认生效。
+
+        实际实现（含 Linux/X11 的 EWMH 写 ``_NET_WM_STATE_ABOVE``）在
+        ``ui.mini.topmost``——Tk 的 ``-topmost`` 在 GNOME 上静默无效，不能只调它。
+        """
+        return bool(topmost_ctl.apply(self.root, enabled))
+
+    def topmost_available(self) -> bool:
+        """当前桌面环境能不能置顶（设置页据此把开关置灰）。"""
+        return bool(topmost_ctl.available())
 
     def _window_handle(self):
         """主窗口的顶层 HWND：winfo_id() 给的是客户区，需再取一层父窗口。"""
@@ -833,8 +850,29 @@ class MiniApp:
         self._save_settings()
 
     def set_topmost(self, enabled: bool):
-        self.settings["always_on_top"] = bool(enabled)
-        self.root.attributes("-topmost", bool(enabled))
+        """切换置顶。桌面环境写不进置顶时**如实处理并提示**，不假装成功。
+
+        这是 Linux/X11 置顶收口（docs/linux_compat_plan.md §2.4）的产品侧：GNOME
+        下 Tk 的 ``-topmost`` 会静默失效，用户需要一个明确的说法，而不是一个看起来
+        开着、实际没生效的开关。
+        """
+        enabled = bool(enabled)
+        confirmed = self._apply_topmost(enabled)
+        if enabled and not confirmed and not self.topmost_available():
+            # 环境根本不支持：回退成「关」并明确提示（设置页下次打开会把开关置灰）
+            self.settings["always_on_top"] = False
+            self._save_settings()
+            try:
+                self.root.attributes("-topmost", False)
+            except Exception:
+                pass
+            # 延到本屏重建之后再换屏，避免"消息屏"与"设置屏重建"互相覆盖
+            self.root.after(0, lambda: self.notify(
+                "当前桌面环境不支持窗口置顶：\n"
+                "窗口管理器没有声明 EWMH 的 _NET_WM_STATE_ABOVE。",
+                tone="text_dim", title="窗口置顶不可用"))
+            return
+        self.settings["always_on_top"] = enabled
         self._save_settings()
 
     def set_preview_avatar(self, enabled: bool):
