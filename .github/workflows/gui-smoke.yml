@@ -1,0 +1,107 @@
+name: gui-smoke
+
+# 每晚（+ 手动）：xvfb 无头 X + 软件 GL（llvmpipe）跑 GUI 冒烟与**打包自检**。
+# 这些用例都需要真显示器/真窗口，不进 PR 门禁（见 docs/linux.md §6）。
+#
+# 注：GUI 类用例对长时会话/驱动状态敏感（docs/linux.md 附录A §5），
+# 若某条明显 flaky，先把它注释掉、只留 autopilot 离线场景组。
+on:
+  schedule:
+    - cron: "0 18 * * *"      # UTC 18:00 = 次日 02:00（CST）
+  workflow_dispatch:
+
+jobs:
+  xvfb-smoke:
+    name: GUI 冒烟（xvfb + llvmpipe）
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      TMPDIR: ${{ github.workspace }}/tmp
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 系统依赖（Xvfb / 软件 GL / Tk）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3-tk xvfb x11-utils \
+            libgl1 libglx-mesa0 libgl1-mesa-dri libegl1 libegl-mesa0 mesa-utils \
+            libtcl8.6 libtk8.6
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: 副本窗口自动驾驶（全部场景，逐场景子进程）
+        run: |
+          mkdir -p "$TMPDIR"
+          # text-components 在 Linux/X11 上会踩已知的 DPG/GLFW「反复拆建上下文」段错误
+          # （在开发机源码态可稳定复现，见 docs/linux.md 附录A §5），先跳过它；
+          # 其余场景全跑。它覆盖的组件功能由 smoke_switch / smoke_mini 兜着。
+          xvfb-run -a -s "-screen 0 1600x1000x24" \
+            env LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe \
+            python scripts/dungeon_autopilot.py --scene all --skip text-components \
+              --isolate --timeout 150
+
+      - name: 挂件全链路冒烟
+        run: |
+          xvfb-run -a -s "-screen 0 1600x1000x24" \
+            env LIBGL_ALWAYS_SOFTWARE=1 \
+            python tests/smoke_mini.py
+
+      - name: 界面热切换冒烟
+        run: |
+          xvfb-run -a -s "-screen 0 1600x1000x24" \
+            env LIBGL_ALWAYS_SOFTWARE=1 \
+            python tests/smoke_switch.py
+
+      # autopilot 的报告文件写在 TMPDIR 下的 dungeon_autopilot_*/report.txt，
+      # 里面有全部明细（stdout/stderr 都被它接管）——失败时这是唯一的现场。
+      - name: 上传自动驾驶报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autopilot-reports
+          path: tmp/dungeon_autopilot_*/
+          if-no-files-found: ignore
+
+  package-selfcheck:
+    name: Linux 打包 + 打包自检
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 系统依赖（Xvfb / 软件 GL / Tk）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3-tk xvfb x11-utils \
+            libgl1 libglx-mesa0 libgl1-mesa-dri libegl1 libegl-mesa0 mesa-utils \
+            libtcl8.6 libtk8.6
+
+      # 打包 + 打包自检：PyInstaller onedir，然后在**打包态**里启动发布包、
+      # 引导 XDG 数据目录、真开副本窗口跑 entry-start / session-close /
+      # text-components / mini-game / mini-game-py 五个场景。
+      - name: 打包 + 打包自检
+        run: |
+          xvfb-run -a -s "-screen 0 1600x1000x24" \
+            env LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe \
+            bash build/linux/build_linux.sh --self-check
+
+      - name: 上传 Linux 目录包
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: GiantessGenerator-linux
+          path: dist/GiantessGenerator-linux-*.tar.gz
+          if-no-files-found: ignore

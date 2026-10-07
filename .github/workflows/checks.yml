@@ -1,0 +1,57 @@
+name: checks
+
+# 每 PR / 推 main：跑**离线**自检（纯静态，不需要显示器），Linux 与 Windows 各一套。
+# 需要真窗口的 GUI 冒烟在 gui-smoke.yml（每晚），不进 PR 门禁——避免拖慢评审。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline:
+    name: 离线自检 · ${{ matrix.os }} · Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.12"
+          # 3.14 与开发机同版本：依赖面窄（Pillow 上界、打包钩子），单独盯一轮
+          - os: ubuntu-latest
+            python: "3.14"
+          - os: windows-latest
+            python: "3.12"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Linux 系统依赖（Tk / GL 运行库）
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk libgl1 libegl1 libglx-mesa0 libtcl8.6 libtk8.6
+
+      - name: 安装依赖（整份 requirements.txt）
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: 导入自检（Tk / Dear PyGui 可用）
+        run: python -c "import tkinter, dearpygui.dearpygui, PIL; print('imports ok')"
+
+      # 15 项：含入口/资源、分层、方案校验、组件包契约、字体覆盖等离线守卫
+      - name: 离线守卫
+        run: python tests/run_checks.py
+
+      - name: 默认方案校验（0 error 才退 0）
+        run: python tests/check_scenarios.py
