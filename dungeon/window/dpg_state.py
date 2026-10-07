@@ -44,15 +44,33 @@ _STATE = {"alive": False, "ever_created": False}
 #: 这里只用于抑制这类预期内的陈旧窗口错误；处理器本身必须保持强引用。
 _X11_ERROR_GUARD = None
 
+#: X11 错误码 → 人类可读文本。``XErrorEvent.error_code`` 在结构体首几个字段里，
+#: ctypes 只需声明到它即可安全读取。
+_X11_ERROR_CODES = {3: "BadWindow", 4: "BadPixmap", 8: "BadMatch",
+                    9: "BadDrawable", 10: "BadAccess", 11: "BadAlloc"}
+
+#: 预期内的陈旧窗口错误：只有这两个码走「忽略 + 记日志」。
+#: ``BadMatch(8)`` 也曾出现在 GLFW 反复 destroy/create 的路径上，但它同样可能意味着
+#: 真实配置错误，因此**故意不列入**预期集合——收窄的意义就在这里：不掩盖真实问题。
+_EXPECTED_X11_ERRORS = (3, 9)  # BadWindow / BadDrawable
+
 
 def install_x11_error_guard() -> bool:
-    """安装一个宽松的 X11 同步错误处理器（仅 Linux/X11）。
+    """安装一个 X11 同步错误处理器（仅 Linux/X11）。
 
     Dear PyGui/GLFW 与 Tk 共用 X server 时，宿主 Tk 的事件泵会收到并处理
     其它顶层窗口的旧事件；当这些窗口已经销毁，Tk 内部查询会触发 BadWindow，
     而 Xlib 默认处理器会直接 ``exit(1)``——表现为冒烟测试里的 X Error 硬崩。
-    这是一个兼容性保护，不是业务错误处理；重复调用会重新覆盖当前处理器，
-    防止后续 GLFW/DPG 生命周期把它换掉。
+
+    处理策略（2026-10-06 收窄）：
+    - ``BadWindow`` / ``BadDrawable``：预期内的陈旧窗口错误，忽略并记入
+      ``process_log``（前 3 次完整记录，之后只累加计数）；
+    - 其它错误码：**照样返回 0（不退出进程），但每次大声记录**。这里不转发给
+      Xlib 默认处理器——那个处理器是 ``_XError``，转发等于让进程退出，而段错误
+      压测的价值恰在于「跑完并留下证据」。要恢复默认行为就删掉本函数的所有
+      调用点（风险登记见 docs/linux_compat_plan.md §5）。
+
+    重复调用会重新覆盖当前处理器，防止后续 GLFW/DPG 生命周期把它换掉。
     """
     global _X11_ERROR_GUARD
     if not sys.platform.startswith("linux"):
@@ -64,33 +82,69 @@ def install_x11_error_guard() -> bool:
         if _X11_ERROR_GUARD is None:
             lib_name = ctypes.util.find_library("X11") or "libX11.so.6"
             x11 = ctypes.CDLL(lib_name)
+
+            class XErrorEvent(ctypes.Structure):
+                """Xlib ``XErrorEvent``：只需读到 ``error_code`` / ``request_code``。"""
+
+                _fields_ = [
+                    ("type", ctypes.c_int),
+                    ("display", ctypes.c_void_p),
+                    ("resourceid", ctypes.c_ulong),
+                    ("serial", ctypes.c_ulong),
+                    ("error_code", ctypes.c_ubyte),
+                    ("request_code", ctypes.c_ubyte),
+                    ("minor_code", ctypes.c_ubyte),
+                ]
+
             handler_type = ctypes.CFUNCTYPE(
-                ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
-            state = {"count": 0}
+                ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(XErrorEvent))
+            state = {"count": 0, "unexpected": 0}
 
             def _handle(display, event):
-                state["count"] += 1
-                if state["count"] <= 3:
-                    try:
-                        from dungeon import process_log
-                        process_log.log(
-                            "[X11] 已忽略预期的陈旧窗口错误"
-                            f"（第 {state['count']} 次）")
-                    except Exception:
-                        pass
+                code = int(event.contents.error_code) if event else 0
+                request = int(event.contents.request_code) if event else 0
+                if code in _EXPECTED_X11_ERRORS:
+                    state["count"] += 1
+                    if state["count"] <= 3:
+                        _log_x11(f"已忽略预期的陈旧窗口错误（{_code_label(code)}，"
+                                 f"request={request}，第 {state['count']} 次）")
+                    return 0
+                state["unexpected"] += 1
+                if state["unexpected"] <= 3:
+                    _log_x11(f"未预期的 X11 错误：{_code_label(code)}"
+                             f"（request={request}）——若在冒烟中反复出现请上报",
+                             error=True)
+                else:
+                    _log_x11(f"未预期的 X11 错误累计 {state['unexpected']} 次"
+                             f"（最近：{_code_label(code)}）", error=True)
                 return 0
 
             handler = handler_type(_handle)
-            _X11_ERROR_GUARD = (x11, handler, state)
+            _X11_ERROR_GUARD = (x11, handler, state, XErrorEvent)
 
-        x11, handler, _state = _X11_ERROR_GUARD
+        x11, handler, _state, _event_type = _X11_ERROR_GUARD
         x11.XSetErrorHandler.argtypes = [ctypes.c_void_p]
         x11.XSetErrorHandler.restype = ctypes.c_void_p
-        x11.XSetErrorHandler(handler)
+        x11.XSetErrorHandler(ctypes.cast(handler, ctypes.c_void_p))
         return True
     except Exception as e:
         print(f"[Warning] 安装 X11 错误兼容处理器失败: {e}")
         return False
+
+
+def _code_label(code: int) -> str:
+    """错误码 → ``BadWindow(3)`` 这样的标签。"""
+    return f"{_X11_ERROR_CODES.get(code, 'XError')}({code})"
+
+
+def _log_x11(message: str, error: bool = False) -> None:
+    """把 X11 兼容层的事件记入过程日志（不可用则退回 print）。"""
+    try:
+        from dungeon import process_log
+        process_log.log("[X11] " + message)
+    except Exception:
+        if error:
+            print("[X11] " + message)
 
 
 def is_alive() -> bool:
