@@ -34,6 +34,7 @@
                                      #（缺省「退出时模式」：跟随上次退出时所在界面）
 """
 
+import os
 import sys
 
 from services.ui_mode import MODE_MINI, MODE_PRO, resolve_startup_mode, save_mode
@@ -372,6 +373,63 @@ def _flush_mini_theme_bindings() -> None:
 
 # ==================== 调度循环 ====================
 
+#: 卡死转储文件的句柄（必须保持强引用，否则 faulthandler 写向已回收的文件）
+_HANG_DUMP_FILE = None
+#: 环境变量缺省值：多少秒没有进展就转储一次线程栈
+_HANG_DUMP_DEFAULT_SECONDS = 60.0
+
+
+def _install_hang_watchdog() -> bool:
+    """按环境变量开启 faulthandler 定时转储：卡死时留下那一刻的线程栈。
+
+    本项目真出过「代码里复现不了、只在长时会话里偶发」的挂死，结论是
+    OS/驱动级环境现象（见 ``docs/Dungeon/history/exit_hang_investigation.md``）。
+    这类问题**唯一有价值的证据就是卡住那一刻的线程栈**，而它平时拿不到
+    （DPG 帧循环期间 Python 层看门狗常常拿不到 GIL，``threading.Timer``
+    实测根本不触发）。所以这里挂一个可选的原生转储：
+
+    - ``GIANTESS_HANG_DUMP=30``：30 秒无进展即把**全部线程栈**写进
+      数据区 ``user/hang_dump.txt``（默认关闭，避免日常使用被反复写文件）；
+    - ``GIANTESS_HANG_DUMP_REPEAT=1``：反复转储（默认只转储一次）；
+    - ``GIANTESS_HANG_DUMP_EXIT=1``：转储后直接结束进程（默认继续运行，
+      便于继续操作/观察）。
+
+    返回是否真的开启了。注意它是**尽力而为**：转储依赖 faulthandler 的
+    看门狗线程拿到 GIL，主线程死锁在持有 GIL 的 C 调用里时可能拿不到。
+    """
+    global _HANG_DUMP_FILE
+    raw = (os.environ.get("GIANTESS_HANG_DUMP") or "").strip()
+    if not raw:
+        return False
+    try:
+        seconds = max(5.0, float(raw))
+    except ValueError:
+        seconds = _HANG_DUMP_DEFAULT_SECONDS
+    try:
+        import faulthandler
+        import time
+
+        from paths import data_dir
+
+        path = os.path.join(data_dir(), "user", "hang_dump.txt")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        _HANG_DUMP_FILE = open(path, "a", buffering=1, encoding="utf-8")
+        _HANG_DUMP_FILE.write(
+            f"\n===== 会话开始 {time.strftime('%Y-%m-%d %H:%M:%S')} "
+            f"（{seconds:.0f}s 无进展即转储）=====\n")
+        faulthandler.enable(file=_HANG_DUMP_FILE)
+        faulthandler.dump_traceback_later(
+            seconds,
+            repeat=bool(os.environ.get("GIANTESS_HANG_DUMP_REPEAT")),
+            file=_HANG_DUMP_FILE,
+            exit=bool(os.environ.get("GIANTESS_HANG_DUMP_EXIT")))
+    except Exception as e:
+        print(f"[Warning] 开启卡死转储失败: {e}")
+        return False
+    print(f"[Hang] 卡死转储已开启：{seconds:.0f}s 无进展写入 {path}")
+    return True
+
+
 def run_app(initial_mode: str = None, default_mode: str = MODE_PRO) -> None:
     """按界面模式启动，并在两套界面之间来回切换，直到使用者关闭窗口。
 
@@ -379,6 +437,7 @@ def run_app(initial_mode: str = None, default_mode: str = MODE_PRO) -> None:
     偏好解析（见 :func:`services.ui_mode.resolve_startup_mode`），即跟随设置项的
     ``main.py``。每套界面返回后读取一次切换请求：有就重建另一套，没有就结束进程。
     """
+    _install_hang_watchdog()
     mode = initial_mode or resolve_startup_mode(default_mode)
 
     while True:
