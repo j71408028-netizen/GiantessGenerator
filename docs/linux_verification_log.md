@@ -161,3 +161,77 @@
 - 收窄 `TkHost` 的 X11 guard 启用条件后，`tests/run_checks.py` 仍为 13/13。
 - `tests/smoke_switch.py` 再次 50/50 通过。
 - `data/user/settings.json` 已与测试前 master 备份逐字段核对一致。
+
+### 2026-10-07 02:00-04:00 CST（阶段二：遗留问题收口）
+
+承接 `docs/linux_compat_plan.md` §2，逐项落地（执行记录表见该文 §6）：
+
+- **§2.1-1 XInitThreads**：新增 `ui/common/x11.py` + `ui/common/x11_boot.py`，
+  `main.py` 顶部（`import tkinter` 之前）等五个入口调用；实测 `XInitThreads()` 返回真。
+- **§2.1-2 错误处理器收窄**：`dpg_state.install_x11_error_guard()` 现在解析
+  `XErrorEvent.error_code`，只对 `BadWindow(3)` / `BadDrawable(9)` 静默记日志，其余
+  错误码每次大声记录（不转发默认处理器，避免进程退出）。注入真实 BadWindow 与伪造
+  `BadMatch(8)` 各验证一次：进程存活、日志文案正确。
+- **§2.4 EWMH 置顶**：`ui/common/x11.py` 用纯 ctypes 实现 `_NET_WM_STATE_ABOVE`
+  写入 + 回读，`ui/mini/topmost.py` 收口"Tk 失败再走 EWMH"；GNOME/XWayland 实测
+  `xprop` 可读到该状态、移除也确认。不支持的桌面环境把设置页开关置灰并标注原因。
+  过程中修掉一个真 bug：`XQueryTree` 返回的是 Status，**0 才是失败**，早先按
+  `!= 0` 判失败会把所有窗口都当成顶层窗口。
+- **§2.2 默认方案校验**：`新选项` 触发器移除孤立的 `precondition_names: ["新插入"]`
+  （`新插入` 从来不是触发器名，只是插入动作的默认名）；新增顶层字段 `ending_policy`
+  （`required` / `open`），默认方案声明 `open`，校验器据此不再对开放式方案报"无结局
+  路径"。`check_scenarios.py`：错误 0 / 警告 0 / 提示 1（只剩离线解码器那条环境
+  提示）。`check_scenario_schema.py` 144/144。
+- **§2.3 依赖**：`numpy>=1.26` 写进 `requirements.txt`；两个打包脚本移除
+  `--collect-all zai`、补 `numpy` / `webview`；`dependency_dlg.py` 改成可选 import +
+  `missing_dependencies()`，缺 `networkx`/`graphviz` 时弹框给安装命令而不是 import 崩
+  （本机确实没装，实测提示文案正确）。
+- **回归**：`tests/run_checks.py` **13/13**；`tests/smoke_mini.py` 全部通过；
+  `autopilot --scene session-close --isolate`、`--repeat 3` 通过；`--scene all`
+  30 项里 29 项通过，`mini-game-escape` 报「断言全过」但进程未在宽限内退出
+  （单跑该场景立即通过），属本文下面的「长时间压测环境劣化」现象。
+- **段错误压测（各 6 轮，见计划 §5.1）**：XInitThreads 生效组 3/6 通过、0 段错误、
+  3 挂死；`GIANTESS_X11=0` 对照组 0/6、0 段错误、6 挂死。两组都没复现段错误，
+  所以"XInitThreads 是否消除段错误"这轮**得不出结论**；挂死点固定在 `smoke_switch`
+  第 2 轮「切到挂件后真实跑一局副本」的挂件构建段，且关掉 X11 支持同样复现。
+
+### 2026-10-07 环境观察：长时间连续 GUI 压测后的劣化
+
+- 现象：同一台机器、同一份代码，`smoke_switch.py` 单轮从会话初期的 ~45s 逐步涨到
+  120–170s，并且开始在固定位置挂死（第 2 轮挂件构建段）；`smoke_switch` 在本轮会话
+  初期曾连续 3 次 50/50 全过。
+- 排除：`GIANTESS_X11=0`（不调 XInitThreads、不写 EWMH）同样挂死；**HEAD 基线代码
+  （阶段一之后的 `7015a4a`，无阶段二任何改动）在工作区副本里同样挂在同一位置**，
+  说明与本次改动无关；同期单跑 `smoke_mini.py`、`autopilot --scene session-close
+  --repeat 3`、`--scene mini-game-escape` 都通过。`faulthandler` 抓到的卡点在
+  `tkinter.update_idletasks()`（`smoke_switch.build_mini` 建完挂件后的一次空转）。
+- 结论：属本文 §4.1 那条"长时会话累积的环境现象"（X / GLFW / 桌面环境的累积状态），
+  不是本次改动引入的功能缺陷。压测与 CI 的应对：**逐轮子进程 + 硬超时**，按"有没有
+  段错误"读结论（`developer_tools/_probe_stress.py`、计划 §5.1）；真遇到先重启会话。
+
+### 2026-10-07 修复：模态对话框在 X11 上 `grab failed: window not viewable`
+
+- 复现路径：**文本管理器 → 二级卡片（点条目）→ 弹出地标编辑框**，Linux 上直接抛
+  `_tkinter.TclError: grab failed: window not viewable`（`ui/landmark/__init__.py`
+  的 `self.grab_set()`）。Windows 不复现。
+- 根因：`ui.common.dialogs.BaseDialog.__init__` 刻意先 `withdraw()`（避免默认位置 /
+  浅色标题栏闪现），此时窗口在 X 服务端还没被映射；X11 的 `grab_set` 要求窗口
+  viewable，Windows 的 grab 实现不校验这一点。**全仓共 11 处**在构造期直接
+  `grab_set()`（地标 / 地址 / 章节 / 触发器 / 依赖图 / 输入框 / 消息框…），
+  都是同一颗雷，只是触发时序不同。
+- 修复：`BaseDialog` 新增 `_grab_deferred()`——先试一次即时抓取（各平台保持原有
+  "构造期就挡住输入"的行为，Windows / macOS 会成功），失败则挂到 `<Map>` 事件上
+  补做（窗口被映射时必然触发），最多重试 5 次后放弃（只失去模态，不再抛异常）。
+  11 处调用点全部改为 `_grab_deferred()`；`_show_modal()` 也把抓取挪到显示之后。
+- 过程中的自我纠错：第一版用 `after` 自续轮询补抓，在窗口迟迟不映射时会把事件循环
+  喂死（比原 bug 更糟），已改为纯 `<Map>` 事件驱动、无轮询。
+- 验证：
+  - 注入"第一次 grab 必失败"模拟 X11 行为：`LandmarkDialog` 打开不抛异常、第二次
+    抓取成功、调用次数 2、正常关闭并返回结果；
+  - 逐个真实对话框子进程冒烟（`developer_tools/_dlg_check.py`）：InputDialog /
+    LandmarkDialog / AddressTextDialog / ChapterEditDialog / TriggerEditDialog /
+    DependencyGraphDialog 全部"打开→抓到模态→正常关闭"通过；
+  - 新增离线守卫 `tests/check_modal_grabs.py`（静态扫描 + 行为分支，7 项），
+    `tests/run_checks.py` 由 13 项变 **14 项全通过**；
+  - `tests/smoke_switch.py` 50/50 全通过（本轮会话此前一度因环境劣化挂死，
+    重启会话后恢复正常，见上一条）。

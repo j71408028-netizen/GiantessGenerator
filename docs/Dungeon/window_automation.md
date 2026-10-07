@@ -132,6 +132,36 @@ python scripts/dungeon_autopilot.py --in-process                 # 当前进程�
    见 §6 与 [宿主边界](window_host.md) §6）。
 5. CI：GUI 冒烟层单独一个 job（需要显示器），不要并进无 GUI 的门禁。
 
+### 4b. 长压测标准姿势：`--isolate` + 外层 watchdog
+
+反复开关窗口（`destroy_context → create_context → show_viewport`）会暴露 Dear PyGui
+2.3.1 / GLFW 的低概率**原生**段错误（`SIGSEGV @ ImGui_ImplGlfw_WindowFocusCallback`，
+Python 层 `try/except` 捕不到）。这类问题只能靠「一轮一个子进程 + 外层统计退出码」
+抓：单轮跑在父进程里，一次崩溃就把整轮统计带走，永远得不到"20 轮里崩了几轮"。
+
+标准做法是**逐轮起子进程、按退出码分类**，别把 `--in-process` 用于压测：
+
+```bash
+# 现成脚本（developer_tools/，本地探针目录，不入库）：
+python developer_tools/_probe_stress.py smoke_switch 20                    # 默认：XInitThreads 生效
+GIANTESS_X11=0 python developer_tools/_probe_stress.py smoke_switch 20     # 对照组
+python developer_tools/_probe_stress.py autopilot 5 -- --scene all --isolate
+```
+
+它每轮打印 `rc` 与耗时，末尾汇总 `PASS / 非零退出 / 原生崩溃`——**负的 rc 就是信号**
+（`-11` = SIGSEGV）。等价的手工版本：
+
+```bash
+for i in $(seq 1 20); do
+  .venv/bin/python tests/smoke_switch.py >/dev/null 2>&1
+  echo "round=$i rc=$?"        # 139 = 128+11 段错误
+done
+```
+
+Linux 侧配合 `GIANTESS_X11=0` 做 XInitThreads 有效/无效对比（见
+[docs/linux.md](../linux.md) §3、§6）。判定只看「跑完且没崩」，不看单轮断言——
+断言已由单轮标准跑覆盖。
+
 ## 5. 坑清单
 
 | 坑 | 现象 | 应对 |
@@ -150,7 +180,7 @@ python scripts/dungeon_autopilot.py --in-process                 # 当前进程�
 
 1. **场景扩充**：选项弹窗、插入 / 跳转触发器、结束章节结局、回放模式、AI 返回脏数据（截断 JSON、无 JSON、空文本）。
 2. **真实响应录制**：把一次真实会话的 AI 响应存成 fixture，回归时回放——既真实又不花钱、可复现。
-3. **压测**：`--scene session-close --repeat N --isolate` 连续开关窗口 N 次，抓竞态与关闭路径的偶发问题（已支持，尚未长期跑）。
+3. **压测**：`--scene session-close --repeat N --isolate` 连续开关窗口 N 次，抓竞态与关闭路径的偶发问题——**已落地标准姿势**（§4b，含逐轮退出码统计与 XInitThreads 对照组）。
 4. **退出挂死**：已收敛为「长时会话累积的环境现象」，保留 `EXIT_GRACE` 兜底即可；真遇到先重启系统。
 5. **换宿主的验证**：想验证「换框架也能跑」，最省事的是写一个 `HostPort` 子类（如 asyncio / Qt 节拍）驱动窗口，`check_dungeon_layering.py` 会保证 window 层不再偷偷拉回 Tk。
 6. **CI**：GUI 冒烟层单独一个 job（需要显示器）。

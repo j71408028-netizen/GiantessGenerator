@@ -19,11 +19,21 @@
 
 ## 环境要求
 
-- Windows、macOS 12 或更新版本；Linux 可作为开发环境使用
-- Python 3.10 及以上（开发环境为 Python 3.13）
+- Windows、macOS 12 或更新版本；Linux（X11 / XWayland 会话）见下方「Linux（X11 / XWayland）」与 [docs/linux.md](docs/linux.md)
+- Python 3.10 及以上（开发环境为 Python 3.13；Linux 上 Python 3.12 / 3.14 均已实测）
 - macOS 需要可用的 Tcl/Tk 图形组件。使用 python.org 安装包或 Homebrew Python 均可
 - 若使用 AI 生成功能，需自行准备对应服务商的 API Key（可选功能）
 - 触发器依赖关系图为可选功能，需要额外安装 Graphviz 的 `dot` 命令
+
+### 支持平台矩阵
+
+| 平台 | 状态 | 说明 |
+|---|---|---|
+| Windows 10/11 | ✅ 受支持 | 打包发行（`build/windows/build_windows.ps1`），系统自带 WebView2 支撑内置小游戏 |
+| macOS 12+ | ✅ 受支持 | 打包发行（`build/macos/build_macos.sh`） |
+| Linux · X11 会话 | ✅ 受支持 | 见下方「Linux（X11 / XWayland）」；Linux 打包脚本尚在补位 |
+| Linux · Wayland + XWayland | ⚠️ 可用 | 副本窗口经 XWayland 显示；窗口置顶依赖窗口管理器的 EWMH 支持 |
+| Linux · 纯 Wayland（无 XWayland） | ❌ 不支持 | 副本窗口（GLFW）无法创建 |
 
 ## 安装与运行
 
@@ -51,6 +61,30 @@ python main.py
 ```
 
 默认从项目根目录启动即可。程序也会在启动时修正工作目录，因此从 Finder、快捷方式或其他目录启动源码版时，`data/` 和 `assets/` 仍能被定位。
+
+### Linux（X11 / XWayland）
+
+```bash
+sudo apt install python3-tk fontconfig        # Tk 图形组件与字体；发行版名不同时按包管理器替换
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt     # 必装：networkx / graphviz / openai / numpy 都在这里
+sudo apt install graphviz                     # 可选：仅用于触发器依赖图（Python 包不含 dot）
+python main.py
+```
+
+```bash
+# 离线自检（不需要显示器，13 项）
+.venv/bin/python tests/run_checks.py
+# GUI 冒烟（需要显示器或 xvfb）
+.venv/bin/python tests/smoke_switch.py
+```
+
+Wayland 原生会话不在支持范围内：请在 **XWayland**（`XDG_SESSION_TYPE=wayland` 时的默认行为）下运行；
+纯 Wayland 合成器（如 sway 的纯 Wayland 后端）下副本窗口无法创建。X11 会话可直接使用。
+Linux 侧的兼容细节、限制与实测记录见 [docs/linux.md](docs/linux.md) 与
+[docs/linux_verification_log.md](docs/linux_verification_log.md)。
 
 ### 两套界面：专业模式与ME模式
 
@@ -187,6 +221,12 @@ data/
 **开发与架构**
 
 - [架构与分层](docs/architecture.md)：分层现状与硬约束、结构决策档案（历程索引）、操作手册与提交规范
+
+**平台支持**
+
+- [Linux 支持说明](docs/linux.md)：X11/XWayland 支持范围、XInitThreads 引导、窗口置顶（EWMH）与降级、缺依赖表现、压测与已知限制
+- [Linux 试跑检查记录](docs/linux_verification_log.md)：逐项实测与修复证据链
+- [Linux 兼容计划](docs/linux_compat_plan.md)：三阶段推进计划、验收标准与风险登记
 
 ## 免责声明
 

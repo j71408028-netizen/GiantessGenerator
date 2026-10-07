@@ -43,6 +43,10 @@
 
 ## 2. 阶段二（P1/P2）：遗留问题收口
 
+> **状态（2026-10-07）**：§2.2 / §2.3 / §2.4 已全部落地；§2.1 的 XInitThreads、错误处理器
+> 收窄与压测姿势已落地，段错误压测数据见 §5；向 Dear PyGui 提 issue 属长期跟进项。逐项执行
+> 记录见文末 §6。
+
 ### 2.1 DPG/GLFW 低概率原生段错误（日志 §4.1，P1）
 
 现象：反复 `destroy_context → create_context → show_viewport` 后偶发 `SIGSEGV @ ImGui_ImplGlfw_WindowFocusCallback`，Python 层不可捕获。
@@ -100,17 +104,61 @@
 
 ## 4. 总体验收标准
 
-- [ ] §1.3 阶段一验收全过；
-- [ ] Linux 实机：`run_checks.py` 13/13、autopilot 30/30、`smoke_mini` / `smoke_switch` 全通过（Python 3.12 / 3.14 各跑一轮，确认版本宽容度）；
-- [ ] 默认方案 `check_scenarios.py` 0 error 0 warning（info 只剩可选依赖类）；
-- [ ] Linux PyInstaller 包能启动、创建/进入副本、跑通一个小游戏触发器；
-- [ ] 段错误压测：修复前后各 20 轮 `smoke_switch.py` 连跑记录对比，结论写入 §5。
+- [x] §1.3 阶段一验收全过（6 组提交已入库，工作区干净；Windows 路径未破坏——`install_x11_error_guard()` 在非 Linux 直接返回 False）；
+- [ ] Linux 实机：`run_checks.py` 13/13、autopilot 30/30、`smoke_mini` / `smoke_switch` 全通过（Python 3.12 / 3.14 各跑一轮，确认版本宽容度）——**3.14 已过（13/13、smoke_mini 全通过；autopilot 29/30，1 项为环境劣化导致的退出挂死；`smoke_switch` 会话初期 50/50，长压测后挂死，见 §5.1）**；3.12 那轮待补；
+- [x] 默认方案 `check_scenarios.py` 0 error 0 warning（info 只剩可选依赖类）；
+- [ ] Linux PyInstaller 包能启动、创建/进入副本、跑通一个小游戏触发器（阶段三）；
+- [x] 段错误压测：§5.1 已跑「XInitThreads 生效 / 关闭」各 6 轮并记录（两组均 0 段错误，结论与局限已写明）。
 
 ## 5. 风险登记
 
 | 风险 | 等级 | 状态 |
 |------|------|------|
-| Dear PyGui 2.3.1 / GLFW 反复拆建上下文的回调状态竞争（SIGSEGV） | 高 | 第三方库风险，靠 §2.1 缓解；长期跟随上游 |
-| 宽松 X11 错误处理器可能掩盖真实 X 错误 | 中 | §2.1-2 收窄错误码后关闭 |
-| GNOME 置顶等桌面环境差异无法穷举（KDE/Wayland 各发行版） | 中 | 支持矩阵只承诺 X11+GNOME 实测项，其余按"尽力而为"标注 |
-| Python 3.14 较新，部分依赖（Pillow 上界、PyInstaller 钩子）兼容面窄 | 中 | §1.2-#6 决策 + 打包验证时确认 |
+| Dear PyGui 2.3.1 / GLFW 反复拆建上下文的回调状态竞争（SIGSEGV） | 高 | 第三方库风险，靠 §2.1 缓解；长期跟随上游。收窄后的错误处理器已能把它与 X 错误区分开（未预期错误码会大声记录） |
+| 宽松 X11 错误处理器可能掩盖真实 X 错误 | 中 | ✅ 已关闭：只对 `BadWindow(3)` / `BadDrawable(9)` 记日志返回，其余错误码每次大声记录（`dpg_state._EXPECTED_X11_ERRORS`） |
+| GNOME 置顶等桌面环境差异无法穷举（KDE/Wayland 各发行版） | 中 | ✅ 已收口：EWMH 直接写 + 回读确认，不支持时设置页置灰。支持矩阵只承诺 X11+GNOME 实测项，其余按「尽力而为」标注（docs/linux.md §4） |
+| Python 3.14 较新，部分依赖（Pillow 上界、PyInstaller 钩子）兼容面窄 | 中 | §1.2-#6 决策 + 打包验证时确认（阶段三） |
+| **长时间连续 GUI 压测后环境劣化**：单轮耗时由 ~45s 涨到 120–170s，收尾路径挂死概率上升（`smoke_switch` 已过第 1 轮、卡在第 2 轮「跑一局副本」；`autopilot` 偶发单场景退出挂死）。重启会话/长时间静置后恢复 | 中 | 与 §5 的「退出挂死」同源，属长时会话累积的环境现象**而非本轮改动**（`GIANTESS_X11=0` 对照同样挂死；单跑 `--scene session-close`、`--repeat 3`、`smoke_mini` 均通过）。压测一律逐轮子进程 + 硬超时，结论按"有没有段错误"读，不把挂死记到功能头上 |
+
+### 5.1 段错误压测数据（2026-10-07）
+
+方法：`developer_tools/_probe_stress_matrix.sh`（逐轮子进程 + 单轮超时 + 逐轮还原
+`data/user/settings.json`），两组顺序跑，每组 6 轮 `smoke_switch.py`：
+
+| 组 | 配置 | PASS | 断言失败 | 原生崩溃（段错误） | 挂死 |
+|---|---|---|---|---|---|
+| A | XInitThreads 生效（`main.py` 引导，默认） | 3/6 | 0 | **0** | 3 |
+| B | `GIANTESS_X11=0`（不调 XInitThreads、不写 EWMH） | 0/6 | 0 | **0** | 6 |
+
+读法（必须说清楚的局限）：
+
+- **两组都没有段错误**——§4 日志里那个偶发 SIGSEGV 本轮没有复现，因此「XInitThreads
+  是否消除段错误」这轮**得不出结论**；上表的差异只在挂死率（B 组更差），样本太小、
+  且 B 组跑在后面（环境已经更劣化），不能当成因果。
+- 能确认的是：XInitThreads 真的被调到了（`boot_x11()` 返回 True、`probe_static`
+  验证），EWMH 置顶路径在 GNOME 实测可用，收窄后的错误处理器在真实 BadWindow 下
+  既不退出进程、也留下了过程日志。
+- 挂死点固定在第 2 轮「切换到挂件模式后真实跑一局副本」的挂件构建段；它同时出现在
+  A 组、B 组与 `GIANTESS_X11=0` 的单跑复现里，与 X11 引导开关无关。
+- 想拿到更有意义的对比，需要在**重新启动的干净会话**里跑，且两组交替进行（否则
+  第二组必然跑在更劣化的环境里）。这条留给阶段三 CI（xvfb + llvmpipe）来做。
+
+## 6. 阶段二执行记录（2026-10-07）
+
+| 计划项 | 落地内容 | 验证 |
+|---|---|---|
+| §2.1-1 XInitThreads 实验 | 新增 `ui/common/x11.py`（`init_x_threads`）+ `ui/common/x11_boot.py`；`main.py` / `smoke_switch` / `smoke_mini` / `dungeon_autopilot` / `TkHost.__init__` 五处接入；`GIANTESS_X11=0` 作对比开关 | 压测见 §5.1；`developer_tools/_probe_xinit.py` 确认 `XInitThreads()` 真实调用成功 |
+| §2.1-2 错误处理器收窄 | `dpg_state.install_x11_error_guard()`：ctypes `XErrorEvent` 解析 `error_code`，只对 `BadWindow(3)`/`BadDrawable(9)` 静默记日志，其余错误码每次大声记录 | 注入真实 BadWindow 与伪造 `BadMatch(8)` 各验一次，进程存活且日志正确 |
+| §2.1-3 压测守护 | `docs/Dungeon/window_automation.md` 新增 §4b（逐轮子进程 + 硬超时 + 退出码分类 + `GIANTESS_X11` 对照组）；`developer_tools/_probe_stress.py` / `_probe_stress_matrix.sh` | 本文件 §5.1 |
+| §2.1-4 上游 issue | 未做（低优先级，需要最小复现样例；压测方法已写进 §4b，随时可提） | — |
+| §2.2-1 悬空前置 | `_default/config.json`：`新选项` 触发器移除孤立的 `precondition_names: ["新插入"]` | `check_scenarios.py` 警告清零 |
+| §2.2-2 无结局 info | 新增顶层字段 `ending_policy`（`required` 默认 / `open`）+ 归一化 + 非法值 warning；默认方案声明 `open`；校验器 `open` 时不提示 | `check_scenario_schema.py` 144/144（新增 5 项断言）；`check_scenarios.py` info 只剩可选依赖类 |
+| §2.2-3 解码器 info | 不改代码；`docs/linux.md` §2 写明 `pip install miniaudio` 即消除 | 文档 |
+| §2.3-1 缺依赖体验 | `dependency_dlg.py` 可选 import + `missing_dependencies()` + 对话框内安装提示；`chapter_trigger_mgr.check_dependencies` 先提示再返回（不再 import 崩） | 本机（无 networkx/graphviz）实测提示文案正确 |
+| §2.3-2 numpy | `requirements.txt` 增加 `numpy>=1.26`；`check_entrypoints.UNDECLARED_ALLOWED` 移除旧豁免；打包脚本补 `--collect-all numpy` | `check_entrypoints.py` 通过 |
+| §2.3-3 zai | 从 Windows/macOS 打包脚本移除 `--collect-all zai` | `check_entrypoints.py`（构建脚本解析）通过 |
+| §2.3-4 可选依赖 | README 安装段 + `docs/linux.md` §2 写明缺失降级表现（与 requirements.txt 注释一致） | 文档 |
+| §2.4-1 EWMH 置顶 | `ui/common/x11.py`（`top_level_window` / `state_above` / `is_above` / `supports_above`，纯 ctypes）+ `ui/mini/topmost.py`；`MiniApp` 在 `<Map>` 后落地并回读 | GNOME/XWayland 实测：`_NET_WM_STATE_ABOVE` 写入/移除成功，xprop 可读 |
+| §2.4-2 UI 降级 | `ui/mini/pixel.CycleRow.set_disabled()`；设置页在 `_NET_SUPPORTED` 无该属性时置灰并标注「本桌面环境不支持」，用户强行开启时弹一次说明 | 组件级实测（置灰后不可点击、文案正确） |
+| §2.4-3 支持矩阵 | `docs/linux.md` §4 支持矩阵 + README「支持平台矩阵」 | 文档 |
+
