@@ -690,7 +690,8 @@ class _StuckRelocateDialog(BaseDialog):
         self.result = None
         top = host.winfo_toplevel()
         self.transient(top)
-        self.grab_set()
+        # 抓取延到窗口可见之后（X11 要求 viewable，见 BaseDialog._grab_deferred）
+        self._grab_deferred()
         self._create_widgets()
         self.geometry("560x430")
         self._center_dialog(host)

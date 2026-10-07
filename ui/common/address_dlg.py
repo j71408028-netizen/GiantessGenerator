@@ -40,7 +40,7 @@ class AddressTextDialog(BaseDialog):
         self.result = None
         self._parent = parent.winfo_toplevel()
         self.transient(self._parent)
-        self.grab_set()
+        self._grab_deferred()
         self.allow_empty = allow_empty
         # 地标风格：改注册地址会使基于旧地址组合的已注册地标地址失效
         self._landmark_style = landmark_style

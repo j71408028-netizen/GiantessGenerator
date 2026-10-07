@@ -51,7 +51,8 @@ class QuipDialog(BaseDialog):
             self.quip = clean_quip
 
         self.transient(self._parent)
-        self.grab_set()
+        # 抓取延到窗口可见之后（X11 要求 viewable，见 BaseDialog._grab_deferred）
+        self._grab_deferred()
 
         self.type_list = self._build_type_list()
         self._create_widgets()

@@ -110,7 +110,8 @@ class TriggerEditDialog(BaseDialog):
                              if a.get("name") and a.get("type") != "casualty"] or evolution_names
         self.chapter_names = chapter_names(chapters)
         self.transient(parent)
-        self.grab_set()
+        # 抓取延到窗口可见之后（X11 要求 viewable，见 BaseDialog._grab_deferred）
+        self._grab_deferred()
         self._hint_visible = False
         self._build_ui()
         self._center_dialog(parent)

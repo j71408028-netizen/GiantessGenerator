@@ -85,6 +85,9 @@ class BaseDialog(ctk.CTkToplevel):
         self._dialog_geometry_size = None  # 显式设置的窗口逻辑尺寸 (宽, 高)
         self._center_reference = parent.winfo_toplevel()
         self._titlebar_theme_applied = False
+        #: 模态抓取待窗口可见后补做（见 _grab_deferred）
+        self._grab_pending = False
+        self._grab_attempts = 0
         self.corner_radius = corner_radius
         # 初始化期间保持隐藏：避免在默认位置以浅色标题栏/tkinter 默认图标闪现，
         # 待子类构建完成、居中并应用深色标题栏后再显示（见 _center_dialog）
@@ -152,6 +155,60 @@ class BaseDialog(ctk.CTkToplevel):
         if not self._titlebar_theme_applied:
             self._titlebar_theme_applied = True
             self._apply_titlebar_theme()
+        # 窗口刚被窗口系统映射：这里才是 X11 上抓取模态的正确时机（见 _grab_deferred）
+        self._try_pending_grab()
+
+    #: <Map> 兜底抓取的最大尝试次数（防止某个平台永远抓不上时反复重试）
+    _GRAB_MAX_ATTEMPTS = 5
+
+    # ---------------- 模态抓取 ----------------
+    def _grab_deferred(self):
+        """模态抓取：**等窗口在窗口系统里真正可见之后再** ``grab_set()``。
+
+        为什么不能直接在子类 ``__init__`` 里 ``grab_set()``：``BaseDialog`` 构造期
+        刻意 ``withdraw()``（避免默认位置 / 浅色标题栏闪现），此时窗口在 X 服务端
+        还没被映射。X11 的 ``grab_set`` 要求窗口 viewable，否则抛
+        ``TclError: grab failed: window not viewable``；Windows 的实现不校验这一点，
+        所以这个 bug 只在 Linux 上现形（实测：文本管理器二级卡片 → 地标编辑框）。
+
+        实现上做两件事，**都不轮询**（早期版本用 ``after`` 自续轮询，窗口迟迟不映射
+        时会把事件循环喂死，那是个比原 bug 更糟的错）：
+
+        1. 先试一次即时抓取：各平台保持原有「构造期就挡住输入」的行为，
+           Windows / macOS 会成功，X11 在窗口未映射时失败；
+        2. 失败则挂到 ``<Map>`` 事件上——窗口被映射时必然触发，那时抓取成立。
+           抓取失败最多重试 ``_GRAB_MAX_ATTEMPTS`` 次，之后放弃（只失去模态，
+           绝不让点击流程崩掉）。
+        """
+        self._grab_attempts = 0
+        try:
+            self.grab_set()
+            self._grab_pending = False
+            return
+        except tk.TclError:
+            pass
+        self._grab_pending = True
+        self._try_pending_grab()
+
+    def _try_pending_grab(self) -> None:
+        """窗口可见后抓取模态；不可见/抓不到就等下一次 <Map>（见 _grab_deferred）。"""
+        if not getattr(self, "_grab_pending", False):
+            return
+        if self._grab_attempts >= self._GRAB_MAX_ATTEMPTS:
+            self._grab_pending = False
+            return
+        try:
+            if not self.winfo_exists():
+                self._grab_pending = False
+                return
+            if not self.winfo_viewable():
+                return                      # 还没映射完，等这次 <Map> 之后的下一次
+            self.grab_set()
+            self._grab_pending = False
+        except tk.TclError:
+            self._grab_attempts += 1
+            if self._grab_attempts >= self._GRAB_MAX_ATTEMPTS:
+                self._grab_pending = False
 
     def _apply_icon(self):
         """创建时立即应用应用图标（assets/icons/icon.ico），避免闪现 tkinter 默认图标。
@@ -187,9 +244,10 @@ class BaseDialog(ctk.CTkToplevel):
         focus_widget 指定后聚焦该部件，否则聚焦窗口本身。
         """
         self.transient(self._center_reference)
-        self.grab_set()
         self._center_dialog()
         (focus_widget if focus_widget is not None else self).focus_force()
+        # 抓取放在显示**之后**并允许延迟（X11 要求窗口 viewable，见 _grab_deferred）
+        self._grab_deferred()
         self.wait_window()
 
     def _make_std_button(self, parent, text, primary, command=None):

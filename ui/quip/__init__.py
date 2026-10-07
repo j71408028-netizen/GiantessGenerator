@@ -234,7 +234,8 @@ class QuipCardManager(CardManager):
         dialog.title(f"编辑自定义类型 - {style}")
         dialog.geometry("600x320")
         dialog.transient(self)
-        dialog.grab_set()
+        # 抓取延到窗口可见之后（X11 要求 viewable，见 BaseDialog._grab_deferred）
+        dialog._grab_deferred()
 
         main_frame = ctk.CTkFrame(dialog)
         main_frame.pack(fill='both', expand=True, padx=10, pady=10)

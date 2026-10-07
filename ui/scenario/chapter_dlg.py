@@ -53,7 +53,8 @@ class ChapterEditDialog(BaseDialog):
         self.sens_rows = []
         self._swatch_buttons = {}
         self.transient(parent)
-        self.grab_set()
+        # 抓取延到窗口可见之后（X11 要求 viewable，见 BaseDialog._grab_deferred）
+        self._grab_deferred()
         self._build_ui()
         self._center_dialog(parent)
         self.wait_window()

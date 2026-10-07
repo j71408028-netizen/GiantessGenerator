@@ -459,9 +459,10 @@ class LandmarkDialog(BaseDialog):
         self._addr_dropdown = None
         self._pending_fetch = None
 
-        # 模态设置
+        # 模态设置：抓取要等窗口在窗口系统里可见（X11 上先 grab 会报
+        # "window not viewable"，见 ui/common/dialogs.BaseDialog._grab_deferred）
         self.transient(self._parent)
-        self.grab_set()
+        self._grab_deferred()
 
         self._create_widgets()
         self.geometry("368x360")

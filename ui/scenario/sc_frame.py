@@ -550,7 +550,8 @@ class ScenarioEditor(ctk.CTkFrame):
         dialog.title("编辑转移概率矩阵")
         dialog.geometry("450x350")
         dialog.transient(self)
-        dialog.grab_set()
+        # 抓取延到窗口可见之后（X11 要求 viewable，见 BaseDialog._grab_deferred）
+        dialog._grab_deferred()
 
         types = ["background", "branch", "dialog", "interaction", "action"]
         matrix = self.transition_matrix if self.transition_matrix else self._default_transition_matrix()
