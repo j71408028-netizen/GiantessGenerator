@@ -200,9 +200,16 @@ data/
 - **`tests/` 是常驻自检**，命名即分组，`python tests/run_checks.py` 按类别自动发现
   （新增脚本放进对应类别即可，无需登记）：`check_*.py` 为守卫 / 行为自检（离线、
   可进 CI 门禁）；`smoke_*.py` 为需要真实显示器的 GUI 冒烟（`--smoke` 追加）。
-- **`scripts/` 是开发者一次性工具区**（不入自检门禁）：真窗口自动驾驶
-  （`dungeon_autopilot.py`）、无头模拟（`escape_sim.py`）与数据迁移脚本。要长期
-  维护的回归请写成 `tests/` 脚本。
+- **`scripts/` 是开发者工具区**：还在用的（真窗口自动驾驶 `dungeon_autopilot.py`、无头
+  模拟 `escape_sim.py`）与**一次性用掉后只留档**的（数据迁移 `migrate_*.py`、原生崩溃探针
+  `dpg_probe/`）都放这里，`scripts/README.md` 按「持续维护 / 已落地归档」分组。它**不提供
+  自检项**，但源码仍会被离线守卫**静态扫描**（只有 `developer_tools/` 被那些守卫排除）；
+  要长期维护的回归请写成 `tests/` 脚本。
+- **`developer_tools/` 是人工检查的快捷工具**（被离线守卫整体排除）：查看资源包 / 行为包
+  改动的效果——档案导出预览、小游戏单跑宿主、描述语料体检、演化模型模拟；资源开发者在增补描述风格与
+  小游戏后也推荐运行。判据是「**能一眼看到改动效果的**」——一次性用掉就去
+  `scripts/`。脚本按 `<领域>_<输出>` 命名、产物统一写 `_out/`（整目录不入库），目录约定见
+  [`developer_tools/README.md`](developer_tools/README.md)。
 - **`build/` 里只有 `windows/`、`macos/` 与 `linux/` 入库**：暂不支持单独打包某个启动模式。
 - **提交信息用约定式提交**（2026-10-06 起）：`<type>(<scope>): <subject>`，`type`
   用英文小写（`feat` / `fix` / `refactor` / `docs` / `test` / `chore` / `build` …），
@@ -225,6 +232,8 @@ data/
 **开发与架构**
 
 - [架构与分层](docs/architecture.md)：分层现状与硬约束、结构决策档案（历程索引）、操作手册与提交规范
+- [开发工具目录说明](developer_tools/README.md)：`developer_tools/` 与 `tests/`、`scripts/` 的分工，新增脚本的约定与入库范围
+- [一次性工具说明](scripts/README.md)：`scripts/` 各脚本的性质与用途、迁移脚本的留档策略
 
 **平台支持**
 

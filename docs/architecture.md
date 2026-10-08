@@ -176,7 +176,7 @@ data/static/behaviors/imperial_units/imperial_units.py:45
    `build_*` 一份实例就会丢掉接线（3.2.2 踩过，表现为挂住而不是报错）。
 5. 跑 `python tests/run_checks.py`。**看一眼依赖边总数**——纯位移应当不变；变了先判断
    是"拆模块导致的正常上升"还是"真的增删了依赖"（§3.1 第 4 条）。
-6. 同步文档：`README.md` 的「仓库结构约定」、`core/__init__.py` 之类的包文档、本文件。
+6. 同步文档：`README.md` 的「开发与架构（速查）」、`core/__init__.py` 之类的包文档、本文件。
 
 ### 5.2 自检怎么跑
 
