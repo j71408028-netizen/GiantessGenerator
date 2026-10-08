@@ -42,8 +42,10 @@ htmlcov/
 /data/user/
 /data/archives/
 
-# 本地开发工具与输出
-/developer_tools/
+# 开发工具（developer_tools/ 与 scripts/）：脚本入库，产物统一写各目录下的 _out/
+# 目录约定与入库范围见 developer_tools/README.md 与 scripts/README.md
+/developer_tools/_out/
+/scripts/_out/
 
 # 其他本地区域
 /.workbuddy/

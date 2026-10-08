@@ -52,9 +52,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BUILD_DIR = ROOT / "build"
 
-#: 不参与 import 扫描的目录：产物、缓存、用户数据、IDE，以及不入库的本地工具。
-#: ``developer_tools/`` 是随时可弃的探针集合（.gitignore 掉），让它拖垮正式自检
-#: 没有意义。
+#: 不参与 import 扫描的目录：产物、缓存、用户数据、IDE，以及人工检查的快捷工具。
+#: ``developer_tools/`` 是不进任何门禁的预览 / 体检集合，让它拖垮正式自检没有意义。
+#: （脚本本体已入库；只有它的产物目录 ``_out/`` 在 .gitignore 里。）
 EXCLUDED_DIRS = {
     "__pycache__", ".git", ".idea", ".workbuddy", "data", "dist", "build", "developer_tools",
 }
