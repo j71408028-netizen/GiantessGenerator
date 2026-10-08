@@ -55,7 +55,7 @@ jobs:
       - name: 导入自检（Tk / Dear PyGui 可用）
         run: python -c "import tkinter, dearpygui.dearpygui, PIL; print('imports ok')"
 
-      # 15 项：含入口/资源、分层、方案校验、组件包契约、字体覆盖等离线守卫
+      # 16 项：含入口/资源、分层、方案校验、组件包契约、字体覆盖、聊天时间标记等离线守卫
       - name: 离线守卫
         run: python tests/run_checks.py
 

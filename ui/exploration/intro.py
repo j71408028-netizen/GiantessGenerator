@@ -12,7 +12,9 @@ import customtkinter as ctk
 from core import imaging
 from core.logic import get_predefined_tags
 from services.state_service import StateService
-from ui.common.ctk_image import clear_ctk_label_image, format_avatar
+from ui.common.avatar import (
+    AvatarFrame, COMPACT_AVATAR_SIZE, PROFILE_AVATAR_SIZE,
+)
 from ui.common.widgets import CTkScrollableDropdownFrame
 from ui.common.theme import (
     INTRO_PANEL_BG, INTRO_BORDER, INTRO_BORDER_STRONG, INTRO_HOVER,
@@ -35,10 +37,11 @@ class IntroPanel(ctk.CTkFrame):
         self.generator_panel = generator_panel
 
         self._intro_editing = False
+        self._intro_chat_open = False
         self._state_mode_image_path = None
         self.ZWSP = '\u200B'
         self.is_expanded = True
-        self._avatar_ctk_image = None
+        self._avatar_pil = None           # 当前角色的头像母本（各头像框共用）
         self._avatar_cache_path = None
 
         self.tag_hints = {
@@ -67,8 +70,65 @@ class IntroPanel(ctk.CTkFrame):
 
     # ---------- 聊天入口 ----------
     def _toggle_chat(self):
+        self.toggle_chat()
+
+    def is_chat_open(self) -> bool:
+        return self._intro_chat_open
+
+    def toggle_chat(self):
+        if self._intro_chat_open:
+            self.collapse_chat()
+        else:
+            self.expand_chat()
+
+    def expand_chat(self):
+        """把角色聊天作为本面板的展开区打开（与编辑模式同级）。
+
+        介绍卡让位给聊天区，面板仍然挂在状态面板下方，因此聊天时角色状态
+        依然可见。聊天区高度按左栏剩余空间自适应（见 refresh_chat_height）。
+        """
+        if self._intro_chat_open:
+            return
+        if self._intro_editing:
+            self._cancel()          # 两种展开模式互斥
+        self._intro_chat_open = True
+        self.intro_display_frame.pack_forget()
+        self.intro_chat_frame.pack(fill='x', padx=10, pady=(0, 8))
+        self.refresh_chat_height()
         if self.generator_panel is not None:
-            self.generator_panel.toggle_chat_panel()
+            self.generator_panel.on_chat_expanded()
+
+    def collapse_chat(self):
+        if not self._intro_chat_open:
+            return
+        self._intro_chat_open = False
+        self.intro_chat_frame.pack_forget()
+        self.intro_display_frame.pack(fill='x', padx=12, pady=(8, 10))
+        if self.generator_panel is not None:
+            self.generator_panel.on_chat_collapsed()
+
+    def refresh_chat_height(self):
+        """按左栏当前剩余空间给聊天区定高，随窗口缩放自适应。
+
+        左栏是定高预算：状态面板 + 介绍/聊天区 + 底部按钮。介绍卡让位后
+        余下的空隙就是聊天区能占的高度，超出去会被 pack 裁掉（输入行看不
+        见），所以这里夹在 [150, 420] 之间并留一点余量。
+
+        注意单位：``winfo_height`` 给的是物理像素，而 ``configure(height=)``
+        吃的是逻辑像素；高 DPI 下不换算会算出偏大的高度，正好把聊天区撑出
+        裁剪区，必须除以本控件的 widget scaling。
+        """
+        height = 320            # 拿不到测量值时的兜底（如首帧未映射）
+        host = self.generator_panel
+        try:
+            scale = self._get_widget_scaling() or 1.0
+            avail = (host.content_area.winfo_height()
+                     - host.left_top.winfo_height()) / scale - 34
+            if avail > 0:
+                height = max(150, min(420, int(avail)))
+        except Exception:
+            pass
+        self.intro_chat_frame.configure(height=height)
 
     def set_chat_badge(self, count: int):
         """未读消息徽标：有未读时在聊天按钮左侧亮一个红点。"""
@@ -139,39 +199,39 @@ class IntroPanel(ctk.CTkFrame):
         self._load_avatar_cached(path)
 
     def _load_avatar_cached(self, path):
-        """按路径缓存头像，面板反复加载时不重复读盘/裁剪，避免闪烁。"""
-        if path == self._avatar_cache_path and self._avatar_ctk_image is not None:
-            self._apply_cached_avatar()
+        """按路径缓存头像**母本**，面板反复加载时不重复读盘，避免闪烁。
+
+        缓存的是方形母本位图（而不是某个尺寸的 CTkImage）：档案卡与编辑行
+        尺寸不同，各自从母本降采样即可，不会出现"图比控件大、把控件撑大"的错位。
+        位图读进来后就 ``load()`` 脱离文件句柄——缓存会活到面板销毁，攥着句柄
+        会让头像文件在 Windows 上无法删除/覆盖。
+        """
+        if path == self._avatar_cache_path and self._avatar_pil is not None:
+            self._apply_avatar(self._avatar_pil)
             return
-        self._show_avatar(imaging.load_from_path(path))
-        self._avatar_cache_path = path if self._avatar_ctk_image is not None else None
+        pil_img = imaging.load_from_path(path) if path else None
+        try:
+            pil_img.load()          # 脱离文件句柄（见上），顺带验一次真能解码
+            master = imaging.prepare_avatar(pil_img)
+        except Exception:
+            master = None           # 半截 / 损坏的图：退回占位字形，且不写缓存
+        if master is None:
+            self._avatar_pil = None
+            self._avatar_cache_path = None
+            self._clear_avatar()
+            return
+        self._avatar_pil = master
+        self._avatar_cache_path = path
+        self._apply_avatar(master)
 
-    def _apply_cached_avatar(self):
-        for lbl in (self.avatar_label, getattr(self, 'edit_avatar_label', None)):
-            if lbl is not None:
-                lbl.configure(image=self._avatar_ctk_image, text="")
+    def _apply_avatar(self, pil_img):
+        """把同一份母本铺到本面板的两个头像框（档案卡 / 编辑行）。"""
+        self.avatar_frame.set_image(pil_img)
+        self.edit_avatar_frame.set_image(pil_img)
 
-    def _show_avatar(self, pil_img):
-        if pil_img is not None:
-            try:
-                self._avatar_ctk_image = format_avatar(pil_img)
-                self._apply_cached_avatar()
-            except Exception:
-                self._clear_image_safe()
-                self._avatar_ctk_image = None
-        else:
-            self._clear_image_safe()
-            self._avatar_ctk_image = None
-
-    def _clear_image_safe(self):
-        for lbl in (self.avatar_label, getattr(self, 'edit_avatar_label', None)):
-            if lbl is None:
-                continue
-            clear_ctk_label_image(lbl)
-            try:
-                lbl.configure(text="👤", font=("Segoe UI", 24))
-            except Exception:
-                pass
+    def _clear_avatar(self):
+        self.avatar_frame.clear_image()
+        self.edit_avatar_frame.clear_image()
 
     def reset_state_mode(self):
         self._state_mode_image_path = None
@@ -183,9 +243,9 @@ class IntroPanel(ctk.CTkFrame):
 
     def _refresh_state_image(self, state):
         if not state:
-            self._clear_image_safe()
-            self._avatar_ctk_image = None
+            self._avatar_pil = None
             self._avatar_cache_path = None
+            self._clear_avatar()
             return
         character_repo = self.generator_panel.app._character_repo
         avatar_path = state.avatar_path
@@ -196,12 +256,27 @@ class IntroPanel(ctk.CTkFrame):
                 avatar_path = context.ensure_avatar_for_state(state)
                 state.avatar_path = avatar_path
         if not avatar_path:
-            self._clear_image_safe()
-            self._avatar_ctk_image = None
+            self._avatar_pil = None
             self._avatar_cache_path = None
+            self._clear_avatar()
             return
         abspath = character_repo.get_avatar_abspath(state.giantess_id, avatar_path)
         self._load_avatar_cached(abspath)
+
+    def current_avatar_pil(self, state=None):
+        """当前角色的头像**母本**位图；没有角色 / 没有头像时返回 None。
+
+        聊天面板的头像框经这个接口取图（见 ui.common.avatar.AvatarFrame）：
+        头像的解析、"用预览图当头像"的回退与读盘缓存都留在本面板一处，
+        各处的头像框按自身尺寸从同一份母本降采样。
+        """
+        panel = self.generator_panel
+        if state is None and panel is not None:
+            state = getattr(panel, "current_state", None)
+        if state is None or panel is None:
+            return None
+        self._refresh_state_image(state)
+        return self._avatar_pil
 
     # ---------- UI 构建 ----------
     def _build_content(self):
@@ -216,10 +291,9 @@ class IntroPanel(ctk.CTkFrame):
         intro_card_frame = ctk.CTkFrame(self.intro_display_frame, fg_color="transparent")
         intro_card_frame.pack(fill='x', pady=(0, 6))
 
-        self.avatar_label = ctk.CTkLabel(intro_card_frame, text="", width=56, height=56,
-                                           fg_color=FB_CHIP_BG,
-                                           corner_radius=28)
-        self.avatar_label.pack(side='left', padx=(0, 10))
+        self.avatar_frame = AvatarFrame(intro_card_frame,
+                                        size=PROFILE_AVATAR_SIZE)
+        self.avatar_frame.pack(side='left', padx=(0, 10))
 
         intro_text_frame = ctk.CTkFrame(intro_card_frame, fg_color="transparent")
         intro_text_frame.pack(side='left', fill='both', expand=True)
@@ -289,15 +363,14 @@ class IntroPanel(ctk.CTkFrame):
         self.intro_edit_scroll.pack_propagate(False)
 
         # 编辑模式中的形象上传与生日（同一行）
-        edit_avatar_frame = ctk.CTkFrame(self.intro_edit_scroll, fg_color="transparent")
-        edit_avatar_frame.pack(fill='x', pady=(10, 6))
+        avatar_row = ctk.CTkFrame(self.intro_edit_scroll, fg_color="transparent")
+        avatar_row.pack(fill='x', pady=(10, 6))
 
-        self.edit_avatar_label = ctk.CTkLabel(edit_avatar_frame, text="", width=48, height=48,
-                                                fg_color=FB_CHIP_BG,
-                                                corner_radius=24)
-        self.edit_avatar_label.pack(side='left', padx=(0, 10))
+        self.edit_avatar_frame = AvatarFrame(avatar_row,
+                                             size=COMPACT_AVATAR_SIZE)
+        self.edit_avatar_frame.pack(side='left', padx=(0, 10))
 
-        upload_btn = ctk.CTkButton(edit_avatar_frame, text="上传形象", font=ui_fonts.ui_font(9),
+        upload_btn = ctk.CTkButton(avatar_row, text="上传形象", font=ui_fonts.ui_font(9),
                                     fg_color=FB_CHIP_BG,
                                     text_color=FB_BLUE,
                                     hover_color=FB_CHIP_HOVER, border_width=0,
@@ -305,7 +378,7 @@ class IntroPanel(ctk.CTkFrame):
                                     command=self._upload_image)
         upload_btn.pack(side='left')
 
-        self.delete_img_btn = ctk.CTkButton(edit_avatar_frame, text="删除", font=ui_fonts.ui_font(9),
+        self.delete_img_btn = ctk.CTkButton(avatar_row, text="删除", font=ui_fonts.ui_font(9),
                                               fg_color="transparent",
                                               text_color=INTRO_ERR,
                                               hover_color=INTRO_HOVER,
@@ -316,7 +389,7 @@ class IntroPanel(ctk.CTkFrame):
         self.delete_img_btn.pack(side='left', padx=(4, 0))
 
         # 生日输入（与形象编辑同一行）
-        self.birthday_clear_btn = ctk.CTkButton(edit_avatar_frame, text="✕", width=24, height=24,
+        self.birthday_clear_btn = ctk.CTkButton(avatar_row, text="✕", width=24, height=24,
                                                 fg_color="transparent",
                                                 text_color=INTRO_ERR,
                                                 hover_color=INTRO_HOVER,
@@ -326,13 +399,13 @@ class IntroPanel(ctk.CTkFrame):
                                                 font=ui_fonts.ui_font(10),
                                                 command=self._clear_birthday_edit)
         self.birthday_clear_btn.pack(side='right', padx=(4,0))
-        self.birthday_edit_entry = CTkBirthdayEntry(edit_avatar_frame, width=120,
+        self.birthday_edit_entry = CTkBirthdayEntry(avatar_row, width=120,
                                                      font=ui_fonts.ui_font(11),
                                                      border_width=1,
                                                      border_color=INTRO_BORDER,
                                                      fg_color=FB_CARD_BG)
         self.birthday_edit_entry.pack(side='right')
-        ctk.CTkLabel(edit_avatar_frame, text="生日",
+        ctk.CTkLabel(avatar_row, text="生日",
                      font=ui_fonts.ui_font(10),
                      text_color=FB_MUTED).pack(side='right', padx=4)
 
@@ -413,6 +486,18 @@ fg_color=FB_BTN, text_color="white",
             anchor="w"
         )
         self.save_cost_label.pack(fill='x', side="right", padx=14)
+
+        # ---------- 聊天展开模式 ----------
+        # 与编辑模式同级：展开时占用介绍卡让出的空间，承载 ChatPanel。
+        # 面板本体由 ExplorationPanel 创建后注入 intro_chat_container。
+        self.intro_chat_frame = ctk.CTkFrame(self, fg_color="transparent", height=320)
+        self.intro_chat_frame.pack(fill='x', padx=10, pady=(0, 8))
+        self.intro_chat_frame.pack_propagate(False)
+        self.intro_chat_frame.pack_forget()
+
+        self.intro_chat_container = ctk.CTkFrame(self.intro_chat_frame,
+                                                 fg_color="transparent")
+        self.intro_chat_container.pack(fill='both', expand=True)
 
         self.refresh_display()
 
@@ -523,6 +608,8 @@ fg_color=FB_BTN, text_color="white",
     def _toggle_edit(self):
         if self._intro_editing:
             return
+        if self._intro_chat_open:
+            self.collapse_chat()        # 两种展开模式互斥
         self._intro_editing = True
 
         if self._is_state_mode():

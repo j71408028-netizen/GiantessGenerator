@@ -72,14 +72,16 @@ class ExplorationPanel(ctk.CTkFrame):
         # 内容区域
         self.content_area = ctk.CTkFrame(left_col, fg_color="transparent")
         self.content_area.pack(fill='both', expand=True)
+        # 左栏是定高预算：窗口缩放时让介绍面板重算聊天展开区的高度
+        self.content_area.bind('<Configure>', self._on_content_area_resize, add='+')
 
         # 左上面板：探索模式标题 + 参数/状态/选择面板
-        left_top = ctk.CTkFrame(self.content_area, fg_color="transparent")
-        left_top.pack(fill='x', pady=(0, 5))
-        left_top.grid_columnconfigure(0, weight=1)
+        self.left_top = ctk.CTkFrame(self.content_area, fg_color="transparent")
+        self.left_top.pack(fill='x', pady=(0, 5))
+        self.left_top.grid_columnconfigure(0, weight=1)
 
         # 探索模式标题 (row 0)
-        title_frame = ctk.CTkFrame(left_top, fg_color="transparent")
+        title_frame = ctk.CTkFrame(self.left_top, fg_color="transparent")
         title_frame.grid(row=0, column=0, sticky='ew', padx=8, pady=(6, 2))
         self.title_label = ctk.CTkLabel(title_frame, text="🧭  探索模式",
                                         font=ui_fonts.ui_font(16, "bold"),
@@ -87,7 +89,7 @@ class ExplorationPanel(ctk.CTkFrame):
         self.title_label.pack(side='left')
 
         # 面板堆叠层 (row 1)
-        self.panel_stack = ctk.CTkFrame(left_top, fg_color="transparent")
+        self.panel_stack = ctk.CTkFrame(self.left_top, fg_color="transparent")
         self.panel_stack.grid(row=1, column=0, sticky='nsew')
         self.panel_stack.grid_columnconfigure(0, weight=1)
         self.panel_stack.grid_rowconfigure(0, weight=1)
@@ -256,40 +258,48 @@ class ExplorationPanel(ctk.CTkFrame):
         self._build_result_area(right_frame)
 
     def _build_result_area(self, parent):
-        # 右侧大容器（报告正文 + 详细尺寸）已拆分为独立组件；
-        # 聊天面板与报告面板共用同一格，切换显示。
+        # 右侧大容器（报告正文 + 详细尺寸）独占本格：角色聊天不再抢占它，
+        # 而是挂在左栏介绍面板（IntroPanel）的展开区里（见 toggle_chat_panel）。
         self.report_panel = ReportPanel(parent, self.app, self.context,
                                         self.params_panel, host=self)
         self.report_panel.grid(row=1, column=0, sticky='nsew', padx=5, pady=(0, 4))
-        self.chat_panel = ChatPanel(parent, self.app, host=self,
-                                    chat_service=self._chat_service)
-        self.chat_panel.grid(row=1, column=0, sticky='nsew', padx=5, pady=(0, 4))
-        self.chat_panel.grid_remove()
+
+        # 聊天面板创建后注入介绍面板的展开容器，由 IntroPanel 决定显隐
+        self.chat_panel = ChatPanel(self.intro_panel.intro_chat_container,
+                                    self.app, host=self,
+                                    chat_service=self._chat_service,
+                                    embedded=True)
+        self.chat_panel.pack(fill='both', expand=True)
 
     # ---------- 聊天 ----------
     def toggle_chat_panel(self):
-        """介绍条「💬 聊天」入口：在右栏的聊天面板与报告面板之间切换。"""
+        """介绍条「💬 聊天」入口：把聊天作为介绍面板的展开区打开/收起。"""
         if self.current_state is None:
             return
-        if self._chat_open:
-            self.close_chat_panel()
-        else:
-            self._open_chat_panel()
+        self.intro_panel.toggle_chat()
 
-    def _open_chat_panel(self):
+    def on_chat_expanded(self):
+        """介绍面板展开聊天区：绑定当前角色并清未读徽标。"""
         self._chat_open = True
         self._unread_chat = 0
         self.intro_panel.set_chat_badge(0)
         self.chat_panel.set_state(self.current_state)
-        self.report_panel.grid_remove()
-        self.chat_panel.grid()
+
+    def on_chat_collapsed(self):
+        """介绍面板收起聊天区：摘掉投递控制器，后续回复由未读徽标体现。"""
+        self._chat_open = False
+        self.chat_panel.set_state(None)
 
     def close_chat_panel(self):
-        if not self._chat_open:
-            return
+        """收起聊天（聊天面板的「✕」调用）。"""
         self._chat_open = False
-        self.chat_panel.grid_remove()
-        self.report_panel.grid()
+        self.intro_panel.collapse_chat()
+
+    def _on_content_area_resize(self, event):
+        """左栏尺寸变化时，重算聊天展开区高度（仅聊天打开时有意义）。"""
+        panel = getattr(self, "intro_panel", None)
+        if panel is not None and panel.is_chat_open():
+            panel.refresh_chat_height()
 
     def on_chat_ops_applied(self):
         """AI 在聊天中改动了角色属性：刷新状态面板与介绍条。"""

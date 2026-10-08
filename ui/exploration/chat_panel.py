@@ -1,9 +1,11 @@
 """角色聊天面板（专业模式）。
 
-挂在探索页右栏，与报告面板共用同一格：介绍条上的「💬 聊天」按钮打开本面板
-（报告面板暂时让位），关闭后报告面板归位。消息渲染为气泡列表：玩家消息靠右、
-角色消息靠左；"已读不回"只保留为内部状态，界面上不做任何标注——角色沉默
-本身就是回应。
+挂在左栏介绍面板（IntroPanel）的展开区里，与编辑模式同级：介绍卡上的
+「💬 聊天」按钮让介绍卡让位、聊天区在状态面板下方展开（右栏报告面板不再
+被占用）。面板顶部沿用编辑模式的排布——36px 紧凑头像框（与介绍卡共用同一
+份头像母本）+ 对象名 + 关闭；消息渲染为气泡列表：玩家消息靠右、角色消息
+靠左，并按相邻消息的间隔长短自动补时间标记（见 ui.common.chat_time）；"已读
+不回"只保留为内部状态，界面上不做任何标注——角色沉默本身就是回应。
 
 回复节奏由服务层与投递控制器负责（docs/chat_delivery.md）：AI 决策后回复
 以 queued 入列并排定 available_at；本面板通过共用的 ChatDeliveryController
@@ -26,6 +28,8 @@ from core.models import ChatMessage, CharacterSnapshot
 from services.chat.delivery import ChatDeliveryController
 from services.chat import (ChatService, should_reconcile,
                                    unread_messages)
+from ui.common.avatar import AvatarFrame, COMPACT_AVATAR_SIZE
+from ui.common.chat_time import message_moment, time_marker_text
 from ui.common.theme import (
     FB_BLUE, FB_BTN, FB_BTN_HOVER, FB_CARD_BG, FB_CHIP_BG, FB_CHIP_HOVER,
     FB_MUTED, INTRO_BORDER,
@@ -36,9 +40,14 @@ from ui.common import fonts as ui_fonts
 class ChatPanel(ctk.CTkFrame):
     """单角色的聊天窗口（气泡列表 + 补话条 + 输入行）。"""
 
-    def __init__(self, parent, app, host=None, chat_service: ChatService = None):
-        super().__init__(parent, fg_color=FB_CARD_BG,
-                         border_width=1, border_color=INTRO_BORDER,
+    def __init__(self, parent, app, host=None, chat_service: ChatService = None,
+                 embedded: bool = False):
+        # embedded：嵌入 IntroPanel 展开区时去掉自身卡片描边与底色，
+        # 直接融进介绍面板，避免"卡片套卡片"的双层边框。
+        super().__init__(parent,
+                         fg_color="transparent" if embedded else FB_CARD_BG,
+                         border_width=0 if embedded else 1,
+                         border_color=INTRO_BORDER,
                          corner_radius=10)
         self.app = app
         self.host = host
@@ -48,6 +57,7 @@ class ChatPanel(ctk.CTkFrame):
         self._recall_requested = False
         self._pending_row = None          # 待撤回的玩家消息气泡行
         self._recall_btn = None
+        self._last_moment = None          # 最后一条已渲染消息的时间坐标
 
         self._chat_service = chat_service or ChatService()
         # 投递节奏控制器：到点重载/重渲染/"正在输入"/标记已读，界面不自算延迟
@@ -62,18 +72,21 @@ class ChatPanel(ctk.CTkFrame):
         self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        # 顶栏：对象名 + 关闭
+        # 顶栏：与介绍条编辑模式同款——左侧紧凑头像框，右侧对象名与关闭。
+        # 头像走 IntroPanel 的母本缓存（见 _refresh_avatar），框自己定尺寸。
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.grid(row=0, column=0, sticky='ew', padx=10, pady=(8, 2))
-        self.title_label = ctk.CTkLabel(header, text="💬 聊天",
-                                        font=ui_fonts.ui_font(14, "bold"),
-                                        text_color=FB_BLUE, anchor="w")
-        self.title_label.pack(side='left')
+        self.avatar_frame = AvatarFrame(header, size=COMPACT_AVATAR_SIZE)
+        self.avatar_frame.pack(side='left', padx=(0, 10))
         ctk.CTkButton(header, text="✕", width=28, height=24,
                       font=ui_fonts.ui_font(11),
                       fg_color=FB_CHIP_BG, text_color=FB_MUTED,
                       hover_color=FB_CHIP_HOVER, corner_radius=12,
                       command=self._close).pack(side='right')
+        self.title_label = ctk.CTkLabel(header, text="💬 聊天",
+                                        font=ui_fonts.ui_font(14, "bold"),
+                                        text_color=FB_BLUE, anchor="w")
+        self.title_label.pack(side='left', fill='x', expand=True, padx=(0, 6))
 
         # 消息气泡区
         self.message_scroll = ctk.CTkScrollableFrame(
@@ -108,10 +121,12 @@ class ChatPanel(ctk.CTkFrame):
     def set_state(self, state: CharacterSnapshot):
         """切换聊天对象：经投递控制器重载该角色的聊天历史并重绘。"""
         self.state = state
-        name = state.name if state else ""
-        nick = state.nick if state else ""
-        self.title_label.configure(
-            text=f"💬 与 {name} 聊天" + (f"（{nick}）" if nick else ""))
+        if state is None:
+            self.title_label.configure(text="💬 聊天")
+        else:
+            nick = f"（{state.nick}）" if state.nick else ""
+            self.title_label.configure(text=f"💬 与 {state.name} 聊天{nick}")
+        self._refresh_avatar()
         self._set_status("")
         if state is None:
             self._delivery.detach()
@@ -124,6 +139,21 @@ class ChatPanel(ctk.CTkFrame):
         # 失败静默——发送时会正式报错），再自动补话：
         # 有未读→回复未读；无未读且间隔够久→可能主动搭话
         self.after(80, self._prewarm_then_catchup)
+
+    def _refresh_avatar(self):
+        """顶部紧凑头像框：取介绍卡解析好的同一份头像母本，按本框尺寸显示。
+
+        头像的解析、缩略与"用预览图当头像"的回退都在 IntroPanel 里（含读盘
+        缓存），这里只取母本位图；没有角色或没有头像时框自己退回占位字形。
+        """
+        pil_img = None
+        intro = getattr(self.host, "intro_panel", None)
+        if intro is not None and self.state is not None:
+            try:
+                pil_img = intro.current_avatar_pil(self.state)
+            except Exception:
+                pil_img = None
+        self.avatar_frame.set_image(pil_img)
 
     def unread_count(self) -> int:
         """当前角色的未读玩家消息数（角色尚未看到的积压）。"""
@@ -198,14 +228,37 @@ class ChatPanel(ctk.CTkFrame):
             widget.destroy()
         self._pending_row = None
         self._recall_btn = None
+        self._last_moment = None
         if self.chat_state is None:
             return
         for message in self.chat_state.messages:
             # 角色消息只画已投递/已读的：queued 由控制器到点后再出现
             if message.role == "char" and message.status not in ("delivered", "read"):
                 continue
-            self._append_bubble(message)
+            self._append_timed_bubble(message)
         self._scroll_to_bottom()
+
+    def _append_timed_bubble(self, message: ChatMessage, recallable: bool = False):
+        """按与上一条的间隔补时间标记，再画气泡（间隔太短就不补）。
+
+        ``_last_moment`` 只认**已渲染**的消息：恢复一段历史时它是 None，
+        于是第一条必然带标记，交代这段对话从什么时候开始；跳过 queued
+        角色消息也不会把时间线算歪。
+        """
+        moment = message_moment(message)
+        marker = time_marker_text(self._last_moment, moment)
+        if marker:
+            self._append_time_marker(marker)
+        self._append_bubble(message, recallable=recallable)
+        if moment is not None:
+            self._last_moment = moment
+
+    def _append_time_marker(self, text: str):
+        """消息之间的时间标记：居中、弱化，只交代"隔了多久"。"""
+        row = ctk.CTkFrame(self.message_scroll, fg_color="transparent")
+        row.pack(fill='x', pady=(6, 2))
+        ctk.CTkLabel(row, text=text, font=ui_fonts.ui_font(9),
+                     text_color=FB_MUTED).pack()
 
     def _append_bubble(self, message: ChatMessage, recallable: bool = False):
         is_user = message.role == "user"
@@ -257,7 +310,9 @@ class ChatPanel(ctk.CTkFrame):
         self._recall_requested = False
         self.send_btn.configure(state='disabled', text="…")
         self._set_status("")
-        self._append_bubble(ChatMessage(role="user", text=text), recallable=True)
+        # 玩家消息同样先补标记：上一条已经是很久以前时，不能等回复到了才报时
+        self._append_timed_bubble(ChatMessage(role="user", text=text),
+                                  recallable=True)
 
         state, chat_state = self.state, self.chat_state
 

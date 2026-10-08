@@ -21,14 +21,16 @@ def pil_to_ctk(pil_img: Image.Image, size: Tuple[int, int]) -> ctk.CTkImage:
     return ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=size)
 
 
-def format_avatar(pil_img: Image.Image) -> ctk.CTkImage:
-    """裁剪为方形头像并返回可直接显示的 CTkImage"""
-    size = imaging.AVATAR_HEIGHT
-    if pil_img.size[1] > pil_img.size[0]:
-        cropped = imaging.crop_top_square(pil_img)
-    else:
-        cropped = imaging.crop_center_square(pil_img)
-    processed = cropped.resize((size, size), Image.Resampling.LANCZOS)
+def format_avatar(pil_img: Image.Image, size: int = None) -> ctk.CTkImage:
+    """把图片收成方形头像并包成可直接显示的 CTkImage。
+
+    ``size`` 是控件的**逻辑**尺寸（默认 ``imaging.AVATAR_HEIGHT``=56，即档案主
+    形象；紧凑头像框传 36）。源位图交给 ``imaging.prepare_avatar`` 收口（方形 +
+    分辨率封顶），由 CTk 按控件自身的缩放档位降采样——比"先压到控件尺寸、高 DPI
+    下再放大"清楚；调用方不必先把图缩小。
+    """
+    size = size or imaging.AVATAR_HEIGHT
+    processed = imaging.prepare_avatar(pil_img)
     return pil_to_ctk(processed, (size, size))
 
 

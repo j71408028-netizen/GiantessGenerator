@@ -29,6 +29,11 @@ from PIL import Image
 AVATAR_HEIGHT = 56
 IMAGE_HEIGHT = 180
 
+#: 头像**母本**的像素上限：3 倍于档案主形象高度。界面里的头像框（档案卡 56、
+#: 编辑行与聊天标题栏 36）都从这一份母本按自身尺寸降采样，母本留到这个分辨率
+#: 就够 3 倍缩放清晰，同时不会把用户上传的大图整张扣在内存里。
+AVATAR_SOURCE_HEIGHT = AVATAR_HEIGHT * 3
+
 
 def crop_center_square(pil_img: Image.Image) -> Image.Image:
     w, h = pil_img.size
@@ -44,6 +49,27 @@ def crop_top_square(pil_img: Image.Image) -> Image.Image:
     left = (w - size) // 2
     top = 0
     return pil_img.crop((left, top, left + size, top + size))
+
+
+def prepare_avatar(pil_img: Image.Image,
+                   cap: int = None) -> Image.Image:
+    """把任意图片收成方形头像**母本**：竖图偏上裁、横图居中裁，超过上限再降采样。
+
+    母本是界面头像来源的统一样子（见 ``ui.common.avatar.AvatarFrame``）：方形、
+    分辨率封顶（默认 :data:`AVATAR_SOURCE_HEIGHT`），于是同一个角色的档案卡、
+    编辑行、聊天标题栏可以各自按控件尺寸从它降采样——比"先压到某个控件的尺寸
+    再被别的控件放大"清楚，也不会把原图整张留在内存里。
+
+    不修改入参；返回新位图。
+    """
+    cap = cap or AVATAR_SOURCE_HEIGHT
+    if pil_img.size[1] > pil_img.size[0]:
+        square = crop_top_square(pil_img)      # 竖版头像偏上裁，别切掉脸
+    else:
+        square = crop_center_square(pil_img)
+    if square.size[0] > cap:
+        square = square.resize((cap, cap), Image.Resampling.LANCZOS)
+    return square
 
 
 def resize_to_fixed_height(pil_img: Image.Image, target_height: int) -> Image.Image:

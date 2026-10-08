@@ -75,7 +75,7 @@ python main.py
 ```
 
 ```bash
-# 离线自检（不需要显示器，15 项）
+# 离线自检（不需要显示器，16 项）
 .venv/bin/python tests/run_checks.py
 # GUI 冒烟（需要显示器或 xvfb）
 .venv/bin/python tests/smoke_switch.py
