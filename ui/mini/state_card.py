@@ -64,8 +64,10 @@ class MiniStateCard(px.Panel):
 
         buttons = px.transparent(self)
         buttons.grid(row=4, column=1, sticky='ew', padx=(0, 6), pady=(2, 6))
-        px.small_button(buttons, "聊天", self.app.open_chat,
-                        tone="report", width=54).pack(side='left', padx=(0, 2))
+        # 聊天入口只在这里（顶部按键栏没有聊天键），未读提示也落在这一颗上。
+        self._chat_btn = px.small_button(buttons, "聊天", self.app.open_chat,
+                                         tone="report", width=54)
+        self._chat_btn.pack(side='left', padx=(0, 2))
         px.small_button(buttons, "导出", self.app.export_character,
                         width=54).pack(side='left', padx=2)
         px.small_button(buttons, "删除", self.app.delete_character,
@@ -129,6 +131,12 @@ class MiniStateCard(px.Panel):
         """清空精灵图；空槽由外壳的固定尺寸维持，卡片不会因此塌陷。"""
         self._sprite = None
         px.set_image(self._sprite_label, None)
+
+    # ==================== 聊天未读 ====================
+    def set_chat_unread(self, count: int):
+        """未读聊天：在「聊天」键上亮一个点（挂件里唯一的聊天入口就是它）。"""
+        self._chat_btn.configure(text="聊天●" if count else "聊天")
+        self._chat_btn.set_tone("accent" if count else "report")
 
     # ==================== 离线回复 ====================
     def start_auto_recovery(self):

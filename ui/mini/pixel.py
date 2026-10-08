@@ -479,6 +479,17 @@ class PixelButton(tk.Frame):
         if self._state != 'disabled' and self._command:
             self._command()
 
+    def set_tone(self, tone: str):
+        """换语义色（如未读提示把键面转成 accent）。
+
+        与 ``text_color`` 的区别是这个只记录**色号名**，主题切换时仍会跟着重刷；
+        用 ``text_color`` 钉死具体颜色会在换到另一套外观后留在旧色上。
+        """
+        self._tone = tone
+        self._custom_fg = None
+        self._custom_border = None
+        self._repaint()
+
     def bind_wheel(self, handler):
         """把滚轮事件也接到键面上（tk 不会把滚轮事件冒泡给父控件）。"""
         for widget in (self, self._label):

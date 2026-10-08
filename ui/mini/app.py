@@ -201,9 +201,6 @@ class MiniApp:
         px.PixelButton(bar, "▤", lambda: self.push_screen("characters"),
                        tone="text_dim", width=26, height=22).pack(
             side='right', padx=(2, 4), pady=4)
-        self.chat_btn = px.PixelButton(bar, "✉", self.open_chat,
-                                       tone="text_dim", width=26, height=22)
-        self.chat_btn.pack(side='right', padx=(2, 4), pady=4)
         px.PixelButton(bar, "☰", lambda: self.push_screen("settings"),
                        tone="text_dim", width=26, height=22).pack(
             side='right', pady=4)
@@ -321,7 +318,7 @@ class MiniApp:
         return self._chat_service
 
     def open_chat(self):
-        """打开聊天屏：清掉当前角色的未读并亮/灭标题栏徽标。"""
+        """打开聊天屏：清掉当前角色的未读并灭掉角色卡上的未读点。"""
         if self.current_state is None:
             self.notify("还没有载入角色，先创建或载入一位再来聊天。",
                         title="聊天")
@@ -331,10 +328,8 @@ class MiniApp:
         self.push_screen("chat")
 
     def _refresh_chat_badge(self):
-        unread = sum(self._unread_chat.values())
-        self.chat_btn.configure(
-            text="✉●" if unread else "✉",
-            text_color=px.color("accent") if unread else px.color("text_dim"))
+        """未读提示落在角色卡的「聊天」键上（顶部按键栏不再有聊天键）。"""
+        self.state_card.set_chat_unread(sum(self._unread_chat.values()))
 
     def _on_chat_event(self, event):
         """聊天事件（后台线程）：投递回主线程累计未读。"""
@@ -561,7 +556,7 @@ class MiniApp:
         self.report_view.clear()
         self.state_card.update_state(state)
         self._set_mode("state")
-        # 离线积压的已投递未读回复：点亮标题栏 ✉ 徽标（按存档重算）
+        # 离线积压的已投递未读回复：点亮角色卡「聊天」键上的未读点（按存档重算）
         chat_state = self.chat_service().load_chat(giantess_id, blocking=False)
         self._unread_chat[giantess_id] = (
             len(pending_char_messages(chat_state))
