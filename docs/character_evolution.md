@@ -100,8 +100,9 @@
 
 ## 5. 已验证的动态特性（模拟结论）
 
-以下结论来自 `developer_tools/evolution_sim.py` 的批量模拟（UI 参数范围内，
-含参数角点；对比「长期点数不足」与「点数适中」两种消耗习惯）：
+以下结论来自 `developer_tools/evolution_dump.py` 的批量模拟（UI 参数范围内，含参数角点，
+以及 `data/static/personalities/default.csv` 的全部性格；对比「长期点数不足」与「点数适中」
+两种消耗习惯）：
 
 1. **步长平衡点**：无边界干涉时约为 `初始步长 - 步进 × 敏感值 / 恢复率`。
    敏感值符号决定长期漂移方向——正敏感 → 介入度步长下漂 → 坐标偏下；
@@ -122,17 +123,32 @@
 
 ## 6. 模拟与验证工具
 
-`developer_tools/evolution_sim.py`：对一组性格预设（UI 可设定范围内的角点
-与典型值）持续模拟报告步进、地标切换、副本演化、闲置衰减、离线恢复、
-负向演化，逐步记录坐标/步长/策略值/行动点，按口径（步长发散、步长坍缩、
-坐标长期贴边、步长高频振荡、坐标静止、NaN/Inf）检测退化，
-输出坐标跟踪图与 `report.md`。
+`developer_tools/evolution_dump.py`：对**角点 + 默认性格表**两套预设持续模拟报告步进、
+地标切换、副本演化、闲置衰减、离线恢复、负向演化，逐步记录坐标/步长/策略值/行动点，
+按口径（步长发散、步长坍缩、坐标长期贴边、步长高频振荡、坐标静止、NaN/Inf）检测退化，
+输出坐标跟踪图与 `report.md`。用 `--pack` / `--world` 可先把行为包加载进行为运行时再模拟，
+直接看行为包对演化的覆盖效果。
+
+- **角点**（`--group corners`）：UI 范围极值组合，每条压测单一机制，含零步长对照组；
+- **默认性格表**（`--group table`，`--table <名>` 换表）：`data/static/personalities/` 里
+  真实存在的性格逐条模拟。
 
 ```
-python developer_tools/evolution_sim.py                  # 两种消耗习惯各 400 步
-python developer_tools/evolution_sim.py --steps 2000     # 更长模拟
-python developer_tools/evolution_sim.py --profile ap_moderate --only corner_pos
+python developer_tools/evolution_dump.py                      # 角点 + 默认性格表，两种消耗习惯
+python developer_tools/evolution_dump.py --group corners       # 只跑角点
+python developer_tools/evolution_dump.py --group table --table default
+python developer_tools/evolution_dump.py --only corner_all_pos,温柔
+python developer_tools/evolution_dump.py --steps 2000 --profile ap_moderate
+python developer_tools/evolution_dump.py --pack my_pack        # 带行为包（也可给目录 / .py 路径）
+python developer_tools/evolution_dump.py --list-packs          # 有哪些行为包与性格表
 ```
 
-输出写入 `developer_tools/evolution_sim_output/<消耗习惯>/`（每角色四联
-跟踪图 + 总览图 + 报告）。修改演化公式后建议跑一轮并对照 §5 检查。
+输出写入 `developer_tools/_out/evolution/<消耗习惯>/`（带行为包时再嵌一层 `pack_<名>/`，
+与基线目录并排对比）：每角色跟踪图 + 总览图 + 报告，报告里另有「行为包」小节，列出该包
+覆盖了哪些**本模拟调用**的演化钩子（覆盖为 0 时直接点明结果应与基线一致）。
+修改演化公式后建议跑一轮并对照 §5 检查。
+
+> **能力边界**：副本演化主体公式 `dungeon/rules.py::EvolutionRules.evolve_attributes`
+> **没有**行为钩子——副本路径只通过注入的 `StateService.decay_step_rates` 受行为包影响；
+> 报告路径用到的 `StateService` 坐标 / 步长方法则全部可覆盖（清单见
+> `docs/world_pack_behaviors.md` 附录 A）。
