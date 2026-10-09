@@ -5,7 +5,7 @@ import sys
 
 
 APP_NAME = "GiantessGenerator"
-APP_VERSION = "1.0.0 preview"
+APP_VERSION = "1.0.0"
 
 
 def resource_root() -> str:
