@@ -20,6 +20,7 @@ ENV/
 !/build/windows/
 !/build/macos/
 !/build/linux/
+!/build/release/
 dist/
 *.spec
 
@@ -50,6 +51,7 @@ htmlcov/
 # 其他本地区域
 /.workbuddy/
 .zcodeignore
+/.temp/
 
 # atomic 写临时文件与覆盖前备份（persistence/json_store.py）
 *.bak
