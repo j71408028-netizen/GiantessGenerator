@@ -49,6 +49,16 @@ def check(label, condition, detail=""):
         raise AssertionError(label)
 
 
+def _listdir(path):
+    """列出目录内容；目录不存在时返回空列表。
+
+    data/user、data/archives 被 .gitignore 排除，全新检出（如 CI）下并不存在，
+    os.listdir 会直接抛 FileNotFoundError。备份与还原都该容忍这种「无历史数据」
+    的正常状态，故统一走这里。
+    """
+    return os.listdir(path) if os.path.isdir(path) else []
+
+
 def _discard(path):
     """把测试产物移出 data/（搬到系统临时目录），不做删除。
 
@@ -83,7 +93,9 @@ def main():
     created_packs = []
 
     os.makedirs(backup_dir, exist_ok=True)
-    for name in os.listdir(user_dir):
+    # data/user 与 data/archives 已在 .gitignore 中排除：全新检出（如 CI）下
+    # 目录并不存在，此时没有历史数据可备份。目录会在测试读写时由仓库自行创建。
+    for name in _listdir(user_dir):
         if name.endswith(".json"):
             shutil.copy2(os.path.join(user_dir, name), os.path.join(backup_dir, name))
 
@@ -331,7 +343,7 @@ def main():
             for name in os.listdir(backup_dir):
                 shutil.copy2(os.path.join(backup_dir, name),
                              os.path.join(user_dir, name))
-            for name in os.listdir(user_dir):
+            for name in _listdir(user_dir):
                 if name.endswith(".json") and not os.path.exists(
                         os.path.join(backup_dir, name)):
                     _discard(os.path.join(user_dir, name))

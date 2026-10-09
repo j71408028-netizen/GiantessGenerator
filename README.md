@@ -210,7 +210,11 @@ data/
   小游戏后也推荐运行。判据是「**能一眼看到改动效果的**」——一次性用掉就去
   `scripts/`。脚本按 `<领域>_<输出>` 命名、产物统一写 `_out/`（整目录不入库），目录约定见
   [`developer_tools/README.md`](developer_tools/README.md)。
-- **`build/` 里只有 `windows/`、`macos/` 与 `linux/` 入库**：暂不支持单独打包某个启动模式。
+- **`build/` 里只有 `windows/`、`macos/`、`linux/` 与 `release/` 入库**：前三份是平台
+  打包脚本，`release/` 是跨平台的发布打包器——`python build/release/package.py --tag vX.Y.Z`
+  从 tag 出干净 worktree，打本平台发行包 + 源码归档 + 校验和（详见 [docs/Releases/release.md](docs/Releases/release.md)）。
+  后端默认 PyInstaller，`--backend nuitka` 可切 Nuitka 对照；受限网络可用 `--wheelhouse` 离线构建。
+  暂不支持单独打包某个启动模式。
 - **提交信息用约定式提交**（2026-10-06 起）：`<type>(<scope>): <subject>`，`type`
   用英文小写（`feat` / `fix` / `refactor` / `docs` / `test` / `chore` / `build` …），
   `scope` 写子系统，正文用中文；类型表与示例见
@@ -232,6 +236,8 @@ data/
 **开发与架构**
 
 - [架构与分层](docs/architecture.md)：分层现状与硬约束、结构决策档案（历程索引）、操作手册与提交规范
+- [发布与打包策略](docs/Releases/release.md)：分支/标签模型、发布清单、`build/release/package.py` 的用法与三平台注意事项
+- [v1.0.0 更新说明](docs/Releases/changelog-v1.0.0.md)：正式版相对 `v1.0.0-preview` 的全部变更（新功能、改进、修复、兼容性）
 - [开发工具目录说明](developer_tools/README.md)：`developer_tools/` 与 `tests/`、`scripts/` 的分工，新增脚本的约定与入库范围
 - [一次性工具说明](scripts/README.md)：`scripts/` 各脚本的性质与用途、迁移脚本的留档策略
 
