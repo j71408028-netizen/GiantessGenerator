@@ -19,7 +19,7 @@
 
 ## 环境要求
 
-- Windows、macOS 12 或更新版本；Linux（X11 / XWayland 会话）见下方「Linux（X11 / XWayland）」与 [docs/linux.md](docs/linux.md)
+- Windows、macOS 12 或更新版本；Linux（X11 / XWayland 会话）见下方「Linux（X11 / XWayland）」与 [docs/users/platforms/linux.md](docs/users/platforms/linux.md)
 - Python 3.10 及以上（开发环境为 Python 3.13；Linux 上 Python 3.12 / 3.14 均已实测）
 - macOS 需要可用的 Tcl/Tk 图形组件。使用 python.org 安装包或 Homebrew Python 均可
 - 若使用 AI 生成功能，需自行准备对应服务商的 API Key（可选功能）
@@ -88,7 +88,7 @@ bash build/linux/build_linux.sh --self-check
 
 Wayland 原生会话不在支持范围内：请在 **XWayland**（`XDG_SESSION_TYPE=wayland` 时的默认行为）下运行；
 纯 Wayland 合成器（如 sway 的纯 Wayland 后端）下副本窗口无法创建。X11 会话可直接使用。
-Linux 侧的兼容细节、限制与实测记录见 [docs/linux.md](docs/linux.md)（含兼容计划与试跑检查记录附录）。
+Linux 侧的兼容细节、限制与实测记录见 [docs/users/platforms/linux.md](docs/users/platforms/linux.md)（历史归档见 [docs/users/platforms/linux-history.md](docs/users/platforms/linux-history.md)）。
 
 ### 两套界面：专业模式与ME模式
 
@@ -151,8 +151,8 @@ Linux 侧的兼容细节、限制与实测记录见 [docs/linux.md](docs/linux.m
 
 在「探索一局」之上，程序还有三个长期系统：
 
-- **角色（character）**：创建后的角色拥有长期档案—— HTML 历史档案、离线恢复（程序没开的时间里角色仍在按性格与作息曲线演化）、今日新闻。演化模型的完整设计见 [docs/character_evolution.md](docs/character_evolution.md)。
-- **聊天（chat）**：与角色持续对话。AI 按 JSON 协议回复（可一次多条消息、可沉默）；AI 可自主开启 / 切换话题，并把少量白名单属性写回角色档案。协议细节见 [docs/chat_delivery.md](docs/chat_delivery.md)。
+- **角色（character）**：创建后的角色拥有长期档案—— HTML 历史档案、离线恢复（程序没开的时间里角色仍在按性格与作息曲线演化）、今日新闻。演化模型的完整设计见 [docs/designs/character_evolution.md](docs/designs/character_evolution.md)。
+- **聊天（chat）**：与角色持续对话。AI 按 JSON 协议回复（可一次多条消息、可沉默）；AI 可自主开启 / 切换话题，并把少量白名单属性写回角色档案。协议细节见 [docs/dev/chat_delivery.md](docs/dev/chat_delivery.md)。
 - **世界包（worlds）**：一键激活后，包内资源按类型**接管**各数据源（地标、描述、副本方案、静态表……），你的自由数据不受影响；停用即恢复。世界包还可携带**行为包**在激活期间改变核心算法（详见「包开发」）。
 
 ### 数据与存档
@@ -176,18 +176,18 @@ data/
 |---------------|--------------------------------------------------------|--------------------------------------------|
 | 地标、描述、副本方案    | 可供探索的资源                                                | 程序内编辑器（文本管理 / 副本编辑）即可                      |
 | 姓名、新闻、性格或身材预设 | 一次性抽取单条的资源，.csv格式                                      | 无程序内编辑器；推荐使用Excel                          |
-| 世界包           | 把资源包 + 静态表打成一个可一键激活的 `<world_id>.world.zip`，激活期间接管各数据源 | [世界包行为包开发指南](docs/world_pack_behaviors.md) |
-| 行为包           | 世界包可选携带的 Python 代码包，激活期间覆盖角色创建                         | [世界包行为包开发指南](docs/world_pack_behaviors.md) |
-| 副本小游戏         | `mini_game` 触发器的运行时与作者 API                             | [小游戏框架](docs/Dungeon/minigame.md)          |
+| 世界包           | 把资源包 + 静态表打成一个可一键激活的 `<world_id>.world.zip`，激活期间接管各数据源 | [世界包行为包开发指南](docs/designs/world_pack_behaviors.md) |
+| 行为包           | 世界包可选携带的 Python 代码包，激活期间覆盖角色创建                         | [世界包行为包开发指南](docs/designs/world_pack_behaviors.md) |
+| 副本小游戏         | `mini_game` 触发器的运行时与作者 API                             | [小游戏框架](docs/designs/minigame.md)          |
 | 挑战包           | 把角色与资源打包成秘钥保护的加密 `.chal`，玩家在挑战模式中达成副本结局                | 程序内「挑战模式」打包                                |
-| 世界地址          | 为你的世界申领注册表地址，供地标 / 描述风格跨世界引用                           | [地址系统操作说明](docs/address_system.md)         |
+| 世界地址          | 为你的世界申领注册表地址，供地标 / 描述风格跨世界引用                           | [地址系统操作说明](docs/designs/address_system.md)         |
 
 ---
 
 ## 开发与架构（速查）
 
 分层、守卫与目录组织的**完整口径**（含「为什么」）统一见
-[docs/architecture.md](docs/architecture.md)，这里只留速查：
+[docs/dev/architecture.md](docs/dev/architecture.md)，这里只留速查：
 
 - **分层方向由自检强制**：`infra` → `core` → `dungeon` → `persistence` → `services`
   → `ui` → `app`（另有 `dungeon/window/**` 特例），`python tests/check_import_graph.py`
@@ -212,38 +212,38 @@ data/
   [`developer_tools/README.md`](developer_tools/README.md)。
 - **`build/` 里只有 `windows/`、`macos/`、`linux/` 与 `release/` 入库**：前三份是平台
   打包脚本，`release/` 是跨平台的发布打包器——`python build/release/package.py --tag vX.Y.Z`
-  从 tag 出干净 worktree，打本平台发行包 + 源码归档 + 校验和（详见 [docs/Releases/release.md](docs/Releases/release.md)）。
+  从 tag 出干净 worktree，打本平台发行包 + 源码归档 + 校验和（详见 [docs/ops/release.md](docs/ops/release.md)）。
   后端默认 PyInstaller，`--backend nuitka` 可切 Nuitka 对照；受限网络可用 `--wheelhouse` 离线构建。
   暂不支持单独打包某个启动模式。
 - **提交信息用约定式提交**（2026-10-06 起）：`<type>(<scope>): <subject>`，`type`
   用英文小写（`feat` / `fix` / `refactor` / `docs` / `test` / `chore` / `build` …），
   `scope` 写子系统，正文用中文；类型表与示例见
-  [docs/architecture.md](docs/architecture.md) §6。
+  [docs/dev/architecture.md](docs/dev/architecture.md) §6。
 
 ## 相关文档
 
 **玩家 / 玩法**
 
-- [演化模型](docs/character_evolution.md)：角色行动点数与演化的量、公式与已验证动态特性
-- [聊天协议](docs/chat_delivery.md)：消息生命周期、话题状态机与属性写回白名单
+- [演化模型](docs/designs/character_evolution.md)：角色行动点数与演化的量、公式与已验证动态特性
+- [聊天协议](docs/dev/chat_delivery.md)：消息生命周期、话题状态机与属性写回白名单
 
 **包开发**
 
-- [世界包行为包开发指南](docs/world_pack_behaviors.md)：行为包的开发流程、注册 API 与可覆盖目标
-- [地址系统操作说明](docs/address_system.md)：地标 / 描述风格的地址申领、注册与匹配规则
-- [副本文档索引](docs/Dungeon/README.md)：`docs/Dungeon/` 六篇副本开发文档的入口与「按任务查」表（写方案从[数据模型](docs/Dungeon/script.md)进）
+- [世界包行为包开发指南](docs/designs/world_pack_behaviors.md)：行为包的开发流程、注册 API 与可覆盖目标
+- [地址系统操作说明](docs/designs/address_system.md)：地标 / 描述风格的地址申领、注册与匹配规则
+- [副本文档索引](docs/Dungeon/README.md)：`docs/Dungeon/` 副本开发文档的入口与「按任务查」表（写方案从[数据模型](docs/Dungeon/script.md)进；小游戏框架见 [docs/designs/minigame.md](docs/designs/minigame.md)）
 
 **开发与架构**
 
-- [架构与分层](docs/architecture.md)：分层现状与硬约束、结构决策档案（历程索引）、操作手册与提交规范
-- [发布与打包策略](docs/Releases/release.md)：分支/标签模型、发布清单、`build/release/package.py` 的用法与三平台注意事项
-- [v1.0.0 更新说明](docs/Releases/changelog-v1.0.0.md)：正式版相对 `v1.0.0-preview` 的全部变更（新功能、改进、修复、兼容性）
+- [架构与分层](docs/dev/architecture.md)：分层现状与硬约束、操作手册与提交规范（历史决策见 [docs/dev/legacy/refactor-2026-10.md](docs/dev/legacy/refactor-2026-10.md)）
+- [发布与打包策略](docs/ops/release.md)：分支/标签模型、发布清单、`build/release/package.py` 的用法与三平台注意事项
+- [v1.0.0 更新说明](docs/releases/changelog-v1.0.0.md)：正式版相对 `v1.0.0-preview` 的全部变更（新功能、改进、修复、兼容性）
 - [开发工具目录说明](developer_tools/README.md)：`developer_tools/` 与 `tests/`、`scripts/` 的分工，新增脚本的约定与入库范围
 - [一次性工具说明](scripts/README.md)：`scripts/` 各脚本的性质与用途、迁移脚本的留档策略
 
 **平台支持**
 
-- [Linux 支持说明](docs/linux.md)：X11/XWayland 支持范围、XInitThreads 引导、窗口置顶（EWMH）与降级、缺依赖表现、打包与已知限制——Linux 相关文档的单一归档（兼容计划与试跑检查记录见其附录 A / B）
+- [Linux 支持说明](docs/users/platforms/linux.md)：X11/XWayland 支持范围、XInitThreads 引导、窗口置顶（EWMH）与降级、缺依赖表现、打包与已知限制（兼容计划与试跑检查记录已移入 [docs/users/platforms/linux-history.md](docs/users/platforms/linux-history.md)）
 
 ## 免责声明
 

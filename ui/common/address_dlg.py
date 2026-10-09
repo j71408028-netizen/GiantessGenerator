@@ -5,7 +5,7 @@
 下半部分为序列化地址输入框（可输入搜索，下拉弹层直接置于输入框正下方），
 与级联选择双向联动。对话框顶部显示原先注册地址；地标风格在改选新地址时
 会提示已注册地标地址将失效。仅保留简要操作说明，地址格式、申领流程、
-注册表 schema 等详细说明见 ``docs/address_system.md``。
+注册表 schema 等详细说明见 ``docs/designs/address_system.md``。
 """
 
 import threading

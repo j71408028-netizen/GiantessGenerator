@@ -1,6 +1,6 @@
 """角色经历事件：把角色档案里的近况整理为聊天决策可消费的事件流。
 
-收集范围（粗糙实现，够用为先，见 docs/chat_delivery.md 阶段四）：
+收集范围（粗糙实现，够用为先，见 docs/dev/chat_delivery.md 阶段四）：
 - news      ：state.last_news（内容变化即新事件，同一条新闻只提一次）；
 - position  ：state.position（位置注册/变化后提示一次）；
 - evolution ：演化表最近若干条有效记录（步进非 0 或离线恢复/聊天写入）；

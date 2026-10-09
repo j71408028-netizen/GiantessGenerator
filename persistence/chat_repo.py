@@ -8,7 +8,7 @@ from persistence.json_store import load_json_with_backup, write_json_atomic
 # 压缩逻辑由聊天服务负责，repo 只做硬裁剪兜底）。
 CHAT_HISTORY_LIMIT = 200
 # 存档结构版本：2 = ChatMessage 带生命周期字段（id/status/available_at…，
-# 见 docs/chat_delivery.md）；载入按字段名过滤，旧档自动补齐默认值。
+# 见 docs/dev/chat_delivery.md）；载入按字段名过滤，旧档自动补齐默认值。
 CHAT_SCHEMA_VERSION = 2
 # 话题列表容量与已消费事件 id 的保留上限（与聊天服务共同约束）
 TOPIC_KEEP_LIMIT = 20

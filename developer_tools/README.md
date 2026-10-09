@@ -78,7 +78,7 @@ stdout，都不产生需要排除的文件。
    输出容易出现乱码。`quip_report.py` 在模块开头加了
    `sys.stdout.reconfigure(encoding="utf-8", errors="replace")`，照抄即可（仓库其余部分
    没有这个习惯，所以这条是「建议」而非「必须」）。
-5. **只读用户数据**：`data/` 是用户数据区（见 `docs/architecture.md` §2.2），这里的工具
+5. **只读用户数据**：`data/` 是用户数据区（见 `docs/dev/architecture.md` §2.2），这里的工具
    不写它——要落文件就写 `_out/` 或系统临时目录。清理产物用
    `shutil.move(..., tempfile.mkdtemp())`，**不要 `rm`**。
 6. **不加运行期依赖**：只用 `requirements.txt` 里已有的（`dearpygui` / `Pillow` / …）。

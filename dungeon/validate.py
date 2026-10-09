@@ -174,7 +174,7 @@ def validate_scenario_config(config, *, scenario_dir: str = None) -> list:
 
     # 结局可达性：既没有结束章节、也没有旧版结局触发器 = 永远无法正常收尾。
     # 作者用 ``ending_policy: "open"`` 明确声明"本方案就是开放式"时不提示——
-    # 让 info 永远挂着的做法等于把设计选择报成缺陷（见 docs/linux.md 附录A §2.2）。
+    # 让 info 永远挂着的做法等于把设计选择报成缺陷（见 docs/users/platforms/linux.md 附录A §2.2）。
     has_ending_trigger = any(
         normalize_action_type(t.get("action"),
                               t.get("action_data") if isinstance(t, dict) else None)

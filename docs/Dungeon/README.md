@@ -1,6 +1,6 @@
 # 副本（Dungeon）文档索引
 
-> `docs/Dungeon/` 的入口：**六篇现状文档 + `history/` 历史档案（只读）**。
+> `docs/Dungeon/` 的入口：**五篇现状文档 + `history/` 历史档案（只读）**。
 > 查「改哪段代码看哪篇」用 §2，查「跑哪个脚本」用 §4，查「为什么是这样」用 §5。
 
 ## 1. 文档地图
@@ -13,7 +13,7 @@
 | [宿主边界与可移植性](window_host.md)   | window 层与宿主（Tk）的边界在哪、换 UI 框架能做到哪一步 | 评估可移植性 / 换宿主 |
 | [调试自动化](window_automation.md) | 怎么不手点电脑就回归窗口 | 改窗口后自检 |
 | [领域术语表](domain_terms.md)      | 方案（Scenario）与一局（Run）怎么区分、怎么命名 | 所有人（命名前必读） |
-| [小游戏框架](minigame.md)          | mini_game 触发器运行时、包格式与作者 API | 写小游戏 / 改 `dungeon/window/minigame/` |
+| [小游戏框架](../designs/minigame.md)          | mini_game 触发器运行时、包格式与作者 API | 写小游戏 / 改 `dungeon/window/minigame/` |
 
 ## 2. 按任务查
 
@@ -27,7 +27,7 @@
 | 帧时钟 / 线程 / 跨线程 UI 更新 | [窗口](window.md) §4 | `dungeon_autopilot.py` |
 | 宿主（Tk）耦合 / 换 UI 框架 | [宿主边界](window_host.md) §3、§4 | `check_dungeon_layering.py` |
 | 分层越界（领域层碰了 GUI） | [架构](architecture.md) §3 | `check_dungeon_layering.py` |
-| 写一个小游戏 / 改小游戏包 | [小游戏框架](minigame.md) | `check_minigame.py`、`dungeon_autopilot.py --scene mini-game-py` |
+| 写一个小游戏 / 改小游戏包 | [小游戏框架](../designs/minigame.md) | `check_minigame.py`、`dungeon_autopilot.py --scene mini-game-py` |
 | 显示组件（文本栏 / 属性条 / 过程日志）与组件参数 | [窗口](window.md) §1、`dungeon/window/component_pack/` | `check_component_pack.py`、`dungeon_autopilot.py --scene text-components` |
 | 新增 / 改名标识符（scenario vs dungeon） | [术语表](domain_terms.md) §2 | `check_scenario_naming.py` |
 | 写盘方式（配置 / 回放 / 报告） | [架构](architecture.md) §8、[窗口](window.md) §5-C10 | `check_dungeon_finalize.py` |

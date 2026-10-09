@@ -8,7 +8,7 @@
 |---|---|---|---|
 | [host_refactor.md](host_refactor.md) | 2026-09-23 | DPG 在 Tk 宿主内的 L0–L5 改造全过程、改造前形状、验收数据 | [宿主边界与可移植性](../window_host.md)、[窗口](../window.md) |
 | [exit_hang_investigation.md](exit_hang_investigation.md) | 2026-09-22 ~ 23 | 进程退出挂死的复现矩阵与修正结论、重启复测；`destroy_context()` 后碰 Tk 的崩溃实测 | [窗口 §5-C2 / §6](../window.md)、[自检判定 §4](../window_automation.md) |
-| [dungeon_model_evolution.md](model_evolution.md) | S1 ~ S4 重构 | 章节 / 触发器模型拆分、动作类型退场、scenario / dungeon 命名拆分与目录迁移 | [数据模型](../script.md)、[术语表](../domain_terms.md)、[架构说明](../architecture.md) |
+| [model_evolution.md](model_evolution.md) | S1 ~ S4 重构 | 章节 / 触发器模型拆分、动作类型退场、scenario / dungeon 命名拆分与目录迁移 | [数据模型](../script.md)、[术语表](../domain_terms.md)、[架构说明](../architecture.md) |
 | [lingchat_evaluation.md](lingchat_evaluation.md) | 重构前 | 同人作品 LingChat 的参考价值评估与「不采纳」清单 | [架构说明](../architecture.md) |
 
 ## 约定

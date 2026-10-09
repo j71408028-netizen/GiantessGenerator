@@ -7,7 +7,7 @@
 靠左，并按相邻消息的间隔长短自动补时间标记（见 ui.common.chat_time）；"已读
 不回"只保留为内部状态，界面上不做任何标注——角色沉默本身就是回应。
 
-回复节奏由服务层与投递控制器负责（docs/chat_delivery.md）：AI 决策后回复
+回复节奏由服务层与投递控制器负责（docs/dev/chat_delivery.md）：AI 决策后回复
 以 queued 入列并排定 available_at；本面板通过共用的 ChatDeliveryController
 到点重载聊天域、重渲染，期间显示"对方正在输入…"，渲染后统一标记玩家已读。
 界面只画 delivered/read 的角色消息，queued 消息不会提前出现。撤回窗口 =

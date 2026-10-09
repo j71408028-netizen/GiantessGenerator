@@ -1707,7 +1707,7 @@ def main():
     parser.add_argument("--skip", action="append", default=[], metavar="SCENE",
                         help="跳过指定场景（可重复）。给「已知会踩第三方原生崩溃」的场景"
                              "留出口（如 text-components 在 Linux/X11 上复现 DPG/GLFW "
-                             "反复拆建上下文的 SIGSEGV，见 docs/linux.md 附录A §5），"
+                             "反复拆建上下文的 SIGSEGV，见 docs/users/platforms/linux.md 附录A §5），"
                              "避免把环境风险记成产品失败")
     args = parser.parse_args()
 

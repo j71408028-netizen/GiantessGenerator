@@ -15,6 +15,6 @@
                       各页面装配
 ====================  ==================================================
 
-热切换 / 副本收尾的陷阱清单见 ``docs/architecture.md`` §5.3 与
+热切换 / 副本收尾的陷阱清单见 ``docs/dev/architecture.md`` §5.3 与
 ``docs/Dungeon/window.md`` §5-C2；改本包后必须跑 ``python tests/smoke_switch.py``。
 """

@@ -1,6 +1,6 @@
 """聊天消息投递：后台调度线程 + 两套界面共用的节奏控制器。
 
-职责边界（对应 docs/chat_delivery.md 阶段一、二）：
+职责边界（对应 docs/dev/chat_delivery.md 阶段一、二）：
 - ChatDeliveryScheduler：进程内唯一的后台线程。消息以 queued 入列时
   登记最早 available_at 并唤醒；到点调用 ChatService.deliver_due 把
   queued 提升为 delivered 并广播 message_delivered 事件。应用启动时

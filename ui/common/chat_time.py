@@ -6,7 +6,7 @@
 
 - :func:`message_moment` 取一条消息在对话里的时间坐标——角色消息优先计划
   展示时间 ``available_at``：应用重启后离线到期的回复会被"延迟结算"成启动
-  时刻投递（见 docs/chat_delivery.md），用实际投递时间会把几天的间隔压成
+  时刻投递（见 docs/dev/chat_delivery.md），用实际投递时间会把几天的间隔压成
   一瞬，计划时间才是当时的回复时间；
 - :func:`time_marker_text` 决定这条消息前要不要补标记：与上一条的间隔短于
   :data:`TIME_MARKER_GAP` 就不补（连续对话每句报时是噪音），超过则按

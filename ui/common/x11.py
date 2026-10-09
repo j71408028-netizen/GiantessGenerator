@@ -110,7 +110,7 @@ def init_x_threads() -> bool:
     必须在 ``tkinter`` / ``customtkinter`` / ``dearpygui`` 首次建立连接之前执行。
     调用点放晚了 libX11 不会报错，但那时它已经按单线程模式跑起来，加锁不再生效——
     本函数**无法**检测"已经开过连接"，只能靠调用点自律（各入口文件顶部都写了注释，
-    见 docs/linux.md §3）。
+    见 docs/users/platforms/linux.md §3）。
 
     非 Linux 或 ``GIANTESS_X11=0`` 时返回 False（平台不适用，不是故障）；libX11
     加载不出来时也返回 False，绝不让引导步骤挡住启动。

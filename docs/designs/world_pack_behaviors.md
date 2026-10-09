@@ -1,6 +1,6 @@
 # 世界包行为包开发指南
 
-> 角色演化模型的完整设计（量、公式、已验证动态特性）见 `docs/character_evolution.md`；
+> 角色演化模型的完整设计（量、公式、已验证动态特性）见 `docs/designs/character_evolution.md`；
 > 覆盖 `StateService` 坐标/步长方法前建议先阅读该文档。
 
 行为包（Behavior Pack）是世界包中的一种资源类型，允许世界包作者在激活该世界包期间

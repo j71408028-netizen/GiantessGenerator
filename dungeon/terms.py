@@ -14,7 +14,7 @@
 持久化记录里引用方案 id 的字段一律写 ``scenario_id``；读取时用
 ``scenario_id_of()`` 兼容改名前的 ``dungeon_id``。
 
-（术语拆分的背景见 ``docs/domain_terms.md``；改名前的 ``DungeonRepo`` 实际持久化的
+（术语拆分的背景见 ``docs/Dungeon/domain_terms.md``；改名前的 ``DungeonRepo`` 实际持久化的
 就是方案定义，因而更名为 ``persistence.scenario_repo.ScenarioRepo``。）
 """
 

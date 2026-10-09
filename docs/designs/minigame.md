@@ -1,7 +1,7 @@
 # 小游戏框架
 
 > **定位**：`mini_game` 触发器的运行时、小游戏包格式与作者 API。
-> 触发器动作字段见[数据模型](script.md) §6；宿主端口见[宿主边界](window_host.md) §1。
+> 触发器动作字段见[数据模型](../Dungeon/script.md) §6；宿主端口见[宿主边界](../Dungeon/window_host.md) §1。
 
 一句话：**写一个 Python 类就是一个小游戏**——作者不接触 Dear PyGui；
 绘制 / 输入 / 帧时钟 / 纹理 / 结算 / 回放全部由框架（`dungeon/window/minigame/`）承担。

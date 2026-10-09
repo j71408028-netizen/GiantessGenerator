@@ -1,209 +1,8 @@
-# Linux 支持说明
+# Linux 支持说明 · 历史归档
 
-> 面向使用者的 Linux（X11 / XWayland）兼容说明。Wayland 原生会话是**已知限制**，
-> 不在支持范围内。
->
-> **本文件是 Linux 相关文档的单一归档**（2026-10-07 起合并）：
-> §1–§8 面向使用者；**附录 A** 为兼容计划（目标、逐阶段落地内容、验收标准、
-> 风险登记与执行记录）；**附录 B** 为试跑检查记录（逐项实测证据链）。
-> 原 `docs/linux_compat_plan.md` 与 `docs/linux_verification_log.md` 已并入本文并删除。
-
-## 1. 支持范围
-
-| 会话类型 | 状态 | 说明 |
-|---|---|---|
-| X11（Xorg / XWayland 下的 `DISPLAY`） | ✅ 受支持 | 全部功能可用；GitHub CI 的 Linux job 也跑在同一形态下 |
-| Wayland + XWayland | ✅ 可用 | 图形界面与副本窗口经 XWayland 显示；窗口置顶取决于窗口管理器（GNOME Shell 实测**不可用**，见 §4） |
-| 纯 Wayland（无 XWayland） | ❌ 不支持 | 副本窗口基于 GLFW/X11，纯 Wayland 后端创建不出窗口 |
-
-前提：能提供 Tk 图形组件（`python3-tk`）与一个可用的 X display。无显示器环境可用
-`xvfb-run` 跑 GUI 冒烟（软件渲染 llvmpipe 可行但慢，见 §6）。
-
-## 2. 安装差异
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt     # 必须整份装，见下
-python main.py
-```
-
-- **必须 `pip install -r requirements.txt`**：`networkx`（触发器依赖图）、`graphviz`
-  （依赖图渲染的 Python 侧）、`openai`（AI 功能）都在其中。Linux 试跑环境曾因为
-  只装了部分依赖，出现「点『检查依赖』直接 import 失败」；现在缺依赖会给出明确提示
-  （`ui/scenario/dependency_dlg.py`），但功能仍然用不了。
-- **`numpy` 现在也在 `requirements.txt` 里**（原先是漏声明，靠开发机恰好装过）。
-  副本窗口背景合成、小游戏画布、挑战数值计算都直接 import 它。
-- 触发器依赖图还需要系统级 `dot`：`sudo apt install graphviz`（Python 包不自带二进制）。
-  程序会依次查 `PATH`、`/opt/homebrew/bin/dot`、`/usr/local/bin/dot`。
-- 可选依赖的降级表现与 `requirements.txt` 内注释一致：
-  | 可选依赖 | 缺失时的表现 |
-  |---|---|
-  | `edge-tts` | 对话语音不出声（联网合成），副本照常能玩 |
-  | `miniaudio` / `soundfile` | 章节语音的「物理效果」退回零依赖的播放侧近似（回声 / 缓抖），方案校验会给出提示；装上即消除 |
-  | `pywebview` | 内置小游戏窗口（`web` 后端的兼容通道）打不开，触发器会明确提示；`py` 后端小游戏不受影响 |
-- 中文字体（两条链路，都靠系统装中文字体，建议 `sudo apt install fonts-noto-cjk`）：
-  - 主界面（Tk / CustomTkinter）走 `ui/common/fonts.py` 的家族候选链
-    （Noto Sans CJK SC / 文泉驿微米黑），由 Tk 自己按家族名向 fontconfig 取字体；
-  - 副本窗口（Dear PyGui）**只认字体文件**，走 `dungeon/window/fonts.py`：Linux 上先问
-    `fc-match`（只接受声明覆盖 `zh-cn` 的结果，避免不存在的家族名被替换成拉丁字体），
-    查不到再按发行版常见路径回退（Noto CJK / 思源黑体 / 文泉驿 / Droid Sans Fallback）。
-    系统里一个中文字体都没有时才会退到 DejaVu Sans——那没有中文字形，中文会是方框；
-    窗口开起来后可在过程日志（F12）里看到实际选中的字体文件。
-  - 已知取舍：DPG 无法指定集合字体（`.ttc`）里的 face 序号，Noto CJK 只会取到第 0 个
-    face（JP）——码位覆盖完整、不会缺字，个别字的写法是日文变体；小游戏离屏画布用 PIL
-    渲染，能按 fontconfig 给的序号取到简体 face（详见 `dungeon/window/fonts.py` 模块说明）。
-
-## 3. XInitThreads：为什么要每个入口调一次
-
-Tk（专业模式 / ME模式）与 Dear PyGui/GLFW（副本窗口）在同一个进程里**各开一条 X
-display 连接**，libX11 默认按「单连接单线程」编译——两套工具包各带线程碰同一个 X
-server 是 `BadWindow` 与 `ImGui_ImplGlfw_WindowFocusCallback` 段错误的经典成因。
-
-因此每个会建窗口的入口文件在**最顶部**（任何 `tkinter` / `dearpygui` 之前）都要：
-
-```python
-from ui.common.x11_boot import boot_x11
-
-boot_x11()          # 调 XInitThreads()，全进程一次性生效
-```
-
-已接入的入口：
-
-| 入口 | 位置 |
-|---|---|
-| `main.py`（专业模式 / ME模式） | 第 5 行，`import tkinter` 之前 |
-| `tests/smoke_switch.py` | `ensure_cwd()` 之后（该脚本的 tkinter 都是函数内延迟 import） |
-| `tests/smoke_mini.py` | 路径注入之后、`tkinter` 延迟到 `boot_x11()` 之后再 import |
-| `scripts/dungeon_autopilot.py` | 路径注入之后 |
-| `ui/common/tk_host.py` | `TkHost.__init__` 兜底（幂等，覆盖直接 new 宿主的脚本） |
-
-`XInitThreads()` 必须早于**第一条** X 连接；晚调不会报错但没有意义，`boot_x11()` 会在
-已经调用过时直接返回上次结果。这一切都有开关：`GIANTESS_X11=0` 可整体关掉 Linux 原生
-X11 支持（做有效/无效对比压测用，不是功能开关）。
-
-## 4. 窗口置顶（`_NET_WM_STATE_ABOVE`）
-
-Tk 的 `-topmost` 在 **GNOME Shell / XWayland 实测静默失效**：既不写
-`_NET_WM_STATE_ABOVE`，`attributes("-topmost")` 也一直回报 0（历史记录见
-附录B §4.4）。
-
-现在的实现（`ui/mini/topmost.py` + `ui/common/x11.py`，纯 stdlib ctypes，不引入
-`python-xlib` / `pywinctl`）：
-
-1. 先照常调 Tk 的 `-topmost`（对 KWin 这类 WM 有效）；
-2. 再向 root 窗口发 EWMH `ClientMessage`（`_NET_WM_STATE` / `_NET_WM_STATE_ABOVE`，
-   `source_indication=1`），只对**窗口管理器认的顶层窗口**发——Tk 的 `winfo_id()`
-   在 GNOME 下是客户区子窗口，`wm_frame` 是它的父窗口，`ui.common.x11.top_level_window()`
-   负责上溯；
-3. 回读 `_NET_WM_STATE` 确认（WM 是异步的，最多重试两次）；
-4. 窗口尚未映射时无法回读，`<Map>` 事件后会自动再落一次。
-
-**降级**：窗口管理器若没有在 `_NET_SUPPORTED` 里声明 `_NET_WM_STATE_ABOVE`，ME模式
-设置页的「窗口置顶」开关会**置灰并标注「本桌面环境不支持」**，而不是留一个点了没反应
-的开关；用户在不可用环境里尝试打开时也会收到一次明确提示。
-
-支持矩阵（实测 / 待补）：
-
-| 桌面环境 | X11 置顶 | 备注 |
-|---|---|---|
-| GNOME Shell（XWayland，mutter） | ✅ 可用 | 2026-10-06 实测：EWMH 写入后 `xprop` 可读到 `_NET_WM_STATE_ABOVE` |
-| KWin | 待实测 | `_NET_WM_STATE_ABOVE` 在声明列表里，理论上可用 |
-| 其它 WM | 待实测 | 以 `_NET_SUPPORTED` 声明为准，声明即尝试 |
-
-## 5. X11 错误兼容处理器
-
-`dungeon/window/dpg_state.install_x11_error_guard()`（仅 Linux）会安装一个 ctypes 的
-Xlib 同步错误处理器，用于对付「Tk 事件泵处理到其它已销毁顶层窗口的旧事件」——
-Xlib 默认处理器会直接 `exit(1)`，表现为冒烟里的 `X Error of failed request: BadWindow`。
-
-策略（2026-10-06 收窄）：
-
-- `BadWindow(3)` / `BadDrawable(9)`：预期内的陈旧窗口错误，忽略，并把前 3 次记入
-  `dungeon.process_log`（副本窗口的过程日志面板能看到）；
-- 其它错误码：**照样不退出进程，但每次都记录**（含错误码与 request code）。这是刻意
-  的取舍——要把默认行为换成"让进程崩"，删掉该函数的调用点即可；风险登记见
-  附录A §5。
-
-## 6. 自动化与压测
-
-```bash
-# 离线守卫（不需要显示器）：15 项
-.venv/bin/python tests/run_checks.py
-.venv/bin/python tests/check_scenarios.py          # 方案校验，0 error 才退 0
-
-# GUI 冒烟（需要显示器 / xvfb-run）
-.venv/bin/python tests/smoke_mini.py
-.venv/bin/python tests/smoke_switch.py
-.venv/bin/python scripts/dungeon_autopilot.py --scene all --isolate --timeout 60
-```
-
-平台不适用项按设计 **SKIP**，不计失败：`callback-thread` 场景（靠 Windows
-`SendMessage(WM_KEYDOWN)` 投原生按键）在非 Windows 跳过；`native-close` 同理。
-`smoke_mini` 在 Linux 只断言「置顶调用不抛异常」，置顶有效性由
-`ui/mini/topmost.py` 的 EWMH 回读路径覆盖。
-
-长压测（抓 DPG/GLFW 反复拆建上下文的偶发原生崩溃）的标准姿势是 **`--isolate` +
-外层 watchdog 逐轮起子进程、按退出码统计**，见
-[Dungeon/window_automation.md §4](Dungeon/window_automation.md) 与
-`developer_tools/_probe_stress.py`：
-
-```bash
-python developer_tools/_probe_stress.py smoke_switch 20            # XInitThreads 生效
-GIANTESS_X11=0 python developer_tools/_probe_stress.py smoke_switch 20   # 对照组
-```
-
-## 7. 打包与发布
-
-```bash
-bash build/linux/build_linux.sh                # 只打包
-bash build/linux/build_linux.sh --self-check   # 打包 + 打包自检（需要显示器）
-PYTHON_BIN=python3.12 bash build/linux/build_linux.sh   # 指定解释器
-```
-
-- **形态**：PyInstaller **onedir**，产物 `dist/GiantessGenerator/`（可执行文件与目录同名），
-  另打 `dist/GiantessGenerator-linux-<arch>.tar.gz` 目录包。AppImage / deb 与桌面集成
-  （`.desktop`、PATH 安装）不在本期。
-- **依赖收集**：与 Windows / macOS 脚本同一套 `--collect-all`（customtkinter / dearpygui /
-  PIL / openai / networkx / numpy / webview），**不带** `zai`（项目没有该依赖，见
-  附录A §2.3）。`dot`（Graphviz 二进制）是外部可选
-  依赖，不进包：依赖图功能需要系统 `sudo apt install graphviz`。
-- **构建环境**：脚本自建 `.venv-buildlinux` 并 `pip install -r requirements.txt pyinstaller`，
-  不污染开发 venv。Python 3.14 下 `pywebview` 会装到 6.2.1（更新的版本声明 `<3.14`），
-  web 后端小游戏窗口照常可用。
-- **数据目录**：打包版走 XDG —— `$XDG_DATA_HOME/GiantessGenerator/data`
-  （默认 `~/.local/share/GiantessGenerator/data`），首启从包内 `data/packs`、`data/static`
-  拷贝出可写副本；源码运行仍用仓库内 `data/`（见 `paths.py`）。
-- **打包自检**（`--self-check`）：同一套依赖把 `scripts/dungeon_autopilot.py` 也打成一个包，
-  然后
-  1. 用临时 `XDG_DATA_HOME` 启动发布包（不碰真实用户数据），确认进程存活且
-     `data/{packs,static,user,archives}` 引导成功（有 `xwininfo` 时顺带核对主窗口标题）；
-  2. 在**打包态**里逐场景真开副本窗口：`entry-start`（探索入口 → 进副本）、
-     `session-close`、`text-components`（文本 / 字体组件）、`mini-game`（小游戏触发器
-     返回值链）、`mini-game-py`（py 后端小游戏覆盖层舞台）。
-
-  退出码 0 才算通过——这是「打包后仍然能进副本、小游戏触发器还能跑」的可复现证据。
-
-### 7.1 CI（GitHub Actions）
-
-| 工作流 | 触发 | 内容 |
-|---|---|---|
-| [`checks.yml`](../.github/workflows/checks.yml) | 每 PR / 推 `main` | 离线门禁：Ubuntu（Python 3.12 与 3.14 各一轮）+ Windows（3.12）跑 `tests/run_checks.py`（15 项）与 `tests/check_scenarios.py` |
-| [`gui-smoke.yml`](../.github/workflows/gui-smoke.yml) | 每晚 02:00（CST）+ 手动 | xvfb + 软件 GL（llvmpipe）：`dungeon_autopilot --scene all --isolate`、`smoke_mini`、`smoke_switch`；另一个 job 跑 `build/linux/build_linux.sh --self-check` 并上传目录包 |
-
-GUI 用例对长会话与驱动状态敏感（见 §5 与 附录A §5）：
-某条明显 flaky 时先在工作流里注释掉它，保留 autopilot 离线场景组。
-
-## 8. 已知限制
-
-- **纯 Wayland 不支持**：副本窗口（GLFW/X11）创建不出来，请用 X11 会话或 XWayland。
-- **窗口置顶依赖桌面环境**：GNOME Shell 走 EWMH 可用；不声明该属性的 WM 下开关会置灰。
-- **Dear PyGui 2.3.1 / GLFW 低概率原生段错误**：反复 `destroy_context → create_context
-  → show_viewport` 后偶发 `SIGSEGV @ ImGui_ImplGlfw_WindowFocusCallback`，Python 层
-  捕不到。属第三方库风险，缓解手段是 XInitThreads + 错误处理器收窄 + `--isolate`
-  压测；长期跟随上游（见 附录A §5）。
-- **包形态**：目前只发 tar.gz 目录包，没有 AppImage / deb / 桌面项；运行方式为解包后直接
-  执行 `GiantessGenerator/GiantessGenerator`。
+> **只读 · 仅供溯源**：本文收录 Linux 兼容工作的**过程与实测证据**——
+> 附录 A 为兼容计划与执行记录，附录 B 为试跑检查记录。
+> **不要用这里的结论改代码**——现状一律以 [linux.md](linux.md) 为准。
 
 ---
 
@@ -312,7 +111,7 @@ GUI 用例对长会话与驱动状态敏感（见 §5 与 附录A §5）：
 ### 3.3 文档（P1）
 
 - README：支持平台矩阵（Windows / macOS / Linux-X11 / Wayland×），安装差异（`pip install -r requirements.txt` 必装、可选依赖表现）。
-- 新增 `docs/linux.md`（或并入 README 已知限制节）：X11 guard 机制、置顶限制、`callback-thread` 场景 SKIP、Wayland 走 XWayland 的说明。
+- 新增 `docs/users/platforms/linux.md`（或并入 README 已知限制节）：X11 guard 机制、置顶限制、`callback-thread` 场景 SKIP、Wayland 走 XWayland 的说明。
 - 试跑检查记录作为证据链归档于本文附录 B（2026-10-07 起并入）。
 
 ### 4. 总体验收标准
@@ -329,7 +128,7 @@ GUI 用例对长会话与驱动状态敏感（见 §5 与 附录A §5）：
 |------|------|------|
 | Dear PyGui 2.3.1 / GLFW 反复拆建上下文的回调状态竞争（SIGSEGV） | 高 | 第三方库风险，靠 §2.1 缓解；长期跟随上游。收窄后的错误处理器已能把它与 X 错误区分开（未预期错误码会大声记录）。2026-10-07 补充：autopilot 的 `text-components` 场景（同进程连建 5 个 DPG 上下文）在 Linux/X11 上可**稳定复现** `SIGSEGV @ ImGui_ImplGlfw_CursorEnterCallback`，源码态同样复现、与打包无关；autopilot 因此加了 `--skip`，打包自检与每晚 CI 都跳过该场景（组件功能由 `smoke_switch` / `smoke_mini` 覆盖） |
 | 宽松 X11 错误处理器可能掩盖真实 X 错误 | 中 | ✅ 已关闭：只对 `BadWindow(3)` / `BadDrawable(9)` 记日志返回，其余错误码每次大声记录（`dpg_state._EXPECTED_X11_ERRORS`） |
-| GNOME 置顶等桌面环境差异无法穷举（KDE/Wayland 各发行版） | 中 | ✅ 已收口：EWMH 直接写 + 回读确认，不支持时设置页置灰。支持矩阵只承诺 X11+GNOME 实测项，其余按「尽力而为」标注（docs/linux.md §4） |
+| GNOME 置顶等桌面环境差异无法穷举（KDE/Wayland 各发行版） | 中 | ✅ 已收口：EWMH 直接写 + 回读确认，不支持时设置页置灰。支持矩阵只承诺 X11+GNOME 实测项，其余按「尽力而为」标注（docs/users/platforms/linux.md §4） |
 | Python 3.14 较新，部分依赖（Pillow 上界、PyInstaller 钩子）兼容面窄 | 中 | ✅ 打包验证已确认：Pillow 12.3.0 有 cp314 wheel、PyInstaller 6.22.3 能打出可运行包并跑通打包自检；`pywebview` 在 3.14 上只能装到 6.2.1（更新的版本声明 `<3.14`），web 后端小游戏窗口照常可用。Pillow 上界（`<13`）是否恢复见 §1.2-#6 |
 | **长时间连续 GUI 压测后环境劣化**：单轮耗时由 ~45s 涨到 120–170s，收尾路径挂死概率上升（`smoke_switch` 已过第 1 轮、卡在第 2 轮「跑一局副本」；`autopilot` 偶发单场景退出挂死）。重启会话/长时间静置后恢复 | 中 | 与 §5 的「退出挂死」同源，属长时会话累积的环境现象**而非本轮改动**（`GIANTESS_X11=0` 对照同样挂死；单跑 `--scene session-close`、`--repeat 3`、`smoke_mini` 均通过）。压测一律逐轮子进程 + 硬超时，结论按"有没有段错误"读，不把挂死记到功能头上 |
 
@@ -366,14 +165,14 @@ GUI 用例对长会话与驱动状态敏感（见 §5 与 附录A §5）：
 | §2.1-4 上游 issue | 未做（低优先级，需要最小复现样例；压测方法已写进 §4b，随时可提） | — |
 | §2.2-1 悬空前置 | `_default/config.json`：`新选项` 触发器移除孤立的 `precondition_names: ["新插入"]` | `check_scenarios.py` 警告清零 |
 | §2.2-2 无结局 info | 新增顶层字段 `ending_policy`（`required` 默认 / `open`）+ 归一化 + 非法值 warning；默认方案声明 `open`；校验器 `open` 时不提示 | `check_scenario_schema.py` 144/144（新增 5 项断言）；`check_scenarios.py` info 只剩可选依赖类 |
-| §2.2-3 解码器 info | 不改代码；`docs/linux.md` §2 写明 `pip install miniaudio` 即消除 | 文档 |
+| §2.2-3 解码器 info | 不改代码；`docs/users/platforms/linux.md` §2 写明 `pip install miniaudio` 即消除 | 文档 |
 | §2.3-1 缺依赖体验 | `dependency_dlg.py` 可选 import + `missing_dependencies()` + 对话框内安装提示；`chapter_trigger_mgr.check_dependencies` 先提示再返回（不再 import 崩） | 本机（无 networkx/graphviz）实测提示文案正确 |
 | §2.3-2 numpy | `requirements.txt` 增加 `numpy>=1.26`；`check_entrypoints.UNDECLARED_ALLOWED` 移除旧豁免；打包脚本补 `--collect-all numpy` | `check_entrypoints.py` 通过 |
 | §2.3-3 zai | 从 Windows/macOS 打包脚本移除 `--collect-all zai` | `check_entrypoints.py`（构建脚本解析）通过 |
-| §2.3-4 可选依赖 | README 安装段 + `docs/linux.md` §2 写明缺失降级表现（与 requirements.txt 注释一致） | 文档 |
+| §2.3-4 可选依赖 | README 安装段 + `docs/users/platforms/linux.md` §2 写明缺失降级表现（与 requirements.txt 注释一致） | 文档 |
 | §2.4-1 EWMH 置顶 | `ui/common/x11.py`（`top_level_window` / `state_above` / `is_above` / `supports_above`，纯 ctypes）+ `ui/mini/topmost.py`；`MiniApp` 在 `<Map>` 后落地并回读 | GNOME/XWayland 实测：`_NET_WM_STATE_ABOVE` 写入/移除成功，xprop 可读 |
 | §2.4-2 UI 降级 | `ui/mini/pixel.CycleRow.set_disabled()`；设置页在 `_NET_SUPPORTED` 无该属性时置灰并标注「本桌面环境不支持」，用户强行开启时弹一次说明 | 组件级实测（置灰后不可点击、文案正确） |
-| §2.4-3 支持矩阵 | `docs/linux.md` §4 支持矩阵 + README「支持平台矩阵」 | 文档 |
+| §2.4-3 支持矩阵 | `docs/users/platforms/linux.md` §4 支持矩阵 + README「支持平台矩阵」 | 文档 |
 
 ### 7. 阶段二后补：副本窗口中文字体（2026-10-07）
 
@@ -402,7 +201,7 @@ GUI 用例对长会话与驱动状态敏感（见 §5 与 附录A §5）：
   覆盖判据 OK、小游戏离屏拿到 `Noto Sans CJK SC (Bold)`；对照组 `DejaVuSans.ttf` 判 MISSING。
 - `tests/run_checks.py` **15/15**；`smoke_switch.py` **50/50**（真实副本窗口链路，见下）。
 
-遗留（已写进 `docs/linux.md` §2）：
+遗留（已写进 `docs/users/platforms/linux.md` §2）：
 
 - DPG 无法指定 `.ttc` 内的 face 序号，Noto CJK 只会取到第 0 个 face（JP）：码位覆盖完整、
   不会缺字，个别字的写法是日文变体。彻底解决要靠上游支持 face 序号，或改用单面简体字体
@@ -421,7 +220,7 @@ GUI 用例对长会话与驱动状态敏感（见 §5 与 附录A §5）：
 | §3.2 CI 每 PR | `.github/workflows/checks.yml`：Ubuntu（3.12 / 3.14 各一轮）+ Windows（3.12），装整份 requirements 后跑 `run_checks.py`（15 项）与 `check_scenarios.py`，带 Tk/GL 系统依赖与导入自检 | 本地 `env -u DISPLAY` 跑通 15/15（证明离线门禁不需要显示器）；两个工作流 YAML 本地解析校验通过 |
 | §3.2 CI 每晚 | `.github/workflows/gui-smoke.yml`：一个 job 用 `xvfb-run` + llvmpipe 跑 `dungeon_autopilot --scene all --skip text-components --isolate`、`smoke_mini`、`smoke_switch` 并上传 autopilot 报告；另一个 job 跑 `build/linux/build_linux.sh --self-check` 并上传目录包 | 命令与本地实测一致（本地在真实 X 上跑通）；首个 CI 运行待推送后观察 |
 | §3.2 场景跳过开关 | `dungeon_autopilot.py` 新增 `--skip SCENE`（可重复；未知场景或全部跳过则报错退出 2）：给已知会踩第三方原生崩溃的场景留出口 | `--skip bogus` 与「全部跳过」均 rc=2；`--scene all --skip text-components` 解析通过 |
-| §3.3 文档 | README（平台矩阵标出 Linux 打包、数据目录补 XDG、`build/` 说明、打包命令）；`docs/linux.md` 新增 §7 打包与发布、§7.1 CI；`Dungeon/window_automation.md` 指向 GUI 冒烟工作流；本节记录 | 文档 |
+| §3.3 文档 | README（平台矩阵标出 Linux 打包、数据目录补 XDG、`build/` 说明、打包命令）；`docs/users/platforms/linux.md` 新增 §7 打包与发布、§7.1 CI；`Dungeon/window_automation.md` 指向 GUI 冒烟工作流；本节记录 | 文档 |
 
 ### 8.1 打包验证中发现并处理的问题
 

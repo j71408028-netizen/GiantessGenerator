@@ -1,6 +1,6 @@
 """角色聊天服务：上下文组装、非流式 AI 调用、响应解析与属性写回。
 
-协议要点（对应 docs/chat_delivery.md）：
+协议要点（对应 docs/dev/chat_delivery.md）：
 - AI 严格输出 JSON：messages（1~4 条，一次可发多条消息）/ silent_reason /
   ops / nick / memory_note；messages 缺失时回退读旧协议的 reply；
 - 已读不回：read 恒为 True（看到即已读）；messages 为空时不出角色气泡，

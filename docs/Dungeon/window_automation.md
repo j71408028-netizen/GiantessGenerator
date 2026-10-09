@@ -162,7 +162,7 @@ done
 ```
 
 Linux 侧配合 `GIANTESS_X11=0` 做 XInitThreads 有效/无效对比（见
-[docs/linux.md](../linux.md) §3、§6）。判定只看「跑完且没崩」，不看单轮断言——
+[docs/users/platforms/linux.md](../users/platforms/linux.md) §3、§6）。判定只看「跑完且没崩」，不看单轮断言——
 断言已由单轮标准跑覆盖。
 
 ## 5. 坑清单

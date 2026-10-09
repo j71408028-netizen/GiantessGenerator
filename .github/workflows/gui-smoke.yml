@@ -1,9 +1,9 @@
 name: gui-smoke
 
 # 每晚（+ 手动）：xvfb 无头 X + 软件 GL（llvmpipe）跑 GUI 冒烟与**打包自检**。
-# 这些用例都需要真显示器/真窗口，不进 PR 门禁（见 docs/linux.md §6）。
+# 这些用例都需要真显示器/真窗口，不进 PR 门禁（见 docs/users/platforms/linux.md §6）。
 #
-# 注：GUI 类用例对长时会话/驱动状态敏感（docs/linux.md 附录A §5），
+# 注：GUI 类用例对长时会话/驱动状态敏感（docs/users/platforms/linux-history.md 附录A §5），
 # 若某条明显 flaky，先把它注释掉、只留 autopilot 离线场景组。
 on:
   schedule:
@@ -41,7 +41,7 @@ jobs:
         run: |
           mkdir -p "$TMPDIR"
           # text-components 在 Linux/X11 上会踩已知的 DPG/GLFW「反复拆建上下文」段错误
-          # （在开发机源码态可稳定复现，见 docs/linux.md 附录A §5），先跳过它；
+          # （在开发机源码态可稳定复现，见 docs/users/platforms/linux-history.md 附录A §5），先跳过它；
           # 其余场景全跑。它覆盖的组件功能由 smoke_switch / smoke_mini 兜着。
           xvfb-run -a -s "-screen 0 1600x1000x24" \
             env LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe \

@@ -330,7 +330,7 @@ class ChatMessage:
     已读（仅对 user 消息有意义）；silent 为"已读不回"：对方已读但未回复，
     此时本条 user 消息后不会紧跟 char 消息。
 
-    生命周期字段（AI 已生成 ≠ 已送达 ≠ 玩家已读，见 docs/chat_delivery.md）：
+    生命周期字段（AI 已生成 ≠ 已送达 ≠ 玩家已读，见 docs/dev/chat_delivery.md）：
     - id / batch_id / sequence：稳定身份与"一次决策多条消息"的分组；
     - status：角色消息 queued → delivered → read；user 消息恒为空串
       （沿用 read/silent 表达"角色是否看到/是否已读不回"）；
@@ -392,7 +392,7 @@ class ChatParams:
 
 @dataclass
 class Topic:
-    """聊天话题（docs/chat_delivery.md 阶段三）。
+    """聊天话题（docs/dev/chat_delivery.md 阶段三）。
 
     角色与玩家之间的一段连续对话主题，由 AI 在协议里通过
     topic.action（continue/start/switch/end）自主开启、切换与结束；

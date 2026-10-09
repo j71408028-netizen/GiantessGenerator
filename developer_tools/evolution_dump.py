@@ -102,7 +102,7 @@ PERSONALITY_FIELDS = ("init_intrusion", "init_destruction",
 SOURCE_CORNER = "角点"
 SOURCE_TABLE = "默认性格表"
 
-# UI 可设定范围的角点（ui/exploration/creation_params_dlg.py + docs/character_evolution.md §1）：
+# UI 可设定范围的角点（ui/exploration/creation_params_dlg.py + docs/designs/character_evolution.md §1）：
 # 步长 / 敏感 / 重力 ∈ [-3, 3]，个性强度 ∈ [0, 5]，初始坐标 ∈ [0.4, 4.5]。
 # 每条只压一个机制，避免多个极值互相掩盖；``note`` 写清它压的是什么。
 CORNER_PRESETS = [

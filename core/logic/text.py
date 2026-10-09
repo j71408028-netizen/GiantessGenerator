@@ -2,7 +2,7 @@
 
 自 ``core/logic.py`` 按职责拆出（原文件现为薄壳 ``core/logic/__init__.py``）。
 ``@behavior_hook`` 的 scope ``"logic"`` 是已部署行为包的公开契约，与文件位置无关，
-不得改动（见 ``docs/world_pack_behaviors.md``）。
+不得改动（见 ``docs/designs/world_pack_behaviors.md``）。
 """
 
 import random

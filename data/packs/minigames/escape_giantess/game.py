@@ -2,7 +2,7 @@
 """逃离巨大娘 · Escape the Giantess —— py 后端移植版。
 
 原版是桌面项目里的网页原型（原生 JS + Canvas2D，68×48 格、两主题、三类危险源、
-织物层、视野迷雾），玩法设计与算法见原项目 `docs/玩法设计与算法总结.md`。
+织物层、视野迷雾）；玩法设计与算法记录在**原项目**中，不在本仓库内。
 本文件按原版逐模块移植到小游戏框架 API 上：
 
   config/utils/state/mapgen/fabric/tiles/hazards/player/fx/render → 本文件分节

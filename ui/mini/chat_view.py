@@ -7,7 +7,7 @@
 角色靠左（ink_soft 底、text 字）。
 
 行为与专业版完全一致，仍由共用的 ``ChatDeliveryController`` 驱动（消息生命周期
-见 docs/chat_delivery.md）：AI 回复以 queued 入列，到点重载重渲染、期间显示"对方
+见 docs/dev/chat_delivery.md）：AI 回复以 queued 入列，到点重载重渲染、期间显示"对方
 正在输入…"、渲染后统一标记已读；界面只画 delivered/read 的角色消息。撤回窗口 =
 AI 应答完成之前（角色已"看到"即关闭，物理删除）。打开时先后台预热聊天参数再自动
 补话（有未读→回复未读；间隔够久→可能主动搭话）。AI 请求都在后台线程执行。
