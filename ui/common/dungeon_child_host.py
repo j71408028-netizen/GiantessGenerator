@@ -25,6 +25,10 @@ X11 连接——``dpg.destroy_context()`` 终止的是子进程的 GLFW，父进
 ``default_font``      空串（字体家族随构造参数传入，不依赖宿主）
 ====================  ====================================================
 
+**DPI 感知**：子进程的感知档位镜像父进程——CTk 主进程（专业模式）是感知的，
+独立挂件版（纯 Tk，见 ``ui.mini.dpi``）刻意无感知。子进程若在父进程感知时保持
+无感知，Windows 会把视口再放大一次（窗口与字体巨大，2026-10-11 实测）。
+
 协议（``multiprocessing.Pipe`` 双向，JSON 安全 dict）：
 
 - 子 → 父：``{"req": "show_window"}``、``{"req": "dialog", "id", "kind",
@@ -228,6 +232,31 @@ class ChildHost(HostPort):
 
 # ==================== 子进程主体 ====================
 
+def _ensure_dpi_awareness():
+    """开启本进程的 DPI 感知（仅 Windows；必须在任何窗口创建之前调用）。
+
+    子进程是全新的 Python 进程：主进程里由 CTk 在建根窗口时开启的 DPI 感知
+    **不会**被继承。子进程若停留在无感知状态，Windows 会把 DPG 视口的
+    96-DPI 逻辑坐标按系统缩放再放大一次（实测 175% 缩放的机器上窗口与字体
+    整体巨大约 3 倍，2026-10-11）。
+
+    档位与 CTk 主程序一致（``shcore.SetProcessDpiAwareness(2)``，Per-Monitor
+    Aware）——视口尺寸与缩放是父进程按真实 DPI 量好随载荷传入的，子进程必须
+    同样感知，坐标才能对上。调用失败（已设置过 / 旧系统无 shcore）退回
+    ``SetProcessDPIAware`` 兜底，再失败就只能保持无感知。
+    """
+    if not _IS_WINDOWS:
+        return
+    import ctypes
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
+
 def run_dungeon_host(conn, payload):
     """子进程入口：由 ``dungeon_spawner`` 经 ``multiprocessing.Process`` 拉起。
 
@@ -238,6 +267,12 @@ def run_dungeon_host(conn, payload):
 
     from paths import ensure_cwd
 
+    # DPI 感知镜像父进程：父进程感知（专业模式的 CTk 进程）则子进程也要感知，
+    # 否则 Windows 会把视口再放大一次；父进程本身无感知（独立挂件版的设计，
+    # 见 ui.mini.dpi）则子进程同样保持无感知——Windows 整体位图拉伸，
+    # 与旧「DPG 与 Tk 同进程」时代的表现一致（尺寸正确、位图偏糊）。
+    if payload.get("dpi_aware"):
+        _ensure_dpi_awareness()
     ensure_cwd()
     try:
         result = _run_session(conn, payload)

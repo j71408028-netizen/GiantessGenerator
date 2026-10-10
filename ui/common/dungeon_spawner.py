@@ -37,6 +37,7 @@
 
 import multiprocessing
 import queue
+import sys
 import threading
 import time
 
@@ -84,6 +85,31 @@ class DungeonProcessHandle:
                 pass
 
 
+def _parent_dpi_aware() -> bool:
+    """父进程是否处于 DPI 感知状态（子进程照抄这个档位）。
+
+    专业模式的 CTk 进程在建根窗口时开感知（``shcore.SetProcessDpiAwareness(2)``）；
+    独立挂件版刻意保持无感知（``ui.mini.dpi`` 的设计）。子进程必须与父进程同档：
+    父感知而子不感知 → Windows 把视口再放大一次（巨大）；父不感知而子感知 →
+    视口比主窗口小一圈。查询失败时按"感知"处理（宁可大号正确也不要二次放大）。
+    """
+    if not sys.platform.startswith("win"):
+        return True
+    try:
+        import ctypes
+        value = ctypes.c_uint(0)
+        if ctypes.windll.shcore.GetProcessDpiAwareness(
+                None, ctypes.byref(value)) == 0:
+            return value.value != 0
+    except Exception:
+        pass
+    try:
+        import ctypes
+        return bool(ctypes.windll.user32.IsProcessDPIAware())
+    except Exception:
+        return True
+
+
 def launch_dungeon_subprocess(host_window, app=None, dialogs=None,
                               **window_kwargs) -> SessionResult:
     """在独立子进程里跑一局副本，返回与窗口 ``run()`` 同形的结果。
@@ -110,6 +136,8 @@ def launch_dungeon_subprocess(host_window, app=None, dialogs=None,
     payload = {
         "window": serialize_launch(window_kwargs),
         "viewport": {"scale": scale, "main_cw": main_cw, "main_ch": main_ch},
+        # 子进程照抄父进程的 DPI 感知档位（见 _parent_dpi_aware 的说明）
+        "dpi_aware": _parent_dpi_aware(),
     }
 
     # 藏起主窗口（对齐旧 TkHost.hide_window 的时机：子进程显示视口之前）
