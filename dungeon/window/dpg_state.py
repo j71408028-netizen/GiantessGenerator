@@ -232,8 +232,8 @@ def mark_destroyed() -> None:
 def park_context() -> bool:
     """建一个**从不显示**的保活视口，把进程留在「Tk 根窗口健康」的状态。
 
-    调用点：副本会话收尾 ``destroy_context()`` 之后（``base._finish_session``），
-    以及热切换的兜底修复之后（``app_shell._revive_dpg_for_teardown``）。
+    调用点：副本会话收尾 ``destroy_context()`` 之后（``base._finish_session``；
+    会话现运行在独立子进程里，收尾后进程随即退出，这一步只是无害的进程内收尾）。
 
     已经有活着的上下文时直接返回 True（幂等）。返回 False 表示这次没修好——
     调用方若正要销毁/切换界面，得走自己的兜底路径。

@@ -5,7 +5,6 @@ import ui.common.dialogs
 
 import customtkinter as ctk
 
-from dungeon.window import DungeonSessionWindow
 from core.ai import resolve_ai_config
 from ui.exploration.giantess_state import GiantessStatePanel
 from ui.exploration.creation_params import CreationParamsPanel
@@ -570,24 +569,25 @@ class ExplorationPanel(ctk.CTkFrame):
         self._launch_dungeon_with_data(data)
 
     def _launch_dungeon_with_data(self, data: dict):
-        ai_config = resolve_ai_config(self.app.settings)
+        from ui.common.dungeon_spawner import launch_dungeon_subprocess
         from ui.common.fonts import dungeon_font_default
-        from ui.common.tk_host import TkHost
+
+        ai_config = resolve_ai_config(self.app.settings)
         dungeon_font = self.app.settings.get("dungeon_font", dungeon_font_default())
-        # 宿主适配器：副本窗口只通过端口取尺寸/DPI、显隐宿主、弹收尾提示
-        host = TkHost(self)
 
         dungeons = self.app._scenario_repo.list_all()
         if not dungeons:
             ui.common.dialogs.showerror("错误", "请先到“副本编辑”创建副本方案")
             return
 
-        # 探索模式：入口阶段在 DungeonSessionWindow 内部完成副本方案选择，
-        # 与正式副本会话界面共享同一个 DPG 生命周期，不再创建独立窗口。
-        # L4：run() 返回结果对象，调用方不再读窗口私有属性；入口页选「加载回放」
-        # 也在窗口内部切 is_replay 完成，无需在这里 new 第二个窗口。
-        window = DungeonSessionWindow(
-            self, name=data["name"], nick=data.get("nick", ""),
+        # 副本会话在独立子进程里跑：DPG/GLFW 独占子进程，不再与 Tk 主程序
+        # 同进程共存（不再需要保活视口 / WM_QUIT 清理那套补救机器）。
+        # 参数与 DungeonSessionWindow 构造一致；视口尺寸、收尾弹框与回放
+        # 文件框由 spawner 在父进程代劳，结果以 SessionResult 返回。
+        result = launch_dungeon_subprocess(
+            host_window=self.app.root, app=self.app,
+            dialogs=ui.common.dialogs,
+            name=data["name"], nick=data.get("nick", ""),
             height=data["height"], personality=data["personality_obj"],
             preset=data.get("preset_obj"), greed=data.get("greed", 0),
             original_height=data.get("original_height", 1.6),
@@ -595,7 +595,7 @@ class ExplorationPanel(ctk.CTkFrame):
             intro_visible=data.get("intro_visible", ""),
             tags=data.get("selected_tags", []),
             uploaded_image=data.get("uploaded_image"),
-            scenario_config=None, scenario_repo=self.app._scenario_repo,
+            scenario_config=None,
             merged_landmarks=self.context.merged_landmarks,
             merged_quips=self.context.quips,
             selected_styles=self.context.selected_styles,
@@ -606,19 +606,32 @@ class ExplorationPanel(ctk.CTkFrame):
             dungeon_font=dungeon_font,
             body_parts=data.get("body_parts", {}),
             character=self.current_state,
-            character_repo=self.app._character_repo,
-            gui=self.app,
+            settings=self.app.settings,
             scenario_ids=self.app._scenario_repo.list_all(),
-            host=host,
         )
-        result = window.run()
 
-        # 入口阶段失败（配置缺失/行动点数不足/校验错误）：窗口已关闭，在主线程提示
+        # 入口阶段失败（配置缺失/行动点数不足/校验错误）：子进程已退出，提示
         if result.failed:
             ui.common.dialogs.showerror("错误", result.launch_error)
+        # 会话可能在子进程里改动了角色（扣 AP、结局索引落盘），重载刷新
+        self._reload_character_after_dungeon()
+
+    def _reload_character_after_dungeon(self):
+        """子进程已把角色改动写盘，重载当前角色并刷新主界面状态面板。"""
+        state = self.current_state
+        if state is None or not getattr(state, "giantess_id", None):
             return
-        # 其余结果（入口返回 / 正常会话 / 回放）窗口内部已处理完，无需 UI 层介入
-        return
+        try:
+            fresh = self.app._character_repo.load(state.giantess_id)
+        except Exception:
+            fresh = None
+        if fresh is None:
+            return
+        self.current_state = fresh
+        if hasattr(self, "state_panel"):
+            self.state_panel.update_state(fresh)
+        if hasattr(self, "_update_report_cost_label"):
+            self._update_report_cost_label()
 
     # ---------- 面板辅助 ----------
     def update_theme(self, mode=None):

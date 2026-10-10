@@ -137,8 +137,9 @@ class MainWindowManager:
         """
         from services.ui_mode import MODE_MINI
 
-        # 副本视口是独立顶层窗口，切换界面会把它连同 Tk 根一起带走，
-        # 会话结果无从回收，因此进行中直接拒绝切换（先于确认框，避免白问一次）。
+        # 副本会话（独立子进程）进行中时本方法正阻塞在 spawner 的等待循环里，
+        # 切换界面要销毁 Tk 根、重建事件循环，会话无从回收，因此直接拒绝切换
+        # （先于确认框，避免白问一次）。
         if self._active_dungeon_window is not None:
             ui.common.dialogs.showwarning(
                 "提示", "副本进行中，请先结束副本再切换界面。")
@@ -161,8 +162,8 @@ class MainWindowManager:
         """
         from app.shell import switch_to
 
-        # 副本视口是独立顶层窗口，切换界面会把它连同 Tk 根一起带走，
-        # 会话结果无从回收，因此进行中直接拒绝切换。
+        # 副本会话（独立子进程）进行中时本方法正阻塞在 spawner 的等待循环里，
+        # 切换界面无从回收会话，因此进行中直接拒绝切换。
         if self._active_dungeon_window is not None:
             ui.common.dialogs.showwarning(
                 "提示", "副本进行中，请先结束副本再切换界面。")
@@ -177,11 +178,13 @@ class MainWindowManager:
 
         self._persist_settings()
 
+        # 副本会话在独立子进程里跑（见 ui.common.dungeon_spawner）：这里只需
+        # 请它收尾；父进程退出后管道断开，子进程的看护线程会立即结束。
+        # 父进程不再创建 DPG 上下文——**不要**在这里 import dearpygui：
+        # 从未建上下文就调它的函数会直接段错误（见 dungeon.window.dpg_state）。
         if self._active_dungeon_window is not None:
             try:
-                import dearpygui.dearpygui as dpg
-                if dpg.is_dearpygui_running():
-                    dpg.stop_dearpygui()
+                self._active_dungeon_window.request_close()
             except Exception:
                 pass
 

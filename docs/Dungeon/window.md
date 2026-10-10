@@ -5,10 +5,13 @@
 > 架构改造背景见 [宿主边界与可移植性](window_host.md)，自检见 [调试自动化](window_automation.md)。
 > **改动 `dungeon/` 下任何代码前请先扫 §5 约束清单。**
 
-窗口由 Tkinter 主程序宿主、在 Tk 主线程内运行的 DearPyGui（下称 DPG）会话组成。
+窗口由 Tkinter 主程序拉起的**独立子进程**承载：父进程（Tk 主程序）经
+`ui/common/dungeon_spawner.py` 序列化构造参数并 spawn 子进程，会话窗口在子进程里
+运行 DearPyGui（下称 DPG），DPG/GLFW 独占子进程（见 [宿主边界与可移植性](window_host.md) §7）。
 渲染帧由窗口自己驱动（`run()` 里的手动渲染循环），不用 `dpg.start_dearpygui()` 堵死宿主主循环。
 窗口对宿主的全部依赖收敛在宿主端口 `dungeon/window/host.py`，因此 `dungeon/window/` 里没有任何
-`tkinter` / `ui.*` import。
+`tkinter` / `ui.*` import；§5-C2/C12/C14 描述的同进程共存约束现在只约束**子进程内部**
+（父进程从不创建 DPG 上下文）。
 
 ## 目录
 
@@ -147,7 +150,7 @@ run() → SessionResult
 | 会话中点窗口 X | DPG 原生关闭 | 同样由帧循环判定（**不再依赖 exit callback**，见 §5-C6） |
 | 回放播完 | `_replay_next_step` → `_request_close()` | 同「返回」 |
 | 会话未触发结局就退出 | `_handle_exit()` → `_finalize(completed=False)` | 落盘「未完成」回放与报告；**不**写 `endings.json`、不记挑战达成 |
-| 宿主关闭整个应用 | `MainWindowManager.on_closing` → `dpg.stop_dearpygui()` → `os._exit(0)` | 帧循环先退出，`os._exit` 不再回来 |
+| 宿主关闭整个应用 | `MainWindowManager.on_closing` → 句柄 `request_close()`（协议请子进程收尾）→ `os._exit(0)`；父进程退出即管道断开，子进程的看护线程立即终结 | 父进程不再有 DPG 上下文可停；`import dearpygui` 在父进程是段错误 |
 
 三条程序化关闭路径都归到 `_request_close()`（见 §5-C1）。
 
@@ -284,11 +287,13 @@ run() → SessionResult
 
 ### 5.2 C8：宿主端口方法表
 
-`dungeon/window/host.py::HostPort`（缺省实现 = 无宿主），Tk 实现 `ui/common/tk_host.py::TkHost`。
+`dungeon/window/host.py::HostPort`（缺省实现 = 无宿主），Tk 实现 `ui/common/tk_host.py::TkHost`，
+子进程实现 `ui/common/dungeon_child_host.py::ChildHost`（弹框/文件框走协议请父进程代答，见
+[宿主边界与可移植性](window_host.md) §7）。
 
 | 端口方法 | 用途 | Tk 实现 |
 |---|---|---|
-| `viewport_metrics()` | `(视口宽, 视口高, dpi_scale, 宿主客户区宽, 高)` | `winfo_toplevel/winfo_id/winfo_fpixels` + `GetAncestor`/`GetDpiForWindow`/`GetClientRect` |
+| `viewport_metrics()` | `(视口宽, 视口高, dpi_scale, 宿主客户区宽, 高)` | `winfo_toplevel/winfo_id/winfo_fpixels` + `GetAncestor`/`GetDpiForWindow`/`GetClientRect`（子进程：父进程 spawn 前量好随载荷传入） |
 | `hide_window()` / `show_window()` | 副本视口显示时藏起宿主、关闭后恢复 | `withdraw` / `deiconify` + `lift` |
 | `pump_events()` | 帧循环里处理一次宿主事件（宿主不冻结） | `widget.update()` |
 | `discard_pending_quit()` | 丢弃视口原生关闭（X）留下的退出残留消息（见 §5-C12） | Win32 下 `PeekMessageW(..., WM_QUIT, WM_QUIT, PM_REMOVE)` |
@@ -313,6 +318,8 @@ DungeonSessionWindow(...).run()                      # 不传 = HostPort()，无
 | 改动范围 | 先跑 |
 |---|---|
 | 关闭路径、收尾、入口阶段、生命周期、帧时钟、回调线程、章节背景音乐、章节对话语音物理效果、对话语音 | `python scripts/dungeon_autopilot.py`（11 场景 100 项断言，含 `text-components` 组件冒烟）；单场景 `--scene <名字> --isolate`，连开关窗 `--scene session-close --repeat 2 --isolate` |
+| 启动载荷序列化 / 结果往返（进程隔离线格式） | `python tests/check_dungeon_launch_payload.py`（无 GUI，73 项断言） |
+| 会话子进程端到端（spawn、协议代答、登记/注销、限帧钩子） | `python tests/smoke_mini.py`（副本链路实测一节；`GIANTESS_DUNGEON_TEST_FRAMES` 限帧子进程） |
 | `_finalize` / `json_store` / `scenario_repo` | `python tests/check_dungeon_finalize.py`（无 GUI，32 项断言） |
 | 显示组件包 / 文本组件 / 组件参数 | `python tests/check_component_pack.py`（无 GUI，102 项断言：加载链、契约与服务面（替身 ctx + AST 越界扫描）、元数据与参数夹取、外部包覆盖、隐藏 DPG 上下文里的四钩子冒烟与控件无残留） |
 | 分句器 / 说话人标记 | `python tests/check_splitter.py` |

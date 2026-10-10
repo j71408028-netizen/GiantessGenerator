@@ -573,25 +573,26 @@ class ChallengeModePanel(ctk.CTkFrame):
         self.gui.selected_styles = self.gui.context.selected_styles
         self.gui.selected_quip_styles = self.gui.context.selected_quip_styles
 
-        # L4：run() 返回结果对象（挑战模式无入口阶段，暂无需要处理的分支）
-        from dungeon.window import DungeonSessionWindow
-        from ui.common.tk_host import TkHost
-        DungeonSessionWindow(
-            self.gui.root,
+        # L4：run() 返回结果对象（挑战模式无入口阶段，暂无需要处理的分支）。
+        # 会话在独立子进程里跑（DPG/GLFW 独占子进程），参数与窗口构造一致。
+        from ui.common.dungeon_spawner import launch_dungeon_subprocess
+
+        launch_dungeon_subprocess(
+            host_window=self.gui.root, app=self.gui,
+            dialogs=ui.common.dialogs,
             name=name, nick=nick,
             personality=personality, preset=preset,
             original_height=original_height, intro_hidden=intro_hidden,
             intro_visible=intro_visible, tags=tags, uploaded_image=None,
-            scenario_config=scenario_config, scenario_repo=self.gui._scenario_repo,
+            scenario_config=scenario_config,
             merged_landmarks=self.gui.context.merged_landmarks, merged_quips=self.gui.context.quips,
             selected_styles=landmark_styles, selected_quip_styles=quip_styles_data,
             detail_pools=self.gui.context.detail_pools, height=height,
             ai_config=ai_config,
             greed=greed, is_replay=False, replay_data=None,
             scenario_id=scenario_id, dungeon_font=dungeon_font, body_parts=body_parts,
-            character=None, character_repo=self.gui._character_repo, gui=self.gui,
-            mode="challenge", host=TkHost(self.gui.root)
-        ).run()
+            character=None, settings=gui_settings, mode="challenge",
+        )
 
         self.gui.context.selected_styles = saved_styles
         self.gui.context.selected_quip_styles = saved_quip

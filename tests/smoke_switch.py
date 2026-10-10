@@ -8,18 +8,16 @@
 
 五轮：
   1. 专业模式 → 切到挂件（没跑过副本的常规路径）；
-  2. 挂件模式 → **真实跑一局副本**（收尾会 ``dpg.destroy_context()``）→ 切回专业；
+  2. 挂件模式 → **真实跑一局副本**（会话在独立子进程里）→ 切回专业；
   3. 二次构建专业模式；
   4. 再切回挂件并二次构建挂件（验证 ``ui.mini.pixel`` 的跨解释器缓存已清）；
   5. 挂件模式 → **再真实跑一局副本** → 再切回专业。
 
-第 2 轮是**回归保护的要点**：``destroy_context()`` 会终止 GLFW，此后 Tk 根窗口
-失去销毁/隐藏能力，而热切换的收尾恰好是 ``root.destroy()``——没有副本侧那道
-保活视口（``dungeon.window.dpg_state.park_context``）时，这一轮的 ``mainloop``
-会以 0xC000041D 静默杀死进程。第 4 轮保护的是另一条：挂件层的字体度量缓存
-（``tkinter.font.Font``）绑在解释器上，不清理的话切回挂件时界面建不起来。
-第 5 轮保护「保活视口 → 拆保活视口（下一局开头）→ 再保活」这条往返：DPG 的
-上下文与视口都是进程单例，两局之间必须一拆一建，拆错了同样会硬崩。
+副本会话自 2026-10 起运行在独立子进程里（``ui.common.dungeon_spawner``），
+父进程不再创建 DPG 上下文——曾让热切换静默杀进程的「``destroy_context()``
+终止 GLFW 后 Tk 根失去销毁能力」随之成为历史，第 2/5 轮改为守护这条隔离面：
+父进程全程 ``dpg_state.was_created()`` 为假。第 4 轮保护的是挂件层的字体度量
+缓存（``tkinter.font.Font``）跨解释器清理——切回挂件时界面要建得起来。
 
 每轮检查：
   - 界面确实建起来了，控件可布局、可刷新；
@@ -30,7 +28,7 @@
   - 挂件建窗时本线程是 **DPI 非感知**的（``ui.mini.dpi``）：挂件那套像素尺寸
     是按 96 DPI 写死的，靠系统的位图缩放才与独立挂件版一致；一旦被 CTk 设成
     感知之后没切回来，同一个窗口就只剩一半大；
-  - 跑过副本之后保活视口确实补上了（热切换不需要走兜底修复）；
+  - 跑过副本之后父进程仍未创建 DPG 上下文；
   - 销毁后模块级全局（CTk 的 DPI 轮询表、挂件主题绑定表与字体缓存）没有残留；
   - 挂件在二次建起后仍能正常调查（功能性验证，不只是建窗）。
 
@@ -195,15 +193,14 @@ def mini_phase(boot):
 # ==================== 真实副本会话（复用挂件自检里的桩件与限帧循环） ====================
 
 def _run_real_dungeon(app, root):
-    """真实拉起一局副本：AI 指向不可达地址、帧循环限帧、弹框换成记录型。
+    """真实拉起一局副本（独立子进程）：AI 指向不可达地址、子进程限帧、弹框记录型。
 
     ``smoke_mini`` 里已有这套桩件（参数与签名一致性也由它保证），这里直接用，
     免得两处各写一份；它跑完会把新增的副本产物搬出 ``data/``。
 
-    可重复调用（第 2、5 轮各一次）：桩只要装一次，重复装会把真类也替换成桩。
+    可重复调用（第 2、5 轮各一次）：桩只要装一次，重复装会把真函数也替换成桩。
     """
     import smoke_mini as mini_smoke
-    from app.shell import _root_needs_repair
     from dungeon.window import dpg_state
 
     if not mini_smoke._REAL_WINDOW.get("cls"):
@@ -222,9 +219,10 @@ def _run_real_dungeon(app, root):
                os.path.join(data_dir(), "user", "replays"),
                os.path.join(data_dir(), "user", "reports")]
     outcome = mini_smoke._real_dungeon_run(app, root, cleanup)
-    # 收尾应已补上保活视口：这一步不成立，热切换就只剩兜底修复可走
-    outcome["park"] = dpg_state.is_alive()
-    outcome["repair_needed"] = _root_needs_repair()
+    # 进程隔离的隔离面：父进程全程不建 DPG 上下文（会话在子进程里），
+    # 热切换因此不再依赖副本侧的保活视口与兜底修复
+    outcome["park"] = not dpg_state.was_created()
+    outcome["repair_needed"] = False
     return outcome
 
 
@@ -399,8 +397,8 @@ def main():
                   str(outcome["hidden"]))
             check("副本结束后挂件恢复显示", outcome["restored"] == "normal",
                   str(outcome["restored"]))
-            check("副本收尾已补上 DPG 保活视口", bool(outcome["park"]))
-            check("切换不需要走兜底修复", not outcome["repair_needed"])
+            check("父进程全程未创建 DPG 上下文（会话在子进程）", bool(outcome["park"]))
+            check("切换不再依赖副本侧修复", not outcome["repair_needed"])
 
             print("    切换（修复逻辑失效时，这一步会静默杀死进程）")
             root.after(300, app.switch_to_professional)
@@ -462,19 +460,19 @@ def main():
             except Exception as e:
                 check("挂件二次可用", False, f"{type(e).__name__}: {e}")
 
-            # ---------- 第 5 轮：再跑一局副本（保活视口一拆一建） ----------
-            print("\n[5] 挂件模式再跑一局副本后切回专业（保活视口一拆一建）")
+            # ---------- 第 5 轮：再跑一局副本（隔离面：父进程始终不碰 DPG） ----------
+            print("\n[5] 挂件模式再跑一局副本后切回专业（进程隔离面）")
             from dungeon.window import dpg_state
-            check("上一轮留下的保活视口在场", dpg_state.is_alive(),
-                  str(dpg_state.is_alive()))
+            check("上一局之后父进程仍未建 DPG 上下文", not dpg_state.was_created(),
+                  str(dpg_state.was_created()))
 
             outcome = _run_real_dungeon(app3, root3)
             check("第二局副本真实跑通", bool(outcome["ran"]))
             check("第二局未被入口校验拦下", not outcome["failed"], outcome["error"])
             check("第二局后挂件恢复显示", outcome["restored"] == "normal",
                   str(outcome["restored"]))
-            check("第二局收尾又补上保活视口", bool(outcome["park"]))
-            check("第二局后切换不需要兜底修复", not outcome["repair_needed"])
+            check("第二局后父进程仍未创建 DPG 上下文", bool(outcome["park"]))
+            check("第二局后切换不再依赖副本侧修复", not outcome["repair_needed"])
 
             root3.after(300, app3.switch_to_professional)
             root3.deiconify()

@@ -268,7 +268,7 @@ data/
 | 构造参数必须保存到 `self` | mixin 方法可能被其他 mixin 调用，`__init__` 里的局部变量会 AttributeError | [窗口文档](window.md) §5-C3 |
 | 关闭一律走 `_request_close()` | 业务代码不直接 `dpg.stop_dearpygui()` | [窗口文档](window.md) §5-C1 |
 | 跨线程 UI 更新走 `self._frame.call()` | 帧时钟是**窗口实例成员**；计时类逻辑用 `every/after` 帧任务而不是开线程 | [窗口文档](window.md) §5-C4、`window/frame.py` |
-| GLFW 终止**之后**，当时的 Tk 根窗口不得 `destroy()` / `withdraw()`；收尾后必须补隐藏保活视口 | 终止**前** Tk 照常可用——收尾顺序刻意把 Tk 交互（恢复主窗口、弹框）放在 `destroy_context()` 之前；终止后那个根的窗口级命令会 0xC0000005 硬崩。保活视口把进程留在「Tk 根健康」状态，宿主的热切换才成立。`_finish_session()` / `_start_session()` 的顺序就是为此固定的 | [窗口文档](window.md) §5-C2 |
+| GLFW 终止**之后**，当时的 Tk 根窗口不得 `destroy()` / `withdraw()`；收尾后必须补隐藏保活视口 | 终止**前** Tk 照常可用——收尾顺序刻意把 Tk 交互（恢复主窗口、弹框）放在 `destroy_context()` 之前；终止后那个根的窗口级命令会 0xC0000005 硬崩。保活视口把进程留在「Tk 根健康」状态。`_finish_session()` / `_start_session()` 的顺序就是为此固定的。**2026-10 起会话在独立子进程里跑**（[宿主边界](window_host.md) §7）：本条只约束子进程内部；父进程不再创建 DPG 上下文，热切换与 GLFW 不再相关 | [窗口文档](window.md) §5-C2 |
 | 写盘必走原子写 | 半截文件不可恢复 | 本文 §8 |
 | 剧本 / 运营术语不混用 | `scenario_*` = 方案，`dungeon_*` = 一局 | [术语表](domain_terms.md) |
 | 组件只读窗口状态 | 组件 ctx 即窗口实例，不反向写状态；**访问只经组件服务面**（`component_viewport` / `schedule*` / `session_waiting_for_input` / `component_top_inset` 等，C13），不读窗口私有属性 | `component_registry.py::DungeonComponent` 契约文档、`components.py::ComponentHandler`、`tests/check_component_pack.py` |

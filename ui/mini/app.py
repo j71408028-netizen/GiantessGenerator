@@ -789,19 +789,15 @@ class MiniApp:
         )
 
     def _launch_dungeon(self, *, payload, config, scenario_id, character, mode):
-        from dungeon.window import DungeonSessionWindow
-        from ui.common.tk_host import TkHost
+        from ui.common.dungeon_spawner import launch_dungeon_subprocess
         from ui.mini.dialogs import MiniDialogs
         ai_config = resolve_ai_config(self.settings)
         dungeon_font = self.settings.get("dungeon_font") or "Microsoft YaHei"
-        # 宿主端口：副本窗口只经它取尺寸/DPI、显隐宿主、弹收尾提示。
-        # owner=self —— 挂件主控不是 Tk 控件，不显式指名就登记不到活动窗口，
-        # 挂件关闭时停不掉副本视口。
-        # dialogs=MiniDialogs —— 不用 CTk 那套弹窗（纯 Tk 根下会卡住）。
-        host = TkHost(self.root, owner=self, dialogs=MiniDialogs(self.root))
-        # 不传 scenario_ids —— 挂件版已由「调查」掷好方案，跳过入口选择阶段。
-        window = DungeonSessionWindow(
-            self.root,
+        # 副本会话在独立子进程里跑：DPG/GLFW 独占子进程，不再与挂件的 Tk 根
+        # 同进程共存。收尾弹框用挂件自己的原生弹框（纯 Tk 根下不能拉 CTk）。
+        result = launch_dungeon_subprocess(
+            host_window=self.root, app=self,
+            dialogs=MiniDialogs(self.root),
             name=payload["name"], nick=payload.get("nick", ""),
             height=payload["height"], personality=payload["personality_obj"],
             preset=payload.get("preset_obj"), greed=payload.get("greed", 0),
@@ -810,7 +806,7 @@ class MiniApp:
             intro_visible=payload.get("intro_visible", ""),
             tags=payload.get("selected_tags", []),
             uploaded_image=payload.get("uploaded_image"),
-            scenario_config=config, scenario_repo=self._scenario_repo,
+            scenario_config=config,
             merged_landmarks=self.context.merged_landmarks,
             merged_quips=self.context.quips,
             selected_styles=self.context.selected_styles,
@@ -819,10 +815,8 @@ class MiniApp:
             ai_config=ai_config, is_replay=False, replay_data=None,
             scenario_id=scenario_id, dungeon_font=dungeon_font,
             body_parts=payload.get("body_parts", {}),
-            character=character, character_repo=self._character_repo,
-            gui=self, mode=mode, host=host)
-        result = window.run()
-        # 入口阶段失败（配置缺失/行动点数不足/校验错误）：窗口已关闭，在主线程提示
+            character=character, settings=self.settings, mode=mode)
+        # 入口阶段失败（配置缺失/行动点数不足/校验错误）：子进程已退出，提示
         if result.failed:
             self.notify(result.launch_error, tone="danger", title="无法进入")
             return
@@ -830,6 +824,15 @@ class MiniApp:
         self.root.deiconify()
         self.root.lift()
         if self.current_state is not None:
+            # 会话可能在子进程里改动了角色（结局索引落盘），重载再刷新
+            fresh = None
+            if getattr(self.current_state, "giantess_id", None):
+                try:
+                    fresh = self._character_repo.load(self.current_state.giantess_id)
+                except Exception:
+                    fresh = None
+            if fresh is not None:
+                self.current_state = fresh
             self.state_card.update_state(self.current_state)
 
     # ==================== 设置（由设置屏调用） ====================

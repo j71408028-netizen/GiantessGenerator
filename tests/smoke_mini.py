@@ -251,7 +251,11 @@ def main():
               == {k: v for k, v in (real_config or {}).items()
                   if k != "entry_action_cost"},
               f"进入消耗 {call['scenario_config'].get('entry_action_cost')}")
-        check("携带当前角色", call.get("character") is app.current_state)
+        # 同一性改为按 id 比较：会话后挂件会从档案重载角色（子进程可能写过
+        # 结局索引），current_state 因此换成新对象
+        check("携带当前角色",
+              getattr(call.get("character"), "giantess_id", None)
+              == getattr(app.current_state, "giantess_id", None))
         check("行动点按进入消耗扣除",
               app.current_state.action_points == 93,
               f"100 - 7 = {app.current_state.action_points}")
@@ -508,14 +512,16 @@ _REAL_WINDOW = {"cls": None, "stub": None}
 
 
 def _install_dungeon_stub():
-    """把副本窗口替换为记录参数的桩，避免测试进入图形事件循环。
+    """把副本启动换成记录参数的桩，避免测试真的 spawn 子进程。
 
-    真实类存进 ``_REAL_WINDOW``：后面的「真实拉起一次」会用它临时换回，
-    验证桩覆盖不到的交接（显隐、活动窗口登记、收尾与结果对象）。
+    副本会话已在独立子进程里跑（``ui.common.dungeon_spawner``），桩因此打在
+    spawner 入口上：记录 ``_launch_dungeon`` 装配的全部构造参数（键集合与窗口
+    构造签名的一致性仍可验），并返回不会产生任何进程的空结果。
     """
     import inspect
 
     import dungeon.window as dungeon_window
+    import ui.common.dungeon_spawner as spawner
 
     real_params = set(inspect.signature(
         dungeon_window.DungeonSessionWindow.__init__).parameters) - {"self"}
@@ -523,19 +529,18 @@ def _install_dungeon_stub():
     _REAL_WINDOW["cls"] = dungeon_window.DungeonSessionWindow
 
     class _StubResult:
-        """``DungeonSessionWindow.run()`` 的返回壳：挂件侧只看 failed / launch_error。"""
+        """``launch_dungeon_subprocess`` 的返回壳：挂件侧只看 failed / launch_error。"""
         failed = False
         launch_error = ""
 
-    class _StubWindow:
-        def __init__(self, parent, **kwargs):
-            _LAST_CALL["kwargs"] = kwargs
+    def _stub_launch(host_window=None, app=None, dialogs=None, **kwargs):
+        _LAST_CALL["kwargs"] = kwargs
+        return _StubResult()
 
-        def run(self):
-            return _StubResult()
-
-    dungeon_window.DungeonSessionWindow = _StubWindow
-    _REAL_WINDOW["stub"] = _StubWindow
+    real_launch = spawner.launch_dungeon_subprocess
+    spawner.launch_dungeon_subprocess = _stub_launch
+    _REAL_WINDOW["stub"] = _stub_launch
+    _REAL_WINDOW["real_launch"] = real_launch
 
 
 def _kwargs_match_signature(kwargs) -> bool:
@@ -569,21 +574,24 @@ def _snapshot_files(root_dir):
 
 
 def _real_dungeon_run(app, root, cleanup_dirs):
-    """真实拉起一次副本窗口，验证挂件与副本窗口的交接。
+    """真实拉起一局副本（独立子进程），验证挂件与 spawner 的交接。
 
-    桩只能验参数，验不到交接。这里走完整链路：建 DPG 视口 → 藏起挂件 →
-    跑帧 → 收尾 → 恢复挂件 → 取回 ``SessionResult``。三处刻意改造：
+    旧桩思路延续，只是采样点搬到了父进程侧：
 
-    - AI 指向不可达地址：连不上立即失败，既不产生真实调用也不挂在网络等待；
-    - 帧循环跑到上限就主动收尾，等价于用户点了副本视口的关闭键；
-    - 弹框换成记录型：收尾会弹「未完成回放已保存」等提示，真弹出来要等人点，
-      自检里改成记录调用，顺便验证提示确实经宿主弹框端口发出。
+    - AI 指向不可达地址：经 ``resolve_ai_config`` 桩随载荷传给子进程，
+      连不上立即失败，既不产生真实调用也不挂在网络等待；
+    - 子进程帧循环经 ``GIANTESS_DUNGEON_TEST_FRAMES`` 环境变量限帧（窗口层
+      的自检钩子），到帧按「用户点关闭键」收尾；
+    - 收尾弹框经协议送回父进程，由记录型 ``MiniDialogs`` 代答——顺便验证
+      提示确实经协议回到界面侧发出。
+
+    可重复调用（smoke_switch 的第 2、5 轮各一次）：桩只要装一次，重复装会
+    把真函数也替换成桩。
     """
-    import dungeon.window as dungeon_window
+    import ui.common.dungeon_spawner as spawner
     import ui.mini.app as mini_app
     import ui.mini.dialogs as mini_dialogs
 
-    real_cls = _REAL_WINDOW["cls"]
     sample = {}
     before = {}
     for path in cleanup_dirs:
@@ -609,7 +617,7 @@ def _real_dungeon_run(app, root, cleanup_dirs):
             self.calls.append(("ask", title, message))
             return True
 
-    # 挂件在 _launch_dungeon 里才 import 这两个名字，替换源模块即可生效
+    # 挂件在 _launch_dungeon 里才 import 这些名字，替换源模块即可生效。
     # 给掷出的方案注入进入消耗：挂件不走入口阶段，扣点是它自己做的，
     # 默认方案消耗多为 0，不注入就验不到这条链路。
     saved_load = app._scenario_repo.load_config
@@ -621,46 +629,63 @@ def _real_dungeon_run(app, root, cleanup_dirs):
 
     saved_dialogs = mini_dialogs.MiniDialogs
     saved_resolve = mini_app.resolve_ai_config
+    saved_launch = spawner.launch_dungeon_subprocess
     mini_dialogs.MiniDialogs = MiniDialogs
     mini_app.resolve_ai_config = lambda _settings: dict(_NO_NETWORK_AI)
     app._scenario_repo.load_config = _load_with_cost
+    # 桩件装好后一直替换着 spawner 入口；真实跑这一局要换回真函数
+    spawner.launch_dungeon_subprocess = _REAL_WINDOW["real_launch"]
 
-    def _limited_frame_loop(self):
-        import dearpygui.dearpygui as dpg
-        for i in range(_TEST_FRAMES):
-            self._pump_host_events()
-            self._frame.tick()
-            if not dpg.is_dearpygui_running():
-                self._on_close()
-                return
-            dpg.render_dearpygui_frame()
-            if i == 5:
-                # 会话进行中采样：宿主应已隐藏、活动窗口应已登记到挂件上
-                sample["root_state"] = root.state()
-                sample["registered"] = app._active_dungeon_window is not None
-                sample["dialogs"] = type(
-                    getattr(getattr(self, "host", None), "dialogs", None)).__name__
-        # 帧数用尽：按用户点关闭键处理（置标记后走正常收尾）
-        self._closing = True
-        self._on_close()
+    # 交接采样：显隐、登记、代答弹框与结果回收都收在 spawner 里，逐个包一层
+    saved_hide = spawner._hide_window
+    saved_show = spawner._show_window
+    saved_register = spawner._register
+    saved_answer = spawner._answer_dialog
+    saved_result = spawner.result_from_dict
 
-    saved_loop = real_cls._run_frame_loop
-    saved_run = real_cls.run
-    real_cls._run_frame_loop = _limited_frame_loop
+    def _hide_rec(window):
+        saved_hide(window)
+        try:
+            sample["root_state"] = window.state()
+        except Exception:
+            pass
 
-    def _capture_run(self):
-        result = saved_run(self)
+    def _register_rec(owner, handle):
+        ok = saved_register(owner, handle)
+        if handle is not None:
+            sample["registered"] = ok
+        return ok
+
+    def _answer_rec(conn, lock, dlg, msg):
+        sample["dialogs_type"] = type(dlg).__name__
+        return saved_answer(conn, lock, dlg, msg)
+
+    def _result_rec(data):
+        result = saved_result(data)
         sample["result"] = result
         return result
 
-    real_cls.run = _capture_run
+    spawner._hide_window = _hide_rec
+    spawner._show_window = saved_show
+    spawner._register = _register_rec
+    spawner._answer_dialog = _answer_rec
+    spawner.result_from_dict = _result_rec
+
+    env_key = "GIANTESS_DUNGEON_TEST_FRAMES"
+    saved_env = os.environ.get(env_key)
+    os.environ[env_key] = str(_TEST_FRAMES)
     try:
-        dungeon_window.DungeonSessionWindow = real_cls
         app.enter_dungeon()
     finally:
-        dungeon_window.DungeonSessionWindow = _REAL_WINDOW["stub"]
-        real_cls._run_frame_loop = saved_loop
-        real_cls.run = saved_run
+        if saved_env is None:
+            os.environ.pop(env_key, None)
+        else:
+            os.environ[env_key] = saved_env
+        spawner._hide_window = saved_hide
+        spawner._register = saved_register
+        spawner._answer_dialog = saved_answer
+        spawner.result_from_dict = saved_result
+        spawner.launch_dungeon_subprocess = saved_launch
         mini_app.resolve_ai_config = saved_resolve
         mini_dialogs.MiniDialogs = saved_dialogs
         app._scenario_repo.load_config = saved_load
@@ -670,7 +695,7 @@ def _real_dungeon_run(app, root, cleanup_dirs):
     outcome = {
         "ran": result is not None,
         "registered": sample.get("registered"),
-        "dialogs": sample.get("dialogs"),
+        "dialogs": sample.get("dialogs_type"),
         "hidden": sample.get("root_state"),
         "restored": root.state(),
         "unregistered": app._active_dungeon_window is None,

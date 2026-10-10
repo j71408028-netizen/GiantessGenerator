@@ -15,17 +15,14 @@
 - 旧解释器排队的 ``after`` 定时器与待派发事件：Tcl 的 notifier 按线程共享，
   它们会在**新界面**的事件循环里到期/派发，而那时命令已随旧解释器删除，
   控制台里会出现 ``invalid command name``——见 :func:`_quiesce_root`；
-- ``dearpygui`` 的上下文：全局单例，两套界面共用同一个副本引擎；
 - ``ui.mini.pixel`` 的模块级缓存：主题绑定表（指着已销毁控件）与字体度量缓存
   （``tkinter.font.Font`` 绑在具体解释器上，跨根复用会报
   ``application has been destroyed``）。
 
-另有一条**只有跑过副本之后才出现**的坑：副本会话收尾会 ``dpg.destroy_context()``，
-它顺带终止 GLFW，此后 Tk 根窗口就失去销毁/隐藏能力（硬崩，不是异常），而热切换的
-收尾恰好是 ``root.destroy()``。对此的正式修法在副本侧——会话收尾会立刻补一个
-**隐藏的保活视口**（``dungeon.window.dpg_state.park_context``），进程因此一直留在
-「Tk 根窗口健康」的状态，本模块只保留一条兜底修复（见
-:func:`_revive_dpg_for_teardown`）。
+副本会话自 2026-10 起运行在**独立子进程**里（``ui.common.dungeon_spawner``），
+父进程不再创建 DPG 上下文、不再 import dearpygui——曾长在「Tk 与 DPG 同进程
+共存」上的整套补救机器（保活视口 ``park_context`` 的兜底修复、根窗口退役等）
+随会话一起搬走，本模块不再过问。
 
 用法：
 
@@ -47,9 +44,6 @@ from services.ui_mode import MODE_MINI, MODE_PRO, resolve_startup_mode, save_mod
 
 # 待处理的切换请求。两套界面都通过 switch_to() 写入，由 run_app 的循环读取。
 _PENDING = {"mode": None}
-
-#: 兜底「退役」的根窗口：不能让它们被 GC 回收（回收会去销毁那个坏窗口）
-_RETIRED_ROOTS = []
 
 #: 一次清场最多派发多少个事件（防某个 <Configure> 处理器无限自续）
 _MAX_EVENT_DRAIN = 2000
@@ -125,15 +119,11 @@ def switch_to(root, mode: str, *, save=None) -> None:
     """结束当前界面并请求切换到 ``mode``。
 
     步骤：先落盘（可选）→ 登记请求 → 摘掉关闭协议 → 摘掉 CTk 缩放登记
-    → 必要时修复根窗口 → 清掉旧解释器的残留定时器与待派发事件 → 销毁根窗口。
+    → 清掉旧解释器的残留定时器与待派发事件 → 销毁根窗口。
     销毁根窗口会让 ``mainloop()`` 返回，``run_app`` 的循环接着启动新界面。
 
     摘掉 ``WM_DELETE_WINDOW`` 是必需的：两套界面的关闭协议都以
     ``os._exit(0)`` 收尾，销毁窗口会触发它，清理代码就再也跑不到。
-
-    跑过副本的进程多一道「修复」：正常情况下副本收尾已经补好了保活视口
-    （``dungeon.window.dpg_state.park_context``），这里什么都不用做；只有那次
-    补救失败时才会走 :func:`_revive_dpg_for_teardown` 的兜底。
     """
     if save is not None:
         try:
@@ -147,13 +137,6 @@ def switch_to(root, mode: str, *, save=None) -> None:
     except Exception:
         pass
     _detach_ctk_window(root)
-
-    repair_needed = _root_needs_repair()
-    revived = _revive_dpg_for_teardown() if repair_needed else False
-    if repair_needed and not revived:
-        # 该修却没修好：这时销毁根窗口会把进程直接带走，宁可留一个退到屏幕外的空窗口
-        _retire_root(root)
-        return
     # 销毁前把旧解释器的残留清干净（见 _quiesce_root）：不清就会在**新界面**的
     # 事件循环里刷一串 invalid command name。
     _quiesce_root(root)
@@ -162,84 +145,21 @@ def switch_to(root, mode: str, *, save=None) -> None:
         root.destroy()
     except Exception:
         pass
-    # 注 1：**不要**在这里去回收 DPG 上下文。兜底修复建起的视口就是保活视口，
-    # 收回会再终止一次 GLFW，接着新建的另一套界面根窗口就起不来了（CTk 根的
-    # deiconify 硬崩，2026-09-28 实测）。它从不 show，对使用者不可见。
-    # 注 2：销毁后才「取消排队的 after」是没用的——那时命令已经删了，取消不取消
+    # 注 1：销毁后才「取消排队的 after」是没用的——那时命令已经删了，取消不取消
     # 都不会再报错；要清就得在销毁之前清，见 _quiesce_root。
+    # 注 2：**不要**在这里碰 DPG——副本会话已搬进独立子进程
+    # （ui.common.dungeon_spawner），父进程从不创建 DPG 上下文；对从未建
+    # 上下文的 dearpygui 调用函数会直接段错误，不是异常。
 
 
-# ==================== 跑过副本之后的根窗口修复（兜底） ====================
-
-def _root_needs_repair() -> bool:
-    """当前 Tk 根窗口是否需要先修复才能销毁。
-
-    正常情况下副本收尾已经补好了保活视口（``park_context``），``is_alive()`` 为真，
-    这里返回 False。返回 True 只说明那次补救没成功（例如建视口时抛了异常），
-    属于兜底路径。
-    """
-    state = sys.modules.get("dungeon.window.dpg_state")
-    if state is None:
-        return False
-    return bool(state.was_created()) and not bool(state.is_alive())
-
-
-def _revive_dpg_for_teardown() -> bool:
-    """兜底：临时重建一个隐藏的 DPG 视口，把被 ``destroy_context()`` 弄坏的 Tk 根修好。
-
-    **症状**（实测，2026-09-28，见 ``.workbuddy/memory/2026-09-28.md``）：副本会话
-    收尾会 ``dpg.destroy_context()``，它顺带终止 GLFW。此后 Tk 根窗口的销毁/隐藏
-    （``root.destroy()`` / ``root.withdraw()`` 与 Win32 ``ShowWindow``）一律硬崩
-    （0xC0000005 / 0xC000041D，没有 traceback），**之后新建的 CTk 根首次显示**
-    （``deiconify()``）同样硬崩——热切换的收尾恰好是 ``root.destroy()``，
-    于是「跑过副本 → 切换界面」＝静默杀进程。
-
-    正式修法在副本侧：会话收尾 ``destroy_context()`` 之后立刻
-    ``dungeon.window.dpg_state.park_context()`` 留一个隐藏的保活视口，进程因此一直
-    留在「Tk 根窗口健康」的状态，本函数根本不会被调用。这里是它万一失败时的兜底：
-    建上下文 + 一个**不 show 的**视口（实测只建上下文不行，必须建视口）。
-
-    返回 True 表示视口已建好。**调用方不要把它收回去**：收回会再终止一次 GLFW，
-    接着新建的另一套界面根窗口就起不来了（CTk 根的 ``deiconify`` 硬崩，实测）；
-    而这个视口从不 show，对使用者完全不可见。它此后就充当保活视口，下一局副本
-    开头会被 ``base._start_session`` 拆掉。
-    """
-    state = sys.modules.get("dungeon.window.dpg_state")
-    if state is None or not state.was_created() or state.is_alive():
-        return False
-    if not state.park_context():
-        print("[Warning] 重建 DPG 视口失败，界面切换将退化为「窗口退场」")
-        return False
-    return True
-
-
-def _retire_root(root) -> None:
-    """兜底：把**无法销毁**的根窗口「退役」——退出主循环、藏起来、移出屏幕。
-
-    只在 :func:`_revive_dpg_for_teardown` 失败时才会走到（正常都直接销毁）。
-    ``quit()`` / ``attributes('-alpha')`` / ``geometry()`` 是实测中保持可用的操作
-    （崩的只有 destroy / withdraw / ShowWindow），所以退役本身是安全的。必须留着
-    强引用：否则 GC 释放解释器时会去销毁那个窗口，照样崩。
-    """
-    for action in (root.quit,
-                   lambda: root.attributes("-alpha", 0.0),
-                   lambda: root.geometry("1x1+-32000+-32000")):
-        try:
-            action()
-        except Exception:
-            pass
-    _RETIRED_ROOTS.append(root)
-    print("[Warning] 旧界面窗口已退场（未能销毁，进程继续运行）")
+# ==================== 跑过副本之后的根窗口修复 ====================
+# （已随进程隔离删除：副本会话在独立子进程里跑（ui.common.dungeon_spawner），
+# 父进程不再创建 DPG 上下文，GLFW 的生命周期不再影响 Tk 根窗口。曾经的
+# 「保活视口 park_context + 兜底重建 + 根窗口退役」三件套见 git 历史。）
 
 
 def _release_global_state() -> None:
-    """清掉不随 Tk 解释器销毁的模块级全局状态。
-
-    只清挂件层的模块级缓存。**不动 DPG 上下文**：跑过副本之后进程里本来就该留着
-    一个保活视口（见 :func:`_revive_dpg_for_teardown`），把它拆掉正是「新建的另一套
-    界面起不来」的成因。DPG 上下文的生命周期由副本侧自己管
-    （``dungeon.window.dpg_state.park_context`` / ``unpark_context``）。
-    """
+    """清掉不随 Tk 解释器销毁的模块级全局状态（目前只有挂件层的缓存）。"""
     _flush_mini_theme_bindings()
 
 

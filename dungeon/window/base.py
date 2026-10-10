@@ -11,6 +11,7 @@ Tk 根窗口就失去了销毁/隐藏能力（热切换界面因此会静默杀�
 宿主已隐藏之后再拆掉它（``unpark_context``）——DPG 的上下文与视口都是进程单例。
 """
 
+import os
 import random
 import time
 from collections import deque
@@ -78,7 +79,7 @@ class DungeonWindowBase:
                  ai_config, greed: int,
                  is_replay=False, replay_data=None, scenario_id=None, dungeon_font=None,
                  body_parts=None, character=None, character_repo=None, gui=None,
-                 mode="explore", scenario_ids=None, host=None):
+                 mode="explore", scenario_ids=None, host=None, settings=None):
         # 宿主端口（L2）：尺寸/DPI、显隐、事件泵、弹框、活动窗口登记、字体
         # 全部经此取得。未传时用无宿主缺省实现（自检脚本、无人值守）。
         self.host = host if host is not None else HostPort()
@@ -113,9 +114,14 @@ class DungeonWindowBase:
         self.gui = gui
         # 运行模式："explore"（探索模式）或 "challenge"（挑战模式）
         self.mode = mode
-        self.settings = {}
-        if gui is not None:
+        # 设置：``settings`` 参数优先（子进程没有 gui 可问，父进程随载荷传入）；
+        # 同进程调用未传时回退 gui.settings，两者都缺省为空表（自检替身等）。
+        if settings is not None:
+            self.settings = dict(settings)
+        elif gui is not None:
             self.settings = getattr(gui, "settings", None) or {}
+        else:
+            self.settings = {}
         self.ending_effects = {}
         self.ending_text = ""
         # 当前结局触发器信息（图标路径、触发器下标、已写入的索引记录）
@@ -236,6 +242,16 @@ class DungeonWindowBase:
 
         # 帧循环统计（自检/调试用）
         self.frames_rendered = 0
+        # 自检钩子：副本会话在独立子进程里跑（ui.common.dungeon_spawner），
+        # 冒烟自检经环境变量限制帧数，到帧按「用户点关闭键」收尾，避免
+        # 无人值守的会话挂在帧循环里。正常使用不设置该变量，钩子不生效。
+        try:
+            self._test_frame_limit = int(
+                os.environ.get("GIANTESS_DUNGEON_TEST_FRAMES") or 0)
+        except (TypeError, ValueError):
+            self._test_frame_limit = 0
+        if self._test_frame_limit:
+            self._test_frame_limit = max(1, self._test_frame_limit)
 
     # ---------------- 生命周期：构造之后显式 run() ----------------
     def run(self) -> SessionResult:
@@ -354,6 +370,11 @@ class DungeonWindowBase:
                 break
             dpg.render_dearpygui_frame()
             self.frames_rendered += 1
+            if self._test_frame_limit and self.frames_rendered >= self._test_frame_limit:
+                # 自检限帧到点：等价于用户点了副本视口的关闭键（走同一条收尾链）
+                self._closing = True
+                self._on_close()
+                break
             time.sleep(self.FRAME_INTERVAL)
 
     def _pump_host_events(self):

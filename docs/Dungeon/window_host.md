@@ -8,6 +8,12 @@
 一句话：window 层不认识任何 UI 框架，宿主能力全部经端口索取；DPG 窗口是独立顶层窗口——
 **换宿主可以做，嵌入宿主布局做不到**。
 
+> **2026-10 起的进程形态**：副本会话运行在**独立子进程**里——Tk 主程序经
+> `ui/common/dungeon_spawner.py` 拉起子进程（`ui/common/dungeon_child_host.py`
+> 是子进程内的宿主端口实现），DPG/GLFW 从此独占子进程，与 Tk 不再共享线程
+> 消息队列、GLFW 单例与 X11 连接。下面 §1–§4 描述的边界与能力映射不变，
+> 只是「宿主」的两种实现分别住在两个进程里（§7）。
+
 ## 目录
 
 | 节 | 内容 |
@@ -18,6 +24,7 @@
 | §4 | 嵌入：不能 |
 | §5 | 明确不做的事 |
 | §6 | 进程退出挂死（结论） |
+| §7 | 进程隔离：会话子进程（现状） |
 
 ---
 
@@ -26,9 +33,10 @@
 | 项 | 现状 |
 |---|---|
 | 端口定义 | `dungeon/window/host.py::HostPort`（含无宿主的缺省实现） |
-| Tk 实现 | `ui/common/tk_host.py::TkHost`——window 层之外唯一的 Tk 细节所在地 |
+| Tk 实现 | `ui/common/tk_host.py::TkHost`——window 层之外唯一的 Tk 细节所在地（自检/自动驾驶用；产品路径已改走子进程宿主） |
+| 子进程实现 | `ui/common/dungeon_child_host.py::ChildHost`——子进程内的宿主端口，宿主能力走协议请父进程代劳（§7） |
 | 端口方法表 | 见 [窗口索引](window.md) §5.2（尺寸/DPI、显隐、事件泵、弹框、回放文件选择、小游戏窗口、活动窗口登记、字体） |
-| 注入方式 | `DungeonSessionWindow(..., host=TkHost(self)).run()`；不传 = `HostPort()`（无宿主，自检走这条路径） |
+| 注入方式 | 父进程：`launch_dungeon_subprocess(...)`（`ui/common/dungeon_spawner.py`）；子进程内构造等价于 `DungeonSessionWindow(host=ChildHost(...), **deserialize_launch(payload))`；不传 host = `HostPort()`（无宿主，自检走这条路径） |
 | 守卫 | `tests/check_dungeon_layering.py`：`dungeon/window/*.py` 里出现 `tkinter` / `customtkinter` / `ui` 即失败 |
 
 换宿主要做的事只剩一件：**写一个新适配器**（尺寸/DPI、显隐、事件泵、弹框、活动窗口登记、字体、回放文件选择）。
@@ -93,13 +101,13 @@ DPG 2.3.1 的视口是**独立的 GLFW 顶层窗口**，公开 API 里没有任�
 |---|---|
 | 同一进程里同时持有两个 DPG context 或并发两个副本窗口 | DPG 的上下文与视口都是全局单例语义；`DungeonWindowBase._session_running` 是守门人 |
 | 在帧循环里 `join` 线程 | 会卡帧 |
-| 把「GLFW 终止**后**才崩的 Tk 交互」排到 `destroy_context()` **之后** | GLFW 终止前 Tk 照常可用（收尾顺序「恢复主窗口 → 弹框 → `destroy_context()`」正是刻意把 Tk 交互都放在销毁之前）；终止后那个 Tk 根窗口的 `destroy()` / `withdraw()` 硬崩（0xC0000005）。可用/崩溃操作矩阵见 [窗口索引](window.md) §5-C2 与 `dungeon/window/dpg_state.py` |
-| 让会话收尾之后进程里**没有**活的 DPG 上下文/视口 | `destroy_context()` 终止 GLFW，那个 Tk 根窗口随即不能 `destroy()`/`withdraw()`，之后新建的 `CTk` 根也起不来（首次 `deiconify` 硬崩）——宿主的热切换就完了。收尾必须补一个隐藏保活视口（`dpg_state.park_context()`），下一局开头（宿主隐藏之后）再 `unpark_context()` 拆掉 |
+| 把「GLFW 终止**后**才崩的 Tk 交互」排到 `destroy_context()` **之后** | GLFW 终止前 Tk 照常可用（收尾顺序「恢复主窗口 → 弹框 → `destroy_context()`」正是刻意把 Tk 交互都放在销毁之前）；终止后那个 Tk 根窗口的 `destroy()` / `withdraw()` 硬崩（0xC0000005）。可用/崩溃操作矩阵见 [窗口索引](window.md) §5-C2 与 `dungeon/window/dpg_state.py`。**2026-10 起这条只约束子进程内部**——父进程不再跑 DPG，不再有共存问题；子进程收尾的保活视口（`park_context`）在进程随即退出时只是无害的收尾动作 |
+| 让会话收尾之后进程里**没有**活的 DPG 上下文/视口 | `destroy_context()` 终止 GLFW，那个 Tk 根窗口随即不能 `destroy()`/`withdraw()`，之后新建的 `CTk` 根也起不来（首次 `deiconify` 硬崩）——宿主的热切换就完了。收尾必须补一个隐藏保活视口（`dpg_state.park_context()`），下一局开头（宿主隐藏之后）再 `unpark_context()` 拆掉。**同上：现在只约束子进程内部**；子进程跑完一局即退出，父进程的 Tk 从此与 GLFW 无关 |
 | 在业务代码里直接 `dpg.stop_dearpygui()` | 一律走 `_request_close()` |
 | 为「修挂死」堆看门狗 | Python 层定时器在 DPG 渲染期间拿不到 GIL，超时兜底只能放父进程；真正卡住时 `os._exit` 与 `Stop-Process -Force` 都无效 |
 | 指望把 DPG 窗口嵌入宿主布局 | 只能是独立顶层窗口（§4） |
 | 动 `dungeon/` 领域层 | 分层守卫守着；本层只在 `dungeon/window/` 与调用方之间动刀 |
-| 做「进程隔离」（DPG 渲染放子进程） | 它唯一能治愈的症状（退出挂死）经复测**并不存在**（§6），而代价（跨进程命令/事件协议、资源与组件包搬到子进程、背景纹理共享内存）真实存在 |
+| 在父进程（Tk 主程序）里 import `dearpygui` | 父进程从不创建 DPG 上下文，对从未建上下文的 DPG 调用函数会直接段错误（`try/except` 挡不住，见 `dungeon/window/dpg_state.py` 模块说明）。父进程侧一切副本交互都经 `ui/common/dungeon_spawner.py` |
 
 ## 6. 进程退出挂死（结论）
 
@@ -111,6 +119,40 @@ DPG 2.3.1 的视口是**独立的 GLFW 顶层窗口**，公开 API 里没有任�
 它把「未自行干净退出」也判为失败）。父进程的等待是**硬超时**（读输出在独立线程里做，主线程按
 deadline 轮询），子进程的结论行打印后立即 flush——「已通过但退出挂死」与「超时未出结论」因此可以
 分开汇报。完整复现矩阵与修正过程见 [退出挂死调查](history/exit_hang_investigation.md)。
+
+---
+
+## 7. 进程隔离：会话子进程（现状）
+
+副本会话（`DungeonSessionWindow.run()` 的整个生命周期）运行在**独立子进程**里。
+这是 2026-10 对 [宿主改造档案](history/host_refactor.md) L5「进程隔离」决策的**反转**：
+当年否决它的依据是「它唯一能治愈的症状（退出挂死）不存在」，但此后 09-28（C2）与
+10-07（C12/C14）发现的同进程共存问题让它的收益面被大幅低估——保活视口、`WM_QUIT`
+残留清理、视口僵尸窗口销毁、热切换兜底修复这一整套机器，全部只在描述「Tk 与 DPG
+同进程」。拆进程后这些机制要么随子进程消失，要么退化为子进程内部的无害收尾。
+
+| 件 | 位置 | 职责 |
+|---|---|---|
+| 父进程侧 | `ui/common/dungeon_spawner.py` | 序列化构造参数（`dungeon/window/launch_payload.py`）→ `multiprocessing.Process` 拉起子进程 → 泵循环（`host_window.update()`）→ 代答协议请求 → 还原 `SessionResult`；会话期把句柄登记到 `app._active_dungeon_window`（老代码的「副本进行中」守卫与 `request_close()` 因此零改动） |
+| 子进程侧 | `ui/common/dungeon_child_host.py` | `ChildHost(HostPort)`：尺寸/弹框/回放文件框走协议请父进程代劳，小游戏孙进程照旧；管道断开（父进程死亡）即 `os._exit`，孤儿副本不会继续写 `data/` |
+| 线格式 | `dungeon/window/launch_payload.py` | 构造参数 dict ↔ 纯数据 dict 的往返（dataclass 落 `asdict`、宿主侧参数剔除）；`SessionResult` 的往返同文件。守卫：`tests/check_dungeon_launch_payload.py` |
+
+协议（`multiprocessing.Pipe` 双向，JSON 安全 dict）：子 → 父发
+`show_window` / `dialog` / `open_replay_file`（带请求 id）/ 最终 `result`；
+父 → 子发 `{"reply": id, "answer": ...}` 与 `{"req": "close"}`（父进程整体退出前请
+子进程走帧边界收尾）。子进程的弹框请求在父进程泵循环里用调用方自己的弹框实现
+代答（专业版 `ui.common.dialogs`、挂件版 `MiniDialogs`）——子进程内因此没有任何
+Tk 代码，`tests/check_mini_layering.py` 白名单放行 `dungeon_spawner` 的依据正是它
+模块级零 CTk 依赖。
+
+父进程侧随之删除/简化的死机器：`app/shell.py` 的根窗口修复三件套
+（`_root_needs_repair` / `_revive_dpg_for_teardown` / `_retire_root`）、
+`MainWindowManager.on_closing` 里的 `dpg.stop_dearpygui()` 分支（父进程不再有
+DPG 上下文，**import dearpygui 本身都会段错误**）。
+
+代价（真实存在，已接受）：构造参数必须跨进程序列化（见线格式）；角色在子进程里
+的改动（扣 AP、结局索引）由子进程直接写盘、父进程在会话结束后重载；每次开局有
+一次子进程解释器/导入的启动延迟。挂死的 §6 结论不变：环境现象，与进程形态无关。
 
 ---
 

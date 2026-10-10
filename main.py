@@ -451,6 +451,9 @@ def main():
     """入口：跟随「启动界面模式」设置启动
     （见 ``services.ui_mode.resolve_startup_mode``）。
     """
+    # 打包模式的 multiprocessing 子进程（副本会话子进程、启动屏）在这里拦截并
+    # 接管；正常启动是无操作。必须先于任何其它逻辑：子进程不该跑主程序流程。
+    multiprocessing.freeze_support()
     if "--mini-game-host" in sys.argv:
         # 打包模式：内置小游戏子进程经应用可执行文件路由到这里
         # （源码运行直接跑 ui/common/mini_game_host.py，不走本分支）

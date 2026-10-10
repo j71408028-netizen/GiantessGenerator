@@ -15,9 +15,11 @@
   专业界面的弹窗，挂件一律用整窗换屏代替弹窗。
 
 允许：``ui.mini.*`` 自身、``ui.common.tk_host``（副本窗口的宿主端口适配，是挂件与
-dungeon 层之间的桥）、``ui.common.x11``（纯 stdlib ctypes 的 Linux/X11 原生支持，
-零 GUI 框架依赖）。外观模式住在 ``core.appearance``（零依赖，2026-10-06 从
-``ui/common/`` 下移），不属于 ``ui.*``，因此不受本白名单约束。
+dungeon 层之间的桥）、``ui.common.dungeon_spawner``（副本会话子进程的父进程侧，
+模块级零 CTk 依赖——副本会话已搬进独立子进程，挂件经它拉起并代答收尾弹框）、
+``ui.common.x11``（纯 stdlib ctypes 的 Linux/X11 原生支持，零 GUI 框架依赖）。
+外观模式住在 ``core.appearance``（零依赖，2026-10-06 从 ``ui/common/`` 下移），
+不属于 ``ui.*``，因此不受本白名单约束。
 
 退出码：0 = 通过；1 = 存在越界依赖。
 """
@@ -40,6 +42,9 @@ FORBIDDEN_ROOTS = {
 ALLOWED_UI = {
     "ui.mini",
     "ui.common.tk_host",
+    # 副本会话子进程的父进程侧（模块级零 CTk 依赖；TkHost 只在函数内惰性
+    # import，仅用于 spawn 前量视口尺寸）
+    "ui.common.dungeon_spawner",
     # 纯 stdlib ctypes 的 Linux/X11 原生支持（XInitThreads / EWMH 置顶），零 GUI
     # 框架依赖：挂件要写 _NET_WM_STATE_ABOVE 就靠它（见 ui/mini/topmost.py）。
     "ui.common.x11",
