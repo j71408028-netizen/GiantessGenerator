@@ -77,13 +77,6 @@ class TriggerEditDialog(BaseDialog):
             "注意：位于「结束章节」内的小游戏触发器会被跳过；结果会写入回放记录，\n"
             "回放时不再进入游戏，直接按记录复现返回值。"
         ),
-        "ending": (
-            "（已迁移）本动作已改由「结束章节」承担：在章节编辑里勾选“结束章节”，"
-            "进入后所有段落类型固定为结局、步进为 0，段落数耗尽即终止副本。\n"
-            "此处仅用于兼容旧配置；旧配置中的结局触发器仍可触发并结算。\n"
-            "结局结算增量：结束时统一结算一次，可修改介入度、破坏性、伤亡步进、自定义属性和行动点数返还。\n"
-            "结局图标：选择 png 图标后视为重要结局，并在首次达成时记入档案；不配置图标则为普通结局。"
-        ),
         "none": (
             "条件满足时不执行实际动作，只记录该触发器已经成立，其他触发器可以在前置条件中引用它。\n"
             "适用场景：作为多个触发器共用的中间条件节点。"
@@ -871,6 +864,7 @@ class TriggerEditDialog(BaseDialog):
             "game": MINI_GAME_DEFAULT_ID, "target_level": 3,
         })
 
+    def _insert_template(self):
         self._set_action_template("insert", "新插入",
                                   {"text": "", "text_type": "background",
                                    "highlight": False, "delayed": False})
