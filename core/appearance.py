@@ -49,7 +49,7 @@ def subscribe(callback):
 def resolve(color_value):
     """把 ``(亮色, 暗色)`` 二元组按当前模式取成单色；单色值原样返回。
 
-    ``ui.common.theme`` 里的色表都是二元组，纯 tkinter 控件只接受具体颜色，
+    ``ui.ctk.theme`` 里的色表都是二元组，纯 tkinter 控件只接受具体颜色，
     取值时统一经由此函数。
     """
     if isinstance(color_value, (tuple, list)) and len(color_value) == 2:

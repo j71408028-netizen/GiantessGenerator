@@ -10,9 +10,9 @@ import re
 import shutil
 from tkinter import filedialog
 
-import ui.common.dialogs
+import ui.ctk.dialogs
 from dungeon.audio.chapters import BGM_SUPPORTED_EXTS
-from ui.common.dialogs import ImageCropDialog
+from ui.ctk.dialogs import ImageCropDialog
 
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp")
 
@@ -53,7 +53,7 @@ def import_background_image(parent, scenario_repo, scenario_id) -> str:
     try:
         crop_dlg = ImageCropDialog(parent, file_path, mode=ImageCropDialog.MODE_BACKGROUND)
     except Exception as e:
-        ui.common.dialogs.showerror("错误", f"图片加载失败: {e}")
+        ui.ctk.dialogs.showerror("错误", f"图片加载失败: {e}")
         return ""
     cropped_path = crop_dlg.get_cropped_path()
     if not cropped_path:
@@ -64,7 +64,7 @@ def import_background_image(parent, scenario_repo, scenario_id) -> str:
 
     dungeon_dir = os.path.join(scenario_repo.root, scenario_id)
     if not os.path.exists(dungeon_dir):
-        ui.common.dialogs.showerror("错误", f"副本目录不存在: {dungeon_dir}")
+        ui.ctk.dialogs.showerror("错误", f"副本目录不存在: {dungeon_dir}")
         return ""
 
     images_dir = os.path.join(dungeon_dir, "images")
@@ -75,12 +75,12 @@ def import_background_image(parent, scenario_repo, scenario_id) -> str:
         basename += ".png"
     dest_path = os.path.join(images_dir, basename)
     if os.path.exists(dest_path):
-        if not ui.common.dialogs.askyesno("文件已存在", f"图片 {basename} 已存在，是否覆盖？"):
+        if not ui.ctk.dialogs.askyesno("文件已存在", f"图片 {basename} 已存在，是否覆盖？"):
             return ""
     try:
         save_cropped_image(cropped_path, dest_path)
     except Exception as e:
-        ui.common.dialogs.showerror("错误", f"保存裁剪图片失败: {e}")
+        ui.ctk.dialogs.showerror("错误", f"保存裁剪图片失败: {e}")
         return ""
     return os.path.relpath(dest_path, dungeon_dir)
 
@@ -99,17 +99,17 @@ def import_bgm_audio(parent, scenario_repo, scenario_id) -> str:
         return ""
     ext = os.path.splitext(file_path)[1].lower()
     if ext not in BGM_SUPPORTED_EXTS:
-        ui.common.dialogs.showerror(
+        ui.ctk.dialogs.showerror(
             "错误", f"不支持的音频格式：{ext or '（无后缀）'}\n"
                     f"请用：{patterns}")
         return ""
     if not (scenario_id and scenario_repo):
-        ui.common.dialogs.showerror("错误", "无法解析副本目录，无法保存音频文件")
+        ui.ctk.dialogs.showerror("错误", "无法解析副本目录，无法保存音频文件")
         return ""
 
     dungeon_dir = os.path.join(scenario_repo.root, scenario_id)
     if not os.path.exists(dungeon_dir):
-        ui.common.dialogs.showerror("错误", f"副本目录不存在: {dungeon_dir}")
+        ui.ctk.dialogs.showerror("错误", f"副本目录不存在: {dungeon_dir}")
         return ""
 
     audio_dir = os.path.join(dungeon_dir, "audio")
@@ -117,12 +117,12 @@ def import_bgm_audio(parent, scenario_repo, scenario_id) -> str:
     basename = os.path.basename(file_path)
     dest_path = os.path.join(audio_dir, basename)
     if os.path.exists(dest_path):
-        if not ui.common.dialogs.askyesno("文件已存在", f"音频 {basename} 已存在，是否覆盖？"):
+        if not ui.ctk.dialogs.askyesno("文件已存在", f"音频 {basename} 已存在，是否覆盖？"):
             return ""
     try:
         shutil.copy2(file_path, dest_path)
     except Exception as e:
-        ui.common.dialogs.showerror("错误", f"保存音频文件失败: {e}")
+        ui.ctk.dialogs.showerror("错误", f"保存音频文件失败: {e}")
         return ""
     return os.path.relpath(dest_path, dungeon_dir).replace("\\", "/")
 
@@ -139,10 +139,10 @@ def import_ending_icon(parent, scenario_repo, scenario_id) -> str:
         with PILImage.open(file_path) as img:
             img.load()
     except Exception as e:
-        ui.common.dialogs.showerror("错误", f"图片加载失败: {e}")
+        ui.ctk.dialogs.showerror("错误", f"图片加载失败: {e}")
         return ""
     if not (scenario_id and scenario_repo):
-        ui.common.dialogs.showerror("错误", "无法解析副本目录，无法保存结局图标")
+        ui.ctk.dialogs.showerror("错误", "无法解析副本目录，无法保存结局图标")
         return ""
 
     dungeon_dir = os.path.join(scenario_repo.root, scenario_id)
@@ -159,6 +159,6 @@ def import_ending_icon(parent, scenario_repo, scenario_id) -> str:
             else:
                 img.convert("RGB").save(dest_path, "PNG")
     except Exception as e:
-        ui.common.dialogs.showerror("错误", f"保存结局图标失败: {e}")
+        ui.ctk.dialogs.showerror("错误", f"保存结局图标失败: {e}")
         return ""
     return os.path.relpath(dest_path, dungeon_dir).replace("\\", "/")

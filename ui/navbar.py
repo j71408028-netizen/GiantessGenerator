@@ -1,13 +1,13 @@
 import customtkinter as ctk
 
 from paths import APP_VERSION
-from ui.common.theme import (
+from ui.ctk.theme import (
     NAV_BG, NAV_HOVER, NAV_TEXT, NAV_TITLE,
     NAV_SELECTED_BG, NAV_SELECTED_TEXT, NAV_WORLD_BG, NAV_WORLD_GREEN,
     NAV_WORLD_HOVER, NAV_WORLD_SELECTED_BG, NAV_WORLD_SELECTED_TEXT, NAV_WORLD_TEXT,
     NAV_WORLD_TITLE,
 )
-from ui.common import fonts as ui_fonts
+from ui.ctk import fonts as ui_fonts
 
 
 class NavigationBar(ctk.CTkFrame):

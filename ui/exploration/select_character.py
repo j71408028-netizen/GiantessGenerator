@@ -5,16 +5,16 @@ import os
 import customtkinter as ctk
 from PIL import Image
 
-from ui.common.widgets import ClickableCard
+from ui.ctk.widgets import ClickableCard
 from persistence.character_repo import CharacterRepo
 from core import imaging
 from core.logic import format_size
-from ui.common.theme import (
+from ui.ctk.theme import (
     SELECT_PANEL_BG, SELECT_BORDER, SELECT_BORDER_STRONG, SELECT_HOVER,
     SELECT_TEXT, SELECT_TEXT_SOFT, SELECT_TEXT_MUTED, SELECT_TITLE,
     SELECT_PLACEHOLDER,
 )
-from ui.common import fonts as ui_fonts
+from ui.ctk import fonts as ui_fonts
 
 _MAX_SEARCH_LEN = 20
 _IMG_HEIGHT = 120

@@ -1,7 +1,7 @@
 import random
 from tkinter import filedialog
 
-import ui.common.dialogs
+import ui.ctk.dialogs
 
 import customtkinter as ctk
 
@@ -10,13 +10,13 @@ from core.models import CharacterSnapshot
 from persistence.character_repo import CharacterRepo
 from core.logic import format_size
 from core.address_model import format_addr_verbose
-from ui.common.theme import (
+from ui.ctk.theme import (
     STATE_BG, STATE_BORDER, STATE_BORDER_STRONG, STATE_HOVER,
     STATE_MENU_HOVER, STATE_TEXT, STATE_TEXT_SOFT, STATE_TEXT_MUTED,
     STATE_TEXT_DISABLED, STATE_LABEL, STATE_PLACEHOLDER, STATE_ERR,
     STATE_ERR_HOVER, STATE_METRIC_BAR, STATE_METRIC_TEXT, STATE_METRIC_BAR_LOW,
 )
-from ui.common import fonts as ui_fonts
+from ui.ctk import fonts as ui_fonts
 
 
 class GiantessStatePanel(ctk.CTkFrame):
@@ -375,18 +375,18 @@ class GiantessStatePanel(ctk.CTkFrame):
 
     def _back_to_params(self):
         if self.gui_ref and hasattr(self.gui_ref, 'generator_panel'):
-            if not ui.common.dialogs.askyesno("确认卸载", "确定要卸载当前角色吗？\n未保存的修改将丢失。"):
+            if not ui.ctk.dialogs.askyesno("确认卸载", "确定要卸载当前角色吗？\n未保存的修改将丢失。"):
                 return
             self.stop_auto_recovery()
             self.gui_ref.generator_panel.switch_to_params_panel()
 
     def _export_chara(self):
         if not self.gui_ref:
-            ui.common.dialogs.showerror("错误", "未绑定主界面实例")
+            ui.ctk.dialogs.showerror("错误", "未绑定主界面实例")
             return
         state = self.gui_ref.generator_panel.current_state
         if state is None:
-            ui.common.dialogs.showerror("错误", "未绑定角色数据")
+            ui.ctk.dialogs.showerror("错误", "未绑定角色数据")
             return
         file_path = filedialog.asksaveasfilename(
             title="导出角色卡或档案",
@@ -410,9 +410,9 @@ class GiantessStatePanel(ctk.CTkFrame):
                 export_character_mhtml(state, file_path,
                                        show_casualties=self._show_casualties())
             except Exception as e:
-                ui.common.dialogs.showerror("错误", f"导出角色档案失败：{e}")
+                ui.ctk.dialogs.showerror("错误", f"导出角色档案失败：{e}")
                 return
-            ui.common.dialogs.showinfo("成功", f"角色档案已导出到：{file_path}")
+            ui.ctk.dialogs.showinfo("成功", f"角色档案已导出到：{file_path}")
             return
         if lower.endswith(".chara.json"):
             card_path = file_path
@@ -424,17 +424,17 @@ class GiantessStatePanel(ctk.CTkFrame):
 
     def _delete_character(self):
         if not self.gui_ref or not self.gui_ref.generator_panel.current_state:
-            ui.common.dialogs.showerror("错误", "未绑定角色数据")
+            ui.ctk.dialogs.showerror("错误", "未绑定角色数据")
             return
         state = self.gui_ref.generator_panel.current_state
         name = state.name
-        if not ui.common.dialogs.askyesno("确认删除", f"确定要永久删除角色「{name}」吗？\n此操作不可恢复。"):
+        if not ui.ctk.dialogs.askyesno("确认删除", f"确定要永久删除角色「{name}」吗？\n此操作不可恢复。"):
             return
         self.character_repo.delete(state.giantess_id)
         self.stop_auto_recovery()
         self.gui_ref.generator_panel.current_state = None
         self.gui_ref.generator_panel.switch_to_params_panel()
-        ui.common.dialogs.showinfo("已删除", f"角色「{name}」已永久删除。")
+        ui.ctk.dialogs.showinfo("已删除", f"角色「{name}」已永久删除。")
 
     def start_auto_recovery(self):
         if self._running:

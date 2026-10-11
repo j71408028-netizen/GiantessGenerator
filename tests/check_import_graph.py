@@ -134,7 +134,7 @@ UI_FRAMEWORK_SUBMODULES = {
 #
 # **当前为空**（阶段 3.2.3）：11 条例外已全部消除——core 侧由 3.2.1（下移/内联）与
 # 3.2.2（回调注入 / 共享词表下移）清零，最后 5 条依附于 ``services/image_service``
-# 的例外随图像层拆分（纯图像下移 ``core.imaging``、CTk 包装上移 ``ui/common/ctk_image``）
+# 的例外随图像层拆分（纯图像下移 ``core.imaging``、CTk 包装上移 ``ui/common/ctk_image``（当时叫 ui/common，2026-10-11 更名 ui/ctk））
 # 一并消除。保留这张表供将来按同一格式登记新例外。
 KNOWN_EXCEPTIONS = []
 

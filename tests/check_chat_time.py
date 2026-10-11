@@ -1,7 +1,7 @@
 """聊天时间标记守卫：间隔长短 → 补不补、补到什么精度。
 
 背景：专业模式的角色聊天面板会按相邻消息的间隔自动补时间标记
-（``ui/common/chat_time.py``）。这套"分级"是最容易被顺手改坏的地方——
+（``ui/ctk/chat_time.py``）。这套"分级"是最容易被顺手改坏的地方——
 把跨天的日期去掉、把 5 分钟门槛调没、或者误用实际投递时间（应用重启后
 离线到期的回复会被结算成启动时刻，几天的间隔会被压成一瞬），界面都不会
 报错，只会显示成一段没有时间概念的历史。
@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from core.models import ChatMessage  # noqa: E402
-from ui.common.chat_time import (  # noqa: E402
+from ui.ctk.chat_time import (  # noqa: E402
     TIME_MARKER_GAP, format_time_marker, message_moment, time_marker_text,
 )
 

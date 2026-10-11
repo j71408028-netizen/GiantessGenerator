@@ -14,11 +14,11 @@ import tkinter as tk
 import customtkinter as ctk
 
 import services.worlds.address_registry as address_registry
-import ui.common.dialogs
-from ui.common.dialogs import BaseDialog
-from ui.common import fonts as ui_fonts
-from ui.common.widgets import CTkScrollableDropdownFrame
-from ui.common.theme import (
+import ui.ctk.dialogs
+from ui.ctk.dialogs import BaseDialog
+from ui.ctk import fonts as ui_fonts
+from ui.ctk.widgets import CTkScrollableDropdownFrame
+from ui.ctk.theme import (
     ADDR_PANEL_BG, ADDR_BORDER_STRONG, ADDR_HOVER, ADDR_CLEAR_HOVER,
     ADDR_CLEAR_BORDER, ADDR_TEXT, ADDR_TEXT_SOFT, ADDR_TEXT_MUTED,
     ADDR_OK, ADDR_OK_HOVER, ADDR_ERR,
@@ -451,7 +451,7 @@ class AddressTextDialog(BaseDialog):
         try:
             data, updated = address_registry.download_registry()
         except address_registry.RegistryOfflineError as exc:
-            ui.common.dialogs.showerror(
+            ui.ctk.dialogs.showerror(
                 "离线，无法注册",
                 f"{exc}\n\n注册地址必须联网完成（需先下载最新地址注册表），"
                 "不允许离线注册。")
@@ -459,7 +459,7 @@ class AddressTextDialog(BaseDialog):
         address_registry.save_cache(data, updated)
         entries = address_registry.parse_entries(data)
         if address_registry.find_entry(text, entries) is None:
-            ui.common.dialogs.showerror(
+            ui.ctk.dialogs.showerror(
                 "地址未申领",
                 f"地址\n{text}\n未在最新地址注册表中申领，不允许注册。\n"
                 "请从上方级联或列表中选择已申领的地址；如需新增地址请先在仓库中申领。")
@@ -469,12 +469,12 @@ class AddressTextDialog(BaseDialog):
     def _on_ok(self):
         text = self._composed_address()
         if not text and not self.allow_empty:
-            ui.common.dialogs.showwarning("警告", "请选择注册地址")
+            ui.ctk.dialogs.showwarning("警告", "请选择注册地址")
             return
         if text:
             err = validate_address_text(text)
             if err:
-                ui.common.dialogs.showwarning("警告", f"地址格式错误：{err}")
+                ui.ctk.dialogs.showwarning("警告", f"地址格式错误：{err}")
                 return
             if not self._check_registry_claim(text):
                 return

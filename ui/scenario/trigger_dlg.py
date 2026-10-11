@@ -4,7 +4,7 @@ import tkinter as tk
 
 import customtkinter as ctk
 
-import ui.common
+import ui.ctk
 from dungeon.actions import (
     MINI_GAME_DEFAULT_ID, NEW_ACTIONS, VISUAL_FILTERS, VISUAL_FILTER_KEYS,
     action_label, normalize_action_type,
@@ -15,8 +15,8 @@ from dungeon.audio.chapters import (
 )
 # 旧版动作清单归校验器所有：这里只借来识别旧配置
 from dungeon.validate import LEGACY_ACTIONS
-from ui.common.dialogs import BaseDialog
-from ui.common.theme import (
+from ui.ctk.dialogs import BaseDialog
+from ui.ctk.theme import (
     TRIGGER_TEXT, TRIGGER_HINT,
 )
 from ui.scenario.asset_import import import_ending_icon
@@ -924,7 +924,7 @@ class TriggerEditDialog(BaseDialog):
     def _ending_template(self):
         # 结局动作已迁移为「结束章节」（chapter_dlg 中勾选“结束章节”），
         # 不再提供新建入口；保留本方法仅为旧配置的查看兼容
-        ui.common.dialogs.showinfo(
+        ui.ctk.dialogs.showinfo(
             "已迁移",
             "「结局」动作已改由「结束章节」承担：\n"
             "在章节编辑对话框勾选“结束章节”，即可配置结局结算与图标；\n"
@@ -984,14 +984,14 @@ class TriggerEditDialog(BaseDialog):
     def _ok(self):
         name = self.name_var.get().strip()
         if not name:
-            ui.common.dialogs.showerror("错误", "名称不能为空")
+            ui.ctk.dialogs.showerror("错误", "名称不能为空")
             return
 
         # 校验名称唯一性（排除自身）
         original_name = self.trigger.get("name", "")
         for t in self.all_triggers:
             if t.get("name") == name and t.get("name") != original_name:
-                ui.common.dialogs.showerror("错误", f"名称 '{name}' 已被其他触发器使用")
+                ui.ctk.dialogs.showerror("错误", f"名称 '{name}' 已被其他触发器使用")
                 return
 
         # 解析前置条件名称
@@ -1006,10 +1006,10 @@ class TriggerEditDialog(BaseDialog):
         existing_names = {t["name"] for t in self.all_triggers if t.get("name") != name}
         for pn in pre_names:
             if pn not in existing_names and pn != name:  # 自身不能作为前置条件
-                ui.common.dialogs.showerror("错误", f"前置条件名称 '{pn}' 不存在")
+                ui.ctk.dialogs.showerror("错误", f"前置条件名称 '{pn}' 不存在")
                 return
             if pn == name:
-                ui.common.dialogs.showerror("错误", "触发器不能将自身作为前置条件")
+                ui.ctk.dialogs.showerror("错误", "触发器不能将自身作为前置条件")
                 return
         # 简单循环依赖检测（A->B, B->A）
         # 构建依赖图，从当前名称开始，检查是否形成环（包括间接）
@@ -1020,14 +1020,14 @@ class TriggerEditDialog(BaseDialog):
             action_type = self.current_action_type
             action_data = self._collect_action_data()
         except ValueError as exc:
-            ui.common.dialogs.showerror("输入有误", str(exc))
+            ui.ctk.dialogs.showerror("输入有误", str(exc))
             return
 
         # 所在章节：空值=任意章节，CHAPTER_NONE=仅无章节，否则必须是已有章节
         chapter_scope = self._chapter_label_to_scope(self.chapter_var.get())
         if chapter_scope not in (CHAPTER_ANY, CHAPTER_NONE) \
                 and chapter_scope not in self.chapter_names:
-            ui.common.dialogs.showerror("错误", f"所在章节 '{chapter_scope}' 不存在")
+            ui.ctk.dialogs.showerror("错误", f"所在章节 '{chapter_scope}' 不存在")
             return
 
         # 短暂视效表单字段（仅视效动作生效）
@@ -1035,10 +1035,10 @@ class TriggerEditDialog(BaseDialog):
             try:
                 duration = int(float(self.effect_duration_var.get()))
             except ValueError:
-                ui.common.dialogs.showerror("错误", "视效的持续步数必须是数字")
+                ui.ctk.dialogs.showerror("错误", "视效的持续步数必须是数字")
                 return
             if duration < 1:
-                ui.common.dialogs.showerror("错误", "视效的持续步数至少为 1")
+                ui.ctk.dialogs.showerror("错误", "视效的持续步数至少为 1")
                 return
             action_data["filter"] = self._effect_label_to_key(self.effect_var.get())
             action_data["duration"] = duration
@@ -1047,11 +1047,11 @@ class TriggerEditDialog(BaseDialog):
         if action_type == "goto":
             target = self._goto_label_to_scope(self.goto_var.get())
             if target and target not in self.chapter_names:
-                ui.common.dialogs.showerror(
+                ui.ctk.dialogs.showerror(
                     "错误", f"目标章节 '{target}' 不存在，请先在「章节」页签添加")
                 return
             if target and target == chapter_scope:
-                ui.common.dialogs.showerror(
+                ui.ctk.dialogs.showerror(
                     "错误", "目标章节与所在章节相同，触发器触发后会立即被跳过")
                 return
             action_data["chapter"] = target
@@ -1079,27 +1079,27 @@ class TriggerEditDialog(BaseDialog):
                 try:
                     float(var.get())
                 except ValueError:
-                    ui.common.dialogs.showerror("错误", f"结局的{field}必须是数字")
+                    ui.ctk.dialogs.showerror("错误", f"结局的{field}必须是数字")
                     return
             for name, var in self.ending_custom_delta_vars.items():
                 try:
                     float(var.get())
                 except ValueError:
-                    ui.common.dialogs.showerror("错误", f"自定义属性 {name} 的增量必须是数字")
+                    ui.ctk.dialogs.showerror("错误", f"自定义属性 {name} 的增量必须是数字")
                     return
             try:
                 int(float(self.ending_refund_var.get()))
             except ValueError:
-                ui.common.dialogs.showerror("错误", "结局的行动点数返还必须是数字")
+                ui.ctk.dialogs.showerror("错误", "结局的行动点数返还必须是数字")
                 return
 
         # 验证 condition 结构
         if not isinstance(condition, dict):
-            ui.common.dialogs.showerror("错误", "condition 必须是字典")
+            ui.ctk.dialogs.showerror("错误", "condition 必须是字典")
             return
         rules = condition.get("rules", [])
         if not isinstance(rules, list):
-            ui.common.dialogs.showerror("错误", "condition.rules 必须是列表")
+            ui.ctk.dialogs.showerror("错误", "condition.rules 必须是列表")
             return
         allowed_keys = set(self.evolution_names) | {"介入度", "破坏性", "总伤亡", "总计数",
                                                    "间隔计数", "节内计数", "伤亡数组"}
@@ -1111,14 +1111,14 @@ class TriggerEditDialog(BaseDialog):
         allowed_comparators = {">=", "<=", ">", "<", "==", "!="}
         for rule in rules:
             if not isinstance(rule, dict):
-                ui.common.dialogs.showerror("错误", "规则项必须是字典")
+                ui.ctk.dialogs.showerror("错误", "规则项必须是字典")
                 return
             key = rule.get("key")
             if not key or key not in allowed_keys:
-                ui.common.dialogs.showerror("错误", f"规则中的 key '{key}' 不在允许列表中")
+                ui.ctk.dialogs.showerror("错误", f"规则中的 key '{key}' 不在允许列表中")
                 return
             if rule.get("comparator", ">=") not in allowed_comparators:
-                ui.common.dialogs.showerror("错误", "规则中的 comparator 不受支持")
+                ui.ctk.dialogs.showerror("错误", "规则中的 comparator 不受支持")
                 return
             metric = rule.get("metric", "count")
             if key.startswith("选择:"):
@@ -1126,7 +1126,7 @@ class TriggerEditDialog(BaseDialog):
             else:
                 allowed_metrics = {"count", "avg", "trend", "last"}
             if metric not in allowed_metrics:
-                ui.common.dialogs.showerror("错误", f"规则中的 metric '{metric}' 不受支持")
+                ui.ctk.dialogs.showerror("错误", f"规则中的 metric '{metric}' 不受支持")
                 return
             if key.startswith("选择:") and metric in ("ratio", "trend", "last"):
                 try:
@@ -1134,7 +1134,7 @@ class TriggerEditDialog(BaseDialog):
                     if target is None or int(target) < 0:
                         raise ValueError
                 except (TypeError, ValueError):
-                    ui.common.dialogs.showerror("错误", f"规则 {key} 的 metric='{metric}' 需要非负整数 target（目标选项编号）")
+                    ui.ctk.dialogs.showerror("错误", f"规则 {key} 的 metric='{metric}' 需要非负整数 target（目标选项编号）")
                     return
                 if metric == "ratio":
                     try:
@@ -1142,46 +1142,46 @@ class TriggerEditDialog(BaseDialog):
                     except (TypeError, ValueError):
                         ratio_value = -1.0
                     if not 0.0 <= ratio_value <= 1.0:
-                        ui.common.dialogs.showerror("错误", f"规则 {key} 的 ratio 指标 value 必须在 0~1 之间")
+                        ui.ctk.dialogs.showerror("错误", f"规则 {key} 的 ratio 指标 value 必须在 0~1 之间")
                         return
             if metric == "trend" and rule.get("window") is not None:
                 try:
                     if int(rule["window"]) < 2:
                         raise ValueError
                 except (TypeError, ValueError):
-                    ui.common.dialogs.showerror("错误", f"规则 {key} 的 trend 指标 window 必须是 >=2 的整数")
+                    ui.ctk.dialogs.showerror("错误", f"规则 {key} 的 trend 指标 window 必须是 >=2 的整数")
                     return
 
         # 验证 action_data
         if not isinstance(action_data, dict):
-            ui.common.dialogs.showerror("错误", "action_data 必须是字典")
+            ui.ctk.dialogs.showerror("错误", "action_data 必须是字典")
             return
         evo_dir = action_data.get("evolution_directions")
         if evo_dir is not None:
             if not isinstance(evo_dir, dict):
-                ui.common.dialogs.showerror("错误", "evolution_directions 必须是字典")
+                ui.ctk.dialogs.showerror("错误", "evolution_directions 必须是字典")
                 return
             for evo_name, delta in evo_dir.items():
                 if evo_name not in self.evolution_names:
-                    ui.common.dialogs.showerror("错误", f"演化量 '{evo_name}' 不存在")
+                    ui.ctk.dialogs.showerror("错误", f"演化量 '{evo_name}' 不存在")
                     return
                 if not isinstance(delta, (int, float)):
-                    ui.common.dialogs.showerror("错误", f"演化量 '{evo_name}' 的变化值必须是数字")
+                    ui.ctk.dialogs.showerror("错误", f"演化量 '{evo_name}' 的变化值必须是数字")
                     return
 
         # 特定类型验证
         if action_type == "insert" and not action_data.get("text"):
-            ui.common.dialogs.showerror("错误", "插入动作必须填写插入段落文本")
+            ui.ctk.dialogs.showerror("错误", "插入动作必须填写插入段落文本")
             return
         if action_type == "option" and (not action_data.get("options")
                                         or len(action_data["options"]) < 2):
-            ui.common.dialogs.showerror("错误", "选项动作至少需要 2 个选项")
+            ui.ctk.dialogs.showerror("错误", "选项动作至少需要 2 个选项")
             return
         if action_type == "ending" and not action_data.get("name"):
-            ui.common.dialogs.showerror("错误", "结局动作必须填写结局名称")
+            ui.ctk.dialogs.showerror("错误", "结局动作必须填写结局名称")
             return
         if action_type == "option" and ("options" not in action_data or not isinstance(action_data["options"], list)):
-            ui.common.dialogs.showerror("错误", "选项类型必须包含 options 列表")
+            ui.ctk.dialogs.showerror("错误", "选项类型必须包含 options 列表")
             return
 
         self.result = {

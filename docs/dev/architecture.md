@@ -42,7 +42,7 @@
 |---|---|
 | `tests/check_import_graph.py` | **全局层间方向** + 下层禁 UI 框架（本仓最核心的一道） |
 | `tests/check_dungeon_layering.py` | dungeon 内部：领域层 / 窗口层 |
-| `tests/check_mini_layering.py` | 挂件层禁 CTk、禁 `ui.common.{theme,fonts,widgets,dialogs}` |
+| `tests/check_mini_layering.py` | 挂件层禁 CTk、禁 `ui.ctk.{theme,fonts,widgets,dialogs}` |
 | `tests/check_entrypoints.py` | 构建脚本的入口 / 图标 / `--add-data` 源路径存在性 + 全仓悬空 import |
 
 另有 `check_scenario_schema.py` 守住副本方案字段的**端到端接线**（`schema` 声明 →
@@ -110,9 +110,11 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 - `ui/common` 起初只放专业模式窗口组件，后来混进了与控件无关的进程/宿主机制。2026-10-11
   按依赖拆出 `ui/hosting/`（`x11` `x11_boot` `tk_host` `dungeon_spawner`
   `dungeon_child_host` `mini_game_host`——全部零顶层 CTk 依赖，被两种模式与 main 共用；
-  `splash` 因本身是 CTk 窗口留在原处），并把 `dungeon_spawner` / `tk_host` 的弹框实现改成
+  `splash` 因本身是 CTk 窗口留在 CTk 组件侧），并把 `dungeon_spawner` / `tk_host` 的弹框实现改成
   调用方注入（缺省 CTk 版延迟到首次使用才 import）。挂件白名单由此从「点名豁免三个
   例外模块」收敛为整包放行 `ui.hosting`（`tests/check_mini_layering.py`）。
+  同日 `ui/common` 其余部分（全部依赖 CTk 的专业组件）整体更名 `ui/ctk`，
+  `ui/common` 名号退役——此后「专业组件住 `ui/ctk`，进程宿主住 `ui/hosting`」。
 
 新增越界**不许直接塞进 `KNOWN_EXCEPTIONS` 就走**——先想清楚能不能靠"按依赖定层"解决。
 

@@ -1,19 +1,19 @@
 from tkinter import ttk
 
-import ui.common.dialogs
+import ui.ctk.dialogs
 from typing import List, Any, Optional
 
 import customtkinter as ctk
 
-from ui.common.dialogs import InputDialog
-from ui.common.widgets import ClickableCard, CTkSegmentedControl
-from ui.common.theme import (
+from ui.ctk.dialogs import InputDialog
+from ui.ctk.widgets import ClickableCard, CTkSegmentedControl
+from ui.ctk.theme import (
     MGR_BG, MGR_HEADER_BG, MGR_BORDER, MGR_BORDER_STRONG,
     MGR_HOVER, MGR_TEXT, MGR_TEXT_SOFT, MGR_OK,
     MGR_OK_HOVER, MGR_ERR, MGR_ERR_HOVER, MGR_ROW_STRIPE,
     MGR_ROW_SELECTED_BG, MGR_ROW_SELECTED_TEXT, MGR_ROW_DISABLED_TEXT, MGR_HEADER_TEXT,
 )
-from ui.common import fonts as ui_fonts
+from ui.ctk import fonts as ui_fonts
 
 
 class TreeviewManager(ctk.CTkFrame):
@@ -247,7 +247,7 @@ class TreeviewManager(ctk.CTkFrame):
         """编辑选中项"""
         item = self.get_selected_item()
         if item is None:
-            ui.common.dialogs.showwarning("警告", "请先选择一个项目")
+            ui.ctk.dialogs.showwarning("警告", "请先选择一个项目")
             return
         idx = self.get_selected_index()
         result = self.create_item_dialog(item)
@@ -269,7 +269,7 @@ class TreeviewManager(ctk.CTkFrame):
         if item is None:
             return
         idx = self.get_selected_index()
-        if ui.common.dialogs.askyesno("确认", f"确定要删除 '{self.display_name(item)}' 吗？"):
+        if ui.ctk.dialogs.askyesno("确认", f"确定要删除 '{self.display_name(item)}' 吗？"):
             items = self.get_items()
             del items[idx]
             self.save_items(items)
@@ -279,7 +279,7 @@ class TreeviewManager(ctk.CTkFrame):
         """将选中项上移一位"""
         idx = self.get_selected_index()
         if idx == -1:
-            ui.common.dialogs.showwarning("警告", "请先选择一个项目")
+            ui.ctk.dialogs.showwarning("警告", "请先选择一个项目")
             return
         if idx == 0:
             return
@@ -296,7 +296,7 @@ class TreeviewManager(ctk.CTkFrame):
         """将选中项下移一位"""
         idx = self.get_selected_index()
         if idx == -1:
-            ui.common.dialogs.showwarning("警告", "请先选择一个项目")
+            ui.ctk.dialogs.showwarning("警告", "请先选择一个项目")
             return
         items = self.get_items()
         if idx == len(items) - 1:
@@ -418,13 +418,13 @@ class CardManager(ctk.CTkFrame):
             self.load_items()
             self.show_first_view()
         except ValueError as e:
-            ui.common.dialogs.showerror("错误", str(e))
+            ui.ctk.dialogs.showerror("错误", str(e))
         self._notify_style_list_changed()
 
     def rename_style(self):
         old = self._get_current_style()
         if old == self._get_default_style():
-            ui.common.dialogs.showwarning("警告", f"不能重命名默认风格")
+            ui.ctk.dialogs.showwarning("警告", f"不能重命名默认风格")
             return
         dlg = InputDialog(self, title="重命名风格", prompt=f"将 '{old}' 重命名为:")
         new = dlg.get_input()
@@ -437,15 +437,15 @@ class CardManager(ctk.CTkFrame):
             self.load_items()
             self.show_first_view()
         except ValueError as e:
-            ui.common.dialogs.showerror("错误", str(e))
+            ui.ctk.dialogs.showerror("错误", str(e))
         self._notify_style_list_changed()
 
     def delete_style(self):
         name = self._get_current_style()
         if name == self._get_default_style():
-            ui.common.dialogs.showwarning("警告", "不能删除默认风格")
+            ui.ctk.dialogs.showwarning("警告", "不能删除默认风格")
             return
-        if not ui.common.dialogs.askyesno("确认", f"确定删除风格 '{name}' 吗？"):
+        if not ui.ctk.dialogs.askyesno("确认", f"确定删除风格 '{name}' 吗？"):
             return
         try:
             self._delete_style_impl(name)
@@ -453,7 +453,7 @@ class CardManager(ctk.CTkFrame):
             self.load_items()
             self.show_first_view()
         except ValueError as e:
-            ui.common.dialogs.showerror("错误", str(e))
+            ui.ctk.dialogs.showerror("错误", str(e))
         self._notify_style_list_changed()
 
     # ---------- 添加按钮行为修改 ----------

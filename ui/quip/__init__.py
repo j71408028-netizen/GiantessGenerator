@@ -1,7 +1,7 @@
 import os
 import tkinter as tk
 
-import ui.common.dialogs
+import ui.ctk.dialogs
 
 import customtkinter as ctk
 import re
@@ -10,20 +10,20 @@ from core.logic import SIZE_CATEGORIES, SIZE_DISPLAY
 from persistence import QuipRepo
 from persistence.quip_repo import DEFAULT_QUIP_STYLE
 from services.challenges import get_challenge_packs, import_quip_challenge_pack
-from ui.common.managers import TreeviewManager, CardManager
-from ui.common.widgets import ClickableCard, CTkScrollableDropdownFrame
-from ui.common.dialogs import BaseDialog
-from ui.common.address_dlg import AddressTextDialog
+from ui.ctk.managers import TreeviewManager, CardManager
+from ui.ctk.widgets import ClickableCard, CTkScrollableDropdownFrame
+from ui.ctk.dialogs import BaseDialog
+from ui.ctk.address_dlg import AddressTextDialog
 from ui.quip.dialogs import QuipDialog, _TargetSelectDialog
 from core.address_model import format_addr_verbose
-from ui.common.theme import (
+from ui.ctk.theme import (
     QUIP_BG, QUIP_PANEL_BG, QUIP_BORDER_STRONG, QUIP_HOVER,
     QUIP_MENU_HOVER, QUIP_CARD_HOVER, QUIP_TEXT, QUIP_TEXT_SOFT,
     QUIP_PLACEHOLDER, QUIP_LINK, QUIP_OK, QUIP_OK_HOVER,
     QUIP_ERR, QUIP_ERR_HOVER, QUIP_TYPEVIEW, QUIP_TYPEVIEW_HOVER,
     QUIP_TYPE_COLORS,
 )
-from ui.common import fonts as ui_fonts
+from ui.ctk import fonts as ui_fonts
 
 
 class QuipCardManager(CardManager):
@@ -124,11 +124,11 @@ class QuipCardManager(CardManager):
         if dlg.result is not None:
             self.quip_repo.save_style_address(style, dlg.result)
             if dlg.result:
-                ui.common.dialogs.showinfo(
+                ui.ctk.dialogs.showinfo(
                     "已保存",
                     f"已保存风格注册地址：{format_addr_verbose(dlg.result)}。")
             else:
-                ui.common.dialogs.showinfo(
+                ui.ctk.dialogs.showinfo(
                     "已保存", "已清除风格注册地址（该风格可接任意地标后的描述）。")
 
     def _get_challenge_packs_with_keys(self):
@@ -177,14 +177,14 @@ class QuipCardManager(CardManager):
             try:
                 imported = import_quip_challenge_pack(self._settings_repo, pack_name, self.quip_repo)
             except ValueError as e:
-                ui.common.dialogs.showerror("错误", str(e))
+                ui.ctk.dialogs.showerror("错误", str(e))
                 self._set_combo_to_current_style()
                 return
             self.refresh_styles()
             self.load_items()
             self._refresh_active_view()
             self.gui.load_combined_quips()
-            ui.common.dialogs.showinfo("成功", f"已从挑战包导入 {imported} 条描述数据")
+            ui.ctk.dialogs.showinfo("成功", f"已从挑战包导入 {imported} 条描述数据")
         else:
             if choice != self._get_current_style():
                 self._set_current_style(choice)
@@ -609,7 +609,7 @@ class QuipCardManager(CardManager):
         target_size, target_intr, target_dest = result
 
         if not copy and target_size == src_size and target_intr == src_intr and target_dest == src_dest:
-            ui.common.dialogs.showwarning("警告", "不能移动到相同位置")
+            ui.ctk.dialogs.showwarning("警告", "不能移动到相同位置")
             return
 
         style = self.style_var.get()
@@ -653,7 +653,7 @@ class QuipCardManager(CardManager):
             self.show_first_view()
 
         action = "复制" if copy else "移动"
-        ui.common.dialogs.showinfo("成功", f"已{action}描述至 {target_size} {target_intr}/{target_dest}")
+        ui.ctk.dialogs.showinfo("成功", f"已{action}描述至 {target_size} {target_intr}/{target_dest}")
 
     # ---------- 增删改 ----------
     def add_item_in_category(self):
@@ -721,7 +721,7 @@ class QuipCardManager(CardManager):
             self.save_items(self.all_items)
 
     def delete_item(self, item):
-        if ui.common.dialogs.askyesno("确认", "确定要删除这条描述吗？"):
+        if ui.ctk.dialogs.askyesno("确认", "确定要删除这条描述吗？"):
             self.all_items.remove(item)
             self.save_items(self.all_items)
             if self.current_view == "second":
@@ -872,12 +872,12 @@ text_color=QUIP_ERR,
     def edit_item(self):
         match = self.get_selected_item()
         if match is None:
-            ui.common.dialogs.showwarning("警告", "请先选择一个类型标记")
+            ui.ctk.dialogs.showwarning("警告", "请先选择一个类型标记")
             return
         item_idx = match[6]
         items = self.quip_mgr.all_items
         if not (0 <= item_idx < len(items)):
-            ui.common.dialogs.showwarning("警告", "源描述已失效，请刷新")
+            ui.ctk.dialogs.showwarning("警告", "源描述已失效，请刷新")
             return
         self.quip_mgr.edit_item(items[item_idx])
         self.refresh_matches()
@@ -885,18 +885,18 @@ text_color=QUIP_ERR,
     def delete_item(self):
         match = self.get_selected_item()
         if match is None:
-            ui.common.dialogs.showwarning("警告", "请先选择一个类型标记")
+            ui.ctk.dialogs.showwarning("警告", "请先选择一个类型标记")
             return
         letter, idx, tname, sname, cont, snippet, item_idx, start = match
         items = self.quip_mgr.all_items
         if not (0 <= item_idx < len(items)):
-            ui.common.dialogs.showwarning("警告", "源描述已失效，请刷新")
+            ui.ctk.dialogs.showwarning("警告", "源描述已失效，请刷新")
             return
         target_item = items[item_idx]
         text = target_item['text']
         m = re.match(rf'\[{letter}:{idx}:([^\]]*)\]', text[start:])
         if not m:
-            ui.common.dialogs.showwarning("警告", "未找到对应类型标记，可能已被修改")
+            ui.ctk.dialogs.showwarning("警告", "未找到对应类型标记，可能已被修改")
             return
         inner = m.group(1)
         target_item['text'] = text[:start] + inner + text[start + len(m.group(0)):]

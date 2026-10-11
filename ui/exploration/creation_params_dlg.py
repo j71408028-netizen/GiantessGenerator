@@ -8,10 +8,10 @@ from PIL import Image, ImageDraw
 
 from core.logic import ALL_PART_NAMES
 from core.models import Personality, BodyPreset
-from ui.common.dialogs import BaseDialog
-from ui.common import fonts as ui_fonts
-from ui.common.widgets import CTkScrollableDropdownFrame, CTkSegmentedControl
-from ui.common.theme import (
+from ui.ctk.dialogs import BaseDialog
+from ui.ctk import fonts as ui_fonts
+from ui.ctk.widgets import CTkScrollableDropdownFrame, CTkSegmentedControl
+from ui.ctk.theme import (
     PARAMS_DLG_PANEL_BG, PARAMS_DLG_BORDER_STRONG, PARAMS_DLG_HOVER, PARAMS_DLG_MENU_HOVER,
     PARAMS_DLG_SLIDER_BTN, PARAMS_DLG_SLIDER_BTN_HOVER, PARAMS_DLG_SLIDER_TRACK, PARAMS_DLG_GOLDEN_SLIDER_BTN,
     PARAMS_DLG_GOLDEN_SLIDER_BTN_HOVER, PARAMS_DLG_CLEAR_HOVER, PARAMS_DLG_CLEAR_BORDER, PARAMS_DLG_TEXT,

@@ -21,7 +21,7 @@ from PIL import Image, ImageDraw
 from core import appearance
 
 # 立绘配色：与主题调色板（assets/theme/*.json 的 vars 段）逐值一致，这里写成
-# 字面量是为了让服务层不必反向依赖 UI 层——``ui.common.theme`` 会连带导入
+# 字面量是为了让服务层不必反向依赖 UI 层——``ui.ctk.theme`` 会连带导入
 # customtkinter，而挂件界面是纯 tkinter，不该被它拖进来。改动一侧请同步另一侧。
 VIEW_OUTLINE = "#2A2033"
 VIEW_OUTLINE_DARK = "#332F2E"

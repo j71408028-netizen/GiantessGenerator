@@ -15,7 +15,7 @@
 一个面板或区域**，需要给某个区域单独调色时改它自己的常量即可，不会波及其它
 界面；跨界面共用的语义色请改 ``roles`` 里的角色。用法：
 
-``from ui.common.theme import CHALLENGE_PANEL_BG, CHALLENGE_TEXT``
+``from ui.ctk.theme import CHALLENGE_PANEL_BG, CHALLENGE_TEXT``
 
 本模块加载后把每个角色解析为 ``[light, dark]`` 列表、色阶引用解析为
 hex 字符串，并按常量名暴露给各 UI 页面。改配色请编辑 JSON。
@@ -38,7 +38,7 @@ import sys
 
 # 运行时补丁：模式切换时同步刷新 CTk 控件的 Frame 底色，
 # 避免主题切换后几何重排露出的缝隙闪现旧模式颜色（所有 UI 入口通用）。
-import ui.common.ctk_patch  # noqa: E402,F401
+import ui.ctk.ctk_patch  # noqa: E402,F401
 from paths import assets_dir
 
 #: 没有持久化配色记录时使用的默认配色。
@@ -151,7 +151,7 @@ def _merge(target, source):
 
 
 def _rebind_imports(name, old, new):
-    """把 ``from ui.common.theme import name`` 得到的旧值换成新值。
+    """把 ``from ui.ctk.theme import name`` 得到的旧值换成新值。
 
     只替换「当前值就是旧对象」的模块（``is`` 判定），避免误伤其它模块里
     同名的无关全局量。

@@ -20,7 +20,7 @@ EXCLUDED_PARTS = {"__pycache__", ".idea", "build", "dist"}
 #: .venv-buildlinux…），枚举必然漏。
 VIRTUALENV_PREFIXES = (".venv", "venv")
 VIRTUALENV_NAMES = {"env", "ENV"}
-SAFE_PLATFORM_CONFIG_FILES = {Path("ui/common/fonts.py")}
+SAFE_PLATFORM_CONFIG_FILES = {Path("ui/ctk/fonts.py")}
 PATTERN = re.compile(
     r"ctypes\.windll|ctypes\.WinDLL|os\.startfile|"
     r"(?:[A-Za-z]:[\\/].*?\.exe)|%LOCALAPPDATA%|"
@@ -36,7 +36,7 @@ GUARD_PATTERN = re.compile(
 #: 允许直接 ``grab_set()`` 的文件：都在 ``BaseDialog`` 的延迟抓取实现里
 #: （``_grab_deferred`` / ``_try_pending_grab``）。其余界面代码一律走
 #: ``BaseDialog._grab_deferred()``。
-MODAL_GRAB_ALLOWED = {Path("ui/common/dialogs.py")}
+MODAL_GRAB_ALLOWED = {Path("ui/ctk/dialogs.py")}
 GRAB_SET_PATTERN = re.compile(r"\.grab_set\s*\(")
 
 
@@ -108,7 +108,7 @@ def main() -> int:
         print("\n模态抓取违规（构造期直接 grab_set 会在 X11 上抛 window not viewable）：")
         for item in violations:
             print("  " + item)
-        print("  正确写法：BaseDialog._grab_deferred()（见 ui/common/dialogs.py）")
+        print("  正确写法：BaseDialog._grab_deferred()（见 ui/ctk/dialogs.py）")
         return 1
     print("模态抓取检查通过：界面代码一律走 BaseDialog._grab_deferred()。")
     return 0

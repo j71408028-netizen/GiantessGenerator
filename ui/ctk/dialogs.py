@@ -9,8 +9,8 @@ from PIL import Image, ImageTk
 
 from core import imaging
 from paths import icon_dir
-from ui.common import fonts as ui_fonts
-from ui.common.theme import (
+from ui.ctk import fonts as ui_fonts
+from ui.ctk.theme import (
     DLG_BG, DLG_PANEL_BG, DLG_BORDER, DLG_BORDER_STRONG,
     DLG_HOVER, DLG_SLIDER_BTN, DLG_SLIDER_BTN_HOVER, DLG_BTN_PRIMARY,
     DLG_BTN_PRIMARY_HOVER, DLG_TEXT, DLG_TEXT_SOFT, DLG_TITLE,

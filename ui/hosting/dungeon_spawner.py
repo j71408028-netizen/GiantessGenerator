@@ -4,11 +4,11 @@
 调用方拿到与 ``DungeonSessionWindow(...).run()`` 完全同形的返回值::
 
     result = launch_dungeon_subprocess(
-        host_window=self.app.root, app=self.app, dialogs=ui.common.dialogs,
+        host_window=self.app.root, app=self.app, dialogs=ui.ctk.dialogs,
         name=...,              # ……与窗口构造相同的其余参数
         settings=self.app.settings)
     if result.failed:
-        ui.common.dialogs.showerror("错误", result.launch_error)
+        ui.ctk.dialogs.showerror("错误", result.launch_error)
 
 为什么搬进程：副本的 DPG/GLFW 与 Tk 同进程共存时共享线程消息队列、GLFW
 单例与 X11 连接，由此长出一整套同进程补救机器（保活视口 ``park_context``、
@@ -117,7 +117,7 @@ def launch_dungeon_subprocess(host_window, *, dialogs, app=None,
     ``host_window``：主窗口（Tk/CTk 根）——spawn 前量视口尺寸并藏起、等待期
     泵事件、收尾时恢复。``dialogs``：收尾弹框实现（需
     ``showinfo/showwarning/showerror/askyesno``），**必填注入**——专业模式传
-    ``ui.common.dialogs``，挂件传 ``ui.mini.dialogs.MiniDialogs``；本模块因此
+    ``ui.ctk.dialogs``，挂件传 ``ui.mini.dialogs.MiniDialogs``；本模块因此
     不 import 任何 CTk 组件。``app``：持有 ``_active_dungeon_window`` 的主控
     对象（``MainWindowManager`` / ``MiniApp``），仅用于会话期登记，可省略。
     其余关键字参数与 ``DungeonSessionWindow`` 构造参数一致（``parent`` /

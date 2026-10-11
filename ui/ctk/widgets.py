@@ -4,8 +4,8 @@ import customtkinter as ctk
 import sys
 import difflib
 
-from ui.common import fonts as ui_fonts
-from ui.common.theme import (
+from ui.ctk import fonts as ui_fonts
+from ui.ctk.theme import (
     WIDGET_BG, WIDGET_PANEL_BG, WIDGET_BORDER, WIDGET_BORDER_STRONG,
     SEG_HOVER, WIDGET_HOVER, WIDGET_MENU_HOVER, WIDGET_TEXT,
     WIDGET_TEXT_SOFT, WIDGET_TEXT_MUTED, WIDGET_TITLE, WIDGET_CARD_HOVER_BORDER,

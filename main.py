@@ -13,16 +13,16 @@ import tkinter as tk
 import customtkinter as ctk
 
 from paths import ensure_cwd
-import ui.common.ctk_patch  # noqa: F401  模式切换时同步刷新 CTk 控件 Frame 底色，避免几何重排露旧色
-from ui.common import fonts as ui_fonts
+import ui.ctk.ctk_patch  # noqa: F401  模式切换时同步刷新 CTk 控件 Frame 底色，避免几何重排露旧色
+from ui.ctk import fonts as ui_fonts
 from services.exploration.context import ExplorationContext
 from app.window_manager import MainWindowManager
 from persistence import SettingsRepo, LandmarkRepo, PresetRepo, PersonalityRepo
 from persistence import QuipRepo, ScenarioRepo, CharacterRepo
 from services.worlds import WorldManager
-from ui.common.loading import LoadingWindow
-from ui.common.splash import splash_process
-from ui.common.theme import DEFAULT_PALETTE, apply_palette
+from ui.ctk.loading import LoadingWindow
+from ui.ctk.splash import splash_process
+from ui.ctk.theme import DEFAULT_PALETTE, apply_palette
 
 
 def _load_repos(state):

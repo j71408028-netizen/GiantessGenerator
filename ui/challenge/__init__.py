@@ -2,7 +2,7 @@
 import os
 import json
 
-import ui.common.dialogs
+import ui.ctk.dialogs
 import customtkinter as ctk
 
 from core.ai import resolve_ai_config
@@ -10,14 +10,14 @@ from dungeon.terms import scenario_config_of, scenario_id_of
 from services.challenges import ChallengeService
 from core.models import Personality, BodyPreset
 from core.address_model import world_of
-from ui.common.widgets import ClickableCard, CollapsibleBlock, StyleListBox, CTkScrollableDropdownFrame
-from ui.common.theme import (
+from ui.ctk.widgets import ClickableCard, CollapsibleBlock, StyleListBox, CTkScrollableDropdownFrame
+from ui.ctk.theme import (
     CHAL_PANEL_BG, CHAL_BORDER_STRONG, CHAL_HOVER, CHAL_CARD_HOVER,
     CHAL_TEXT, CHAL_TEXT_SOFT, CHAL_TEXT_MUTED, CHAL_TITLE,
     CHAL_PLACEHOLDER, CHAL_OK, CHAL_OK_HOVER, CHAL_ERR,
     CHAL_ERR_HOVER, CHAL_INTRO_CYAN, CHAL_INTRO_ORANGE,
 )
-from ui.common import fonts as ui_fonts
+from ui.ctk import fonts as ui_fonts
 
 
 class ChallengeModePanel(ctk.CTkFrame):
@@ -431,17 +431,17 @@ class ChallengeModePanel(ctk.CTkFrame):
             self._pack_cards[file_path] = card
 
     def _on_create_ok(self, key):
-        ui.common.dialogs.showinfo("成功", f"挑战包已创建\n自动生成秘钥:\n{key}\n\n秘钥已写入环境变量")
+        ui.ctk.dialogs.showinfo("成功", f"挑战包已创建\n自动生成秘钥:\n{key}\n\n秘钥已写入环境变量")
         self._refresh_packs()
         if hasattr(self.gui, 'refresh_challenge_pack_dropdowns'):
             self.gui.refresh_challenge_pack_dropdowns()
 
     def _delete_pack(self, file_path):
         if self.challenge_mgr._is_bundled_path(file_path):
-            ui.common.dialogs.showwarning("提示", "世界包附带的挑战包不可删除")
+            ui.ctk.dialogs.showwarning("提示", "世界包附带的挑战包不可删除")
             return
         filename = os.path.basename(file_path)
-        if not ui.common.dialogs.askyesno("确认", f"确定删除挑战包 '{filename}' 吗？"):
+        if not ui.ctk.dialogs.askyesno("确认", f"确定删除挑战包 '{filename}' 吗？"):
             return
         card = self._pack_cards.pop(file_path, None)
         if card:
@@ -472,30 +472,30 @@ class ChallengeModePanel(ctk.CTkFrame):
     def _do_create(self):
         if (getattr(self.gui, "world_state", None) is not None
                 and self.gui.world_state.active):
-            ui.common.dialogs.showwarning("提示", "世界包加载期间不可创建挑战包")
+            ui.ctk.dialogs.showwarning("提示", "世界包加载期间不可创建挑战包")
             return
         pack_name = self.pack_name_entry.get().strip()
         if not pack_name:
-            ui.common.dialogs.showerror("错误", "请输入挑战包名称")
+            ui.ctk.dialogs.showerror("错误", "请输入挑战包名称")
             return
 
         choice = self.char_combo.get()
         cid = self.char_map.get(choice, ("", {}))[0]
         if not cid:
-            ui.common.dialogs.showerror("错误", "请选择角色")
+            ui.ctk.dialogs.showerror("错误", "请选择角色")
             return
 
         lms = self.landmark_selector.get_selected_raw_names()
         qps = self.quip_selector.get_selected_raw_names()
         if not lms:
-            ui.common.dialogs.showerror("错误", "请至少选择一个地标风格组")
+            ui.ctk.dialogs.showerror("错误", "请至少选择一个地标风格组")
             return
         if not qps:
             qps = []
 
         dg = self.dungeon_combo.get()
         if not dg:
-            ui.common.dialogs.showerror("错误", "请选择副本方案")
+            ui.ctk.dialogs.showerror("错误", "请选择副本方案")
             return
 
         intro = self.intro_text.get("1.0", "end-1c").strip()
@@ -510,7 +510,7 @@ class ChallengeModePanel(ctk.CTkFrame):
                 )
                 self.after(0, lambda k=key: self._on_create_ok(k))
             except Exception as e:
-                self.after(0, lambda e=e: ui.common.dialogs.showerror("错误", str(e)))
+                self.after(0, lambda e=e: ui.ctk.dialogs.showerror("错误", str(e)))
 
         self.after(50, _do_work)
 
@@ -518,11 +518,11 @@ class ChallengeModePanel(ctk.CTkFrame):
         try:
             data = self.challenge_mgr.open_challenge_by_name(pack_base)
         except Exception as e:
-            ui.common.dialogs.showerror("错误", f"打开挑战包失败: {e}")
+            ui.ctk.dialogs.showerror("错误", f"打开挑战包失败: {e}")
             return
 
         if data is None:
-            ui.common.dialogs.showerror("错误", "无法读取挑战包内容")
+            ui.ctk.dialogs.showerror("错误", "无法读取挑战包内容")
             return
 
         self._launch_dungeon_from_data(data)
@@ -541,7 +541,7 @@ class ChallengeModePanel(ctk.CTkFrame):
 
         personality_dict = char_data.get("personality")
         if not personality_dict:
-            ui.common.dialogs.showerror("错误", "挑战包中缺少性格数据")
+            ui.ctk.dialogs.showerror("错误", "挑战包中缺少性格数据")
             return
         personality = Personality.from_dict(personality_dict)
 
@@ -558,7 +558,7 @@ class ChallengeModePanel(ctk.CTkFrame):
 
         gui_settings = self.gui._settings_repo.load()
         ai_config = resolve_ai_config(gui_settings)
-        from ui.common.fonts import dungeon_font_default
+        from ui.ctk.fonts import dungeon_font_default
         dungeon_font = gui_settings.get("dungeon_font", dungeon_font_default())
 
         landmark_styles = data.get("landmark_styles", [])
@@ -579,7 +579,7 @@ class ChallengeModePanel(ctk.CTkFrame):
 
         launch_dungeon_subprocess(
             host_window=self.gui.root, app=self.gui,
-            dialogs=ui.common.dialogs,
+            dialogs=ui.ctk.dialogs,
             name=name, nick=nick,
             personality=personality, preset=preset,
             original_height=original_height, intro_hidden=intro_hidden,

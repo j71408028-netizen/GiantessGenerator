@@ -243,7 +243,7 @@ def _top_level_names(path: Path):
 
     返回 ``(names, dynamic)``。``names`` 为 None 表示源码无法解析——此时放弃校验
     而不是误报；``dynamic`` 为真表示该模块用 ``globals().update(...)`` / ``exec``
-    之类手段**动态**创建全局量（``ui.common.theme`` 就是从 ``assets/theme/*.json``
+    之类手段**动态**创建全局量（``ui.ctk.theme`` 就是从 ``assets/theme/*.json``
     注入那批 token 的），静态解析看不到，调用方据此跳过名字级校验。
     """
     try:
@@ -253,7 +253,7 @@ def _top_level_names(path: Path):
 
     names = set()
 
-    # 动态填充检测单独走一整棵树：``ui.common.theme`` 在**模块顶层**执行
+    # 动态填充检测单独走一整棵树：``ui.ctk.theme`` 在**模块顶层**执行
     # ``globals().update(palette)``，而拼装那些 token 的代码在函数里，只看顶层
     # 语句会漏判。这里刻意保守——模块里只要出现过 globals() / exec 这类手段，就
     # 放弃对它的名字级校验（模块路径本身仍然校验）。

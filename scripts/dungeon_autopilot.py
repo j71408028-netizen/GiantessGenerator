@@ -158,7 +158,7 @@ wbase.create_client = lambda *a, **k: _AI
 
 # ---------------------------------------------------------------------------
 # 自检宿主：记录收尾弹框，不做任何窗口操作
-#    L2 之后 window 层只经宿主端口要东西（不再 import ui.common.dialogs），
+#    L2 之后 window 层只经宿主端口要东西（不再 import ui.ctk.dialogs），
 #    所以自检不需要再打桩对话框模块——换掉宿主就够了。
 # ---------------------------------------------------------------------------
 from dungeon.window.host import DIALOG_ASK, HostPort  # noqa: E402

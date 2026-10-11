@@ -4,11 +4,11 @@ from typing import Optional
 
 import customtkinter as ctk
 
-import ui.common
+import ui.ctk
 from core.logic import SIZE_CATEGORIES
 from persistence import QuipRepo
-from ui.common.dialogs import BaseDialog
-from ui.common.theme import (
+from ui.ctk.dialogs import BaseDialog
+from ui.ctk.theme import (
     QUIP_DLG_DELETE_BG, QUIP_DLG_DELETE_HOVER, QUIP_TYPE_COLORS,
 )
 
@@ -285,12 +285,12 @@ class QuipDialog(BaseDialog):
         for name, letter, subtypes in self.type_list:
             if name == selected_type:
                 if not subtypes:
-                    ui.common.dialogs.showwarning("警告", "该类型没有细分选项")
+                    ui.ctk.dialogs.showwarning("警告", "该类型没有细分选项")
                     return
                 try:
                     idx = subtypes.index(selected_subtype) + 1
                 except ValueError:
-                    ui.common.dialogs.showwarning("警告", "请选择一个有效的细分")
+                    ui.ctk.dialogs.showwarning("警告", "请选择一个有效的细分")
                     return
                 # 生成标签： [字母:索引:]
                 tag = f"[{letter}:{idx}:]"
@@ -304,7 +304,7 @@ class QuipDialog(BaseDialog):
                 self.quip_textbox.mark_set(tk.INSERT, new_pos)
                 self._render_quip_tags()
                 return
-        ui.common.dialogs.showwarning("警告", "未找到对应的类型")
+        ui.ctk.dialogs.showwarning("警告", "未找到对应的类型")
 
     def _insert_mark_tag(self):
         """插入 [字母:数字:MARK] 标记，内容固定为 MARK"""
@@ -316,14 +316,14 @@ class QuipDialog(BaseDialog):
                 try:
                     idx = subtypes.index(selected_subtype) + 1
                 except ValueError:
-                    ui.common.dialogs.showwarning("警告", "请选择一个有效的细分")
+                    ui.ctk.dialogs.showwarning("警告", "请选择一个有效的细分")
                     return
                 tag = f"[{letter}:{idx}:MARK]"
                 self.quip_textbox.focus_set()
                 self.quip_textbox.insert(tk.INSERT, tag)
                 self._render_quip_tags()
                 return
-        ui.common.dialogs.showwarning("警告", "未找到对应的类型")
+        ui.ctk.dialogs.showwarning("警告", "未找到对应的类型")
 
     def _delete_tag(self):
         """删除匹配当前类型和细分的标记：
@@ -346,7 +346,7 @@ class QuipDialog(BaseDialog):
                 break
 
         if not letter or idx is None:
-            ui.common.dialogs.showwarning("警告", "请选择有效的类型和细分")
+            ui.ctk.dialogs.showwarning("警告", "请选择有效的类型和细分")
             return
 
         # 获取当前文本框内容
@@ -378,7 +378,7 @@ class QuipDialog(BaseDialog):
     def validate(self):
         quip_text = self.quip_textbox.get("1.0", "end-1c").strip()
         if not quip_text:
-            ui.common.dialogs.showwarning("警告", "请输入描述内容")
+            ui.ctk.dialogs.showwarning("警告", "请输入描述内容")
             return False
         return True
 

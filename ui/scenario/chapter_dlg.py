@@ -3,7 +3,7 @@ import tkinter as tk
 
 import customtkinter as ctk
 
-import ui.common.dialogs
+import ui.ctk.dialogs
 from dungeon.actions import VISUAL_FILTERS
 from dungeon.audio.chapters import (
     CHAPTER_COLOR_PRESETS, DEFAULT_BGM_FADE_SECONDS, DEFAULT_BGM_VOLUME,
@@ -13,8 +13,8 @@ from dungeon.audio.chapters import (
 from dungeon.audio.voice_fx import (DEFAULT_INTENSITY, MAX_INTENSITY, PRESET_NONE,
                               SLOT_LABELS, SLOTS, label_of,
                               preset_keys_for)
-from ui.common.dialogs import BaseDialog
-from ui.common.theme import (
+from ui.ctk.dialogs import BaseDialog
+from ui.ctk.theme import (
     CHAPTER_BORDER, CHAPTER_HOVER, CHAPTER_TEXT, CHAPTER_TEXT_SOFT,
     CHAPTER_HINT, CHAPTER_ERR, CHAPTER_ERR_HOVER, CHAPTER_SWATCH_SELECTED_BORDER,
 )
@@ -461,17 +461,17 @@ class ChapterEditDialog(BaseDialog):
     def _ok(self):
         name = self.name_var.get().strip()
         if not name:
-            ui.common.dialogs.showerror("错误", "章节名称不能为空")
+            ui.ctk.dialogs.showerror("错误", "章节名称不能为空")
             return
         original_name = self.chapter.get("name", "")
         for other in self.all_chapters:
             if other.get("name") == name and other.get("name") != original_name:
-                ui.common.dialogs.showerror("错误", f"章节名称 '{name}' 已被使用")
+                ui.ctk.dialogs.showerror("错误", f"章节名称 '{name}' 已被使用")
                 return
 
         color = (self.color_var.get() or "").strip()
         if not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
-            ui.common.dialogs.showerror("错误", "配色必须是 #RRGGBB 形式的颜色值")
+            ui.ctk.dialogs.showerror("错误", "配色必须是 #RRGGBB 形式的颜色值")
             return
 
         background = {}
@@ -483,7 +483,7 @@ class ChapterEditDialog(BaseDialog):
             if filter_key:
                 background["filter_effect"] = filter_key
         elif filter_key:
-            ui.common.dialogs.showerror("错误", "配置了滤镜但没有选择背景图片，滤镜不会生效")
+            ui.ctk.dialogs.showerror("错误", "配置了滤镜但没有选择背景图片，滤镜不会生效")
             return
 
         bgm = {}
@@ -492,10 +492,10 @@ class ChapterEditDialog(BaseDialog):
             try:
                 fade_seconds = float(self.bgm_fade_var.get())
             except ValueError:
-                ui.common.dialogs.showerror("错误", "背景音乐的淡入淡出秒数必须是数字")
+                ui.ctk.dialogs.showerror("错误", "背景音乐的淡入淡出秒数必须是数字")
                 return
             if fade_seconds < 0:
-                ui.common.dialogs.showerror("错误", "背景音乐的淡入淡出秒数不能为负")
+                ui.ctk.dialogs.showerror("错误", "背景音乐的淡入淡出秒数不能为负")
                 return
             bgm = {
                 "path": audio_path,
@@ -508,27 +508,27 @@ class ChapterEditDialog(BaseDialog):
         for index, row in enumerate(self.sens_rows, start=1):
             attr = row["attr_var"].get().strip()
             if not attr:
-                ui.common.dialogs.showerror("错误", f"第 {index} 条敏感效果没有选择属性")
+                ui.ctk.dialogs.showerror("错误", f"第 {index} 条敏感效果没有选择属性")
                 return
             try:
                 strength = float(row["strength_var"].get())
             except ValueError:
-                ui.common.dialogs.showerror("错误", f"第 {index} 条敏感效果的强度必须是数字")
+                ui.ctk.dialogs.showerror("错误", f"第 {index} 条敏感效果的强度必须是数字")
                 return
             try:
                 objective = float(row["objective_var"].get())
             except ValueError:
-                ui.common.dialogs.showerror("错误", f"第 {index} 条敏感效果的客观影响必须是数字")
+                ui.ctk.dialogs.showerror("错误", f"第 {index} 条敏感效果的客观影响必须是数字")
                 return
             sensitivity.append({"attr": attr, "strength": strength, "objective": objective})
 
         try:
             max_paragraphs = int(float(self.max_paragraphs_var.get()))
         except ValueError:
-            ui.common.dialogs.showerror("错误", "最大段落数必须是数字")
+            ui.ctk.dialogs.showerror("错误", "最大段落数必须是数字")
             return
         if max_paragraphs < 1:
-            ui.common.dialogs.showerror("错误", "最大段落数至少为 1")
+            ui.ctk.dialogs.showerror("错误", "最大段落数至少为 1")
             return
 
         is_ending = bool(self.ending_var.get())
@@ -559,12 +559,12 @@ class ChapterEditDialog(BaseDialog):
                 try:
                     result[delta_fields[field]] = float(var.get())
                 except ValueError:
-                    ui.common.dialogs.showerror("错误", f"结局结算的{field}必须是数字")
+                    ui.ctk.dialogs.showerror("错误", f"结局结算的{field}必须是数字")
                     return
             try:
                 result["action_points_refund"] = int(float(self.ending_refund_var.get()))
             except ValueError:
-                ui.common.dialogs.showerror("错误", "结局结算的行动点数返还必须是数字")
+                ui.ctk.dialogs.showerror("错误", "结局结算的行动点数返还必须是数字")
                 return
             result["icon_path"] = self.ending_icon_var.get().strip()
 

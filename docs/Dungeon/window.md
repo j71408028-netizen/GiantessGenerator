@@ -262,7 +262,7 @@ run() → SessionResult
 | **C5** | 计时类逻辑不开线程，用 `every` / `after` 帧任务 | 旧实现各自靠 `_closing` 标志轮询退出、收尾时逐个 join；现在退出不需要 join | `python tests/check_dungeon_window_contract.py`（禁 `threading.Timer`）；场景结束时断言 `threading.enumerate()` 无非 daemon 残留 |
 | **C6** | DPG 2.3.1 兼容性怪癖，见 §5.1 子表 | 实测结论 | 手测 + 自动驾驶 |
 | **C7** | 入口阶段与会话页共用 `bg_texture` / `bg_image_item` | 进入会话时 `_freeze_background` 把冻结帧设为 `_bg_pil_full`，后续 relayout 沿用冻结画面 | 手测入口 → 会话 |
-| **C8** | window 层不许 import `tkinter` / `customtkinter` / `ui`；宿主能力一律经 `HostPort`，见 §5.2 端口表 | 换 UI 框架只需换适配器；自检不再需要打桩 `ui.common.dialogs` | `tests/check_dungeon_layering.py` |
+| **C8** | window 层不许 import `tkinter` / `customtkinter` / `ui`；宿主能力一律经 `HostPort`，见 §5.2 端口表 | 换 UI 框架只需换适配器；自检不再需要打桩 `ui.ctk.dialogs` | `tests/check_dungeon_layering.py` |
 | **C9** | 构造 / 复制 `DungeonState` 只用关键字参数 | 字段顺序会随迭代变化（`chapter_steps` 就是从中间插入的）；`clone()` 曾按位置传参导致伤亡数组被填成步长浮点数，于是**每一步** `_finish_step` 都抛 `'float' object is not iterable`——故事看着还在出字，但总计数不增长、触发器与结局永不触发 | 断言「回放记录是否增长」 |
 | **C10** | 写盘一律用原子写（`persistence/json_store.py`） | 半截文件不可恢复，`.bak` 是唯一回退；回放 / 报告按时间戳命名、本来不会被覆盖，调用时传 `backup=False` | `tests/check_dungeon_finalize.py` |
 | **C11** | 术语不混用：`scenario_*` = 方案，`dungeon_*` = 一局 | 见 [术语表](domain_terms.md) 与 `dungeon/terms.py` | `tests/check_scenario_naming.py` |
@@ -297,11 +297,11 @@ run() → SessionResult
 | `hide_window()` / `show_window()` | 副本视口显示时藏起宿主、关闭后恢复 | `withdraw` / `deiconify` + `lift` |
 | `pump_events()` | 帧循环里处理一次宿主事件（宿主不冻结） | `widget.update()` |
 | `discard_pending_quit()` | 丢弃视口原生关闭（X）留下的退出残留消息（见 §5-C12） | Win32 下 `PeekMessageW(..., WM_QUIT, WM_QUIT, PM_REMOVE)` |
-| `dialog(kind, title, message)` | 收尾提示 / 询问（`info`/`warning`/`error`/`ask`） | `ui.common.dialogs.*` |
+| `dialog(kind, title, message)` | 收尾提示 / 询问（`info`/`warning`/`error`/`ask`） | `ui.ctk.dialogs.*` |
 | `open_replay_file()` | 入口页加载回放；缺省实现返回 `None`（等价于用户取消） | `filedialog` + JSON 校验（解析在适配器侧） |
 | `launch_mini_game()` | 打开 **web 后端**小游戏窗口（`mini_game` 触发器按 manifest 分派；`py` 后端走会话内覆盖层舞台 `dungeon/window/minigame/`，不经端口）；结果经回调回传；缺省实现返回 `False` | 独立**子进程**跑 pywebview/WebView2（`ui/hosting/mini_game_host.py`，pywebview 强制占主线程），结果写 JSON 文件、watch 线程回调 |
 | `register_active_window()` / `unregister_active_window()` | 让宿主整体退出时能找到活动副本窗口 | 沿 `master/parent` 链找持有 `_active_dungeon_window` 的主窗口 |
-| `default_font()` | 段落字体缺省家族 | `ui.common.fonts.dungeon_font_default()` |
+| `default_font()` | 段落字体缺省家族 | `ui.ctk.fonts.dungeon_font_default()` |
 
 用法：
 

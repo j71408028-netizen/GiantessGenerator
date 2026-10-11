@@ -1,8 +1,8 @@
 import customtkinter as ctk
 
-from ui.common.dialogs import BaseDialog
-from ui.common import fonts as ui_fonts
-from ui.common.theme import (
+from ui.ctk.dialogs import BaseDialog
+from ui.ctk import fonts as ui_fonts
+from ui.ctk.theme import (
     NEWS_TEXT, NEWS_TITLE,
 )
 from datetime import date

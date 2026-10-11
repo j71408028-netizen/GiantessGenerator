@@ -29,9 +29,9 @@ except Exception:  # pragma: no cover - 环境相关
 
 from dungeon.actions import action_label, normalize_action_type
 from dungeon.audio.chapters import scope_label
-from ui.common.dialogs import BaseDialog
-from ui.common.fonts import graphviz_font
-from ui.common.theme import (
+from ui.ctk.dialogs import BaseDialog
+from ui.ctk.fonts import graphviz_font
+from ui.ctk.theme import (
     DEPENDENCY_TEXT, DEPENDENCY_TEXT_SOFT, DEPENDENCY_OK, DEPENDENCY_ERR,
     ACTION_FILL_BACKGROUND, ACTION_FILL_EFFECT, ACTION_FILL_ENDING, ACTION_FILL_GOTO,
     ACTION_FILL_INSERT, ACTION_FILL_NONE, ACTION_FILL_OPTION, ACTION_FILL_SENSITIVITY,

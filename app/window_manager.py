@@ -7,8 +7,8 @@ from typing import Dict, List
 
 import customtkinter as ctk
 
-import ui.common.dialogs
-import ui.common.ctk_patch  # noqa: F401  模式切换时同步刷新 CTk 控件 Frame 底色，避免几何重排露旧色
+import ui.ctk.dialogs
+import ui.ctk.ctk_patch  # noqa: F401  模式切换时同步刷新 CTk 控件 Frame 底色，避免几何重排露旧色
 from services.exploration.context import ExplorationContext
 from paths import icon_dir
 from persistence import QuipRepo, ScenarioRepo, CharacterRepo
@@ -23,12 +23,12 @@ from ui.quip import QuipCardManager
 from ui.scenario.sc_frame import ScenarioEditor
 from ui.settings import SettingsPanel
 from ui.exploration.news_dlg import NewsDialog
-from ui.common.loading import LoadingPage
-from ui.common.theme import (
+from ui.ctk.loading import LoadingPage
+from ui.ctk.theme import (
     APP_BG, APP_BORDER_STRONG, APP_HOVER, APP_TEXT_SOFT,
     DEFAULT_PALETTE, apply_palette, current_palette, refresh_widgets,
 )
-from ui.common import fonts as ui_fonts
+from ui.ctk import fonts as ui_fonts
 
 
 class MainWindowManager:
@@ -141,10 +141,10 @@ class MainWindowManager:
         # 切换界面要销毁 Tk 根、重建事件循环，会话无从回收，因此直接拒绝切换
         # （先于确认框，避免白问一次）。
         if self._active_dungeon_window is not None:
-            ui.common.dialogs.showwarning(
+            ui.ctk.dialogs.showwarning(
                 "提示", "副本进行中，请先结束副本再切换界面。")
             return
-        if not ui.common.dialogs.askyesno(
+        if not ui.ctk.dialogs.askyesno(
                 "切换界面",
                 "将保存当前设置并切换到挂件模式，窗口会重建。\n\n"
                 "两套界面共用同一份角色与存档数据。是否继续？"):
@@ -165,7 +165,7 @@ class MainWindowManager:
         # 副本会话（独立子进程）进行中时本方法正阻塞在 spawner 的等待循环里，
         # 切换界面无从回收会话，因此进行中直接拒绝切换。
         if self._active_dungeon_window is not None:
-            ui.common.dialogs.showwarning(
+            ui.ctk.dialogs.showwarning(
                 "提示", "副本进行中，请先结束副本再切换界面。")
             return
         self._closing = True
@@ -209,7 +209,7 @@ class MainWindowManager:
             self.settings_panel.sync_saved_theme()
         locked = self._locked_pages()
         if page_key in locked:
-            ui.common.dialogs.showwarning(
+            ui.ctk.dialogs.showwarning(
                 "提示",
                 f"{locked[page_key]}，无法进入该管理页。\n如需编辑请先卸载或解散世界包。")
             return
@@ -606,12 +606,12 @@ class MainWindowManager:
     def load_character_by_id(self, giantess_id: str):
         state = self.context.load_character_state(giantess_id)
         if state is None:
-            ui.common.dialogs.showerror("错误", f"无法加载角色 '{giantess_id}'")
+            ui.ctk.dialogs.showerror("错误", f"无法加载角色 '{giantess_id}'")
             return
 
         if hasattr(self, 'generator_panel'):
             self.generator_panel.load_character_by_id(state)
-            ui.common.dialogs.showinfo("成功", f"已加载角色：{state.name}")
+            ui.ctk.dialogs.showinfo("成功", f"已加载角色：{state.name}")
             article = self.context.prepare_news_for_character_load(state)
             if article is not None:
                 self.root.after(
@@ -630,17 +630,17 @@ class MainWindowManager:
 
     def export_character_card_to_path(self, file_path: str):
         if not hasattr(self, 'generator_panel'):
-            ui.common.dialogs.showerror("错误", "生成器面板未初始化")
+            ui.ctk.dialogs.showerror("错误", "生成器面板未初始化")
             return
         params = self.generator_panel.params_panel.get_params()
         personality_obj = params.get("current_personality_obj")
         preset_obj = params.get("current_preset_obj")
 
         if personality_obj is None:
-            ui.common.dialogs.showerror("错误", "请选择一个具体的性格")
+            ui.ctk.dialogs.showerror("错误", "请选择一个具体的性格")
             return
         if preset_obj is None:
-            ui.common.dialogs.showerror("错误", "请选择一个具体的身材")
+            ui.ctk.dialogs.showerror("错误", "请选择一个具体的身材")
             return
 
         data = self.context.build_export_card_data(
@@ -659,19 +659,19 @@ class MainWindowManager:
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            ui.common.dialogs.showinfo("成功", f"角色卡已导出到：{file_path}")
+            ui.ctk.dialogs.showinfo("成功", f"角色卡已导出到：{file_path}")
         except Exception as e:
-            ui.common.dialogs.showerror("错误", f"保存失败：{e}")
+            ui.ctk.dialogs.showerror("错误", f"保存失败：{e}")
 
     def export_character_card_from_state(self, state, file_path: str):
         try:
             data = self.context.build_export_card_from_state(state)
         except ValueError as e:
-            ui.common.dialogs.showerror("错误", str(e))
+            ui.ctk.dialogs.showerror("错误", str(e))
             return
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            ui.common.dialogs.showinfo("成功", f"角色卡已导出到：{file_path}")
+            ui.ctk.dialogs.showinfo("成功", f"角色卡已导出到：{file_path}")
         except Exception as e:
-            ui.common.dialogs.showerror("错误", f"保存失败：{e}")
+            ui.ctk.dialogs.showerror("错误", f"保存失败：{e}")

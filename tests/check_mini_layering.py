@@ -7,18 +7,18 @@
 
 - 引入 ``customtkinter`` —— 启动被拖慢、打包体积变大，且挂件刻意不用它的圆角与
   主题机制，混用只会让两套控件风格打架；
-- 引入 ``ui.common.theme`` —— 该模块顶层 ``import ui.common.ctk_patch``，会连带
+- 引入 ``ui.ctk.theme`` —— 该模块顶层 ``import ui.ctk.ctk_patch``，会连带
   拉起 customtkinter；配色应当走 ``core.appearance`` + ``ui.mini.pixel``；
-- 引入 ``ui.common.fonts`` —— 那里的 ``ui_font()`` 给专业版用磅值，挂件要的是
+- 引入 ``ui.ctk.fonts`` —— 那里的 ``ui_font()`` 给专业版用磅值，挂件要的是
   负数像素字号，两边不能共用；
-- 引入 ``ui.common.widgets`` / ``dialogs`` / ``managers`` —— 都是 CTk 控件或面向
+- 引入 ``ui.ctk.widgets`` / ``dialogs`` / ``managers`` —— 都是 CTk 控件或面向
   专业界面的弹窗，挂件一律用整窗换屏代替弹窗。
 
 允许：``ui.mini.*`` 自身、整包 ``ui.hosting``（进程与宿主基础设施：副本会话
 子进程的父/子两侧、宿主端口适配、X11 原生支持、小游戏宿主——包规约是**不顶层
 import CTk 组件**，需要弹框一律由调用方注入，缺省实现延迟到首次使用才
 import；``tests/check_mini_layering.py`` 之外的职责由包 docstring 承担）。
-外观模式住在 ``core.appearance``（零依赖，2026-10-06 从 ``ui/common/`` 下移），
+外观模式住在 ``core.appearance``（零依赖，2026-10-06 从 ``ui/common/``（今 ui/ctk）下移），
 不属于 ``ui.*``，因此不受本白名单约束。
 
 退出码：0 = 通过；1 = 存在越界依赖。
@@ -108,7 +108,7 @@ def main() -> int:
             print(f"  FAIL {item['file']}:{item['lineno']}  {item['module']} — {item['reason']}")
         print(f"[check_mini_layering] FAILED {len(violations)} 处越界依赖")
         return 1
-    print("[check_mini_layering] PASSED：挂件层无 customtkinter / ui.common.theme "
+    print("[check_mini_layering] PASSED：挂件层无 customtkinter / ui.ctk.theme "
           "依赖，只经 ui.hosting 与 core 层对外接触")
     return 0
 

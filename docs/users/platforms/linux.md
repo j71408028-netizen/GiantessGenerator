@@ -42,7 +42,7 @@ python main.py
   | `miniaudio` / `soundfile` | 章节语音的「物理效果」退回零依赖的播放侧近似（回声 / 缓抖），方案校验会给出提示；装上即消除 |
   | `pywebview` | 内置小游戏窗口（`web` 后端的兼容通道）打不开，触发器会明确提示；`py` 后端小游戏不受影响 |
 - 中文字体（两条链路，都靠系统装中文字体，建议 `sudo apt install fonts-noto-cjk`）：
-  - 主界面（Tk / CustomTkinter）走 `ui/common/fonts.py` 的家族候选链
+  - 主界面（Tk / CustomTkinter）走 `ui/ctk/fonts.py` 的家族候选链
     （Noto Sans CJK SC / 文泉驿微米黑），由 Tk 自己按家族名向 fontconfig 取字体；
   - 副本窗口（Dear PyGui）**只认字体文件**，走 `dungeon/window/fonts.py`：Linux 上先问
     `fc-match`（只接受声明覆盖 `zh-cn` 的结果，避免不存在的家族名被替换成拉丁字体），

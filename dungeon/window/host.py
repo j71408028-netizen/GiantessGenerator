@@ -12,7 +12,7 @@
 ``pump_events()``         帧循环里处理一次宿主事件（宿主不冻结的关键，L0）
 ``discard_pending_quit()`` 丢掉「副本视口被原生关闭键关掉」留下的退出类残留消息
                           （Tk 侧是线程队列里的 ``WM_QUIT``，见 §5-C12）
-``dialog()``              收尾时的提示/询问（替代原先的 ``ui.common.dialogs``）
+``dialog()``              收尾时的提示/询问（替代原先的 ``ui.ctk.dialogs``）
 ``open_replay_file()``    入口页"加载回放"的文件选择（L4：回放不再需要调用方
                           重开第二个窗口，因此这个文件对话框必须由宿主提供）
 ``register_active_window()`` 让宿主在整体退出时能找到活动副本窗口
@@ -38,7 +38,7 @@ DIALOG_WARNING = "warning"
 DIALOG_ERROR = "error"
 DIALOG_ASK = "ask"
 
-#: 无 UI 框架时的中文字族兜底。权威表在 ``ui/common/fonts.py``（UI 层），
+#: 无 UI 框架时的中文字族兜底。权威表在 ``ui/ctk/fonts.py``（UI 层），
 #: 真实宿主直接委托给那份，这里只保证自检脚本里字体不缺席。
 _PLATFORM_FALLBACK_FONTS = {
     "win32": "Microsoft YaHei",

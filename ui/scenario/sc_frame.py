@@ -1,4 +1,4 @@
-import ui.common.dialogs
+import ui.ctk.dialogs
 import customtkinter as ctk
 import re
 import copy
@@ -13,22 +13,22 @@ from dungeon.audio.speech import (DEFAULT_OTHER_VOICES, DEFAULT_RATE, DEFAULT_VO
                             DEFAULT_VOICE_PROTAGONIST, DEFAULT_VOICE_VOLUME,
                             MAX_VOICE_VOLUME, RECOMMENDED_VOICES,
                             edge_tts_available, normalize_voice)
-from ui.common.widgets import (CTkScrollableDropdownFrame, CTkSegmentedControl,
+from ui.ctk.widgets import (CTkScrollableDropdownFrame, CTkSegmentedControl,
                                CycleOptionButton)
-from ui.common.dialogs import (BaseDialog, InputDialog, DLG_BORDER_STRONG,
+from ui.ctk.dialogs import (BaseDialog, InputDialog, DLG_BORDER_STRONG,
                                DLG_PANEL_BG, DLG_TEXT, DLG_TEXT_SOFT)
 from ui.scenario.chapter_trigger_mgr import ChapterTriggerManager
 from dungeon.terms import DEFAULT_SCENARIO_ID, scenario_config_of, scenario_id_of
 from dungeon.validate import format_diagnostics, has_errors
 from ui.scenario.evolution_attributes import EvolutionAtrrManager
 from ui.scenario.component_mgr import ComponentManager
-from ui.common.theme import (
+from ui.ctk.theme import (
     SC_BG, SC_PANEL_BG, SC_BORDER, SC_BORDER_STRONG,
     SC_HOVER, SC_MENU_HOVER, SC_CARD_HOVER, SC_TEXT,
     SC_TEXT_SOFT, SC_TITLE, SC_LINK, SC_OK,
     SC_OK_HOVER, SC_ERR, SC_ERR_HOVER,
 )
-from ui.common import fonts as ui_fonts
+from ui.ctk import fonts as ui_fonts
 
 
 class VoicePickDialog(BaseDialog):
@@ -239,11 +239,11 @@ class ScenarioEditor(ctk.CTkFrame):
             return
         file_path = self._challenge_mgr.resolve_pack_path(choice)
         if file_path is None:
-            ui.common.dialogs.showerror("错误", f"无法读取挑战包 '{choice}'，未找到对应秘钥")
+            ui.ctk.dialogs.showerror("错误", f"无法读取挑战包 '{choice}'，未找到对应秘钥")
             return
         result = self._challenge_mgr.try_open_with_keys(file_path)
         if result is None:
-            ui.common.dialogs.showerror("错误", f"无法读取挑战包 '{choice}'，未找到对应秘钥")
+            ui.ctk.dialogs.showerror("错误", f"无法读取挑战包 '{choice}'，未找到对应秘钥")
             return
         data, _, _ = result
         if not data:
@@ -251,7 +251,7 @@ class ScenarioEditor(ctk.CTkFrame):
         scenario_config = scenario_config_of(data)
         scenario_id = scenario_id_of(data)
         if not scenario_config:
-            ui.common.dialogs.showinfo("提示", "该挑战包中没有副本方案")
+            ui.ctk.dialogs.showinfo("提示", "该挑战包中没有副本方案")
             return
 
         if self._scenario_repo.exists(scenario_id):
@@ -262,7 +262,7 @@ class ScenarioEditor(ctk.CTkFrame):
         self._refresh_scenario_list()
         self._load_scenario(scenario_id)
         self._notify_validation()
-        ui.common.dialogs.showinfo("成功", f"已从挑战包加载副本方案 '{scenario_id}'")
+        ui.ctk.dialogs.showinfo("成功", f"已从挑战包加载副本方案 '{scenario_id}'")
 
     def _on_scenario_tab_switch(self, value):
         # 分段值可能带装饰空格（如 " 动态 "），统一去掉后再比较
@@ -795,7 +795,7 @@ class ScenarioEditor(ctk.CTkFrame):
         # 更新快照
         self._update_prompt_snapshot()
         self._notify_validation()
-        ui.common.dialogs.showinfo("成功", "通用设置已保存")
+        ui.ctk.dialogs.showinfo("成功", "通用设置已保存")
 
     def _save_evolution_triggers(self):
         """仅保存演化量、章节与触发器，不修改提示词"""
@@ -815,14 +815,14 @@ class ScenarioEditor(ctk.CTkFrame):
         """保存后把方案校验结果反馈给作者：有错误级诊断时弹窗汇总，其余仅控制台。"""
         diagnostics = getattr(self._scenario_repo, "last_diagnostics", None) or []
         if has_errors(diagnostics):
-            ui.common.dialogs.showwarning(
+            ui.ctk.dialogs.showwarning(
                 "方案校验发现问题",
                 format_diagnostics(diagnostics, include_info=False))
 
     def _rename_scenario(self):
         old_name = self.current_scenario_id
         if old_name == DEFAULT_SCENARIO_ID:
-            ui.common.dialogs.showwarning("警告", "默认副本方案不可重命名")
+            ui.ctk.dialogs.showwarning("警告", "默认副本方案不可重命名")
             return
 
         dlg = InputDialog(self, title="重命名副本方案", prompt=f"将 '{old_name}' 重命名为:")
@@ -831,13 +831,13 @@ class ScenarioEditor(ctk.CTkFrame):
             return
 
         if self._scenario_repo.exists(new_name):
-            ui.common.dialogs.showerror("错误", "副本方案名称已存在")
+            ui.ctk.dialogs.showerror("错误", "副本方案名称已存在")
             return
 
         # 加载旧配置并保存为新名称，再删除旧配置
         config = self._scenario_repo.load_config(old_name)
         if config is None:
-            ui.common.dialogs.showerror("错误", f"无法加载副本方案 '{old_name}'")
+            ui.ctk.dialogs.showerror("错误", f"无法加载副本方案 '{old_name}'")
             return
 
         try:
@@ -846,20 +846,20 @@ class ScenarioEditor(ctk.CTkFrame):
             self._refresh_scenario_list()
             self._load_scenario(new_name)
         except Exception as e:
-            ui.common.dialogs.showerror("错误", f"重命名失败: {e}")
+            ui.ctk.dialogs.showerror("错误", f"重命名失败: {e}")
 
     def _delete_scenario(self):
         if self.current_scenario_id == DEFAULT_SCENARIO_ID:
-            ui.common.dialogs.showwarning("警告", "默认副本方案不可删除")
+            ui.ctk.dialogs.showwarning("警告", "默认副本方案不可删除")
             return
-        if not ui.common.dialogs.askyesno("确认", f"确定删除副本方案 '{self.current_scenario_id}' 吗？\n此操作不可恢复！"):
+        if not ui.ctk.dialogs.askyesno("确认", f"确定删除副本方案 '{self.current_scenario_id}' 吗？\n此操作不可恢复！"):
             return
         try:
             self._scenario_repo.delete(self.current_scenario_id)
             self._refresh_scenario_list()
             self._load_scenario(DEFAULT_SCENARIO_ID)
         except Exception as e:
-            ui.common.dialogs.showerror("错误", str(e))
+            ui.ctk.dialogs.showerror("错误", str(e))
 
     def _new_scenario(self):
         dlg = InputDialog(self, title="新建副本方案", prompt="请输入新副本方案名称:")
@@ -867,7 +867,7 @@ class ScenarioEditor(ctk.CTkFrame):
         if not new_id or not re.match(r'^\w+$', new_id):
             return
         if self._scenario_repo.exists(new_id):
-            ui.common.dialogs.showerror("错误", "副本方案已存在")
+            ui.ctk.dialogs.showerror("错误", "副本方案已存在")
             return
         empty_config = {
             "initial_prompt": "",
@@ -886,7 +886,7 @@ class ScenarioEditor(ctk.CTkFrame):
             self._refresh_scenario_list()
             self._load_scenario(new_id)
         else:
-            ui.common.dialogs.showerror("错误", "创建失败")
+            ui.ctk.dialogs.showerror("错误", "创建失败")
 
     def _update_prompt_snapshot(self):
         """用当前UI内容更新快照（用于对比）"""
@@ -902,7 +902,7 @@ class ScenarioEditor(ctk.CTkFrame):
             return
         # 如果提示词有修改，询问是否保存
         if self._is_prompt_modified():
-            if ui.common.dialogs.askyesno("通用设置未保存", "当前通用设置已修改，是否保存？", parent=self):
+            if ui.ctk.dialogs.askyesno("通用设置未保存", "当前通用设置已修改，是否保存？", parent=self):
                 self._save_prompts()
             # 如果用户选择“否”，则放弃修改（快照不变）
         # 加载新副本方案

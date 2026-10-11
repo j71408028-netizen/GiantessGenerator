@@ -4,7 +4,7 @@
 「💬 聊天」按钮让介绍卡让位、聊天区在状态面板下方展开（右栏报告面板不再
 被占用）。面板顶部沿用编辑模式的排布——36px 紧凑头像框（与介绍卡共用同一
 份头像母本）+ 对象名 + 关闭；消息渲染为气泡列表：玩家消息靠右、角色消息
-靠左，并按相邻消息的间隔长短自动补时间标记（见 ui.common.chat_time）；"已读
+靠左，并按相邻消息的间隔长短自动补时间标记（见 ui.ctk.chat_time）；"已读
 不回"只保留为内部状态，界面上不做任何标注——角色沉默本身就是回应。
 
 回复节奏由服务层与投递控制器负责（docs/dev/chat_delivery.md）：AI 决策后回复
@@ -28,13 +28,13 @@ from core.models import ChatMessage, CharacterSnapshot
 from services.chat.delivery import ChatDeliveryController
 from services.chat import (ChatService, should_reconcile,
                                    unread_messages)
-from ui.common.avatar import AvatarFrame, COMPACT_AVATAR_SIZE
-from ui.common.chat_time import message_moment, time_marker_text
-from ui.common.theme import (
+from ui.ctk.avatar import AvatarFrame, COMPACT_AVATAR_SIZE
+from ui.ctk.chat_time import message_moment, time_marker_text
+from ui.ctk.theme import (
     FB_BLUE, FB_BTN, FB_BTN_HOVER, FB_CARD_BG, FB_CHIP_BG, FB_CHIP_HOVER,
     FB_MUTED, INTRO_BORDER,
 )
-from ui.common import fonts as ui_fonts
+from ui.ctk import fonts as ui_fonts
 
 
 class ChatPanel(ctk.CTkFrame):

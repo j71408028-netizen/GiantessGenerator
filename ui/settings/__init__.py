@@ -7,7 +7,7 @@ from ui.settings.dialogs import AIConfigDialog, WorldPackCreateDialog
 
 import customtkinter as ctk
 
-import ui.common.dialogs
+import ui.ctk.dialogs
 
 if TYPE_CHECKING:
     from persistence.settings_repo import SettingsRepo
@@ -23,17 +23,17 @@ from dungeon.terms import is_default_scenario
 from services.challenges import ChallengeService
 import services.ui_mode as ui_mode
 from services.news import DEFAULT_NEWS_TABLE, NewsService
-from ui.common.widgets import (
+from ui.ctk.widgets import (
     CollapsibleBlock, StyleListBox, CycleOptionButton, ScrollableComboBox,
 )
-from ui.common import fonts as ui_fonts
-from ui.common.theme import (
+from ui.ctk import fonts as ui_fonts
+from ui.ctk.theme import (
     SETTINGS_PANEL_BG, SETTINGS_HOVER, SETTINGS_CHECKBOX_HOVER, SETTINGS_INPUT_HOVER,
     SETTINGS_INPUT_BG, SETTINGS_INPUT_BORDER,
     SETTINGS_SWITCH_TRACK, SETTINGS_SWITCH_PROGRESS, SETTINGS_SWITCH_KNOB, SETTINGS_TEXT_SOFT,
     SETTINGS_LABEL, SETTINGS_OK, SETTINGS_ERR,
 )
-from ui.common.theme import (
+from ui.ctk.theme import (
     DEFAULT_PALETTE, current_palette, palette_display_names,
 )
 
@@ -528,7 +528,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
                 if p["name"] == self.world_pack_var.get() and not p.get("error"):
                     return
             self.world_pack_enable_var.set(False)
-            ui.common.dialogs.showwarning("提示", "没有可加载的世界包，请先创建")
+            ui.ctk.dialogs.showwarning("提示", "没有可加载的世界包，请先创建")
 
     def _activate_selected_pack(self):
         """根据 optionmenu 当前选择的包执行激活（供保存流程调用）。"""
@@ -685,7 +685,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
 
     def _create_world_pack(self):
         if self.world_manager is None:
-            ui.common.dialogs.showerror("错误", "世界包功能不可用")
+            ui.ctk.dialogs.showerror("错误", "世界包功能不可用")
             return
         dialog = WorldPackCreateDialog(
             self, available_resources=self._build_available_resources())
@@ -719,7 +719,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
                     selected_resources=cfg["selected_resources"],
                 )
             except Exception as e:
-                self.after(0, lambda: ui.common.dialogs.showerror(
+                self.after(0, lambda: ui.ctk.dialogs.showerror(
                     "错误", f"创建世界包失败：{e}"))
                 return
             self.after(0, lambda m=manifest: self._on_pack_created(m))
@@ -727,19 +727,19 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.after(50, _do_work)
 
     def _on_pack_created(self, manifest):
-        ui.common.dialogs.showinfo(
+        ui.ctk.dialogs.showinfo(
             "成功", f"世界包「{manifest.name}」已创建\nworld_id: {manifest.world_id}")
         self._refresh_world_pack_ui()
 
     def _dissolve_world_pack(self):
         if self.world_manager is None:
-            ui.common.dialogs.showerror("错误", "世界包功能不可用")
+            ui.ctk.dialogs.showerror("错误", "世界包功能不可用")
             return
         if self.world_state is None or not self.world_state.active:
             return
         world_id = self.world_state.world_id
         name = self.world_state.pack_name
-        choice = ui.common.dialogs.askyesnocancel(
+        choice = ui.ctk.dialogs.askyesnocancel(
             "删除世界包",
             f"删除「{name}」会立即退出该世界包。\n是否将包内资源解散到自由资源？")
         if choice is None:
@@ -760,9 +760,9 @@ class SettingsPanel(ctk.CTkScrollableFrame):
                 self.world_manager.deactivate(self.settings, self.settings_repo)
                 self.world_manager.delete_pack(world_id)
         except ValueError as e:
-            ui.common.dialogs.showerror("错误", str(e))
+            ui.ctk.dialogs.showerror("错误", str(e))
             return
-        ui.common.dialogs.showinfo("成功", f"世界包「{name}」已删除")
+        ui.ctk.dialogs.showinfo("成功", f"世界包「{name}」已删除")
         self._after_world_state_change()
 
     def _build_generation_block(self):
@@ -1376,7 +1376,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         try:
             self._apply_world_pack_changes_on_save()
         except ValueError as e:
-            ui.common.dialogs.showerror("错误", str(e))
+            ui.ctk.dialogs.showerror("错误", str(e))
             self._refresh_world_pack_ui()
             return
 

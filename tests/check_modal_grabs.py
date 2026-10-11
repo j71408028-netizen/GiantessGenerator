@@ -11,12 +11,12 @@ X11 的 ``grab_set`` 要求窗口 viewable，于是
 在点击「文本管理器 → 二级卡片 → 地标编辑框」时直接抛出；Windows 的 grab 实现不校验
 viewable，所以同样的代码在 Windows 上一切正常，直到有人在 Linux 上点。
 
-正确写法是 :meth:`ui.common.dialogs.BaseDialog._grab_deferred`：先试一次即时抓取
+正确写法是 :meth:`ui.ctk.dialogs.BaseDialog._grab_deferred`：先试一次即时抓取
 （Windows/macOS 保持原有行为），失败就等 ``<Map>`` 事件补做——窗口被映射时必然触发。
 
 本守卫两部分：
 
-1. **静态**：``ui/`` 下除 ``ui/common/dialogs.py``（延迟抓取的实现处）外，不得出现
+1. **静态**：``ui/`` 下除 ``ui/ctk/dialogs.py``（延迟抓取的实现处）外，不得出现
    裸 ``.grab_set(``；
 2. **行为**：用不依赖 Tk 的桩对象验证 ``_grab_deferred`` / ``_try_pending_grab`` 的
    判定分支——失败要挂起、不可见不消耗重试、可见后成功即停、连续失败有上限。
@@ -32,7 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UI_DIR = os.path.join(ROOT, "ui")
 #: 延迟抓取的实现处：只有这里可以直接调 grab_set
-ALLOWED_FILES = {os.path.join("ui", "common", "dialogs.py")}
+ALLOWED_FILES = {os.path.join("ui", "ctk", "dialogs.py")}
 
 failures = []
 total = 0
@@ -81,7 +81,7 @@ check("ui/ 下没有裸 grab_set（构造期直接抓会在 X11 抛 window not v
 
 import tkinter as tk  # noqa: E402
 
-from ui.common.dialogs import BaseDialog  # noqa: E402
+from ui.ctk.dialogs import BaseDialog  # noqa: E402
 
 
 class FakeDialog:

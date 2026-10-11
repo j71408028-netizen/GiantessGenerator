@@ -4,7 +4,7 @@ import tkinter as tk
 from dataclasses import fields
 from tkinter import filedialog
 
-import ui.common.dialogs
+import ui.ctk.dialogs
 from typing import Optional, Callable, Dict, Any
 
 import customtkinter as ctk
@@ -14,15 +14,15 @@ from services.exploration.context import ExplorationContext
 from core.models import Personality, BodyPreset
 from persistence import PresetRepo, PersonalityRepo
 from core.logic import format_size, length_unit_label
-from ui.common.widgets import CTkSegmentedControl
+from ui.ctk.widgets import CTkSegmentedControl
 from ui.exploration.creation_params_dlg import PersonalityCustomDialog, PresetCustomDialog
-from ui.common.theme import (
+from ui.ctk.theme import (
     PARAMS_PANEL_BG, PARAMS_PANEL_BORDER, PARAMS_BORDER_STRONG, PARAMS_HOVER,
     PARAMS_MENU_HOVER, PARAMS_SLIDER_BTN, PARAMS_SLIDER_BTN_HOVER, PARAMS_SLIDER_TRACK,
     PARAMS_GOLDEN_SLIDER_BTN, PARAMS_GOLDEN_SLIDER_BTN_HOVER, PARAMS_GOLDEN_TEXT, PARAMS_TEXT_SOFT,
     PARAMS_TEXT_MUTED, PARAMS_TEXT_DISABLED, PARAMS_LABEL, PARAMS_PLACEHOLDER,
 )
-from ui.common import fonts as ui_fonts
+from ui.ctk import fonts as ui_fonts
 
 
 class CreationParamsPanel(ctk.CTkFrame):
@@ -625,7 +625,7 @@ class CreationParamsPanel(ctk.CTkFrame):
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
         except Exception as e:
-            ui.common.dialogs.showerror("错误", f"读取文件失败：{e}")
+            ui.ctk.dialogs.showerror("错误", f"读取文件失败：{e}")
             return
 
         self.name_var.set(data.get("name", ""))
@@ -685,17 +685,17 @@ class CreationParamsPanel(ctk.CTkFrame):
         if self.on_image_uploaded:
             self.on_image_uploaded()
 
-        ui.common.dialogs.showinfo("成功", "角色卡导入完成！")
+        ui.ctk.dialogs.showinfo("成功", "角色卡导入完成！")
 
     def _export_character_card(self):
         params = self.get_params()
         personality_obj = params["current_personality_obj"]
         preset_obj = params["current_preset_obj"]
         if personality_obj is None:
-            ui.common.dialogs.showerror("错误", "请选择一个具体的性格（不能为随机）")
+            ui.ctk.dialogs.showerror("错误", "请选择一个具体的性格（不能为随机）")
             return
         if preset_obj is None:
-            ui.common.dialogs.showerror("错误", "请选择一个具体的身材（不能为随机）")
+            ui.ctk.dialogs.showerror("错误", "请选择一个具体的身材（不能为随机）")
             return
 
         file_path = filedialog.asksaveasfilename(

@@ -3,7 +3,7 @@ from typing import Optional
 
 import customtkinter as ctk
 
-import ui.common
+import ui.ctk
 from dungeon.actions import (VISUAL_FILTERS, action_label,
                              normalize_action_type)
 from dungeon.validate import LEGACY_ACTIONS
@@ -12,12 +12,12 @@ from dungeon.audio.chapters import (
     default_chapter_color, shade_for_mode,
 )
 from dungeon.audio.voice_fx import SLOTS, label_of
-from ui.common.managers import TreeviewManager
-from ui.common.theme import (
+from ui.ctk.managers import TreeviewManager
+from ui.ctk.theme import (
     SCRIPT_BORDER, SCRIPT_HOVER, SCRIPT_TEXT_SOFT, SCRIPT_OK,
     SCRIPT_OK_HOVER, SCRIPT_ERR, SCRIPT_ERR_HOVER,
 )
-from ui.common import fonts as ui_fonts
+from ui.ctk import fonts as ui_fonts
 from ui.scenario.chapter_dlg import ChapterEditDialog
 from ui.scenario.trigger_dlg import TriggerEditDialog
 
@@ -113,14 +113,14 @@ class ChapterTriggerManager(TreeviewManager):
     def check_dependencies(self):
         triggers = self.get_trigger_items()
         if not triggers:
-            ui.common.dialogs.showwarning("检查依赖", "当前没有触发器，无需检查依赖。")
+            ui.ctk.dialogs.showwarning("检查依赖", "当前没有触发器，无需检查依赖。")
             return
         from ui.scenario.dependency_dlg import (INSTALL_HINT,
                                                missing_dependencies)
         missing = missing_dependencies()
         if missing:
             # 缺依赖不再让 import 直接炸（Linux 试跑踩过），这里先说人话
-            ui.common.dialogs.showwarning(
+            ui.ctk.dialogs.showwarning(
                 "检查依赖",
                 "依赖关系检查需要以下组件，当前环境未安装：\n"
                 + "、".join(missing) + f"\n\n安装命令：{INSTALL_HINT}")
@@ -440,7 +440,7 @@ class ChapterTriggerManager(TreeviewManager):
     def edit_item(self):
         row = self.get_selected_row()
         if row is None:
-            ui.common.dialogs.showwarning("警告", "请先选择一个章节或触发器")
+            ui.ctk.dialogs.showwarning("警告", "请先选择一个章节或触发器")
             return
         row_kind, item = row
         target = item
@@ -488,7 +488,7 @@ class ChapterTriggerManager(TreeviewManager):
     def delete_item(self):
         row = self.get_selected_row()
         if row is None:
-            ui.common.dialogs.showwarning("警告", "请先选择一个章节或触发器")
+            ui.ctk.dialogs.showwarning("警告", "请先选择一个章节或触发器")
             return
         row_kind, item = row
         if row_kind == ROW_TRIGGER:
@@ -499,7 +499,7 @@ class ChapterTriggerManager(TreeviewManager):
 
     def _delete_trigger(self, trigger):
         name = trigger.get("name") or "未命名"
-        if not ui.common.dialogs.askyesno("确认", f"确定要删除触发器 '{name}' 吗？"):
+        if not ui.ctk.dialogs.askyesno("确认", f"确定要删除触发器 '{name}' 吗？"):
             return
         triggers = self._trigger_list()
         position = self._index_of(triggers, trigger)
@@ -516,7 +516,7 @@ class ChapterTriggerManager(TreeviewManager):
                      "、".join(t.get("name") or "未命名" for t in children)
         else:
             detail = "该章节下没有触发器。"
-        if not ui.common.dialogs.askyesno("确认", f"确定要删除章节 '{name}' 吗？\n{detail}"):
+        if not ui.ctk.dialogs.askyesno("确认", f"确定要删除章节 '{name}' 吗？\n{detail}"):
             return
 
         chapters = self._chapter_list()
@@ -529,7 +529,7 @@ class ChapterTriggerManager(TreeviewManager):
                  if isinstance(t.get("action_data"), dict)
                  and t["action_data"].get("chapter") == name]
         if stale:
-            ui.common.dialogs.showwarning(
+            ui.ctk.dialogs.showwarning(
                 "仍有触发器指向该章节",
                 "以下触发器的「跳转章节」仍指向已删除的章节：\n" + "、".join(stale))
         self._save()
@@ -544,7 +544,7 @@ class ChapterTriggerManager(TreeviewManager):
     def _move(self, delta: int):
         row = self.get_selected_row()
         if row is None:
-            ui.common.dialogs.showwarning("警告", "请先选择一个章节或触发器")
+            ui.ctk.dialogs.showwarning("警告", "请先选择一个章节或触发器")
             return
         index = self.get_selected_index()
         row_kind, item = row

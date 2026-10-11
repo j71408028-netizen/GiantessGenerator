@@ -5,18 +5,18 @@ import re
 import tkinter as tk
 from tkinter import filedialog
 
-import ui.common.dialogs
+import ui.ctk.dialogs
 
 import customtkinter
 import customtkinter as ctk
 from core import imaging
 from core.logic import get_predefined_tags
 from services.state_service import StateService
-from ui.common.avatar import (
+from ui.ctk.avatar import (
     AvatarFrame, COMPACT_AVATAR_SIZE, PROFILE_AVATAR_SIZE,
 )
-from ui.common.widgets import CTkScrollableDropdownFrame
-from ui.common.theme import (
+from ui.ctk.widgets import CTkScrollableDropdownFrame
+from ui.ctk.theme import (
     INTRO_PANEL_BG, INTRO_BORDER, INTRO_BORDER_STRONG, INTRO_HOVER,
     INTRO_MENU_HOVER, INTRO_CARD_HOVER, FB_TEXT, INTRO_TEXT_SOFT,
     INTRO_ERR, FB_ACCENT, FB_BLUE, FB_BTN,
@@ -25,7 +25,7 @@ from ui.common.theme import (
     FB_MUTED, FB_TAG_BG, FB_TAG_BORDER, FB_TAG_FG,
     FB_TAG_HOVER,
 )
-from ui.common import fonts as ui_fonts
+from ui.ctk import fonts as ui_fonts
 
 
 class IntroPanel(ctk.CTkFrame):
@@ -170,7 +170,7 @@ class IntroPanel(ctk.CTkFrame):
             filetypes=[("图片文件", "*.png *.jpg *.jpeg *.gif *.bmp")]
         )
         if file_path:
-            from ui.common.dialogs import ImageCropDialog
+            from ui.ctk.dialogs import ImageCropDialog
             dialog = ImageCropDialog(self, file_path, mode=ImageCropDialog.MODE_CHARACTER)
             cropped = dialog.get_cropped_path()
             if cropped is None:
@@ -266,7 +266,7 @@ class IntroPanel(ctk.CTkFrame):
     def current_avatar_pil(self, state=None):
         """当前角色的头像**母本**位图；没有角色 / 没有头像时返回 None。
 
-        聊天面板的头像框经这个接口取图（见 ui.common.avatar.AvatarFrame）：
+        聊天面板的头像框经这个接口取图（见 ui.ctk.avatar.AvatarFrame）：
         头像的解析、"用预览图当头像"的回退与读盘缓存都留在本面板一处，
         各处的头像框按自身尺寸从同一份母本降采样。
         """
@@ -662,7 +662,7 @@ fg_color=FB_BTN, text_color="white",
         if self._is_state_mode():
             state = self.generator_panel.current_state
             if not StateService.consume_action_points(state, 50):
-                ui.common.dialogs.showerror("点数不足",
+                ui.ctk.dialogs.showerror("点数不足",
                     f"保存角色信息需要50行动点数，当前仅剩{state.action_points}点。")
                 return
             state.intro_hidden = hidden
@@ -690,7 +690,7 @@ fg_color=FB_BTN, text_color="white",
             self.intro_mode_btn.configure(text="✏️ 编辑",
                 fg_color=FB_CHIP_BG, text_color=FB_BLUE)
             self.refresh_display()
-            ui.common.dialogs.showinfo("保存成功", "角色信息已更新")
+            ui.ctk.dialogs.showinfo("保存成功", "角色信息已更新")
         else:
             self.params_panel.set_intro_data(hidden, visible, tags)
             self.params_panel.set_birthday(birthday)

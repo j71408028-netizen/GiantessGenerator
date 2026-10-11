@@ -122,8 +122,8 @@ def _build_context(boot):
 def build_professional(boot):
     """构建专业模式界面（简化掉启动屏与分步任务，其余与真实启动一致）。"""
     import customtkinter as ctk
-    from ui.common import fonts as ui_fonts
-    from ui.common.theme import DEFAULT_PALETTE, apply_palette
+    from ui.ctk import fonts as ui_fonts
+    from ui.ctk.theme import DEFAULT_PALETTE, apply_palette
     from app.window_manager import MainWindowManager
 
     settings = boot["settings"]
@@ -234,7 +234,7 @@ def _stub_ui_dialogs(confirm=True):
     导航栏「⇄ ME模式」按钮会先弹确认框——自检不能真弹（模态窗口会把事件循环堵死），
     所以按记录型替换，顺便可以断言「确实问过」。
     """
-    import ui.common.dialogs as dlg
+    import ui.ctk.dialogs as dlg
     calls = []
 
     def askyesno(title, message, *a, **k):

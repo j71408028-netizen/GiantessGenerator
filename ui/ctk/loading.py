@@ -5,8 +5,8 @@ import sys
 import customtkinter as ctk
 
 from paths import icon_dir
-from ui.common import fonts as ui_fonts
-from ui.common.theme import (
+from ui.ctk import fonts as ui_fonts
+from ui.ctk.theme import (
     LOADING_BG, LOADING_TEXT_SOFT, LOADING_LABEL,
 )
 

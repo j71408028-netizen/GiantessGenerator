@@ -1,12 +1,12 @@
 """挂件版弹框：纯 tkinter，不碰 customtkinter。
 
 副本窗口的收尾提示与询问（是否保存回放、加载回放出错等）经宿主端口
-``TkHost.dialog`` 发出，宿主缺省用 ``ui.common.dialogs``——那是 customtkinter
+``TkHost.dialog`` 发出，宿主缺省用 ``ui.ctk.dialogs``——那是 customtkinter
 实现，顶层就把 CTk 拉起来，在挂件（纯 ``tk.Tk`` 根窗口）下既违背挂件层的
 依赖约定，实测也会卡在 CTk 的模态等待里。因此挂件侧注入本模块的实现。
 
 对外只暴露 ``showinfo/showwarning/showerror/askyesno``，签名与
-``ui.common.dialogs`` 的对应函数一致（``(title, message)``），这样
+``ui.ctk.dialogs`` 的对应函数一致（``(title, message)``），这样
 ``TkHost`` 无需区分宿主种类。
 """
 

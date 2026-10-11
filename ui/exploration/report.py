@@ -3,7 +3,7 @@ import datetime
 import os
 import tkinter as tk
 
-import ui.common.dialogs
+import ui.ctk.dialogs
 from paths import data_dir
 
 import customtkinter as ctk
@@ -11,14 +11,14 @@ import customtkinter as ctk
 from core import imaging
 from core.logic import ALL_PART_NAMES, format_size
 from core.models import CharacterSnapshot
-from ui.common.ctk_image import clear_ctk_label_image, format_image
-from ui.common.theme import (
+from ui.ctk.ctk_image import clear_ctk_label_image, format_image
+from ui.ctk.theme import (
     REPORT_PANEL_BG, REPORT_HEADER_BG, REPORT_BORDER, REPORT_BORDER_STRONG,
     REPORT_HOVER, REPORT_TEXT_MUTED, REPORT_PLACEHOLDER, REPORT_TAG_BODY,
     REPORT_TAG_CASUALTY, REPORT_TAG_COMPARE, REPORT_TAG_INTRO, REPORT_TAG_MEASURE,
     REPORT_TAG_QUIP, REPORT_TAG_SEPARATOR, REPORT_TAG_WILL, REPORT_TITLE_GOLD,
 )
-from ui.common import fonts as ui_fonts
+from ui.ctk import fonts as ui_fonts
 
 
 class ReportPanel(ctk.CTkFrame):
@@ -229,11 +229,11 @@ class ReportPanel(ctk.CTkFrame):
 
         report_text = self.last_report.report_text
         if not report_text.strip():
-            ui.common.dialogs.showwarning("警告", "没有可保存的报告内容。")
+            ui.ctk.dialogs.showwarning("警告", "没有可保存的报告内容。")
             return
 
         if self.host.current_state is None:
-            if ui.common.dialogs.askyesno("创建角色", "当前无角色。\n是否创建角色并保存报告？"):
+            if ui.ctk.dialogs.askyesno("创建角色", "当前无角色。\n是否创建角色并保存报告？"):
                 snapshot = self.context.character_from_core_or_report(self.last_report)
                 self.host.current_state = snapshot
                 self.host.switch_to_state_panel(snapshot)
@@ -248,7 +248,7 @@ class ReportPanel(ctk.CTkFrame):
         filepath = self._do_save_report(giantess_id, name, report_text)
         self._report_saved = True
         self._update_save_btn_state()
-        ui.common.dialogs.showinfo("保存成功", f"报告已保存至：{filepath}")
+        ui.ctk.dialogs.showinfo("保存成功", f"报告已保存至：{filepath}")
 
     # ---------- 正文渲染 ----------
     def _render_result_ui(self, text, height, body_parts):

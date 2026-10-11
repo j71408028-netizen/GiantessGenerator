@@ -6,22 +6,22 @@ import tkinter as tk
 import customtkinter as ctk
 
 import services.worlds.address_registry as address_registry
-import ui.common.dialogs
+import ui.ctk.dialogs
 from core.models import Landmark
 from persistence.landmark_repo import LandmarkRepo, DEFAULT_LANDMARK_STYLE
 from services.challenges import get_challenge_packs, import_landmark_challenge_pack
-from ui.common.dialogs import BaseDialog
-from ui.common.managers import CardManager
-from ui.common.widgets import ClickableCard, CTkScrollableDropdownFrame
-from ui.common.address_dlg import AddressTextDialog
+from ui.ctk.dialogs import BaseDialog
+from ui.ctk.managers import CardManager
+from ui.ctk.widgets import ClickableCard, CTkScrollableDropdownFrame
+from ui.ctk.address_dlg import AddressTextDialog
 from core.address_model import format_addr_verbose
-from ui.common.theme import (
+from ui.ctk.theme import (
     LM_BG, LM_PANEL_BG, LM_BORDER_STRONG, LM_HOVER,
     LM_MENU_HOVER, LM_CARD_HOVER, LM_TEXT, LM_TEXT_SOFT,
     LM_TEXT_MUTED, LM_LINK, LM_OK, LM_OK_HOVER,
     LM_ERR, LM_ERR_HOVER,
 )
-from ui.common import fonts as ui_fonts
+from ui.ctk import fonts as ui_fonts
 
 
 class LandmarkCardManager(CardManager):
@@ -123,11 +123,11 @@ class LandmarkCardManager(CardManager):
         if dlg.result is not None:
             self.landmark_repo.save_style_address(style, dlg.result)
             if dlg.result:
-                ui.common.dialogs.showinfo(
+                ui.ctk.dialogs.showinfo(
                     "已保存",
                     f"已保存风格注册地址：{format_addr_verbose(dlg.result)}。")
             else:
-                ui.common.dialogs.showinfo(
+                ui.ctk.dialogs.showinfo(
                     "已保存", "已清除风格注册地址（该风格地标不参与地址规则）。")
 
     def _get_challenge_packs_with_keys(self):
@@ -176,14 +176,14 @@ class LandmarkCardManager(CardManager):
             try:
                 imported = import_landmark_challenge_pack(self._settings_repo, pack_name, self.landmark_repo)
             except ValueError as e:
-                ui.common.dialogs.showerror("错误", str(e))
+                ui.ctk.dialogs.showerror("错误", str(e))
                 self._set_combo_to_current_style()
                 return
             self.refresh_styles()
             self.load_items()
             self.show_first_view()
             self.gui.load_combined_landmarks()
-            ui.common.dialogs.showinfo("成功", f"已从挑战包导入 {imported} 条地标数据")
+            ui.ctk.dialogs.showinfo("成功", f"已从挑战包导入 {imported} 条地标数据")
         else:
             new_style = choice
             if new_style == self._get_current_style():
@@ -423,7 +423,7 @@ class LandmarkCardManager(CardManager):
                 self.show_first_view()
 
     def delete_item(self, item):
-        if ui.common.dialogs.askyesno("确认", f"确定要删除地标 '{item.name}' 吗？"):
+        if ui.ctk.dialogs.askyesno("确认", f"确定要删除地标 '{item.name}' 吗？"):
             self.all_items.remove(item)
             self.save_items(self.all_items)
             if self.current_view == "second":
@@ -460,7 +460,7 @@ class LandmarkDialog(BaseDialog):
         self._pending_fetch = None
 
         # 模态设置：抓取要等窗口在窗口系统里可见（X11 上先 grab 会报
-        # "window not viewable"，见 ui/common/dialogs.BaseDialog._grab_deferred）
+        # "window not viewable"，见 ui/ctk/dialogs.BaseDialog._grab_deferred）
         self.transient(self._parent)
         self._grab_deferred()
 
@@ -631,7 +631,7 @@ class LandmarkDialog(BaseDialog):
                 size = float(self.size_var.get())
             except (TypeError, ValueError):
                 size = 0.0
-            ui.common.dialogs.showinfo(
+            ui.ctk.dialogs.showinfo(
                 "不推荐",
                 f"子地址 {opt['value']} 的最细单元尺度小于地标尺寸"
                 f"（{size:.4g} 米），已置为不推荐；如仍需使用请手动填写地址。")
@@ -640,14 +640,14 @@ class LandmarkDialog(BaseDialog):
 
     def validate(self):
         if not self.name_var.get().strip():
-            ui.common.dialogs.showwarning("警告", "请输入地标名称")
+            ui.ctk.dialogs.showwarning("警告", "请输入地标名称")
             return False
         try:
             size = float(self.size_var.get())
             if size <= 0:
                 raise ValueError("尺寸必须大于0")
         except ValueError:
-            ui.common.dialogs.showwarning("警告", "请输入有效的正数尺寸")
+            ui.ctk.dialogs.showwarning("警告", "请输入有效的正数尺寸")
             return False
         return True
 

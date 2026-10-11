@@ -8,11 +8,11 @@ from typing import Dict, Optional
 
 import customtkinter as ctk
 
-from ui.common.dialogs import BaseDialog
-from ui.common.widgets import StyleListBox
-from ui.common import fonts as ui_fonts
-from ui.common import dialogs
-from ui.common.theme import (
+from ui.ctk.dialogs import BaseDialog
+from ui.ctk.widgets import StyleListBox
+from ui.ctk import fonts as ui_fonts
+from ui.ctk import dialogs
+from ui.ctk.theme import (
     SETTINGS_DLG_HOVER, SETTINGS_DLG_INPUT_BORDER, SETTINGS_DLG_TEXT, SETTINGS_DLG_TEXT_SOFT,
     SETTINGS_DLG_OK, SETTINGS_DLG_ERR,
 )

@@ -10,6 +10,6 @@
 - ``mini_game_host``：内置小游戏的 pywebview 子进程宿主。
 
 准入规则（``tests/check_mini_layering.py`` 会守住）：本包**不得顶层 import**
-CTk 界面组件（``ui.common.theme/widgets/dialogs`` 等）——需要弹框能力时一律
+CTk 界面组件（``ui.ctk.theme/widgets/dialogs`` 等）——需要弹框能力时一律
 由调用方注入（如 ``dialogs=`` 参数），缺省实现延迟到真正使用时才 import。
 """

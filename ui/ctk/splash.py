@@ -13,7 +13,7 @@ import sys
 import customtkinter as ctk
 
 from paths import ensure_cwd, icon_dir
-from ui.common.loading import LoadingPage
+from ui.ctk.loading import LoadingPage
 
 _DEFAULT_W = 1280
 _DEFAULT_H = 720
@@ -85,7 +85,7 @@ def splash_process(conn, theme_mode, color_theme, title, palette=None):
     # 否则它会用默认配色的底色渲染。
     if palette:
         try:
-            from ui.common.theme import apply_palette
+            from ui.ctk.theme import apply_palette
             apply_palette(palette)
         except Exception as e:
             print(f"[Warning] 启动屏应用配色 '{palette}' 失败: {e}")

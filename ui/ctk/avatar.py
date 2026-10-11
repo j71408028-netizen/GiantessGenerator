@@ -19,8 +19,8 @@ hack（``getattr(self, 'edit_avatar_label', None)``），于是：
 
 import customtkinter as ctk
 
-from ui.common.ctk_image import clear_ctk_label_image, format_avatar
-from ui.common.theme import FB_CHIP_BG, FB_MUTED
+from ui.ctk.ctk_image import clear_ctk_label_image, format_avatar
+from ui.ctk.theme import FB_CHIP_BG, FB_MUTED
 
 #: 头像框尺寸（逻辑像素），按用途分两档——社交软件里"列表 / 标题栏头像"普遍在
 #: 32~40，只有名片、个人主页那类头像砖才到 48~56：

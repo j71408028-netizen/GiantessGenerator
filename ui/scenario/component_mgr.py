@@ -20,10 +20,10 @@ from tkinter import colorchooser
 import customtkinter as ctk
 
 from dungeon.schema import DEFAULT_TEXT_COMPONENT, TEXT_COMPONENT_IDS
-from ui.common.theme import (
+from ui.ctk.theme import (
     SC_BORDER, SC_BORDER_STRONG, SC_TEXT_SOFT, SC_TITLE,
 )
-from ui.common import fonts as ui_fonts
+from ui.ctk import fonts as ui_fonts
 
 #: 文本主组件三选一控件的档位（值 → 展示名）
 _TEXT_COMPONENT_CHOICES = [

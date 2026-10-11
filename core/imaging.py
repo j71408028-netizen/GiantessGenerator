@@ -8,7 +8,7 @@
 
 **边界**：本模块只依赖 ``PIL`` 与标准库，**不得** import ``tkinter`` /
 ``customtkinter`` / ``dearpygui``。把 PIL 图片包成 ``CTkImage``、或有副作用地清空某个
-控件的图片，都属于界面层的事，那些函数在 ``ui/common/ctk_image.py``。
+控件的图片，都属于界面层的事，那些函数在 ``ui/ctk/ctk_image.py``。
 
 **由来**（2026-10-06 阶段 3.2.3）：本模块内容原先整体住在 ``services/image_service.py``，
 里面纯图像与界面逻辑混在一起，导致两条守卫例外——
@@ -55,7 +55,7 @@ def prepare_avatar(pil_img: Image.Image,
                    cap: int = None) -> Image.Image:
     """把任意图片收成方形头像**母本**：竖图偏上裁、横图居中裁，超过上限再降采样。
 
-    母本是界面头像来源的统一样子（见 ``ui.common.avatar.AvatarFrame``）：方形、
+    母本是界面头像来源的统一样子（见 ``ui.ctk.avatar.AvatarFrame``）：方形、
     分辨率封顶（默认 :data:`AVATAR_SOURCE_HEIGHT`），于是同一个角色的档案卡、
     编辑行、聊天标题栏可以各自按控件尺寸从它降采样——比"先压到某个控件的尺寸
     再被别的控件放大"清楚，也不会把原图整张留在内存里。

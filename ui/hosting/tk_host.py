@@ -9,7 +9,7 @@
     from ui.hosting.tk_host import TkHost
     result = DungeonSessionWindow(..., host=TkHost(self)).run()
     if result.failed:
-        ui.common.dialogs.showerror("错误", result.launch_error)
+        ui.ctk.dialogs.showerror("错误", result.launch_error)
 """
 
 import ctypes
@@ -21,7 +21,7 @@ from ctypes import wintypes
 
 from dungeon.window.host import (DIALOG_ASK, DIALOG_ERROR, DIALOG_INFO,
                                  DIALOG_WARNING, HostPort)
-from ui.common.fonts import dungeon_font_default
+from ui.ctk.fonts import dungeon_font_default
 
 _IS_WINDOWS = sys.platform.startswith("win")
 
@@ -40,7 +40,7 @@ class TkHost(HostPort):
       持有 ``_active_dungeon_window`` 的对象；挂件的主控 ``MiniApp`` 不是控件
       （不在这条链上），必须显式传入，否则主窗口退出时停不掉副本窗口。
     - ``dialogs``：弹框实现，需提供 ``showinfo/showwarning/showerror/askyesno``。
-      缺省用 ``ui.common.dialogs``（customtkinter 实现，首次用到才 import）；
+      缺省用 ``ui.ctk.dialogs``（customtkinter 实现，首次用到才 import）；
       纯 Tk 宿主传入自己的实现，避免为了一个提示框把 CTk 拉起来。
     """
 
@@ -60,7 +60,7 @@ class TkHost(HostPort):
     def dialogs(self):
         """弹框实现：注入优先，缺省的 CTk 版延迟到首次使用才拉起。"""
         if self._dialogs is None:
-            import ui.common.dialogs as _ctk_dialogs
+            import ui.ctk.dialogs as _ctk_dialogs
             self._dialogs = _ctk_dialogs
         return self._dialogs
 

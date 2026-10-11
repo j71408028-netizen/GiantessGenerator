@@ -1,7 +1,7 @@
 # ui/exploration/exp_frame.py
 import math
 
-import ui.common.dialogs
+import ui.ctk.dialogs
 
 import customtkinter as ctk
 
@@ -14,14 +14,14 @@ from ui.exploration.report import ReportPanel
 from ui.exploration.chat_panel import ChatPanel
 from services.chat import events as chat_events
 from services.chat import ChatService, pending_char_messages
-from ui.common.dialogs import BaseDialog
-from ui.common.theme import (
+from ui.ctk.dialogs import BaseDialog
+from ui.ctk.theme import (
     EXP_BG, EXP_BORDER, EXP_BORDER_STRONG, EXP_HOVER,
     EXP_TEXT_SOFT, EXP_TEXT_MUTED, EXP_TEXT_DISABLED, EXP_OK,
     EXP_OK_HOVER, EXP_ERR, EXP_ERR_HOVER, EXP_REPORT,
     EXP_REPORT_HOVER, EXP_DUNGEON, EXP_DUNGEON_HOVER, EXP_STYLE_SELECTED_BORDER,
 )
-from ui.common import fonts as ui_fonts
+from ui.ctk import fonts as ui_fonts
 from core.models import CharacterSnapshot
 from services.exploration.context import ExplorationContext
 from core.address_model import world_of, distance_m, format_addr_verbose
@@ -495,7 +495,7 @@ class ExplorationPanel(ctk.CTkFrame):
                 self.context.preset_repo, self.context.personality_repo
             )
             if core is None:
-                ui.common.dialogs.showerror("错误", "参数无效，请检查输入。")
+                ui.ctk.dialogs.showerror("错误", "参数无效，请检查输入。")
                 return
             report = self.context.report_from_core_or_character(
                 core,
@@ -507,7 +507,7 @@ class ExplorationPanel(ctk.CTkFrame):
             if getattr(self, "_report_aborted_stuck", False):
                 self._report_aborted_stuck = False
                 return
-            ui.common.dialogs.showerror("点数不足", "行动点数不足以生成报告。")
+            ui.ctk.dialogs.showerror("点数不足", "行动点数不足以生成报告。")
             return
         self.report_panel.render_report(report)
         if self.current_state:
@@ -535,7 +535,7 @@ class ExplorationPanel(ctk.CTkFrame):
 
     def _create_character(self):
         last_report = self.report_panel.last_report
-        if last_report and ui.common.dialogs.askyesno("使用已有数据", "是否使用当前报告数据创建角色？"):
+        if last_report and ui.ctk.dialogs.askyesno("使用已有数据", "是否使用当前报告数据创建角色？"):
             snapshot = self.context.character_from_core_or_report(last_report)
         else:
             self.report_panel.clear()
@@ -546,7 +546,7 @@ class ExplorationPanel(ctk.CTkFrame):
                 self.context.preset_repo, self.context.personality_repo
             )
             if core is None:
-                ui.common.dialogs.showerror("错误", "参数无效，请检查输入。")
+                ui.ctk.dialogs.showerror("错误", "参数无效，请检查输入。")
                 return
             snapshot = self.context.character_from_core_or_report(core)
 
@@ -570,14 +570,14 @@ class ExplorationPanel(ctk.CTkFrame):
 
     def _launch_dungeon_with_data(self, data: dict):
         from ui.hosting.dungeon_spawner import launch_dungeon_subprocess
-        from ui.common.fonts import dungeon_font_default
+        from ui.ctk.fonts import dungeon_font_default
 
         ai_config = resolve_ai_config(self.app.settings)
         dungeon_font = self.app.settings.get("dungeon_font", dungeon_font_default())
 
         dungeons = self.app._scenario_repo.list_all()
         if not dungeons:
-            ui.common.dialogs.showerror("错误", "请先到“副本编辑”创建副本方案")
+            ui.ctk.dialogs.showerror("错误", "请先到“副本编辑”创建副本方案")
             return
 
         # 副本会话在独立子进程里跑：DPG/GLFW 独占子进程，不再与 Tk 主程序
@@ -586,7 +586,7 @@ class ExplorationPanel(ctk.CTkFrame):
         # 文件框由 spawner 在父进程代劳，结果以 SessionResult 返回。
         result = launch_dungeon_subprocess(
             host_window=self.app.root, app=self.app,
-            dialogs=ui.common.dialogs,
+            dialogs=ui.ctk.dialogs,
             name=data["name"], nick=data.get("nick", ""),
             height=data["height"], personality=data["personality_obj"],
             preset=data.get("preset_obj"), greed=data.get("greed", 0),
@@ -612,7 +612,7 @@ class ExplorationPanel(ctk.CTkFrame):
 
         # 入口阶段失败（配置缺失/行动点数不足/校验错误）：子进程已退出，提示
         if result.failed:
-            ui.common.dialogs.showerror("错误", result.launch_error)
+            ui.ctk.dialogs.showerror("错误", result.launch_error)
         # 会话可能在子进程里改动了角色（扣 AP、结局索引落盘），重载刷新
         self._reload_character_after_dungeon()
 
@@ -798,18 +798,18 @@ class _StuckRelocateDialog(BaseDialog):
 
     def _apply_move(self):
         if not self.combo or not self._entries:
-            ui.common.dialogs.showwarning("提示", "没有可前往的地址。")
+            ui.ctk.dialogs.showwarning("提示", "没有可前往的地址。")
             return
         it = self._entries.get(self.combo.get())
         if it is None:
             return
         d = distance_m(self.state.position, it["address"]) if self.state.position else None
         if d is None:
-            ui.common.dialogs.showerror("无法直接前往", "该地址与角色位置不在同一世界观，请使用「切换世界观」。")
+            ui.ctk.dialogs.showerror("无法直接前往", "该地址与角色位置不在同一世界观，请使用「切换世界观」。")
             return
         cost = self._move_cost(d)
         if not self.state_service.consume_action_points(self.state, cost):
-            ui.common.dialogs.showerror(
+            ui.ctk.dialogs.showerror(
                 "行动点数不足",
                 f"前往该地址需要 {cost} 行动点数，当前仅剩 {self.state.action_points}。\n"
                 "无法切换时将进入负向演化。")
@@ -820,7 +820,7 @@ class _StuckRelocateDialog(BaseDialog):
     def _apply_world_switch(self):
         worlds = self.options.get("worlds") or []
         if not worlds:
-            ui.common.dialogs.showwarning("提示", "当前没有其它世界观可供切换。")
+            ui.ctk.dialogs.showwarning("提示", "当前没有其它世界观可供切换。")
             return
         target_world = worlds[0]
         anchor = None
@@ -829,10 +829,10 @@ class _StuckRelocateDialog(BaseDialog):
                 anchor = it["address"]
                 break
         if anchor is None:
-            ui.common.dialogs.showerror("无法切换世界观", "目标世界观内没有已注册地标可作为落脚点。")
+            ui.ctk.dialogs.showerror("无法切换世界观", "目标世界观内没有已注册地标可作为落脚点。")
             return
         if not self.state_service.consume_action_points(self.state, 125):
-            ui.common.dialogs.showerror(
+            ui.ctk.dialogs.showerror(
                 "行动点数不足",
                 f"切换世界观需要 125 行动点数，当前仅剩 {self.state.action_points}。\n"
                 "无法切换时将进入负向演化。")

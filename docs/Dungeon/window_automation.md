@@ -48,7 +48,7 @@
 `check_component_pack.py` 覆盖；本脚本的 `text-components` 场景只负责真窗口里的接管可见状态。
 
 L2 之后注入点更干净：宿主能力（尺寸/DPI、显隐、事件泵、收尾弹框、回放文件选择）全部经
-`dungeon.window.host.HostPort` 注入，**不用再打桩 `ui.common.dialogs`**——
+`dungeon.window.host.HostPort` 注入，**不用再打桩 `ui.ctk.dialogs`**——
 `ScriptedHost`（无宿主）与 `RecordingTkHost`（真 Tk 度量 + 记录弹框）就够了。
 
 ## 2. 覆盖范围与边界（现状）

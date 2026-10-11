@@ -79,7 +79,7 @@ class RecordingHost(HostPort):
     """记录收尾弹框；询问类一律回答「否」。
 
     L2 之后 window 层只经宿主端口弹框（``dungeon/window/host.py``），
-    自检因此改为注入一个记录宿主，不再打桩 ``ui.common.dialogs`` 模块。
+    自检因此改为注入一个记录宿主，不再打桩 ``ui.ctk.dialogs`` 模块。
     """
 
     def __init__(self):

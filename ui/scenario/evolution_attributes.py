@@ -2,9 +2,9 @@ import tkinter as tk
 
 import customtkinter as ctk
 
-import ui.common
-from ui.common.dialogs import BaseDialog
-from ui.common.managers import TreeviewManager
+import ui.ctk
+from ui.ctk.dialogs import BaseDialog
+from ui.ctk.managers import TreeviewManager
 
 
 
@@ -77,10 +77,10 @@ class EvolutionAtrrManager(TreeviewManager):
         if not item:
             return
         if item["type"] in ("intrusion", "destruction", "casualty"):
-            ui.common.dialogs.showwarning("警告", "介入度、破坏性和总伤亡不可删除")
+            ui.ctk.dialogs.showwarning("警告", "介入度、破坏性和总伤亡不可删除")
             return
         name = item["name"]
-        if ui.common.dialogs.askyesno("确认", f"确定要删除自定义属性 '{name}' 吗？"):
+        if ui.ctk.dialogs.askyesno("确认", f"确定要删除自定义属性 '{name}' 吗？"):
             idx = self.get_selected_index()
             items = self.get_items()
             del items[idx]
@@ -211,7 +211,7 @@ class CustomAttrDialog(BaseDialog):
                 self.result = new_item
             self._close()
         except Exception as e:
-            ui.common.dialogs.showerror("错误", str(e))
+            ui.ctk.dialogs.showerror("错误", str(e))
 
     def _cancel(self, _event=None):
         self.result = None

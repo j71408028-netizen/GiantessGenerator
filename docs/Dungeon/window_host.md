@@ -75,7 +75,7 @@
 
 | 宿主 | 节拍源 | 需要实现的端口 |
 |---|---|---|
-| Tk（现状） | `while` + `root.update()` + `sleep(1/60)` | 宿主窗口显隐（`TkHost._window_widget()`：控件本身若没有窗口级命令，退回 `winfo_toplevel()`——专业模式传进来的 `ExplorationPanel` 是 `CTkFrame`，`withdraw`/`deiconify` 是 `Wm` 的方法，直接拿控件显隐会**静默失效**）+ `winfo_*` + ctypes DPI + `ui.common.dialogs` |
+| Tk（现状） | `while` + `root.update()` + `sleep(1/60)` | 宿主窗口显隐（`TkHost._window_widget()`：控件本身若没有窗口级命令，退回 `winfo_toplevel()`——专业模式传进来的 `ExplorationPanel` 是 `CTkFrame`，`withdraw`/`deiconify` 是 `Wm` 的方法，直接拿控件显隐会**静默失效**）+ `winfo_*` + ctypes DPI + `ui.ctk.dialogs` |
 | Qt | `while` + `QApplication.processEvents()`，或 `QTimer(16)` | `QWidget.hide/show` + `devicePixelRatioF()` + `QMessageBox` / `QFileDialog` |
 | 无框架脚本 / CI | `while` + `sleep` | 屏幕尺寸 + no-op + print |
 | Web / 其它进程 | 做不到（DPG 必须在本进程有 GLFW 窗口） | — |
@@ -141,7 +141,7 @@ deadline 轮询），子进程的结论行打印后立即 flush——「已通�
 `show_window` / `dialog` / `open_replay_file`（带请求 id）/ 最终 `result`；
 父 → 子发 `{"reply": id, "answer": ...}` 与 `{"req": "close"}`（父进程整体退出前请
 子进程走帧边界收尾）。子进程的弹框请求在父进程泵循环里用调用方自己的弹框实现
-代答（专业版 `ui.common.dialogs`、挂件版 `MiniDialogs`）——子进程内因此没有任何
+代答（专业版 `ui.ctk.dialogs`、挂件版 `MiniDialogs`）——子进程内因此没有任何
 Tk 代码，`tests/check_mini_layering.py` 白名单放行 `dungeon_spawner` 的依据正是它
 模块级零 CTk 依赖。
 
