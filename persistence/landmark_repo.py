@@ -1,8 +1,8 @@
-import json
 import os
 from dataclasses import asdict
 
 from core.models import Landmark
+from .json_store import load_json_with_backup, write_json_atomic
 
 
 DEFAULT_LANDMARK_STYLE = "ChineseMix"
@@ -45,12 +45,11 @@ class LandmarkRepo:
     def load(self, style_name: str = None) -> list:
         if style_name is None:
             style_name = DEFAULT_LANDMARK_STYLE
-        filepath = self._filepath(style_name)
-        if not os.path.exists(filepath):
+        # 主文件损坏时回退 .bak，风格列表不至于整表不可用
+        data = load_json_with_backup(self._filepath(style_name))
+        if not isinstance(data, list):
             return []
-        with open(filepath, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            return [Landmark(**item) for item in data]
+        return [Landmark(**item) for item in data]
 
     def load_merged(self, style_names: list) -> list:
         merged = []
@@ -59,9 +58,8 @@ class LandmarkRepo:
         return merged
 
     def save(self, style_name: str, landmarks: list):
-        filepath = self._free_filepath(style_name)
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump([asdict(l) for l in landmarks], f, ensure_ascii=False, indent=2)
+        write_json_atomic(self._free_filepath(style_name),
+                          [asdict(l) for l in landmarks])
 
     # ---------- 风格注册地址（companion 文件） ----------
     def addr_path(self, style_name: str) -> str:
@@ -69,20 +67,12 @@ class LandmarkRepo:
 
     def load_style_address(self, style_name: str) -> str:
         """读取风格注册地址文本（世界观 + 该风格注册的若干上级级）。空 = 未注册。"""
-        read_dir = self._read_dir()
-        path = os.path.join(read_dir, f"{style_name}{ADDR_SUFFIX}")
-        if not os.path.exists(path):
-            return ""
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        except Exception:
-            return ""
+        data = load_json_with_backup(
+            os.path.join(self._read_dir(), f"{style_name}{ADDR_SUFFIX}"))
         return data.get("address", "") if isinstance(data, dict) else ""
 
     def save_style_address(self, style_name: str, address_text: str):
-        with open(self.addr_path(style_name), 'w', encoding='utf-8') as f:
-            json.dump({"address": address_text or ""}, f, ensure_ascii=False, indent=2)
+        write_json_atomic(self.addr_path(style_name), {"address": address_text or ""})
 
     def load_style_registers(self, style_names: list) -> dict:
         """{风格名: 注册地址文本}。"""
@@ -92,12 +82,10 @@ class LandmarkRepo:
         if style_name in self.get_styles():
             raise ValueError(f"风格 '{style_name}' 已存在")
         if copy_from:
-            source = self._filepath(copy_from)
-            if os.path.exists(source):
-                with open(source, 'r', encoding='utf-8') as sf:
-                    data = json.load(sf)
-                with open(self._free_filepath(style_name), 'w', encoding='utf-8') as df:
-                    json.dump(data, df, ensure_ascii=False, indent=2)
+            # 原样拷贝（保留未知字段），源损坏回退 .bak，仍不可用则建空风格
+            data = load_json_with_backup(self._filepath(copy_from))
+            if isinstance(data, list):
+                write_json_atomic(self._free_filepath(style_name), data)
             else:
                 self.save(style_name, [])
             src_addr = self.load_style_address(copy_from)

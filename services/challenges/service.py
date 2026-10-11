@@ -17,6 +17,7 @@ from dataclasses import asdict
 from typing import Optional, List, Dict, Tuple
 
 from dungeon.terms import scenario_id_of
+from persistence.json_store import load_json_with_backup, write_json_atomic
 
 
 class ChallengeService:
@@ -144,26 +145,19 @@ class ChallengeService:
 
         :return: 字典 {包名（不含扩展名）: 秘钥字符串}
         """
-        result = {}
-        path = self._keys_file_path()
-        if os.path.exists(path):
-            try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    result = json.load(f)
-            except Exception:
-                pass
-        return result
+        data = load_json_with_backup(self._keys_file_path())
+        return data if isinstance(data, dict) else {}
 
     def _save_keys(self, keys: Dict[str, str]):
         """
         保存秘钥映射到 keys.json，并更新环境变量
 
+        秘钥表是全仓唯一不可再生的数据（丢了所有 .chal 包都无法打开），
+        与副本方案同待遇：原子写 + 覆盖前留 .bak。
+
         :param keys: 秘钥映射字典
         """
-        self._ensure_storage_dir()
-        path = self._keys_file_path()
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(keys, f, ensure_ascii=False, indent=2)
+        write_json_atomic(self._keys_file_path(), keys)
         # 同步到环境变量，方便其他进程读取
         os.environ[self.ENV_KEY] = json.dumps(keys, ensure_ascii=False)
 
@@ -435,8 +429,14 @@ class ChallengeService:
         if not pack_name.endswith('.chal'):
             pack_name += '.chal'
         output_path = os.path.join(self.storage_dir, pack_name)
+        # 同名 .chal 直接覆盖会无声丢掉已有包（秘钥注册后旧包无法再生成），
+        # 拒绝重名，由调用方提示；替换已有包请先删除。
+        if os.path.exists(output_path):
+            raise ValueError(f"挑战包 '{pack_name}' 已存在，请先删除或换一个包名")
 
-        # 将加密数据写入临时文件，再压缩为 zip（单文件）
+        # 加密数据写同目录临时 zip，完成后原子替换到最终路径：
+        # 写到一半崩溃不会留下截断的 .chal
+        tmp_zip_path = None
         tmp_path = None
         try:
             fd, tmp_path = tempfile.mkstemp(suffix='.bin')
@@ -444,11 +444,16 @@ class ChallengeService:
             with open(tmp_path, 'wb') as f:
                 f.write(encrypted)
 
-            with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            fd, tmp_zip_path = tempfile.mkstemp(
+                suffix='.chal', dir=self.storage_dir)
+            os.close(fd)
+            with zipfile.ZipFile(tmp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
                 zf.write(tmp_path, 'challenge_data.bin')
+            os.replace(tmp_zip_path, output_path)
         finally:
-            if tmp_path and os.path.exists(tmp_path):
-                os.unlink(tmp_path)
+            for leftover in (tmp_path, tmp_zip_path):
+                if leftover and os.path.exists(leftover):
+                    os.unlink(leftover)
 
         # 注册秘钥
         self._register_key(pack_name, key)

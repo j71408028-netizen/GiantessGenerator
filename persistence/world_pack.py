@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
 from dungeon.terms import LEGACY_SCENARIO_RESOURCE_KEY, SCENARIO_RESOURCE_KEY
+from .json_store import write_json_atomic
 
 WORLD_PACK_EXT = ".world.zip"
 WORLD_MANIFEST_NAME = "world.json"
@@ -259,10 +260,8 @@ def load_manifest_file(path: str) -> WorldPackManifest:
 
 
 def save_manifest_file(path: str, manifest: WorldPackManifest) -> None:
-    """将清单写入 world.json（先确保父目录存在）。"""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(manifest.to_dict(), f, ensure_ascii=False, indent=2)
+    """将清单写入 world.json（原子写：清单一坏，整包的导入/激活/导出全部失败）。"""
+    write_json_atomic(path, manifest.to_dict())
 
 
 def _missing_members(manifest: WorldPackManifest, members: Set[str]) -> List[str]:

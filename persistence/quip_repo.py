@@ -2,6 +2,8 @@ import json
 import os
 from typing import Dict, List
 
+from .json_store import load_json_with_backup, write_json_atomic
+
 DEFAULT_QUIP_STYLE = "Events"
 # 描述风格“注册地址”companion 文件后缀（世界观 + 风格注册的若干级）
 ADDR_SUFFIX = ".addr.json"
@@ -52,11 +54,10 @@ class QuipRepo:
     def load(self, style_name: str = None) -> dict:
         if style_name is None:
             style_name = DEFAULT_QUIP_STYLE
-        filepath = self._filepath(style_name)
-        if not os.path.exists(filepath):
+        # 主文件损坏时回退 .bak，风格列表不至于整表不可用
+        data = load_json_with_backup(self._filepath(style_name))
+        if not isinstance(data, dict):
             return {}
-        with open(filepath, 'r', encoding='utf-8') as f:
-            data = json.load(f)
         quips = {}
         for key, value in data.items():
             if key == "_meta":
@@ -121,8 +122,9 @@ class QuipRepo:
                 else:
                     save_data[category][coord_key] = quip_list
         save_data["_meta"] = meta
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(save_data, f, ensure_ascii=False, indent=2)
+        # 原子写：save 先读旧文件保 _meta 再整体重写，直接截断写入的话
+        # 崩溃时 _meta 和正文一起丢
+        write_json_atomic(filepath, save_data)
 
     def create_style(self, style_name: str, copy_from: str = None):
         if style_name in self.get_styles():
@@ -161,43 +163,30 @@ class QuipRepo:
 
     def load_style_address(self, style_name: str) -> str:
         """读取描述风格注册地址文本（世界观 + 风格注册的若干上级级）。空 = 未注册。"""
-        read_dir = self._read_dir()
-        path = os.path.join(read_dir, f"{style_name}{ADDR_SUFFIX}")
-        if not os.path.exists(path):
-            return ""
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        except Exception:
-            return ""
+        data = load_json_with_backup(
+            os.path.join(self._read_dir(), f"{style_name}{ADDR_SUFFIX}"))
         return data.get("address", "") if isinstance(data, dict) else ""
 
     def save_style_address(self, style_name: str, address_text: str):
-        with open(self.addr_path(style_name), 'w', encoding='utf-8') as f:
-            json.dump({"address": address_text or ""}, f, ensure_ascii=False, indent=2)
+        write_json_atomic(self.addr_path(style_name), {"address": address_text or ""})
 
     def load_style_registers(self, style_names: List[str]) -> Dict[str, str]:
         """{描述风格名: 注册地址文本}。"""
         return {s: self.load_style_address(s) for s in (style_names or [])}
 
     def load_meta(self, style_name: str) -> dict:
-        filepath = self._filepath(style_name)
-        if not os.path.exists(filepath):
+        data = load_json_with_backup(self._filepath(style_name))
+        if not isinstance(data, dict):
             return self._default_meta()
-        with open(filepath, 'r', encoding='utf-8') as f:
-            data = json.load(f)
         return data.get("_meta", self._default_meta())
 
     def save_meta(self, style_name: str, meta: dict):
         filepath = self._free_filepath(style_name)
-        if os.path.exists(filepath):
-            with open(filepath, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        else:
+        data = load_json_with_backup(filepath)
+        if not isinstance(data, dict):
             data = {}
         data["_meta"] = meta
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        write_json_atomic(filepath, data)
 
     def _filepath(self, style_name: str) -> str:
         return os.path.join(self._read_dir(), f"{style_name}.json")

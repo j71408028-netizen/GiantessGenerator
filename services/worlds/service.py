@@ -29,6 +29,7 @@ from persistence.world_pack import (
 from dungeon.terms import (LEGACY_SCENARIO_RESOURCE_KEY, SCENARIO_RESOURCE_KEY,
                            is_default_scenario)
 from core.behavior_runtime import get_runtime, resolve_behavior_source
+from persistence.json_store import write_json_atomic
 
 _MEMBER_TRAVERSAL_RE = re.compile(r"(^|/)\s*\.\.\s*(/|$)")
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
@@ -51,9 +52,7 @@ def _load_json(path: str) -> Any:
 
 
 def _save_json(path: str, data: Any) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    write_json_atomic(path, data)
 
 
 class WorldManager:

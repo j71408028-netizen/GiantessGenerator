@@ -1,5 +1,4 @@
 import datetime
-import json
 import os
 import shutil
 from dataclasses import asdict
@@ -7,6 +6,7 @@ from typing import Optional
 
 from core import imaging
 from core.models import CharacterSnapshot
+from .json_store import load_json_with_backup, write_json_atomic
 
 
 class CharacterRepo:
@@ -27,16 +27,14 @@ class CharacterRepo:
         state.updated_at = datetime.datetime.now().isoformat()
         char_dir = self._character_path(state.giantess_id)
         os.makedirs(char_dir, exist_ok=True)
-        path = os.path.join(char_dir, "info.json")
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(asdict(state), f, ensure_ascii=False, indent=2)
+        # 角色档案与副本方案同待遇：原子写 + 覆盖前留 .bak，
+        # 保存中途崩溃/断电不会把档案截断清零
+        write_json_atomic(os.path.join(char_dir, "info.json"), asdict(state))
 
     def load(self, giantess_id: str) -> Optional[CharacterSnapshot]:
-        path = self._data_file_path(giantess_id)
-        if not os.path.exists(path):
+        data = load_json_with_backup(self._data_file_path(giantess_id))
+        if data is None:
             return None
-        with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
         return CharacterSnapshot.from_dict(data)
 
     def save_avatar(self, giantess_id: str, source_path: str, low_resolution: bool = False) -> str:
