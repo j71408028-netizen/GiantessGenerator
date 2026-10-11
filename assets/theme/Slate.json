@@ -292,8 +292,17 @@
     "EXP_DUNGEON_HOVER": { "$role": "feature-dungeon-hover" },
     "EXP_STYLE_SELECTED_BORDER": { "$role": "accent" },
 
+    "//exp-action": "探索页实底动作按钮 · 亮深互换：浅色=亮底白字，深色=深底黑字",
+    "EXP_OK_FILL": { "$pair": ["emerald.400", "emerald.600"] },
+    "EXP_OK_FILL_HOVER": { "$pair": ["emerald.500", "emerald.700"] },
+    "EXP_REPORT_FILL": { "$pair": ["orange.400", "orange.600"] },
+    "EXP_REPORT_FILL_HOVER": { "$pair": ["orange.600", "orange.700"] },
+    "EXP_DUNGEON_FILL": { "$pair": ["purple.400", "purple.700"] },
+    "EXP_DUNGEON_FILL_HOVER": { "$pair": ["purple.700", "purple.800"] },
+    "EXP_ACTION_TEXT": { "$pair": ["#FFFFFF", "slate.900"] },
+
     "//state": "巨娘状态面板 · ui/exploration/giantess_state.py",
-    "STATE_BG": { "$role": "bg-app" },
+    "STATE_BG": { "$role": "bg-panel" },
     "STATE_BORDER": { "$role": "border" },
     "STATE_BORDER_STRONG": { "$role": "border-strong" },
     "STATE_HOVER": { "$role": "bg-hover" },

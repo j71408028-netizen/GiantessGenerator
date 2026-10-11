@@ -20,6 +20,8 @@ from ui.ctk.theme import (
     EXP_TEXT_SOFT, EXP_TEXT_MUTED, EXP_TEXT_DISABLED, EXP_OK,
     EXP_OK_HOVER, EXP_ERR, EXP_ERR_HOVER, EXP_REPORT,
     EXP_REPORT_HOVER, EXP_DUNGEON, EXP_DUNGEON_HOVER, EXP_STYLE_SELECTED_BORDER,
+    EXP_OK_FILL, EXP_OK_FILL_HOVER, EXP_REPORT_FILL, EXP_REPORT_FILL_HOVER,
+    EXP_DUNGEON_FILL, EXP_DUNGEON_FILL_HOVER, EXP_ACTION_TEXT,
 )
 from ui.ctk import fonts as ui_fonts
 from core.models import CharacterSnapshot
@@ -64,7 +66,8 @@ class ExplorationPanel(ctk.CTkFrame):
 
         # ===== LEFT COLUMN =====
         left_col = ctk.CTkFrame(self, fg_color="transparent")
-        left_col.grid(row=0, column=0, sticky='nsew', padx=(15, 5), pady=7)
+        # 底边距大于顶边距：窗口标题栏压住顶部，底部需要更多留白才不显挤
+        left_col.grid(row=0, column=0, sticky='nsew', padx=(15, 5), pady=(7, 12))
         left_col.pack_propagate(False)
         left_col.configure(width=500)
 
@@ -128,19 +131,13 @@ class ExplorationPanel(ctk.CTkFrame):
         # 形象变更加载后刷新头像
         self.params_panel.on_image_uploaded = lambda: self.intro_panel.refresh_image_display()
 
-        # 左下按钮区域
-        self.button_inner = ctk.CTkFrame(left_col, fg_color="transparent")
-        self.button_inner.pack(side='bottom', fill='x', padx=12, pady=0)
+        # 左下按钮区域：透明容器统一收纳「加载角色」与动作按钮；动作按钮
+        # 以语义色实底填充；AP 消耗标签同栏右对齐（随角色态显隐）。
+        self.action_bar = ctk.CTkFrame(left_col, fg_color="transparent")
+        self.action_bar.pack(side='bottom', fill='x', padx=12, pady=(6, 0))
 
-        self.button_hint = ctk.CTkFrame(left_col, fg_color="transparent")
-        self.button_hint.pack(side='bottom', fill='x', padx=12, pady=0)
-
-        self.report_cost_label = ctk.CTkLabel(
-            self.button_hint, text="",
-            font=ui_fonts.ui_font(10, "bold"),
-            text_color=EXP_REPORT)
-        left_side = ctk.CTkFrame(self.button_inner, fg_color="transparent")
-        left_side.pack(side='left')
+        left_side = ctk.CTkFrame(self.action_bar, fg_color="transparent")
+        left_side.pack(side='left', pady=6)
         select_btn = ctk.CTkButton(left_side, text="加载角色", width=100,
                                    font=ui_fonts.ui_font(12),
                                    fg_color="transparent",
@@ -150,59 +147,61 @@ class ExplorationPanel(ctk.CTkFrame):
                                    border_width=1,
                                    corner_radius=6,
                                    command=self.switch_to_select_panel)
-        select_btn.pack(side='left', padx=3, pady=(0,5))
+        select_btn.pack(side='left', padx=3, pady=0)
 
-        right_side = ctk.CTkFrame(self.button_inner, fg_color="transparent")
-        right_side.pack(side='right')
+        # AP 标签的 pack 晚于 right_side（side='right' 后 pack 居左），
+        # 因此无论何时 pack_forget/pack 都保持在按钮组左侧。
+        self.report_cost_label = ctk.CTkLabel(
+            self.action_bar, text="",
+            font=ui_fonts.ui_font(10, "bold"),
+            text_color=EXP_REPORT)
 
-        btn_cr = EXP_OK
-        btn_ch = EXP_OK_HOVER
+        right_side = ctk.CTkFrame(self.action_bar, fg_color="transparent")
+        right_side.pack(side='right', pady=6)
+
+        btn_cr = EXP_OK_FILL
+        btn_ch = EXP_OK_FILL_HOVER
         self.action_btn = ctk.CTkButton(
             right_side, text="✨ 创建角色", width=100,
             font=ui_fonts.ui_font(12),
-            fg_color="transparent",
-            border_width=1,
-            border_color=btn_cr,
-            text_color=btn_cr,
+            fg_color=btn_cr,
+            text_color=EXP_ACTION_TEXT,
             hover_color=btn_ch,
             corner_radius=6,
             command=self._on_action_btn_click
         )
-        self.action_btn.pack(side='left', padx=4, pady=(0,5))
+        self.action_btn.pack(side='left', padx=4, pady=0)
 
-        btn_rr = EXP_REPORT
-        btn_rh = EXP_REPORT_HOVER
+        btn_rr = EXP_REPORT_FILL
+        btn_rh = EXP_REPORT_FILL_HOVER
         self.report_btn = ctk.CTkButton(
             right_side, text="📜 生成报告", width=100,
             font=ui_fonts.ui_font(12),
-            fg_color="transparent",
-            border_width=1,
-            border_color=btn_rr,
-            text_color=btn_rr,
+            fg_color=btn_rr,
+            text_color=EXP_ACTION_TEXT,
             hover_color=btn_rh,
             corner_radius=6,
             command=self._generate_giantess
         )
-        self.report_btn.pack(side='left', padx=4, pady=(0,5))
+        self.report_btn.pack(side='left', padx=4, pady=0)
 
-        btn_dr = EXP_DUNGEON
-        btn_dh = EXP_DUNGEON_HOVER
+        btn_dr = EXP_DUNGEON_FILL
+        btn_dh = EXP_DUNGEON_FILL_HOVER
         self.dungeon_btn = ctk.CTkButton(
             right_side, text="🏰 进入副本", width=100,
             font=ui_fonts.ui_font(12),
-            fg_color="transparent",
-            border_width=1,
-            border_color=btn_dr,
-            text_color=btn_dr,
+            fg_color=btn_dr,
+            text_color=EXP_ACTION_TEXT,
             hover_color=btn_dh,
             corner_radius=6,
             command=self._start_dungeon
         )
-        self.dungeon_btn.pack(side='left', padx=4, pady=(0,5))
+        self.dungeon_btn.pack(side='left', padx=4, pady=0)
 
         # ===== RIGHT COLUMN =====
         right_frame = ctk.CTkFrame(self, fg_color="transparent")
-        right_frame.grid(row=0, column=1, rowspan=3, sticky='nsew', padx=(5, 15), pady=7)
+        right_frame.grid(row=0, column=1, rowspan=3, sticky='nsew',
+                         padx=(5, 15), pady=(7, 12))
         right_frame.grid_rowconfigure(0, weight=0)
         right_frame.grid_rowconfigure(1, weight=1)
         right_frame.grid_columnconfigure(0, weight=1)
@@ -248,7 +247,7 @@ class ExplorationPanel(ctk.CTkFrame):
         self.quip_hint_label.bind("<Leave>", _style_hover_leave)
 
         click_label = ctk.CTkLabel(style_bar, text="点击切换",
-                     text_color=EXP_TEXT_DISABLED,
+                     text_color=EXP_TEXT_MUTED,
                      font=ui_fonts.ui_font(12))
         click_label.pack(side='left', padx=(20,0))
         click_label.bind("<Enter>", _style_hover_enter)
@@ -343,9 +342,9 @@ class ExplorationPanel(ctk.CTkFrame):
         避免切换面板时重建「创建角色」按钮导致其跑到「进入副本」右侧。"""
         for btn in (self.action_btn, self.report_btn, self.dungeon_btn):
             btn.pack_forget()
-        self.action_btn.pack(side='left', padx=4, pady=(0, 5))
-        self.report_btn.pack(side='left', padx=4, pady=(0, 5))
-        self.dungeon_btn.pack(side='left', padx=4, pady=(0, 5))
+        self.action_btn.pack(side='left', padx=4, pady=0)
+        self.report_btn.pack(side='left', padx=4, pady=0)
+        self.dungeon_btn.pack(side='left', padx=4, pady=0)
 
     def _sync_state_panel_height(self, event):
         """状态面板始终占用与创建参数面板相同的高度。"""
@@ -356,16 +355,14 @@ class ExplorationPanel(ctk.CTkFrame):
         """显示铺满 content_area 的选择角色面板，保留左上探索模式标题。"""
         self.panel_stack.grid_remove()
         self.intro_panel.pack_forget()
-        self.button_inner.pack_forget()
-        self.button_hint.pack_forget()
+        self.action_bar.pack_forget()
         self.select_panel.pack(fill='both', pady=(0,5), expand=True)
 
     def _leave_select_mode(self):
-        """隐藏选择角色面板，恢复左上堆叠层与左下按钮区。"""
+        """隐藏选择角色面板，恢复左上堆叠层与左下操作栏。"""
         self.select_panel.pack_forget()
         self.panel_stack.grid()
-        self.button_inner.pack(side='bottom', fill='x', padx=12, pady=0)
-        self.button_hint.pack(side='bottom', fill='x', padx=12, pady=0)
+        self.action_bar.pack(side='bottom', fill='x', padx=12, pady=(6, 0))
 
     def switch_to_params_panel(self):
         self._loading_character = False
@@ -396,9 +393,9 @@ class ExplorationPanel(ctk.CTkFrame):
         self._repack_action_buttons()
         self.action_btn.configure(
             text="✨ 创建角色",
-            border_color=EXP_OK,
-            text_color=EXP_OK,
-            hover_color=EXP_OK_HOVER
+            fg_color=EXP_OK_FILL,
+            text_color=EXP_ACTION_TEXT,
+            hover_color=EXP_OK_FILL_HOVER
         )
 
     def switch_to_state_panel(self, state_data=None):
@@ -531,7 +528,7 @@ class ExplorationPanel(ctk.CTkFrame):
             self.report_cost_label.configure(text=f"- {report_cost} AP")
         else:
             self.report_cost_label.configure(text="- 0 AP")
-        self.report_cost_label.pack(side='left', padx=(300,0), pady=(2, 0))
+        self.report_cost_label.pack(side='right', padx=(0, 10))
 
     def _create_character(self):
         last_report = self.report_panel.last_report
