@@ -283,7 +283,6 @@ _expect("warning", "triggers[4].condition.rules[1].metric", "选项度量不支�
 _expect("warning", "triggers[4].condition.rules[2].metric", "伤亡度量不支持")
 _expect("warning", "triggers[4].precondition_names", "前置引用不存在")
 _expect("warning", "triggers[5].action", "旧版结局触发器")
-_expect("warning", "triggers[5].action_data.name", "结局未填名称")
 _expect("error", "chapters[0].overflow_target", "超限跳转悬空（error）")
 _expect("warning", "initial_prompt", "initial_prompt 非字符串")
 _expect("warning", "coupling_level", "耦合等级无效")

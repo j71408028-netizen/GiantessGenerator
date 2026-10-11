@@ -187,14 +187,17 @@ _finish_step()
 2. `precondition_names` 已全部触发过
 3. `condition` 规则组（`TriggerRules.evaluate`）
 
-命中后按动作执行：`insert`（插入段落，可延迟到下一段的衔接地）/ `option`（弹选项）/
-`effect`（限时背景滤镜）/ `fx`（窗口视效）/ `goto`（进入或离开章节）/ `none`（仅标记条件成立）；
-外加只读兼容的 `ending`（旧配置，新方案改用**结束章节**）。
-未知动作走通用跳过路径。字段与参数详见 [数据模型](script.md) §4–§6。
+命中后按 `actions.ACTION_POSITIONS` 的**固定顺序位置**逐位派发，同位置至多生效一个
+（同位置内按配置顺序取第一个满足条件者）：
 
-视效类动作（`effect` / `fx`，见 `actions.VISUAL_ACTION_TYPES`）**总是最优先派发**：
-两轮遍历先派完所有视效触发器再派其余动作——视效是纯视觉、不等结果，
-同一轮里即使还有插入/选项/跳转，画面反应也先生效。
+`fx` → `option` / `mini_game` → `goto` → `effect` → `insert` → `none`
+
+**一轮 = 一次步进收尾（或会话启动）+ 它派生的全部结算重判**（选项选择、小游戏结算，
+见 `triggers._begin_trigger_round`）：重判共享「本轮已触发」集合，同一触发器一轮内
+至多生效一次；被接纳即清空 `间隔计数`。effect 排在 goto 之后，换章后滤镜才生效
+（先于 goto 会被换章清除）。未知动作与旧版动作（`background` / `sensitivity` /
+`ending`）走通用跳过路径，`ending` 仅回放兼容。字段与参数详见
+[数据模型](script.md) §4–§6.1。
 
 ### 5.2 结束路径
 

@@ -450,6 +450,8 @@ class DungeonStoryEngine:
                     summarizer.record_key_event(f"破坏性回落到{int(after_d)}以下")
         # 剧情压缩：记录本段并按块（默认 20 段）压缩
         self._record_story_summary(text_type, text)
+        # 步进收尾开启新一轮判定：本轮含它派生的结算重判（见 _begin_trigger_round）
+        self._begin_trigger_round()
         self.check_triggers()
         # 触发器判定后再检查章节段落数上限，避免同一步内先跳转又被覆盖
         self._check_chapter_overflow()

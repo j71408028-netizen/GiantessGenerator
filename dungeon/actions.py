@@ -5,8 +5,9 @@
 - ``insert`` / ``option`` / ``effect`` / ``goto`` / ``mini_game`` / ``none``：
   一次性的单步行为、跳转到章节、小游戏挑战，以及只标记条件成立的空动作。
   编辑器为这六种提供新建入口。
-- ``ending``：旧配置里的结局触发器，运行时仍执行；新方案改由「结束章节」
-  承担（章节属性 ``ending=True``），编辑器不再提供新建入口。
+- ``ending``：旧配置里的结局触发器，**运行时已不再执行**（仅回放兼容）；
+  新方案改由「结束章节」承担（章节属性 ``ending=True``），编辑器不再提供
+  新建入口，并把存量条目显示为「旧版·已失效」。
 
 已退场的旧版动作（背景切换 / 性格敏感化）**不在本注册表内**：它们的职责
 已由章节自身的属性承担（见 ``dungeon.audio.chapters``），运行时落入「未知动作」
@@ -21,10 +22,11 @@
 # 运行时支持的动作：单步行为 + 章节跳转 + 小游戏挑战 + 条件标记
 NEW_ACTIONS = ("insert", "option", "effect", "fx", "goto", "mini_game", "none")
 
-# 「结局」不再是触发器动作：改由「结束章节」承担（章节属性 ``ending=True``）。
-# 运行时仍兼容旧配置中的 ``ending`` 触发器与旧回放记录；仅编辑器不再提供
-# 新建入口（见 ui/scenario/trigger_dlg.py），运行时遭遇结束章节所在作用域的
-# goto/option 触发器时会跳过。
+# 「结局」触发器动作已删除：新方案由「结束章节」承担（章节属性 ``ending=True``），
+# 结局结算管线（``pending_ending`` + EndingHandler）本身保留。运行时不再执行
+# ending 触发器（与 background/sensitivity 同走「未知动作」跳过路径），仅回放
+# 兼容——旧存档里的结局触发记录仍按记录复现；编辑器把它显示为「旧版·已失效」，
+# 校验器（dungeon/validate.py 的 LEGACY_ACTIONS）在保存与启动前报告专项警告。
 ENDING_ACTION = "ending"
 
 ACTION_LABELS = {
@@ -73,8 +75,24 @@ WINDOW_FX = (
 )
 WINDOW_FX_KEYS = tuple(key for key, _label in WINDOW_FX)
 
-# 视效类动作：纯视觉、不等结果，check_triggers 中总是最优先派发
-VISUAL_ACTION_TYPES = ("effect", "fx")
+# 触发判定的固定顺序位置：一轮判定从先到后逐位派发，**同位置至多生效一个**
+# （同位置内按配置顺序取第一个满足条件且配置有效的触发器）：
+#
+# 1. ``fx``            窗口视效：纯视觉、不等结果，画面反应永远最先；
+# 2. ``option`` / ``mini_game``  模态动作：占用步进，先于流程类占位；
+# 3. ``goto``          章节跳转：之后生效的 effect / insert 落在新章节里
+#                      （effect 若先于 goto 生效会被换章清除，等于白放）；
+# 4. ``effect``        短暂视效（背景滤镜）；
+# 5. ``insert``        插入段落；
+# 6. ``none``          条件标记：最后才立，依赖它的触发器最早下一轮可见。
+ACTION_POSITIONS = (
+    ("fx",),
+    ("option", "mini_game"),
+    ("goto",),
+    ("effect",),
+    ("insert",),
+    ("none",),
+)
 
 
 def normalize_action_type(action_type, action_data: dict = None) -> str:

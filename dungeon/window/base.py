@@ -180,6 +180,7 @@ class DungeonWindowBase:
         self.current_background_path = ""
         self.triggered_names = set()   # 已触发且不可再次触发的触发器
         self.fired_triggers = set()    # 至少触发过一次的触发器（前置条件判断用）
+        self._round_fired = set()      # 本轮判定已生效的触发器（结算重判不重发，见 triggers._begin_trigger_round）
         self.replay_data = []
         # 插入触发器触发后排队的段落（FIFO）
         self.pending_insertions = deque()

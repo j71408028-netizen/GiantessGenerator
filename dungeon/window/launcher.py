@@ -569,6 +569,8 @@ class DungeonLaunchStages:
             self._replay_next_step()
         else:
             self._enter_start_chapter()
+            # 会话启动是第一轮判定的开轮点（见 triggers._begin_trigger_round）
+            self._begin_trigger_round()
             self.check_triggers()
             self._schedule_text_update()
 

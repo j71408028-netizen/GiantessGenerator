@@ -248,10 +248,6 @@ class ChapterTriggerManager(TreeviewManager):
         if action_type in LEGACY_ACTIONS:
             # 旧版动作已不再支持（运行时直接跳过），列表里标出来供用户删除
             return f"{LEGACY_ACTIONS[action_type]}（旧版·已失效）"
-        if action_type == "ending":
-            # 旧配置中的结局触发器仍可运行；新建入口已迁移到「结束章节」
-            icon = (trigger.get("action_data") or {}).get("icon_path")
-            return "结局（重要·旧配置）" if icon else "结局（旧配置）"
         return action_label(action_type)
 
     def _format_background(self, background: dict) -> str:

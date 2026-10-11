@@ -1,5 +1,4 @@
 import copy
-import os
 import tkinter as tk
 
 import customtkinter as ctk
@@ -19,7 +18,6 @@ from ui.ctk.dialogs import BaseDialog
 from ui.ctk.theme import (
     TRIGGER_TEXT, TRIGGER_HINT,
 )
-from ui.scenario.asset_import import import_ending_icon
 
 
 class TriggerEditDialog(BaseDialog):
@@ -225,7 +223,6 @@ class TriggerEditDialog(BaseDialog):
         self.action_frames["fx"] = self._build_fx_form(self.action_area)
         self.action_frames["goto"] = self._build_goto_form(self.action_area)
         self.action_frames["mini_game"] = self._build_mini_game_form(self.action_area)
-        self.action_frames["ending"] = self._build_ending_form(self.action_area)
 
         # ---------- 类型说明（滚动区内的说明文案）----------
         hint_area = ctk.CTkFrame(content, fg_color="transparent")
@@ -494,78 +491,6 @@ class TriggerEditDialog(BaseDialog):
                 return label
         return VISUAL_FILTERS[0][1]
 
-    def _build_ending_form(self, parent):
-        self.ending_frame = ctk.CTkFrame(parent, fg_color="transparent")
-
-        name_row = ctk.CTkFrame(self.ending_frame, fg_color="transparent")
-        name_row.pack(fill='x')
-        ctk.CTkLabel(name_row, text="结局名称:",
-                     font=self.UI_FONT_BOLD).pack(side='left')
-        self.ending_name_var = tk.StringVar(value="")
-        self.ending_name_entry = ctk.CTkEntry(
-            name_row, textvariable=self.ending_name_var, width=250, height=28, font=self.UI_FONT)
-        self.ending_name_entry.pack(side='left', padx=(6, 0))
-
-        ctk.CTkLabel(self.ending_frame, text="结算增量（触发结局后统一计算一次）:",
-                     font=self.UI_FONT_BOLD).pack(anchor='w', pady=(8, 3))
-        delta_row = ctk.CTkFrame(self.ending_frame, fg_color="transparent")
-        delta_row.pack(fill='x')
-        self.ending_intrusion_var = tk.StringVar(value="0")
-        self.ending_destruction_var = tk.StringVar(value="0")
-        self.ending_casualty_var = tk.StringVar(value="0")
-
-        def _delta_entry(row_frame, text, var):
-            ctk.CTkLabel(row_frame, text=text, font=self.UI_FONT).pack(side='left')
-            ctk.CTkEntry(row_frame, textvariable=var, width=70, height=28,
-                         font=self.UI_FONT).pack(side='left', padx=(4, 10))
-
-        _delta_entry(delta_row, "介入度", self.ending_intrusion_var)
-        _delta_entry(delta_row, "破坏性", self.ending_destruction_var)
-        _delta_entry(delta_row, "伤亡步进", self.ending_casualty_var)
-
-        # 自定义属性增量
-        self.ending_custom_delta_vars = {}
-        custom_names = [a["name"] for a in self.evolution_attrs
-                        if a.get("name") and a.get("type") == "custom"]
-        if custom_names:
-            ctk.CTkLabel(self.ending_frame, text="自定义属性增量:",
-                         font=self.UI_FONT_BOLD).pack(anchor='w', pady=(8, 3))
-            for name in custom_names:
-                row = ctk.CTkFrame(self.ending_frame, fg_color="transparent")
-                row.pack(fill='x')
-                ctk.CTkLabel(row, text=name, width=90, anchor='w',
-                             font=self.UI_FONT).pack(side='left')
-                var = tk.StringVar(value="0")
-                self.ending_custom_delta_vars[name] = var
-                ctk.CTkEntry(row, textvariable=var, width=90, height=28,
-                             font=self.UI_FONT).pack(side='left', padx=(4, 0))
-
-        # 行动点数返还
-        refund_row = ctk.CTkFrame(self.ending_frame, fg_color="transparent")
-        refund_row.pack(fill='x', pady=(6, 0))
-        self.ending_refund_var = tk.StringVar(value="0")
-        ctk.CTkLabel(refund_row, text="行动点数返还:", font=self.UI_FONT_BOLD).pack(side='left')
-        ctk.CTkEntry(refund_row, textvariable=self.ending_refund_var,
-                     width=90, height=28, font=self.UI_FONT).pack(side='left', padx=(4, 0))
-
-        # 结局图标（png）：不上传图标则该结局视为不重要，不计入档案
-        icon_row = ctk.CTkFrame(self.ending_frame, fg_color="transparent")
-        icon_row.pack(fill='x', pady=(6, 0))
-        ctk.CTkLabel(icon_row, text="结局图标(png):",
-                     font=self.UI_FONT_BOLD).pack(side='left')
-        self.ending_icon_var = tk.StringVar(value="")
-        ctk.CTkEntry(icon_row, textvariable=self.ending_icon_var, width=180,
-                     height=28, font=self.UI_FONT).pack(side='left', padx=(6, 0))
-        ctk.CTkButton(icon_row, text="选择图标", width=78, command=self._import_ending_icon,
-                      height=28, font=self.UI_FONT).pack(side='left', padx=(6, 0))
-        ctk.CTkButton(icon_row, text="清除", width=52, command=self._clear_ending_icon,
-                      height=28, font=self.UI_FONT).pack(side='left', padx=(4, 0))
-        self.ending_icon_preview = ctk.CTkLabel(self.ending_frame, text="")
-        self.ending_icon_preview.pack(anchor='w', pady=(2, 0))
-        self._ending_icon_ctkimg = None
-        return self.ending_frame
-
-    def _show_action_frame(self, action_type):
         """仅显示当前动作类型的表单，其余动作帧隐藏。"""
         if action_type == "none":
             self.action_section_label.pack_forget()
@@ -884,15 +809,6 @@ class TriggerEditDialog(BaseDialog):
         elif action_type == "mini_game":
             data["game"] = self.minigame_game_var.get().strip() or MINI_GAME_DEFAULT_ID
             self._minigame_params_to_data(data)
-        elif action_type == "ending":
-            data["name"] = self.ending_name_var.get().strip()
-            data["intrusion_delta"] = self.ending_intrusion_var.get().strip()
-            data["destruction_delta"] = self.ending_destruction_var.get().strip()
-            data["casualty_step"] = self.ending_casualty_var.get().strip()
-            data["action_points_refund"] = self.ending_refund_var.get().strip()
-            data["custom_deltas"] = {name: var.get().strip()
-                                     for name, var in self.ending_custom_delta_vars.items()}
-            data["icon_path"] = self.ending_icon_var.get().strip()
         return data
 
     def _refresh_action_ui(self, action_type, action_data):
@@ -929,11 +845,6 @@ class TriggerEditDialog(BaseDialog):
             game_id = str(action_data.get("game") or MINI_GAME_DEFAULT_ID)
             self.minigame_game_var.set(game_id)
             self._rebuild_minigame_params(action_data)
-        elif action_type == "ending":
-            self.ending_name_var.set(action_data.get("name") or action_data.get("ending_text") or "")
-            self._load_ending_deltas(action_data)
-            self.ending_icon_var.set(action_data.get("icon_path", ""))
-            self._refresh_ending_icon_preview()
         self._update_action_description()
 
     def _update_action_description(self):
@@ -960,17 +871,6 @@ class TriggerEditDialog(BaseDialog):
             "game": MINI_GAME_DEFAULT_ID, "target_level": 3,
         })
 
-    def _load_ending_deltas(self, action_data):
-        action_data = action_data or {}
-        self.ending_intrusion_var.set(str(action_data.get("intrusion_delta", 0)))
-        self.ending_destruction_var.set(str(action_data.get("destruction_delta", 0)))
-        self.ending_casualty_var.set(str(action_data.get("casualty_step", 0)))
-        self.ending_refund_var.set(str(action_data.get("action_points_refund", 0)))
-        custom = action_data.get("custom_deltas", {}) or {}
-        for name, var in self.ending_custom_delta_vars.items():
-            var.set(str(custom.get(name, 0)))
-
-    def _insert_template(self):
         self._set_action_template("insert", "新插入",
                                   {"text": "", "text_type": "background",
                                    "highlight": False, "delayed": False})
@@ -979,65 +879,6 @@ class TriggerEditDialog(BaseDialog):
         self._set_action_template("option", "新选项",
                                   {"prompt": "",
                                    "options": [{"id": 0, "prompt": ""}, {"id": 1, "prompt": ""}]})
-
-    def _ending_template(self):
-        # 结局动作已迁移为「结束章节」（chapter_dlg 中勾选“结束章节”），
-        # 不再提供新建入口；保留本方法仅为旧配置的查看兼容
-        ui.ctk.dialogs.showinfo(
-            "已迁移",
-            "「结局」动作已改由「结束章节」承担：\n"
-            "在章节编辑对话框勾选“结束章节”，即可配置结局结算与图标；\n"
-            "进入结束章节后段落固定为结局类型、步进为 0，"
-            "段落数耗尽即终止副本。")
-
-    # ---------- 结局图标 ----------
-    def _resolve_ending_icon_abspath(self, icon_path: str) -> str:
-        """把配置的相对图标路径解析为实际文件路径（相对副本目录）。"""
-        if not icon_path:
-            return ""
-        if os.path.isabs(icon_path):
-            return icon_path
-        if self.scenario_id and self._scenario_repo:
-            candidate = os.path.normpath(
-                os.path.join(self._scenario_repo.root, self.scenario_id, icon_path))
-            if os.path.exists(candidate):
-                return candidate
-        return icon_path
-
-    def _refresh_ending_icon_preview(self):
-        """按当前图标路径刷新预览缩略图。"""
-        path = self._resolve_ending_icon_abspath(self.ending_icon_var.get().strip())
-        if not path or not os.path.exists(path):
-            self._ending_icon_ctkimg = None
-            self.ending_icon_preview.configure(image=None, text="（未选择图标）")
-            return
-        try:
-            from PIL import Image
-            img = Image.open(path)
-            w, h = img.size
-            max_side = 96
-            if max(w, h) > max_side:
-                scale = max_side / max(w, h)
-                w, h = max(1, int(w * scale)), max(1, int(h * scale))
-                img = img.resize((w, h), Image.Resampling.LANCZOS)
-            self._ending_icon_ctkimg = ctk.CTkImage(light_image=img, dark_image=img, size=(w, h))
-            self.ending_icon_preview.configure(image=self._ending_icon_ctkimg, text="")
-        except Exception as e:
-            print(f"结局图标预览失败: {e}")
-            self._ending_icon_ctkimg = None
-            self.ending_icon_preview.configure(image=None, text="（预览失败）")
-
-    def _import_ending_icon(self):
-        """选择 png 图标并存入副本 endings 目录，路径以相对副本目录保存。"""
-        rel = import_ending_icon(self, self._scenario_repo, self.scenario_id)
-        if not rel:
-            return
-        self.ending_icon_var.set(rel)
-        self._refresh_ending_icon_preview()
-
-    def _clear_ending_icon(self):
-        self.ending_icon_var.set("")
-        self._refresh_ending_icon_preview()
 
     # ---------- 确定 ----------
     def _ok(self):
@@ -1151,29 +992,6 @@ class TriggerEditDialog(BaseDialog):
                                        if entry.get().strip()]
 
 
-        # 结局表单字段（仅结局动作生效）
-        if action_type == "ending":
-            action_data["name"] = self.ending_name_var.get().strip()
-            for field, var in (("介入度增量", self.ending_intrusion_var),
-                               ("破坏性增量", self.ending_destruction_var),
-                               ("伤亡步进", self.ending_casualty_var)):
-                try:
-                    float(var.get())
-                except ValueError:
-                    ui.ctk.dialogs.showerror("错误", f"结局的{field}必须是数字")
-                    return
-            for name, var in self.ending_custom_delta_vars.items():
-                try:
-                    float(var.get())
-                except ValueError:
-                    ui.ctk.dialogs.showerror("错误", f"自定义属性 {name} 的增量必须是数字")
-                    return
-            try:
-                int(float(self.ending_refund_var.get()))
-            except ValueError:
-                ui.ctk.dialogs.showerror("错误", "结局的行动点数返还必须是数字")
-                return
-
         # 验证 condition 结构
         if not isinstance(condition, dict):
             ui.ctk.dialogs.showerror("错误", "condition 必须是字典")
@@ -1257,9 +1075,6 @@ class TriggerEditDialog(BaseDialog):
         if action_type == "option" and (not action_data.get("options")
                                         or len(action_data["options"]) < 2):
             ui.ctk.dialogs.showerror("错误", "选项动作至少需要 2 个选项")
-            return
-        if action_type == "ending" and not action_data.get("name"):
-            ui.ctk.dialogs.showerror("错误", "结局动作必须填写结局名称")
             return
         if action_type == "option" and ("options" not in action_data or not isinstance(action_data["options"], list)):
             ui.ctk.dialogs.showerror("错误", "选项类型必须包含 options 列表")

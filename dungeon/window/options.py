@@ -121,7 +121,8 @@ class OptionHandler:
         self.pending_option = None
         self._option_generating = False
 
-        # 可再次触发的选项触发器在选择后仍可被重新检查触发
+        # 结算后立即重判（同一轮，见 triggers._begin_trigger_round）：同一触发器
+        # 受本轮已触发集合保护不会立刻重发，其他触发器（含另一个选项）可接力
         self.check_triggers()
         # 选择后下一次点击必然生成：立即补射预生成（check_triggers 排队的
         # 插入段/结局会使其自动跳过，改由相应路径补射）

@@ -8,8 +8,8 @@
 import random
 
 from dungeon import process_log
-from dungeon.actions import (EMPTY_ACTIONS, MINI_GAME_DEFAULT_ID,
-                             VISUAL_ACTION_TYPES, VISUAL_FILTER_KEYS,
+from dungeon.actions import (ACTION_POSITIONS, EMPTY_ACTIONS, ENDING_ACTION,
+                             MINI_GAME_DEFAULT_ID, VISUAL_FILTER_KEYS,
                              WINDOW_FX_KEYS, normalize_action_type)
 from dungeon.audio.chapters import (find_chapter, is_terminating_chapter,
                               matches_scope, sensitivity_amount)
@@ -213,42 +213,49 @@ class TriggerHandler:
         self._refresh_visual_effect()
 
     # ------------------ 触发判定 ------------------
-    def check_triggers(self, skip_names=None):
-        """判定所有触发器。``skip_names``：本轮跳过的触发器名集合——
-        小游戏结算后的重判传入刚结算的触发器，防止条件仍成立时原地重启
-        （后续步进的重判不受影响，可再次触发的触发器照常按条件再进）。
+    def _begin_trigger_round(self):
+        """开启新一轮判定：清空「本轮已触发」集合。
 
-        视效类动作（短暂视效 / 窗口视效）**总是最优先派发**：纯视觉、不等
-        结果，同一轮判定里即使还有插入/选项/跳转要执行，画面反应也先生效。"""
+        一轮 = 一次步进收尾（或会话启动）+ 它派生的全部结算重判（选项选择、
+        小游戏结算）。重判共享同一集合，**同一触发器一轮内至多生效一次**：
+        结算后条件仍成立的触发器不会立刻重发（选项连弹、视效/插入重复发放
+        被结构性挡住），其他触发器可以接力。
+        """
+        self._round_fired = set()
+
+    def check_triggers(self):
+        """判定所有触发器（一轮）：按 ``actions.ACTION_POSITIONS`` 的固定顺序
+        逐位派发，**同位置至多生效一个**（同位置内按配置顺序取第一个满足条件
+        且配置有效的触发器；配置无效被跳过时不占配额）。
+
+        被接纳的触发器立即清空 ``间隔计数``，并记入 ``_round_fired``——本轮
+        （含派生的结算重判）内不会再触发。回放不判定，只按记录复现。"""
         if not self.triggers:
             return
-        skip = skip_names or ()
-        for action_types in (VISUAL_ACTION_TYPES, None):
+        for position in ACTION_POSITIONS:
             for trigger_index, trigger in enumerate(self.triggers):
-                if trigger.get("name") in self.triggered_names \
-                        or trigger.get("name") in skip:
+                name = trigger.get("name")
+                if name in self.triggered_names or name in self._round_fired:
                     continue
                 action_data = trigger.get("action_data", {})
                 action_type = normalize_action_type(trigger.get("action_type"), action_data)
-                if action_types is not None:
-                    if action_type not in action_types:
-                        continue
-                elif action_type in VISUAL_ACTION_TYPES:
-                    continue   # 视效类已在第一轮派发
-                self._dispatch_trigger(trigger, trigger_index, action_type)
+                if action_type not in position:
+                    continue
+                if self._dispatch_trigger(trigger, trigger_index, action_type):
+                    break   # 同位置至多一个生效
 
-    def _dispatch_trigger(self, trigger, trigger_index, action_type):
-        """派发单个已通过条件判定的触发器动作。"""
+    def _dispatch_trigger(self, trigger, trigger_index, action_type) -> bool:
+        """派发单个触发器动作；返回是否生效（通过门槛且动作被接纳）。"""
         action_data = trigger.get("action_data", {})
         # 所在章节：触发器只在指定章节内参与判定
         if not matches_scope(trigger.get("chapter"), self.current_chapter):
-            return
+            return False
         pre_names = trigger.get("precondition_names", [])
         if not all(name in self.fired_triggers for name in pre_names):
-            return
+            return False
         cond = trigger.get("condition", {})
         if not self.evaluate_condition(cond, self.dungeon_state):
-            return
+            return False
         action_accepted = True
         if action_type == "insert":
             text = str(action_data.get("text", "")).strip()
@@ -270,7 +277,7 @@ class TriggerHandler:
             if is_terminating_chapter(
                     find_chapter(self.chapters, self.current_chapter)):
                 process_log.log(f"[Trigger] 选项触发器 {trigger['name']} 位于结束章节内，已跳过")
-                return
+                return False
             options = action_data.get("options") or []
             if not options:
                 process_log.log(f"[Trigger] 选项触发器 {trigger['name']} 未配置选项，已跳过")
@@ -381,7 +388,7 @@ class TriggerHandler:
             if is_terminating_chapter(
                     find_chapter(self.chapters, self.current_chapter)):
                 process_log.log(f"[Trigger] 跳转触发器 {trigger['name']} 位于结束章节内，已跳过")
-                return
+                return False
             target = str(action_data.get("chapter") or "").strip()
             chapter = find_chapter(self.chapters, target) if target else None
             if target and chapter is None:
@@ -399,20 +406,11 @@ class TriggerHandler:
                     chapter_background=dict((chapter or {}).get("background") or {}),
                     chapter_bgm=dict((chapter or {}).get("bgm") or {}),
                     chapter_voice_fx=dict((chapter or {}).get("voice_fx") or {}))
-        elif action_type == "ending":
-            name = str(action_data.get("name") or action_data.get("ending_text") or "").strip()
-            if not name:
-                process_log.log(f"[Trigger] 结局触发器 {trigger['name']} 未填写结局名称，已跳过")
-                action_accepted = False
-            elif self.dungeon_ended:
-                process_log.log(f"[Trigger] 结局触发器 {trigger['name']} 触发时故事已结束，已跳过")
-                action_accepted = False
-            else:
-                self.pending_ending = {
-                    "name": name, "action_data": action_data, "trigger_index": trigger_index}
-                process_log.log(f"[Trigger] 已触发: {trigger['name']}，结局：{name}")
-                self._start_ending_generation()
-                self._last_ending_record = self._record_trigger_action(trigger, action_type, action_data)
+        elif action_type == ENDING_ACTION:
+            # 旧版结局触发器已退场：新方案由「结束章节」承担，这里只留一行提示
+            process_log.log(f"[Trigger] 结局触发器 {trigger['name']} 是旧版配置，"
+                            "运行时已不再执行，请改用「结束章节」")
+            action_accepted = False
         elif action_type in EMPTY_ACTIONS:
             # 空触发器：无动作，仅用于标记条件成立，供其他触发器作为前置条件
             process_log.log(f"[Trigger] 空触发器 {trigger['name']} 条件成立（无动作）")
@@ -422,12 +420,15 @@ class TriggerHandler:
             action_accepted = False
 
         if not action_accepted:
-            return
+            return False
         # 可再次触发（默认）：不加入已触发集合，条件满足时可重复触发
         self.fired_triggers.add(trigger["name"])
         if not trigger.get("repeatable", True):
             self.triggered_names.add(trigger["name"])
+        # 生效即清空间隔计数，并记入本轮已触发（派生的结算重判不再重发）
         self.dungeon_state.steps_since_trigger = 0
+        self._round_fired.add(trigger["name"])
+        return True
 
     def _on_mini_game_result(self, result):
         """小游戏结果回调（宿主线程）：并入帧线程后执行结算。"""
@@ -464,10 +465,10 @@ class TriggerHandler:
                 else {"value": result}
             record["choice_value"] = value
         process_log.log(f"[MiniGame] {summary}，重跑触发判定")
-        # 结算后立即重判：按返回值配置的跳转等关联触发器同一步生效。
-        # 跳过刚结算的触发器本身——否则条件仍成立的自动触发器会在结算瞬间
-        # 原地重启游戏，玩家永远回不到副本主页面。
-        self.check_triggers(skip_names={pending["name"]})
+        # 结算后立即重判（同一轮，共享本轮已触发集合）：按返回值配置的跳转等
+        # 关联触发器同一步生效；刚结算的触发器已在集合里，条件仍成立也不会
+        # 原地重启游戏，玩家回得到副本主页面。
+        self.check_triggers()
         self._maybe_pregen_next()
 
     def _record_trigger_action(self, trigger, action_type, action_data, **extra) -> dict:

@@ -19,7 +19,7 @@ import os
 from dataclasses import dataclass
 
 from dungeon import schema
-from dungeon.actions import (ENDING_ACTION, VISUAL_FILTER_KEYS, WINDOW_FX_KEYS,
+from dungeon.actions import (VISUAL_FILTER_KEYS, WINDOW_FX_KEYS,
                              normalize_action_type)
 from dungeon.audio.chapters import (BGM_SUPPORTED_EXTS, CHAPTER_NONE,
                               MAX_BGM_VOLUME, normalize_chapters)
@@ -99,6 +99,8 @@ LEGACY_ACTIONS = {
     "background": "背景切换",
     "sensitivity": "性格敏感化",
     "sensitive": "性格敏感化",
+    # 「结局」触发器动作已删除：职责由「结束章节」承担，运行时跳过，仅回放兼容
+    "ending": "结局触发器",
 }
 
 
@@ -172,17 +174,13 @@ def validate_scenario_config(config, *, scenario_dir: str = None) -> list:
         add("warning", "chapters", f"标记了 {len(starts)} 个起始章节（{', '.join(starts)}），"
                                    f"运行时只会进入第一个")
 
-    # 结局可达性：既没有结束章节、也没有旧版结局触发器 = 永远无法正常收尾。
-    # 作者用 ``ending_policy: "open"`` 明确声明"本方案就是开放式"时不提示——
-    # 让 info 永远挂着的做法等于把设计选择报成缺陷（见 docs/users/platforms/linux.md 附录A §2.2）。
-    has_ending_trigger = any(
-        normalize_action_type(t.get("action"),
-                              t.get("action_data") if isinstance(t, dict) else None)
-        == ENDING_ACTION
-        for t in (config.get("triggers") or []) if isinstance(t, dict))
+    # 结局可达性：没有结束章节 = 永远无法正常收尾（旧版「结局」触发器已退场，
+    # 运行时直接跳过，不再算结局路径）。作者用 ``ending_policy: "open"`` 明确
+    # 声明"本方案就是开放式"时不提示——让 info 永远挂着的做法等于把设计选择
+    # 报成缺陷（见 docs/users/platforms/linux.md 附录A §2.2）。
     ending_policy = schema.normalize_ending_policy(config.get("ending_policy"))
-    if not terminating and not has_ending_trigger and ending_policy != "open":
-        add("info", "", "方案没有任何结局路径（无结束章节、无「结局」触发器）："
+    if not terminating and ending_policy != "open":
+        add("info", "", "方案没有任何结局路径（无结束章节）："
                         "只能通过退出结束，不产生结局结算与结局索引。"
                         "若是有意为之，可把 ending_policy 设为 open 消除本提示")
 
@@ -617,15 +615,6 @@ def _validate_triggers(triggers, chapter_names, terminating, trigger_names,
             add("warning", action_path,
                 f"旧版动作「{LEGACY_ACTIONS[action_type]}」运行时会直接跳过，"
                 f"该职责已由章节属性承担，请在编辑器中删除或改写")
-        elif action_type == ENDING_ACTION:
-            add("warning", action_path,
-                "「结局」触发器是旧配置：编辑器不再提供新建入口，运行时仍兼容执行，"
-                "新方案请改用「结束章节」")
-            if not str(action_data.get("name") or action_data.get("ending_text") or "").strip():
-                add("warning", path + ".action_data.name", "结局触发器未填写结局名称，运行时会跳过")
-            icon = str(action_data.get("icon_path") or "").strip()
-            if icon and scenario_dir and not _asset_exists(scenario_dir, icon):
-                add("warning", path + ".action_data.icon_path", f"结局图标不存在：{icon}")
         elif action_type == "goto":
             target = str(action_data.get("chapter") or "").strip()
             if target and target not in chapter_names:
