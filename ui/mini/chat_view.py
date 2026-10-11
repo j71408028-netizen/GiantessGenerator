@@ -52,6 +52,12 @@ class MiniChatView(px.Panel):
         self._recall_btn = None
         self._bubble_labels = []
         self._wrap = DEFAULT_WRAP
+        # 已渲染消息的 (role, text) 序列；None 表示下次 reload 必须全量重绘。
+        # reload 每次都返回从盘上读出的全新对象，只能按键值对前缀比对：撤回
+        # 会物理删除消息使序列变短，投递只会追加（queued 消息到点提升为
+        # delivered 后才首次渲染），因此前缀稳定即可增量。与专业模式同款。
+        self._rendered_keys = None
+        self._scroll_job = None           # 待执行的"滚到底"定时器（合并用）
         self._build_ui()
         self._attach()
 
@@ -139,10 +145,32 @@ class MiniChatView(px.Panel):
         if not self.winfo_exists():
             return
         self.chat_state = chat_state
-        self._render_messages()
+        self._render_delta(chat_state)
         # 已投递消息已在本屏渲染：清掉角色卡上的未读点
         self.app._unread_chat.pop(self.state.giantess_id, None)
         self.app._refresh_chat_badge()
+
+    def _render_delta(self, chat_state):
+        """控制器重载聊天域后重绘：已渲染前缀原样保留时只追加新气泡。
+
+        长对话里每条回复到达、"正在输入"期间的到点 tick 都不再重建整个
+        列表；前缀对不上（撤回删消息、旧档被外部改写）才退回全量重绘。
+        """
+        if chat_state is None or self._rendered_keys is None:
+            self._render_messages()
+            return
+        renderable = self._renderable()
+        if len(renderable) < len(self._rendered_keys) or any(
+                (message.role, message.text) != key
+                for message, key in zip(renderable, self._rendered_keys)):
+            self._render_messages()
+            return
+        fresh = renderable[len(self._rendered_keys):]
+        if not fresh:
+            return
+        for message in fresh:
+            self._append_bubble(message)
+        self._scroll_to_bottom()
 
     def _on_delivery_status(self, kind: str):
         if not self.winfo_exists():
@@ -196,18 +224,23 @@ class MiniChatView(px.Panel):
         self._delivery.refresh()
 
     # ==================== 渲染 ====================
+    def _renderable(self):
+        """当前聊天域里应出现在界面上的消息：玩家消息全部渲染，角色消息
+        只画已投递/已读的（queued 由控制器到点后再出现）。"""
+        return [message for message in self.chat_state.messages
+                if message.role == "user"
+                or message.status in ("delivered", "read")]
+
     def _render_messages(self):
         for widget in self.listing.body.winfo_children():
             widget.destroy()
         self._bubble_labels = []
         self._pending_row = None
         self._recall_btn = None
-        for message in self.chat_state.messages:
-            # 角色消息只画已投递/已读的：queued 由控制器到点后再出现
-            if message.role == "char" and message.status not in ("delivered", "read"):
-                continue
+        self._rendered_keys = []
+        for message in self._renderable():
             self._append_bubble(message)
-        self.listing.body.after(30, self._scroll_bottom)
+        self._scroll_to_bottom()
 
     def _append_bubble(self, message, recallable: bool = False):
         """一条消息一个气泡：玩家靠右、角色靠左，靠边一侧贴边不顶满。"""
@@ -232,11 +265,22 @@ class MiniChatView(px.Panel):
                         wraplength=self._wrap, justify='left', anchor='w')
         text.pack(padx=8, pady=5)
         self._bubble_labels.append(text)
+        # 本地先行上屏的玩家气泡（_send）也计入：reload 回来时同文本的
+        # 持久化消息正好接上前缀，不再触发全量重绘
+        self._rendered_keys.append((message.role, message.text))
         # tk 不会把滚轮事件冒泡给父控件：气泡里的每个控件都要接一次
         self.listing.bind_wheel(bubble)
         self.listing.bind_wheel(text)
 
-    def _scroll_bottom(self):
+    def _scroll_to_bottom(self):
+        # 合并同一批渲染的滚动请求：一次全量渲染每条气泡都调到这里，
+        # 排 N 个定时器不如排 1 个（30ms 后几何早已就绪）
+        if self._scroll_job is not None:
+            return
+        self._scroll_job = self.after(30, self._do_scroll_to_bottom)
+
+    def _do_scroll_to_bottom(self):
+        self._scroll_job = None
         if self.winfo_exists():
             self.listing.canvas.yview_moveto(1.0)
 
@@ -257,7 +301,7 @@ class MiniChatView(px.Panel):
         self.send_btn.configure(state='disabled')
         self._set_status("")
         self._append_bubble(ChatMessage(role="user", text=text), recallable=True)
-        self._scroll_bottom()
+        self._scroll_to_bottom()
 
         state, chat_state = self.state, self.chat_state
 

@@ -58,6 +58,12 @@ class ChatPanel(ctk.CTkFrame):
         self._pending_row = None          # 待撤回的玩家消息气泡行
         self._recall_btn = None
         self._last_moment = None          # 最后一条已渲染消息的时间坐标
+        # 已渲染消息的 (role, text) 序列；None 表示下次 reload 必须全量重绘
+        # （换聊天对象）。reload 每次都返回从盘上读出的全新对象，只能按键值
+        # 对前缀比对：撤回会物理删除消息使序列变短，投递只会追加（queued
+        # 消息到点提升为 delivered 后才首次渲染），因此前缀稳定即可增量。
+        self._rendered_keys = None
+        self._scroll_job = None           # 待执行的"滚到底"定时器（合并用）
 
         self._chat_service = chat_service or ChatService()
         # 投递节奏控制器：到点重载/重渲染/"正在输入"/标记已读，界面不自算延迟
@@ -134,6 +140,7 @@ class ChatPanel(ctk.CTkFrame):
             self._render_messages()
             return
         # attach 会立即 load_chat（含到点提升）→ on_reload 渲染并标记已读
+        self._rendered_keys = None  # 换聊天对象：旧对话不能参与前缀比对
         self._delivery.attach(state)
         # 打开聊天时先后台预热聊天参数（首次聊天前由 AI 一次性决定，
         # 失败静默——发送时会正式报错），再自动补话：
@@ -164,11 +171,30 @@ class ChatPanel(ctk.CTkFrame):
 
     # ---------- 投递节奏（与挂件模式共用 ChatDeliveryController） ----------
     def _on_delivery_reload(self, chat_state):
-        """控制器重载聊天域后：换用最新状态并重绘（queued 消息不出现）。"""
+        """控制器重载聊天域后：换用最新状态并重绘（queued 消息不出现）。
+
+        已渲染前缀原样保留时只追加新气泡——长对话里每条回复到达、"正在
+        输入"期间的到点 tick 都不再重建整个列表；前缀对不上（换角色、
+        撤回删消息、旧档被外部改写）才退回全量重绘。
+        """
         if not self.winfo_exists():
             return
         self.chat_state = chat_state
-        self._render_messages()
+        if chat_state is None or self._rendered_keys is None:
+            self._render_messages()
+            return
+        renderable = self._renderable()
+        if len(renderable) < len(self._rendered_keys) or any(
+                (message.role, message.text) != key
+                for message, key in zip(renderable, self._rendered_keys)):
+            self._render_messages()
+            return
+        fresh = renderable[len(self._rendered_keys):]
+        if not fresh:
+            return
+        for message in fresh:
+            self._append_timed_bubble(message)
+        self._scroll_to_bottom()
 
     def _on_delivery_status(self, kind: str):
         if self.winfo_exists():
@@ -223,18 +249,23 @@ class ChatPanel(ctk.CTkFrame):
         self._delivery.refresh()
 
     # ---------- 渲染 ----------
+    def _renderable(self):
+        """当前聊天域里应出现在界面上的消息：玩家消息全部渲染，角色消息
+        只画已投递/已读的（queued 由控制器到点后再出现）。"""
+        return [message for message in self.chat_state.messages
+                if message.role == "user"
+                or message.status in ("delivered", "read")]
+
     def _render_messages(self):
         for widget in self.message_scroll.winfo_children():
             widget.destroy()
         self._pending_row = None
         self._recall_btn = None
         self._last_moment = None
+        self._rendered_keys = []
         if self.chat_state is None:
             return
-        for message in self.chat_state.messages:
-            # 角色消息只画已投递/已读的：queued 由控制器到点后再出现
-            if message.role == "char" and message.status not in ("delivered", "read"):
-                continue
+        for message in self._renderable():
             self._append_timed_bubble(message)
         self._scroll_to_bottom()
 
@@ -252,6 +283,9 @@ class ChatPanel(ctk.CTkFrame):
         self._append_bubble(message, recallable=recallable)
         if moment is not None:
             self._last_moment = moment
+        # 本地先行上屏的玩家气泡（_send）也计入：reload 回来时同文本的
+        # 持久化消息正好接上前缀，不再触发全量重绘
+        self._rendered_keys.append((message.role, message.text))
 
     def _append_time_marker(self, text: str):
         """消息之间的时间标记：居中、弱化，只交代"隔了多久"。"""
@@ -287,13 +321,19 @@ class ChatPanel(ctk.CTkFrame):
         self._scroll_to_bottom()
 
     def _scroll_to_bottom(self):
-        def scroll():
-            if not self.winfo_exists():
-                return
-            canvas = getattr(self.message_scroll, "_parent_canvas", None)
-            if canvas is not None:
-                canvas.yview_moveto(1.0)
-        self.after(30, scroll)
+        # 合并同一批渲染的滚动请求：一次全量渲染每条气泡都调到这里，
+        # 排 N 个定时器不如排 1 个（30ms 后几何早已就绪）
+        if self._scroll_job is not None:
+            return
+        self._scroll_job = self.after(30, self._do_scroll_to_bottom)
+
+    def _do_scroll_to_bottom(self):
+        self._scroll_job = None
+        if not self.winfo_exists():
+            return
+        canvas = getattr(self.message_scroll, "_parent_canvas", None)
+        if canvas is not None:
+            canvas.yview_moveto(1.0)
 
     def _set_status(self, text: str):
         self.status_label.configure(text=text)
