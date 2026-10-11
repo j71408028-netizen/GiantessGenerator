@@ -19,7 +19,7 @@
 """
 
 # 运行时支持的动作：单步行为 + 章节跳转 + 小游戏挑战 + 条件标记
-NEW_ACTIONS = ("insert", "option", "effect", "goto", "mini_game", "none")
+NEW_ACTIONS = ("insert", "option", "effect", "fx", "goto", "mini_game", "none")
 
 # 「结局」不再是触发器动作：改由「结束章节」承担（章节属性 ``ending=True``）。
 # 运行时仍兼容旧配置中的 ``ending`` 触发器与旧回放记录；仅编辑器不再提供
@@ -31,6 +31,7 @@ ACTION_LABELS = {
     "insert": "插入文本",
     "option": "弹出选项",
     "effect": "短暂视效",
+    "fx": "窗口视效",
     "goto": "跳转章节",
     "mini_game": "小游戏挑战",
     "ending": "结局",
@@ -59,6 +60,21 @@ VISUAL_FILTERS = (
     ("find_edges", "提取边缘"),
 )
 VISUAL_FILTER_KEYS = tuple(key for key, _label in VISUAL_FILTERS)
+
+# 窗口视效清单（键 + 展示名）：与「短暂视效」的重采样背景滤镜相对——
+# 这些视效操作整个会话窗口（覆盖层 / 内容位移），以绝对时间（秒）消退，
+# 期间其他动作照常。运行时实现见 dungeon/window/fx.py（fx.py 导入时校验
+# 键一致），校验器（dungeon/validate.py）也按这里的键检查配置。
+WINDOW_FX = (
+    ("flash", "闪光"),
+    ("shake", "振动"),
+    ("invert", "反色"),
+    ("rgb_split", "色差分离"),
+)
+WINDOW_FX_KEYS = tuple(key for key, _label in WINDOW_FX)
+
+# 视效类动作：纯视觉、不等结果，check_triggers 中总是最优先派发
+VISUAL_ACTION_TYPES = ("effect", "fx")
 
 
 def normalize_action_type(action_type, action_data: dict = None) -> str:

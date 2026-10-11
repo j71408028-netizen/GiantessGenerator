@@ -225,7 +225,7 @@ MCI 的坑：`play <alias> repeat` 只有 mpegvideo（mp3 等）认，waveaudio�
 
 ## 6. 动作注册表
 
-单一出处：`dungeon/actions.py`（`NEW_ACTIONS` / `ENDING_ACTION` / `ACTION_LABELS` / `VISUAL_FILTERS`）。
+单一出处：`dungeon/actions.py`（`NEW_ACTIONS` / `ENDING_ACTION` / `ACTION_LABELS` / `VISUAL_FILTERS` / `WINDOW_FX`）。
 编辑器、依赖图、回放导出共用，不再各写一份字符串常量。
 
 | 类型 | 展示名 | `action_data` | 状态 |
@@ -233,6 +233,7 @@ MCI 的坑：`play <alias> repeat` 只有 mpegvideo（mp3 等）认，waveaudio�
 | `insert` | 插入文本 | `text, text_type, highlight, delayed` | 运行时；`delayed` 表示等下一段 AI 段落返回后再显示 |
 | `option` | 弹出选项 | `prompt, options[{id, prompt, text}]` | 运行时；选择按编号记入 `选择:<名字>` |
 | `effect` | 短暂视效 | `filter, duration` | 运行时；给当前背景叠加限时滤镜，`duration` 步后恢复章节默认滤镜 |
+| `fx` | 窗口视效 | `fx, duration, intensity` | 运行时；操作整个会话窗口的瞬时画面（闪光 / 振动 / 反色 / 色差分离），`duration` 为绝对时间（秒，0.1~10），按 `intensity`（0~100）定峰值亮度 / 振幅 / 错位幅度；详见 §7 |
 | `goto` | 跳转章节 | `chapter`（空串 = 离开章节） | 运行时；进入目标章节，应用其背景与持续敏感效果 |
 | `mini_game` | 小游戏挑战 | `game, target_level, win_goto, lose_goto` | 运行时；按包 manifest 的 `backend` 分派：`py` → 会话窗口内覆盖层舞台（`dungeon/window/minigame/`，ESC=无结果中止），`web` → 子进程 pywebview 独立窗口；步进暂停，结果经 `finish(won, result)` 回传后按 `win_goto`/`lose_goto` 跳转（空串=原地继续），无结果=原地继续。结果随触发器记录落盘，回放不进游戏直接复现 |
 | `none` | 条件标记 | `{}` | 运行时；无动作，只标记条件成立，供其他触发器作前置条件 |
@@ -254,13 +255,37 @@ MCI 的坑：`play <alias> repeat` 只有 mpegvideo（mp3 等）认，waveaudio�
 | 换章 | 立即清空 |
 | 无背景图 | 视效被忽略（打印提示） |
 
+### 7.1 窗口视效（`fx`，`dungeon/window/fx.py`）
+
+与短暂视效相对的「真正的视效」：操作**整个会话窗口**而非背景图，以**绝对时间**
+（秒）消退，与步进无关。视效键的单一出处是 `actions.WINDOW_FX`
+（`fx.py` 导入时校验，校验器按同清单检查配置）。
+
+| 键 | 画法 |
+|---|---|
+| `flash` 闪光 | 顶层绘制列表一块全窗白色矩形，不透明度从峰值线性退到 0 |
+| `shake` 振动 | 主窗口全部直接子项按基线位置叠加衰减正弦偏移，整窗内容一起抖 |
+| `invert` 反色 | `dpg.output_frame_buffer` 抓一帧当前画面（整窗真实像素）→ 像素工作者反相 → 半透明覆盖层按时长退场 |
+| `rgb_split` 色差分离 | 同一套快照管线：R/G/B 通道按强度错位相加成一张覆盖层图像 |
+
+| 规则 | 行为 |
+|---|---|
+| 派发 | 视效类动作（`effect` / `fx`）在 `check_triggers` 中**总是最优先派发**（两轮遍历） |
+| 阻塞性 | 无：触发即播放、立即返回，期间流式生成与上屏、音频播放、切换背景等一切照常 |
+| 时长 | `duration` 绝对时间（秒，解析失败 / 越界夹回 0.1~10），帧时钟按 `time.monotonic` 计时 |
+| 强度 | `intensity` 0~100：闪光 / 反色峰值不透明度、振动幅度、色差错位幅度（低强度保底可见） |
+| 重触发 | 同类互斥（重触发顶掉旧的），不同类可叠加（如闪光 + 振动） |
+| 换章 | 不清除：视效本身只有亚秒到数秒寿命，到期自消 |
+| 抓帧失败 | 反色 / 色差分离退回处理当前背景图；连背景都没有则放弃本次视效（打印提示） |
+| 回放 | 回放记录原样重放一次（不判定条件，按时长重演） |
+
 ## 8. 编辑器文件索引
 
 | 文件 | 职责 |
 |---|---|
 | `ui/scenario/chapter_trigger_mgr.py` | 章节与触发器**合并面板**：章节行加粗并按自定义颜色着色，其下缩进行是本章节触发器；「任意章节 / 无章节」的触发器排在最后。底部是新建章节 / 新建触发器与共用的编辑、删除、上移、下移 |
 | `ui/scenario/chapter_dlg.py` | 章节编辑：配色色板 + 手填 hex、起始 / 结束标记、最大段落数与超限跳转、背景导入、背景音乐（曲目 / 音量 / 循环 / 淡入淡出）、**对话语音物理效果（她 / 其他人两档的预设 + 强度）**、敏感效果增删、结束章节的结局结算与图标 |
-| `ui/scenario/trigger_dlg.py` | 触发器编辑：所在章节下拉、`跳转章节` / `短暂视效` 表单、`节内计数` 条件键、旧版动作独立按钮行；`结局` 动作已从按钮行移除 |
+| `ui/scenario/trigger_dlg.py` | 触发器编辑：所在章节下拉、`跳转章节` / `短暂视效` / `窗口视效` 表单、`节内计数` 条件键、旧版动作独立按钮行；`结局` 动作已从按钮行移除 |
 | `ui/scenario/asset_import.py` | 背景 / 结局图标 / 背景音乐导入的共用实现（裁剪入库、相对路径；音频落 `<方案>/audio/`，不裁剪） |
 | `ui/scenario/sc_frame.py` | 方案级配置：耦合等级与主角称呼、**对话语音**（总开关 + 她 / 主角 / 其他角色的音色选择 + 语速 / 音量）、进入消耗、显示组件 |
 | `ui/scenario/component_mgr.py` | 显示组件卡片化管理（开关与参数改动自动保存） |

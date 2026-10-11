@@ -7,7 +7,7 @@ import customtkinter as ctk
 import ui.ctk
 from dungeon.actions import (
     MINI_GAME_DEFAULT_ID, NEW_ACTIONS, VISUAL_FILTERS, VISUAL_FILTER_KEYS,
-    action_label, normalize_action_type,
+    WINDOW_FX, WINDOW_FX_KEYS, action_label, normalize_action_type,
 )
 from dungeon.window.minigame import list_mini_games, mini_game_params
 from dungeon.audio.chapters import (
@@ -51,6 +51,13 @@ class TriggerEditDialog(BaseDialog):
             "短暂视效：在背景图上叠加一段限时滤镜，持续指定步数后自动恢复本章节的默认滤镜。\n"
             "视效作用于当前背景图；若此时没有背景图，视效会被忽略。\n"
             "换章会立即清除尚未结束的视效。"
+        ),
+        "fx": (
+            "窗口视效：触发即播放一段作用于整个会话窗口的瞬时画面，按持续秒数（绝对时间）\n"
+            "自动消退，与步进无关。可选：闪光（全窗白光）、振动（整窗内容抖动）、\n"
+            "反色（画面负片）、色差分离（RGB 通道错位）。\n"
+            "视效期间其他动作照常：流式生成与上屏、音频播放、切换背景等都不会被阻塞。\n"
+            "反色与色差分离按触发瞬间的画面快照加工；窗口最小化等抓帧失败时退回当前背景图。"
         ),
         "goto": (
             "跳转到章节：进入目标章节，立即应用该章节的特定背景与持续敏感效果。\n"
@@ -151,7 +158,8 @@ class TriggerEditDialog(BaseDialog):
         # 结局已迁移为「结束章节」；旧配置中的结局触发器仍可编辑保存）
         template_commands = {
             "insert": self._insert_template, "option": self._option_template,
-            "effect": self._effect_template, "goto": self._goto_template,
+            "effect": self._effect_template, "fx": self._fx_template,
+            "goto": self._goto_template,
             "mini_game": self._mini_game_template, "none": self._empty_template,
         }
         btn_frame = ctk.CTkFrame(main, fg_color="transparent")
@@ -214,6 +222,7 @@ class TriggerEditDialog(BaseDialog):
         self.action_frames["insert"] = self._build_insert_form(self.action_area)
         self.action_frames["option"] = self._build_option_form(self.action_area)
         self.action_frames["effect"] = self._build_effect_form(self.action_area)
+        self.action_frames["fx"] = self._build_fx_form(self.action_area)
         self.action_frames["goto"] = self._build_goto_form(self.action_area)
         self.action_frames["mini_game"] = self._build_mini_game_form(self.action_area)
         self.action_frames["ending"] = self._build_ending_form(self.action_area)
@@ -310,6 +319,44 @@ class TriggerEditDialog(BaseDialog):
         ctk.CTkEntry(row, textvariable=self.effect_duration_var, width=68, height=28,
                      font=self.UI_FONT).pack(side='left', padx=(6, 0))
         return frame
+
+    # ---------- 新版动作：窗口视效 ----------
+    def _build_fx_form(self, parent):
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
+        row = ctk.CTkFrame(frame, fg_color="transparent")
+        row.pack(fill='x', pady=(2, 4))
+        ctk.CTkLabel(row, text="视效:", font=self.UI_FONT).pack(side='left')
+        self.fx_labels = [label for _key, label in WINDOW_FX]
+        self.fx_var = tk.StringVar(value=self.fx_labels[0])
+        ctk.CTkComboBox(row, values=self.fx_labels, variable=self.fx_var,
+                        state="readonly", width=150, height=28,
+                        font=self.UI_FONT).pack(side='left', padx=(6, 16))
+        ctk.CTkLabel(row, text="持续秒数:", font=self.UI_FONT).pack(side='left')
+        self.fx_duration_var = tk.StringVar(value="0.8")
+        ctk.CTkEntry(row, textvariable=self.fx_duration_var, width=68, height=28,
+                     font=self.UI_FONT).pack(side='left', padx=(6, 16))
+        ctk.CTkLabel(row, text="强度:", font=self.UI_FONT).pack(side='left')
+        self.fx_intensity_var = tk.StringVar(value="60")
+        ctk.CTkEntry(row, textvariable=self.fx_intensity_var, width=68, height=28,
+                     font=self.UI_FONT).pack(side='left', padx=(6, 0))
+        ctk.CTkLabel(frame,
+                     text="持续秒数为绝对时间（0.1~10）；强度 0~100：闪光/反色的峰值亮度、"
+                          "振动幅度与色差错位幅度。视效期间其他动作照常。",
+                     font=self.UI_FONT_SMALL, text_color=TRIGGER_HINT
+                     ).pack(anchor='w', pady=(4, 0))
+        return frame
+
+    def _fx_label_to_key(self, label: str) -> str:
+        for key, item_label in WINDOW_FX:
+            if item_label == label:
+                return key
+        return WINDOW_FX_KEYS[0]
+
+    def _fx_key_to_label(self, key: str) -> str:
+        for item_key, label in WINDOW_FX:
+            if item_key == key:
+                return label
+        return WINDOW_FX[0][1]
 
     def _build_goto_form(self, parent):
         frame = ctk.CTkFrame(parent, fg_color="transparent")
@@ -828,6 +875,10 @@ class TriggerEditDialog(BaseDialog):
         elif action_type == "effect":
             data.update({"filter": self._effect_label_to_key(self.effect_var.get()),
                          "duration": self.effect_duration_var.get().strip()})
+        elif action_type == "fx":
+            data.update({"fx": self._fx_label_to_key(self.fx_var.get()),
+                         "duration": self.fx_duration_var.get().strip(),
+                         "intensity": self.fx_intensity_var.get().strip()})
         elif action_type == "goto":
             data["chapter"] = self._goto_label_to_scope(self.goto_var.get())
         elif action_type == "mini_game":
@@ -862,6 +913,10 @@ class TriggerEditDialog(BaseDialog):
         elif action_type == "effect":
             self.effect_var.set(self._effect_key_to_label(action_data.get("filter") or ""))
             self.effect_duration_var.set(str(action_data.get("duration", 1)))
+        elif action_type == "fx":
+            self.fx_var.set(self._fx_key_to_label(action_data.get("fx") or ""))
+            self.fx_duration_var.set(str(action_data.get("duration", 0.8)))
+            self.fx_intensity_var.set(str(action_data.get("intensity", 60)))
         elif action_type == "goto":
             scope = action_data.get("chapter") or ""
             if scope and scope not in self.goto_values:
@@ -891,6 +946,10 @@ class TriggerEditDialog(BaseDialog):
     def _effect_template(self):
         self._set_action_template("effect", "新视效",
                                   {"filter": VISUAL_FILTER_KEYS[0], "duration": 1})
+
+    def _fx_template(self):
+        self._set_action_template("fx", "新窗口视效",
+                                  {"fx": WINDOW_FX_KEYS[0], "duration": 0.8, "intensity": 60})
 
     def _goto_template(self):
         default_target = self.chapter_names[0] if self.chapter_names else ""
@@ -1042,6 +1101,28 @@ class TriggerEditDialog(BaseDialog):
                 return
             action_data["filter"] = self._effect_label_to_key(self.effect_var.get())
             action_data["duration"] = duration
+
+        # 窗口视效表单字段（仅窗口视效动作生效）
+        if action_type == "fx":
+            try:
+                fx_duration = float(self.fx_duration_var.get())
+            except ValueError:
+                ui.ctk.dialogs.showerror("错误", "视效的持续秒数必须是数字")
+                return
+            if not 0.1 <= fx_duration <= 10:
+                ui.ctk.dialogs.showerror("错误", "视效的持续秒数必须在 0.1~10 之间")
+                return
+            try:
+                fx_intensity = float(self.fx_intensity_var.get())
+            except ValueError:
+                ui.ctk.dialogs.showerror("错误", "视效的强度必须是数字")
+                return
+            if not 0 <= fx_intensity <= 100:
+                ui.ctk.dialogs.showerror("错误", "视效的强度必须在 0~100 之间")
+                return
+            action_data["fx"] = self._fx_label_to_key(self.fx_var.get())
+            action_data["duration"] = fx_duration
+            action_data["intensity"] = fx_intensity
 
         # 跳转章节表单字段（仅跳转动作生效）
         if action_type == "goto":

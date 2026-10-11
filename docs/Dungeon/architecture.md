@@ -109,7 +109,7 @@ TriggerHandler, OptionHandler, EndingHandler, DungeonPersistence, ComponentHandl
 | `DungeonLaunchStages` | `launcher.py` | 入口阶段：动态背景轮播、方案选择、已达成结局图标循环、开始 / 回放 / 返回 |
 | `DungeonWindowUI` | `ui.py` | UI 构建、流式文本揭示动画、布局自适应、鼠标 / 键盘 / 视口回调 |
 | `DungeonStoryEngine` | `engine.py` | 步进核心：AI 生成、流式分句、属性演化、伤亡结算、收尾回调 |
-| `TriggerHandler` | `triggers.py` | 触发器判定、章节进出、短暂视效、插入段落 |
+| `TriggerHandler` | `triggers.py` | 触发器判定、章节进出、短暂视效、窗口视效、插入段落 |
 | `OptionHandler` | `options.py` | 选项触发器：后台生成选项文字 → 弹窗 → 记录选择 |
 | `EndingHandler` | `ending.py` | 章节敏感效果汇总、结局生成与结局文本构建 |
 | `DungeonPersistence` | `persistence.py` | 结局结算、回放 / 报告落盘、统一收尾 `_finalize(completed)` |
@@ -188,9 +188,13 @@ _finish_step()
 3. `condition` 规则组（`TriggerRules.evaluate`）
 
 命中后按动作执行：`insert`（插入段落，可延迟到下一段的衔接地）/ `option`（弹选项）/
-`effect`（限时滤镜）/ `goto`（进入或离开章节）/ `none`（仅标记条件成立）；
+`effect`（限时背景滤镜）/ `fx`（窗口视效）/ `goto`（进入或离开章节）/ `none`（仅标记条件成立）；
 外加只读兼容的 `ending`（旧配置，新方案改用**结束章节**）。
 未知动作走通用跳过路径。字段与参数详见 [数据模型](script.md) §4–§6。
+
+视效类动作（`effect` / `fx`，见 `actions.VISUAL_ACTION_TYPES`）**总是最优先派发**：
+两轮遍历先派完所有视效触发器再派其余动作——视效是纯视觉、不等结果，
+同一轮里即使还有插入/选项/跳转，画面反应也先生效。
 
 ### 5.2 结束路径
 

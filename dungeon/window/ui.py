@@ -143,8 +143,12 @@ class DungeonWindowUI:
             ):
                 pass
 
-            # 通知窗：窗口级常驻（_notify 显示数秒自动隐藏），不受组件配置影响
-            self._build_notification(viewport_w)
+        # 通知窗：窗口级常驻（_notify 显示数秒自动隐藏），不受组件配置影响
+        self._build_notification(viewport_w)
+
+        # 窗口视效层（闪光/振动/反色/色差分离）：顶层绘制列表 + 与背景纹理
+        # 同规格的视效纹理（触发时 move_item 提到最前，见 fx.py）
+        self._window_fx.build(viewport_w, viewport_h, tex_w, tex_h)
 
         dpg.set_primary_window("main_window", True)
 
@@ -532,6 +536,7 @@ class DungeonWindowUI:
 
         self._layout_notification(w)
         self._relayout_overlays()
+        self._window_fx.relayout(w, h)
         self._refresh_background()
         self._schedule_text_update()
 

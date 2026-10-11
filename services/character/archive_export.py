@@ -336,6 +336,7 @@ _ACTION_LABEL = {
     "sensitivity": "敏感效果",
     "goto": "章节跳转",
     "effect": "短暂视效",
+    "fx": "窗口视效",
     "none": "条件标记",
 }
 
@@ -397,6 +398,12 @@ def _render_trigger_record(entry: dict) -> str:
             body_parts.append(
                 f"<div class='rp-trigger-body'>✨ 视效 {html.escape(filter_key)}"
                 f"（{html.escape(str(data.get('duration', '')))} 步）</div>")
+    elif action_type == "fx":
+        fx_key = str(data.get("fx") or "").strip()
+        if fx_key:
+            body_parts.append(
+                f"<div class='rp-trigger-body'>✨ 窗口视效 {html.escape(fx_key)}"
+                f"（{html.escape(str(data.get('duration', '')))} 秒）</div>")
     if not body_parts and action_type in ("none", "", None):
         body_parts.append("<div class='rp-trigger-body muted'>（仅标记条件成立，无动作）</div>")
     return head + "".join(body_parts)

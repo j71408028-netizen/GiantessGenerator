@@ -19,7 +19,7 @@ import os
 from dataclasses import dataclass
 
 from dungeon import schema
-from dungeon.actions import (ENDING_ACTION, VISUAL_FILTER_KEYS,
+from dungeon.actions import (ENDING_ACTION, VISUAL_FILTER_KEYS, WINDOW_FX_KEYS,
                              normalize_action_type)
 from dungeon.audio.chapters import (BGM_SUPPORTED_EXTS, CHAPTER_NONE,
                               MAX_BGM_VOLUME, normalize_chapters)
@@ -703,6 +703,19 @@ def _validate_triggers(triggers, chapter_names, terminating, trigger_names,
             duration = action_data.get("duration", 1)
             if not _is_number(duration) or duration < 1:
                 add("warning", path + ".action_data.duration", "持续步数必须是 ≥1 的数字")
+        elif action_type == "fx":
+            fx_key = str(action_data.get("fx") or "").strip()
+            if fx_key not in WINDOW_FX_KEYS:
+                add("warning", path + ".action_data.fx",
+                    f"未知窗口视效「{fx_key}」（允许：{', '.join(WINDOW_FX_KEYS)}），运行时会跳过")
+            fx_duration = action_data.get("duration", 0.8)
+            if not _is_number(fx_duration) or not 0.1 <= fx_duration <= 10:
+                add("warning", path + ".action_data.duration",
+                    "持续秒数必须是 0.1~10 的数字（越界时运行时夹回区间）")
+            fx_intensity = action_data.get("intensity", 60)
+            if not _is_number(fx_intensity) or not 0 <= fx_intensity <= 100:
+                add("warning", path + ".action_data.intensity",
+                    "强度必须是 0~100 的数字（越界时运行时夹回区间）")
         elif action_type != "none":
             add("warning", action_path, f"未知动作类型「{action_type}」，运行时会跳过")
 

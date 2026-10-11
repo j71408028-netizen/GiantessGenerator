@@ -9,12 +9,14 @@ import random
 
 from dungeon import process_log
 from dungeon.actions import (EMPTY_ACTIONS, MINI_GAME_DEFAULT_ID,
-                             VISUAL_FILTER_KEYS, normalize_action_type)
+                             VISUAL_ACTION_TYPES, VISUAL_FILTER_KEYS,
+                             WINDOW_FX_KEYS, normalize_action_type)
 from dungeon.audio.chapters import (find_chapter, is_terminating_chapter,
                               matches_scope, sensitivity_amount)
 from dungeon.models import DungeonState, DungeonTextType
 from dungeon.response import canonical_history_entry
 from dungeon.rules import TriggerRules
+from dungeon.window.fx import parse_fx_params
 from dungeon.window.minigame import BACKEND_PY, resolve_mini_game
 
 
@@ -214,195 +216,218 @@ class TriggerHandler:
     def check_triggers(self, skip_names=None):
         """判定所有触发器。``skip_names``：本轮跳过的触发器名集合——
         小游戏结算后的重判传入刚结算的触发器，防止条件仍成立时原地重启
-        （后续步进的重判不受影响，可再次触发的触发器照常按条件再进）。"""
+        （后续步进的重判不受影响，可再次触发的触发器照常按条件再进）。
+
+        视效类动作（短暂视效 / 窗口视效）**总是最优先派发**：纯视觉、不等
+        结果，同一轮判定里即使还有插入/选项/跳转要执行，画面反应也先生效。"""
         if not self.triggers:
             return
         skip = skip_names or ()
-        for trigger_index, trigger in enumerate(self.triggers):
-            if trigger.get("name") in self.triggered_names \
-                    or trigger.get("name") in skip:
-                continue
-            action_data = trigger.get("action_data", {})
-            action_type = normalize_action_type(trigger.get("action_type"), action_data)
-            # 所在章节：触发器只在指定章节内参与判定
-            if not matches_scope(trigger.get("chapter"), self.current_chapter):
-                continue
-            pre_names = trigger.get("precondition_names", [])
-            if not all(name in self.fired_triggers for name in pre_names):
-                continue
-            cond = trigger.get("condition", {})
-            if not self.evaluate_condition(cond, self.dungeon_state):
-                continue
-            action_accepted = True
-            if action_type == "insert":
-                text = str(action_data.get("text", "")).strip()
-                if not text:
-                    process_log.log(f"[Trigger] 插入触发器 {trigger['name']} 缺少插入文本，已跳过")
-                    action_accepted = False
-                else:
-                    delayed = bool(action_data.get("delayed", False))
-                    self.pending_insertions.append({
-                        "text": text,
-                        "text_type": action_data.get("text_type") or "background",
-                        "highlight": bool(action_data.get("highlight", False)),
-                        "delayed": delayed,
-                    })
-                    process_log.log(f"[Trigger] 已触发: {trigger['name']}，排队插入段落（延迟={delayed}）")
-                    self._record_trigger_action(trigger, action_type, action_data)
-            elif action_type == "option":
-                # 结束章节：不允许弹出选项
-                if is_terminating_chapter(
-                        find_chapter(self.chapters, self.current_chapter)):
-                    process_log.log(f"[Trigger] 选项触发器 {trigger['name']} 位于结束章节内，已跳过")
-                    action_accepted = False
+        for action_types in (VISUAL_ACTION_TYPES, None):
+            for trigger_index, trigger in enumerate(self.triggers):
+                if trigger.get("name") in self.triggered_names \
+                        or trigger.get("name") in skip:
                     continue
-                options = action_data.get("options") or []
-                if not options:
-                    process_log.log(f"[Trigger] 选项触发器 {trigger['name']} 未配置选项，已跳过")
+                action_data = trigger.get("action_data", {})
+                action_type = normalize_action_type(trigger.get("action_type"), action_data)
+                if action_types is not None:
+                    if action_type not in action_types:
+                        continue
+                elif action_type in VISUAL_ACTION_TYPES:
+                    continue   # 视效类已在第一轮派发
+                self._dispatch_trigger(trigger, trigger_index, action_type)
+
+    def _dispatch_trigger(self, trigger, trigger_index, action_type):
+        """派发单个已通过条件判定的触发器动作。"""
+        action_data = trigger.get("action_data", {})
+        # 所在章节：触发器只在指定章节内参与判定
+        if not matches_scope(trigger.get("chapter"), self.current_chapter):
+            return
+        pre_names = trigger.get("precondition_names", [])
+        if not all(name in self.fired_triggers for name in pre_names):
+            return
+        cond = trigger.get("condition", {})
+        if not self.evaluate_condition(cond, self.dungeon_state):
+            return
+        action_accepted = True
+        if action_type == "insert":
+            text = str(action_data.get("text", "")).strip()
+            if not text:
+                process_log.log(f"[Trigger] 插入触发器 {trigger['name']} 缺少插入文本，已跳过")
+                action_accepted = False
+            else:
+                delayed = bool(action_data.get("delayed", False))
+                self.pending_insertions.append({
+                    "text": text,
+                    "text_type": action_data.get("text_type") or "background",
+                    "highlight": bool(action_data.get("highlight", False)),
+                    "delayed": delayed,
+                })
+                process_log.log(f"[Trigger] 已触发: {trigger['name']}，排队插入段落（延迟={delayed}）")
+                self._record_trigger_action(trigger, action_type, action_data)
+        elif action_type == "option":
+            # 结束章节：不允许弹出选项
+            if is_terminating_chapter(
+                    find_chapter(self.chapters, self.current_chapter)):
+                process_log.log(f"[Trigger] 选项触发器 {trigger['name']} 位于结束章节内，已跳过")
+                return
+            options = action_data.get("options") or []
+            if not options:
+                process_log.log(f"[Trigger] 选项触发器 {trigger['name']} 未配置选项，已跳过")
+                action_accepted = False
+            elif self.pending_option is not None:
+                process_log.log(f"[Trigger] 选项触发器 {trigger['name']} 触发时已有选项弹窗，已跳过")
+                action_accepted = False
+            else:
+                self.pending_option = {
+                    "name": trigger["name"],
+                    "prompt": action_data.get("prompt", ""),
+                    "options": [
+                        {"id": o.get("id", i), "prompt": o.get("prompt", ""), "text": o.get("text", "")}
+                        for i, o in enumerate(options)
+                    ],
+                }
+                process_log.log(f"[Trigger] 已触发: {trigger['name']}，弹出选项")
+                self._start_option_generation()
+                self._last_option_record = self._record_trigger_action(trigger, action_type, action_data)
+        elif action_type == "mini_game":
+            # 结束章节：不允许弹小游戏
+            if is_terminating_chapter(
+                    find_chapter(self.chapters, self.current_chapter)):
+                process_log.log(f"[Trigger] 小游戏触发器 {trigger['name']} 位于结束章节内，已跳过")
+                action_accepted = False
+            elif self.pending_mini_game is not None:
+                process_log.log(f"[Trigger] 小游戏触发器 {trigger['name']} 触发时已有小游戏进行中，已跳过")
+                action_accepted = False
+            else:
+                game_id = str(action_data.get("game") or MINI_GAME_DEFAULT_ID).strip()
+                resolved = resolve_mini_game(game_id)
+                if resolved is None:
+                    process_log.log(f"[Trigger] 找不到小游戏「{game_id}」，"
+                                    f"触发器 {trigger['name']} 已跳过")
                     action_accepted = False
-                elif self.pending_option is not None:
-                    process_log.log(f"[Trigger] 选项触发器 {trigger['name']} 触发时已有选项弹窗，已跳过")
-                    action_accepted = False
+                elif resolved.backend == BACKEND_PY:
+                    # py 后端：会话窗口内的覆盖层舞台（dungeon.window.minigame.stage）
+                    try:
+                        launched = self._open_mini_game_stage(
+                            resolved, action_data,
+                            on_result=self._on_mini_game_result)
+                    except Exception as exc:
+                        process_log.log(f"[Trigger] 小游戏「{game_id}」打开异常: {exc}")
+                        launched = False
+                    if not launched:
+                        action_accepted = False
+                    else:
+                        self.pending_mini_game = {
+                            "name": trigger["name"],
+                            "action_data": action_data,
+                            "trigger_index": trigger_index,
+                        }
+                        process_log.log(f"[Trigger] 已触发: {trigger['name']}，"
+                                        f"小游戏「{game_id}」开始")
+                        self._last_mini_game_record = self._record_trigger_action(
+                            trigger, action_type, action_data)
                 else:
-                    self.pending_option = {
-                        "name": trigger["name"],
-                        "prompt": action_data.get("prompt", ""),
-                        "options": [
-                            {"id": o.get("id", i), "prompt": o.get("prompt", ""), "text": o.get("text", "")}
-                            for i, o in enumerate(options)
-                        ],
-                    }
-                    process_log.log(f"[Trigger] 已触发: {trigger['name']}，弹出选项")
-                    self._start_option_generation()
-                    self._last_option_record = self._record_trigger_action(trigger, action_type, action_data)
-            elif action_type == "mini_game":
-                # 结束章节：不允许弹小游戏
-                if is_terminating_chapter(
-                        find_chapter(self.chapters, self.current_chapter)):
-                    process_log.log(f"[Trigger] 小游戏触发器 {trigger['name']} 位于结束章节内，已跳过")
-                    action_accepted = False
-                elif self.pending_mini_game is not None:
-                    process_log.log(f"[Trigger] 小游戏触发器 {trigger['name']} 触发时已有小游戏进行中，已跳过")
-                    action_accepted = False
-                else:
-                    game_id = str(action_data.get("game") or MINI_GAME_DEFAULT_ID).strip()
-                    resolved = resolve_mini_game(game_id)
-                    if resolved is None:
-                        process_log.log(f"[Trigger] 找不到小游戏「{game_id}」，"
+                    # web 后端：子进程 pywebview 独立窗口（宿主端口能力）
+                    try:
+                        launched = self.host.launch_mini_game(
+                            game_id, action_data,
+                            on_result=self._on_mini_game_result)
+                    except Exception as exc:
+                        process_log.log(f"[Trigger] 小游戏「{game_id}」启动异常: {exc}")
+                        launched = False
+                    if not launched:
+                        # 宿主不支持 / 目录缺失：触发器不生效，副本流程照常
+                        process_log.log(f"[Trigger] 小游戏「{game_id}」不可用，"
                                         f"触发器 {trigger['name']} 已跳过")
                         action_accepted = False
-                    elif resolved.backend == BACKEND_PY:
-                        # py 后端：会话窗口内的覆盖层舞台（dungeon.window.minigame.stage）
-                        try:
-                            launched = self._open_mini_game_stage(
-                                resolved, action_data,
-                                on_result=self._on_mini_game_result)
-                        except Exception as exc:
-                            process_log.log(f"[Trigger] 小游戏「{game_id}」打开异常: {exc}")
-                            launched = False
-                        if not launched:
-                            action_accepted = False
-                        else:
-                            self.pending_mini_game = {
-                                "name": trigger["name"],
-                                "action_data": action_data,
-                                "trigger_index": trigger_index,
-                            }
-                            process_log.log(f"[Trigger] 已触发: {trigger['name']}，"
-                                            f"小游戏「{game_id}」开始")
-                            self._last_mini_game_record = self._record_trigger_action(
-                                trigger, action_type, action_data)
                     else:
-                        # web 后端：子进程 pywebview 独立窗口（宿主端口能力）
-                        try:
-                            launched = self.host.launch_mini_game(
-                                game_id, action_data,
-                                on_result=self._on_mini_game_result)
-                        except Exception as exc:
-                            process_log.log(f"[Trigger] 小游戏「{game_id}」启动异常: {exc}")
-                            launched = False
-                        if not launched:
-                            # 宿主不支持 / 目录缺失：触发器不生效，副本流程照常
-                            process_log.log(f"[Trigger] 小游戏「{game_id}」不可用，"
-                                            f"触发器 {trigger['name']} 已跳过")
-                            action_accepted = False
-                        else:
-                            self.pending_mini_game = {
-                                "name": trigger["name"],
-                                "action_data": action_data,
-                                "trigger_index": trigger_index,
-                            }
-                            process_log.log(f"[Trigger] 已触发: {trigger['name']}，"
-                                            f"小游戏「{game_id}」开始")
-                            self._last_mini_game_record = self._record_trigger_action(
-                                trigger, action_type, action_data)
-            elif action_type == "effect":
-                filter_key = str(action_data.get("filter") or "").strip()
-                if filter_key not in VISUAL_FILTER_KEYS:
-                    process_log.log(f"[Trigger] 视效触发器 {trigger['name']} 的视效无效：{filter_key}，已跳过")
-                    action_accepted = False
-                else:
-                    try:
-                        duration = max(1, int(float(action_data.get("duration", 1))))
-                    except (TypeError, ValueError):
-                        duration = 1
-                    self.visual_effects.append({"filter": filter_key, "remaining": duration})
-                    self._refresh_visual_effect()
-                    process_log.log(f"[Trigger] 已触发: {trigger['name']}，短暂视效 {filter_key}（{duration} 步）")
-                    self._record_trigger_action(trigger, action_type, action_data)
-            elif action_type == "goto":
-                # 结束章节：不允许通过触发器跳出
-                if is_terminating_chapter(
-                        find_chapter(self.chapters, self.current_chapter)):
-                    process_log.log(f"[Trigger] 跳转触发器 {trigger['name']} 位于结束章节内，已跳过")
-                    action_accepted = False
-                    continue
-                target = str(action_data.get("chapter") or "").strip()
-                chapter = find_chapter(self.chapters, target) if target else None
-                if target and chapter is None:
-                    process_log.log(f"[Trigger] 跳转触发器 {trigger['name']} 的目标章节不存在：{target}，已跳过")
-                    action_accepted = False
-                elif self.current_chapter == (target or None):
-                    process_log.log(f"[Trigger] 跳转触发器 {trigger['name']} 已处于章节「{target or '无章节'}」，已跳过")
-                    action_accepted = False
-                else:
-                    self._enter_chapter(target)
-                    process_log.log(f"[Trigger] 已触发: {trigger['name']}，"
-                          f"跳转章节：{target or '离开章节'}")
-                    self._record_trigger_action(
-                        trigger, action_type, action_data,
-                        chapter_background=dict((chapter or {}).get("background") or {}),
-                        chapter_bgm=dict((chapter or {}).get("bgm") or {}),
-                        chapter_voice_fx=dict((chapter or {}).get("voice_fx") or {}))
-            elif action_type == "ending":
-                name = str(action_data.get("name") or action_data.get("ending_text") or "").strip()
-                if not name:
-                    process_log.log(f"[Trigger] 结局触发器 {trigger['name']} 未填写结局名称，已跳过")
-                    action_accepted = False
-                elif self.dungeon_ended:
-                    process_log.log(f"[Trigger] 结局触发器 {trigger['name']} 触发时故事已结束，已跳过")
-                    action_accepted = False
-                else:
-                    self.pending_ending = {
-                        "name": name, "action_data": action_data, "trigger_index": trigger_index}
-                    process_log.log(f"[Trigger] 已触发: {trigger['name']}，结局：{name}")
-                    self._start_ending_generation()
-                    self._last_ending_record = self._record_trigger_action(trigger, action_type, action_data)
-            elif action_type in EMPTY_ACTIONS:
-                # 空触发器：无动作，仅用于标记条件成立，供其他触发器作为前置条件
-                process_log.log(f"[Trigger] 空触发器 {trigger['name']} 条件成立（无动作）")
-                self._record_trigger_action(trigger, action_type, action_data)
-            else:
-                process_log.log(f"未知的触发器动作类型：{action_type}")
+                        self.pending_mini_game = {
+                            "name": trigger["name"],
+                            "action_data": action_data,
+                            "trigger_index": trigger_index,
+                        }
+                        process_log.log(f"[Trigger] 已触发: {trigger['name']}，"
+                                        f"小游戏「{game_id}」开始")
+                        self._last_mini_game_record = self._record_trigger_action(
+                            trigger, action_type, action_data)
+        elif action_type == "effect":
+            filter_key = str(action_data.get("filter") or "").strip()
+            if filter_key not in VISUAL_FILTER_KEYS:
+                process_log.log(f"[Trigger] 视效触发器 {trigger['name']} 的视效无效：{filter_key}，已跳过")
                 action_accepted = False
+            else:
+                try:
+                    duration = max(1, int(float(action_data.get("duration", 1))))
+                except (TypeError, ValueError):
+                    duration = 1
+                self.visual_effects.append({"filter": filter_key, "remaining": duration})
+                self._refresh_visual_effect()
+                process_log.log(f"[Trigger] 已触发: {trigger['name']}，短暂视效 {filter_key}（{duration} 步）")
+                self._record_trigger_action(trigger, action_type, action_data)
+        elif action_type == "fx":
+            # 窗口视效：整窗瞬时画面，按绝对时间消退；不阻塞任何动作
+            fx_key, duration, intensity = parse_fx_params(action_data)
+            if fx_key not in WINDOW_FX_KEYS:
+                process_log.log(f"[Trigger] 视效触发器 {trigger['name']} 的窗口视效无效：{fx_key}，已跳过")
+                action_accepted = False
+            else:
+                self._window_fx.start(fx_key, duration, intensity)
+                process_log.log(f"[Trigger] 已触发: {trigger['name']}，窗口视效 {fx_key}"
+                                f"（{duration:.1f} 秒，强度 {intensity:.0f}%）")
+                self._record_trigger_action(trigger, action_type, action_data)
+        elif action_type == "goto":
+            # 结束章节：不允许通过触发器跳出
+            if is_terminating_chapter(
+                    find_chapter(self.chapters, self.current_chapter)):
+                process_log.log(f"[Trigger] 跳转触发器 {trigger['name']} 位于结束章节内，已跳过")
+                return
+            target = str(action_data.get("chapter") or "").strip()
+            chapter = find_chapter(self.chapters, target) if target else None
+            if target and chapter is None:
+                process_log.log(f"[Trigger] 跳转触发器 {trigger['name']} 的目标章节不存在：{target}，已跳过")
+                action_accepted = False
+            elif self.current_chapter == (target or None):
+                process_log.log(f"[Trigger] 跳转触发器 {trigger['name']} 已处于章节「{target or '无章节'}」，已跳过")
+                action_accepted = False
+            else:
+                self._enter_chapter(target)
+                process_log.log(f"[Trigger] 已触发: {trigger['name']}，"
+                      f"跳转章节：{target or '离开章节'}")
+                self._record_trigger_action(
+                    trigger, action_type, action_data,
+                    chapter_background=dict((chapter or {}).get("background") or {}),
+                    chapter_bgm=dict((chapter or {}).get("bgm") or {}),
+                    chapter_voice_fx=dict((chapter or {}).get("voice_fx") or {}))
+        elif action_type == "ending":
+            name = str(action_data.get("name") or action_data.get("ending_text") or "").strip()
+            if not name:
+                process_log.log(f"[Trigger] 结局触发器 {trigger['name']} 未填写结局名称，已跳过")
+                action_accepted = False
+            elif self.dungeon_ended:
+                process_log.log(f"[Trigger] 结局触发器 {trigger['name']} 触发时故事已结束，已跳过")
+                action_accepted = False
+            else:
+                self.pending_ending = {
+                    "name": name, "action_data": action_data, "trigger_index": trigger_index}
+                process_log.log(f"[Trigger] 已触发: {trigger['name']}，结局：{name}")
+                self._start_ending_generation()
+                self._last_ending_record = self._record_trigger_action(trigger, action_type, action_data)
+        elif action_type in EMPTY_ACTIONS:
+            # 空触发器：无动作，仅用于标记条件成立，供其他触发器作为前置条件
+            process_log.log(f"[Trigger] 空触发器 {trigger['name']} 条件成立（无动作）")
+            self._record_trigger_action(trigger, action_type, action_data)
+        else:
+            process_log.log(f"未知的触发器动作类型：{action_type}")
+            action_accepted = False
 
-            if not action_accepted:
-                continue
-            # 可再次触发（默认）：不加入已触发集合，条件满足时可重复触发
-            self.fired_triggers.add(trigger["name"])
-            if not trigger.get("repeatable", True):
-                self.triggered_names.add(trigger["name"])
-            self.dungeon_state.steps_since_trigger = 0
+        if not action_accepted:
+            return
+        # 可再次触发（默认）：不加入已触发集合，条件满足时可重复触发
+        self.fired_triggers.add(trigger["name"])
+        if not trigger.get("repeatable", True):
+            self.triggered_names.add(trigger["name"])
+        self.dungeon_state.steps_since_trigger = 0
 
     def _on_mini_game_result(self, result):
         """小游戏结果回调（宿主线程）：并入帧线程后执行结算。"""
@@ -491,6 +516,12 @@ class TriggerHandler:
                 self.visual_effects.append({"filter": filter_key, "remaining": duration})
                 self._refresh_visual_effect()
             process_log.log(f"[Replay] 复现短暂视效: {name}")
+        elif action_type == "fx":
+            # 窗口视效按时长自消，回放按记录原样重放一次
+            fx_key, duration, intensity = parse_fx_params(action_data)
+            if fx_key in WINDOW_FX_KEYS:
+                self._window_fx.start(fx_key, duration, intensity)
+            process_log.log(f"[Replay] 复现窗口视效: {name}")
         elif action_type == "option":
             choice_index = record.get("choice_index")
             if choice_index is None:

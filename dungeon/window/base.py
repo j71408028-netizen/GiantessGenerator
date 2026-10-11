@@ -23,6 +23,7 @@ from dungeon import process_log
 from dungeon.audio import BgmPlayer
 from dungeon.audio.speech import SpeechDirector, VoiceCaster, normalize_voice
 from dungeon.window.background import DungeonBackground
+from dungeon.window.fx import WindowFx
 from dungeon.audio.chapters import normalize_chapters
 from dungeon.coupling import normalize_coupling_level
 from dungeon.window import dpg_state
@@ -150,6 +151,8 @@ class DungeonWindowBase:
         self._bg_pil_original = None
         self._bg_revision = 0
         self._background = DungeonBackground(self)
+        # 窗口视效（闪光/振动/反色/色差分离）：触发即播、按时长自消，不阻塞任何动作
+        self._window_fx = WindowFx(self)
         # 章节背景音乐：一个人一条（bgm 与 background 共用同一套素材路径解析，
         # 因此把 background 的解析器注入进去，省得多写一份相对路径兜底）
         self.current_bgm_path = ""
@@ -404,6 +407,8 @@ class DungeonWindowBase:
         self._destroy_overlays()
         # 背景像素工作者：会话内的全部重采样/混合任务都在这里排队，收工时一并结束
         self._background.shutdown()
+        # 窗口视效：帧任务已随 stop() 清空，这里收掉像素线程、清振动基线与临时快照
+        self._window_fx.shutdown()
         # 章节背景音乐：会话一结束就该静音（帧循环已停，渐变任务不会再被调用方刷新）
         self._bgm.shutdown()
         # 对话语音：同样必须立刻收声，顺手清掉合成的临时音频

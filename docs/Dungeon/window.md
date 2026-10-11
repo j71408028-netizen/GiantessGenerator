@@ -43,6 +43,7 @@
 | `dungeon/window/components.py` | 显示组件生命周期接入（构建 / 布局 / 刷新 / 销毁） |
 | `dungeon/window/launcher.py` | 入口阶段混入 `DungeonLaunchStages`：动态背景轮播、方案选择面板、结局图标轮播、阶段切换 |
 | `dungeon/window/background.py` | 背景图加载 / 旋转 / 模糊 / 淡入淡出 / 纹理更新（含单工作者 `PixelWorker`） |
+| `dungeon/window/fx.py` | 窗口视效（闪光 / 振动 / 反色 / 色差分离）：顶层绘制列表 + 视效纹理，帧时钟计时、绝对时间消退，不阻塞其他动作 |
 | `dungeon/window/frame.py` | 帧时钟 `FrameScheduler`（窗口实例成员 `self._frame`）：`every` / `after` / `cancel` / `call` / `tick` / `drain` / `stop`——window 层唯一的时间源 |
 | `dungeon/window/result.py` | `SessionResult` 与原因常量：`run()` 的返回值，替代「读窗口私有属性」 |
 | `dungeon/window/fonts.py` | **字体与字号唯一真相源**：两档字号（`TEXT_FONT_SIZE` 24 / `UI_FONT_SIZE` 21 / `BOLD_FONT_SIZE`）、家族名→字体文件映射 `_FAMILY_FONT_FILES` + 平台回退链 + 粗体/衬线候选链 + `resolve_font_files()`；窗口 `ui.py` 与组件包共用同一份 |
