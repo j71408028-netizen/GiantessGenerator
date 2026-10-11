@@ -20,7 +20,7 @@
 
 1. **spawn**：构造参数经 ``dungeon.window.launch_payload.serialize_launch``
    序列化后，随视口尺寸一起经 ``multiprocessing.Process``（``_child_main``）
-   传给子进程（``ui.common.dungeon_child_host.run_dungeon_host``）；
+   传给子进程（``ui.hosting.dungeon_child_host.run_dungeon_host``）；
 2. **代问**：子进程的收尾弹框（``dialog``）与回放文件选择
    （``open_replay_file``）以协议请求送回，用调用方的 ``dialogs`` 实现与
    Tk 文件框代答——子进程内因此没有任何 Tk 代码；
@@ -32,7 +32,7 @@
    主窗口关闭/切换界面时的「副本进行中」守卫与通知路径照旧工作，只是
    ``request_close()`` 现在变成「请子进程收尾」。
 
-协议见 ``ui.common.dungeon_child_host`` 模块说明。
+协议见 ``ui.hosting.dungeon_child_host`` 模块说明。
 """
 
 import multiprocessing
@@ -55,7 +55,7 @@ _ACTIVE = None
 
 def _child_main(conn, payload):
     """multiprocessing 拉起的子进程入口（必须模块级，供 spawn pickle）。"""
-    from ui.common.dungeon_child_host import run_dungeon_host
+    from ui.hosting.dungeon_child_host import run_dungeon_host
 
     run_dungeon_host(conn, payload)
 
@@ -110,27 +110,26 @@ def _parent_dpi_aware() -> bool:
         return True
 
 
-def launch_dungeon_subprocess(host_window, app=None, dialogs=None,
+def launch_dungeon_subprocess(host_window, *, dialogs, app=None,
                               **window_kwargs) -> SessionResult:
     """在独立子进程里跑一局副本，返回与窗口 ``run()`` 同形的结果。
 
     ``host_window``：主窗口（Tk/CTk 根）——spawn 前量视口尺寸并藏起、等待期
-    泵事件、收尾时恢复。``app``：持有 ``_active_dungeon_window`` 的主控对象
-    （``MainWindowManager`` / ``MiniApp``），仅用于会话期登记，可省略。
-    ``dialogs``：收尾弹框实现（需 ``showinfo/showwarning/showerror/askyesno``），
-    缺省用 ``ui.common.dialogs``。其余关键字参数与 ``DungeonSessionWindow``
-    构造参数一致（``parent`` / ``host`` / ``gui`` / 两个仓库会被序列化剔除，
-    子进程自行提供）。
+    泵事件、收尾时恢复。``dialogs``：收尾弹框实现（需
+    ``showinfo/showwarning/showerror/askyesno``），**必填注入**——专业模式传
+    ``ui.common.dialogs``，挂件传 ``ui.mini.dialogs.MiniDialogs``；本模块因此
+    不 import 任何 CTk 组件。``app``：持有 ``_active_dungeon_window`` 的主控
+    对象（``MainWindowManager`` / ``MiniApp``），仅用于会话期登记，可省略。
+    其余关键字参数与 ``DungeonSessionWindow`` 构造参数一致（``parent`` /
+    ``host`` / ``gui`` / 两个仓库会被序列化剔除，子进程自行提供）。
     """
     global _ACTIVE
 
     if _ACTIVE is not None:
         return SessionResult(REASON_ALREADY_RUNNING)
-    if dialogs is None:
-        import ui.common.dialogs as dialogs
 
     # 视口尺寸要趁主窗口**仍可见**时量（隐藏后各平台结果不一致，见 TkHost）。
-    from ui.common.tk_host import TkHost
+    from ui.hosting.tk_host import TkHost
 
     viewport_w, _vh, scale, main_cw, main_ch = TkHost(host_window).viewport_metrics()
     payload = {

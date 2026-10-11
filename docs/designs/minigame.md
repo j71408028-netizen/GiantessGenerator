@@ -13,7 +13,7 @@
 | backend | 运行形式 | 通道 |
 |---|---|---|
 | `py` | **会话窗口内的覆盖层舞台**：叠在背景上的全屏画布，步进挂起（阅读模态 `overlay_open()=="minigame"`），ESC 中止 | `dungeon/window/minigame/stage.py`（帧时钟驱动，唯一允许 DPG 的地方） |
-| `web` | 独立顶层窗口（子进程 pywebview/WebView2） | 宿主端口 `launch_mini_game()` → `ui/common/mini_game_host.py` 子进程 |
+| `web` | 独立顶层窗口（子进程 pywebview/WebView2） | 宿主端口 `launch_mini_game()` → `ui/hosting/mini_game_host.py` 子进程 |
 
 两种后端的**结果契约一致**：`{"won": bool, ...}` → 同一条 `_finish_mini_game` 管线
 （胜负分支 / 叙事行 / 回放记录）。无结果（ESC / 用户关窗 / 游戏崩溃）= 不执行

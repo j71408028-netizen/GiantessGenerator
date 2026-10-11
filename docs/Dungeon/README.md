@@ -43,7 +43,7 @@
 | `dungeon/minigame_pack.py` | 领域层 | 小游戏数据包读取（manifest / 参数声明），validate 与 window/minigame 共用 |
 | `dungeon/window/component_pack/` | 组件包 | 官方显示组件（文本栏三选一 / 属性条 / 过程日志），常驻 Python 包，惰性导入 |
 | `dungeon/window/host.py` | 端口 | `HostPort`：window 层向宿主索取能力的唯一出口 |
-| `ui/common/tk_host.py` | 宿主适配 | `TkHost`——window 层之外唯一的 Tk 细节所在地 |
+| `ui/hosting/tk_host.py` | 宿主适配 | `TkHost`——window 层之外唯一的 Tk 细节所在地 |
 | `persistence/scenario_repo.py` | 持久化 | 方案读写、旧目录迁移、保存即校验 |
 | `ui/scenario/*` | 编辑器 | 按 `dungeon/schema.py` 的声明渲染表单 |
 | `tests/*` | 离线自检（`tests/run_checks.py` 统一入口）；需显示器的自动驾驶脚本仍在 `scripts/` | 见 §4 |

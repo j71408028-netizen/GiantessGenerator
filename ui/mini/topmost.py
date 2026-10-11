@@ -3,7 +3,7 @@
 Windows / macOS 上 Tk 的 ``root.attributes("-topmost", ...)`` 就是正路；Linux/X11
 上它**在部分桌面环境（实测 GNOME Shell）写不进 ``_NET_WM_STATE_ABOVE``，而且不报错**——
 读回 ``attributes("-topmost")`` 也一直是 0，静默失效。EWMH 的 ClientMessage 才是这套
-协议的正路，实现见 ``ui.common.x11``。
+协议的正路，实现见 ``ui.hosting.x11``。
 
 本模块把两件事收在一处：
 
@@ -49,7 +49,7 @@ def apply(window, enabled: bool) -> bool:
             return False
 
     try:
-        from ui.common import x11
+        from ui.hosting import x11
     except Exception:
         return False
     if not x11.x11_enabled():
@@ -78,7 +78,7 @@ def available() -> bool:
     if not _is_linux():
         return True
     try:
-        from ui.common import x11
+        from ui.hosting import x11
     except Exception:
         return False
     if not x11.x11_enabled():

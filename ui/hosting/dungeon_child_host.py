@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """副本子进程的宿主端口实现与子进程主体。
 
-副本会话运行在**独立子进程**里（父进程侧见 ``ui.common.dungeon_spawner``）：
+副本会话运行在**独立子进程**里（父进程侧见 ``ui.hosting.dungeon_spawner``）：
 DPG / GLFW 从此独占子进程，与 Tk 主程序不再共享线程消息队列、GLFW 单例与
 X11 连接——``dpg.destroy_context()`` 终止的是子进程的 GLFW，父进程的 Tk 根
 窗口因此不再需要保活视口（``dpg_state.park_context``）这类同进程共存补救。
@@ -197,8 +197,8 @@ class ChildHost(HostPort):
                            str(target), out_path]
                 else:
                     host_script = os.path.join(
-                        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        "common", "mini_game_host.py")
+                        os.path.dirname(os.path.abspath(__file__)),
+                        "mini_game_host.py")
                     cmd = [sys.executable, host_script, entry, str(target), out_path]
                 flags = (subprocess.CREATE_NO_WINDOW if _IS_WINDOWS else 0)
                 proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,

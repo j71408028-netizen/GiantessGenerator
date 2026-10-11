@@ -9,7 +9,7 @@
 **换宿主可以做，嵌入宿主布局做不到**。
 
 > **2026-10 起的进程形态**：副本会话运行在**独立子进程**里——Tk 主程序经
-> `ui/common/dungeon_spawner.py` 拉起子进程（`ui/common/dungeon_child_host.py`
+> `ui/hosting/dungeon_spawner.py` 拉起子进程（`ui/hosting/dungeon_child_host.py`
 > 是子进程内的宿主端口实现），DPG/GLFW 从此独占子进程，与 Tk 不再共享线程
 > 消息队列、GLFW 单例与 X11 连接。下面 §1–§4 描述的边界与能力映射不变，
 > 只是「宿主」的两种实现分别住在两个进程里（§7）。
@@ -33,16 +33,16 @@
 | 项 | 现状 |
 |---|---|
 | 端口定义 | `dungeon/window/host.py::HostPort`（含无宿主的缺省实现） |
-| Tk 实现 | `ui/common/tk_host.py::TkHost`——window 层之外唯一的 Tk 细节所在地（自检/自动驾驶用；产品路径已改走子进程宿主） |
-| 子进程实现 | `ui/common/dungeon_child_host.py::ChildHost`——子进程内的宿主端口，宿主能力走协议请父进程代劳（§7） |
+| Tk 实现 | `ui/hosting/tk_host.py::TkHost`——window 层之外唯一的 Tk 细节所在地（自检/自动驾驶用；产品路径已改走子进程宿主） |
+| 子进程实现 | `ui/hosting/dungeon_child_host.py::ChildHost`——子进程内的宿主端口，宿主能力走协议请父进程代劳（§7） |
 | 端口方法表 | 见 [窗口索引](window.md) §5.2（尺寸/DPI、显隐、事件泵、弹框、回放文件选择、小游戏窗口、活动窗口登记、字体） |
-| 注入方式 | 父进程：`launch_dungeon_subprocess(...)`（`ui/common/dungeon_spawner.py`）；子进程内构造等价于 `DungeonSessionWindow(host=ChildHost(...), **deserialize_launch(payload))`；不传 host = `HostPort()`（无宿主，自检走这条路径） |
+| 注入方式 | 父进程：`launch_dungeon_subprocess(...)`（`ui/hosting/dungeon_spawner.py`）；子进程内构造等价于 `DungeonSessionWindow(host=ChildHost(...), **deserialize_launch(payload))`；不传 host = `HostPort()`（无宿主，自检走这条路径） |
 | 守卫 | `tests/check_dungeon_layering.py`：`dungeon/window/*.py` 里出现 `tkinter` / `customtkinter` / `ui` 即失败 |
 
 换宿主要做的事只剩一件：**写一个新适配器**（尺寸/DPI、显隐、事件泵、弹框、活动窗口登记、字体、回放文件选择）。
 
 > 注意：正因为 window 层不认 tkinter，`open_replay_file()` 里的 `json` 解析与 `filedialog`
-> 必须住在适配器侧（`ui/common/tk_host.py`）。
+> 必须住在适配器侧（`ui/hosting/tk_host.py`）。
 
 已知未收编项：`dungeon/window/ui.py` 里仍有两处 Windows 平台代码（`_temp_title` 与
 `_update_dpi_scale` 的 `FindWindowW` / `GetDpiForWindow`），属于 DPG/Win32 细节而非宿主端口范畴，
@@ -107,7 +107,7 @@ DPG 2.3.1 的视口是**独立的 GLFW 顶层窗口**，公开 API 里没有任�
 | 为「修挂死」堆看门狗 | Python 层定时器在 DPG 渲染期间拿不到 GIL，超时兜底只能放父进程；真正卡住时 `os._exit` 与 `Stop-Process -Force` 都无效 |
 | 指望把 DPG 窗口嵌入宿主布局 | 只能是独立顶层窗口（§4） |
 | 动 `dungeon/` 领域层 | 分层守卫守着；本层只在 `dungeon/window/` 与调用方之间动刀 |
-| 在父进程（Tk 主程序）里 import `dearpygui` | 父进程从不创建 DPG 上下文，对从未建上下文的 DPG 调用函数会直接段错误（`try/except` 挡不住，见 `dungeon/window/dpg_state.py` 模块说明）。父进程侧一切副本交互都经 `ui/common/dungeon_spawner.py` |
+| 在父进程（Tk 主程序）里 import `dearpygui` | 父进程从不创建 DPG 上下文，对从未建上下文的 DPG 调用函数会直接段错误（`try/except` 挡不住，见 `dungeon/window/dpg_state.py` 模块说明）。父进程侧一切副本交互都经 `ui/hosting/dungeon_spawner.py` |
 
 ## 6. 进程退出挂死（结论）
 
@@ -133,8 +133,8 @@ deadline 轮询），子进程的结论行打印后立即 flush——「已通�
 
 | 件 | 位置 | 职责 |
 |---|---|---|
-| 父进程侧 | `ui/common/dungeon_spawner.py` | 序列化构造参数（`dungeon/window/launch_payload.py`）→ `multiprocessing.Process` 拉起子进程 → 泵循环（`host_window.update()`）→ 代答协议请求 → 还原 `SessionResult`；会话期把句柄登记到 `app._active_dungeon_window`（老代码的「副本进行中」守卫与 `request_close()` 因此零改动） |
-| 子进程侧 | `ui/common/dungeon_child_host.py` | `ChildHost(HostPort)`：尺寸/弹框/回放文件框走协议请父进程代劳，小游戏孙进程照旧；管道断开（父进程死亡）即 `os._exit`，孤儿副本不会继续写 `data/` |
+| 父进程侧 | `ui/hosting/dungeon_spawner.py` | 序列化构造参数（`dungeon/window/launch_payload.py`）→ `multiprocessing.Process` 拉起子进程 → 泵循环（`host_window.update()`）→ 代答协议请求 → 还原 `SessionResult`；会话期把句柄登记到 `app._active_dungeon_window`（老代码的「副本进行中」守卫与 `request_close()` 因此零改动） |
+| 子进程侧 | `ui/hosting/dungeon_child_host.py` | `ChildHost(HostPort)`：尺寸/弹框/回放文件框走协议请父进程代劳，小游戏孙进程照旧；管道断开（父进程死亡）即 `os._exit`，孤儿副本不会继续写 `data/` |
 | 线格式 | `dungeon/window/launch_payload.py` | 构造参数 dict ↔ 纯数据 dict 的往返（dataclass 落 `asdict`、宿主侧参数剔除）；`SessionResult` 的往返同文件。守卫：`tests/check_dungeon_launch_payload.py` |
 
 协议（`multiprocessing.Pipe` 双向，JSON 安全 dict）：子 → 父发

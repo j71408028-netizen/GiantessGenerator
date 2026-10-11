@@ -29,7 +29,7 @@
 | `persistence` | `persistence/` | 仓库层 | + `dungeon` |
 | `services` | `services/` | 服务层；按子域分包（`exploration` 探索编排 / `chat` 聊天 / `worlds` 世界包 / `challenges` 挑战包 / `character` 角色长时行为 / `news` 近况 / `preview` 剪影渲染），顶层只留行为包契约服务 `creation_service` / `state_service` 与 `ui_mode`（§2.5） | + `persistence` |
 | `dungeon_window` | `dungeon/window/**` | 副本会话窗口（Dear PyGui） | + `services`；**禁** `tkinter` / `ui.*` |
-| `ui` | `ui/` | 专业界面（CTk）+ 挂件界面（原生 tkinter） | + `dungeon_window` |
+| `ui` | `ui/` | 专业界面（CTk）+ 挂件界面（原生 tkinter）；`ui/hosting/` 是两模式共用的**进程与宿主基础设施**（副本子进程父/子两侧、`tk_host` 宿主桥、`x11` 支持、`mini_game_host`），包规约：不顶层 import CTk 组件，弹框一律注入 | + `dungeon_window` |
 | `app` | `main.py`（字面量入口，留根目录）+ `app/`（`shell` / `window_manager`） | 入口与应用壳 | 全部；**不被任何人依赖** |
 
 **根目录已冻结**：只剩 `paths.py` 与字面量入口 `main.py` 两个文件（构建脚本写死了
@@ -107,6 +107,12 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 - `services/preview` 里那个 `tk.Canvas` 子类**全仓无任何实例化点**，只是被同模块的 PIL
   子类当绘制配方用 → 正解是**去 tk 化**（改名 `BodyPreviewPainter`，图元原语由子类实现），
   而不是把没人用的控件「上移进界面层」。
+- `ui/common` 起初只放专业模式窗口组件，后来混进了与控件无关的进程/宿主机制。2026-10-11
+  按依赖拆出 `ui/hosting/`（`x11` `x11_boot` `tk_host` `dungeon_spawner`
+  `dungeon_child_host` `mini_game_host`——全部零顶层 CTk 依赖，被两种模式与 main 共用；
+  `splash` 因本身是 CTk 窗口留在原处），并把 `dungeon_spawner` / `tk_host` 的弹框实现改成
+  调用方注入（缺省 CTk 版延迟到首次使用才 import）。挂件白名单由此从「点名豁免三个
+  例外模块」收敛为整包放行 `ui.hosting`（`tests/check_mini_layering.py`）。
 
 新增越界**不许直接塞进 `KNOWN_EXCEPTIONS` 就走**——先想清楚能不能靠"按依赖定层"解决。
 

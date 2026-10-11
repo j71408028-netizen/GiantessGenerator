@@ -8,7 +8,7 @@
    - ``"py"``：``entry`` 指向的 Python 文件里**恰一个** MiniGame 子类，
      运行时动态加载（契约由 ``tests/check_minigame.py`` 守卫）；
    - ``"web"``：``session.html``，交给宿主端口 ``launch_mini_game()``
-     用子进程 pywebview 打开（兼容通道，见 ui/common/mini_game_host.py）。
+     用子进程 pywebview 打开（兼容通道，见 ui/hosting/mini_game_host.py）。
 
 无 manifest 但存在 ``session.html`` 的目录按 web 兼容（历史包）。
 

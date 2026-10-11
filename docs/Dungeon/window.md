@@ -6,7 +6,7 @@
 > **改动 `dungeon/` 下任何代码前请先扫 §5 约束清单。**
 
 窗口由 Tkinter 主程序拉起的**独立子进程**承载：父进程（Tk 主程序）经
-`ui/common/dungeon_spawner.py` 序列化构造参数并 spawn 子进程，会话窗口在子进程里
+`ui/hosting/dungeon_spawner.py` 序列化构造参数并 spawn 子进程，会话窗口在子进程里
 运行 DearPyGui（下称 DPG），DPG/GLFW 独占子进程（见 [宿主边界与可移植性](window_host.md) §7）。
 渲染帧由窗口自己驱动（`run()` 里的手动渲染循环），不用 `dpg.start_dearpygui()` 堵死宿主主循环。
 窗口对宿主的全部依赖收敛在宿主端口 `dungeon/window/host.py`，因此 `dungeon/window/` 里没有任何
@@ -33,7 +33,7 @@
 | `dungeon/window/__init__.py` | 用 mixin 组装出 `DungeonSessionWindow` |
 | `dungeon/window/base.py` | 构造（`__init__` 只存参数 + 会话初始化）与运行（`run()` 建 UI、帧循环 `_run_frame_loop`、收尾 `_finish_session`）、入口 / 会话阶段切换、关闭路径、视口尺寸（取自宿主端口） |
 | `dungeon/window/host.py` | **宿主端口** `HostPort`（含无宿主缺省实现）：尺寸/DPI、宿主显隐、事件泵、收尾弹框、活动窗口登记、缺省字体、回放文件选择 |
-| `ui/common/tk_host.py` | 宿主端口的 Tk/CTk 适配器 `TkHost`——**window 层唯一的 Tk 细节所在地** |
+| `ui/hosting/tk_host.py` | 宿主端口的 Tk/CTk 适配器 `TkHost`——**window 层唯一的 Tk 细节所在地** |
 | `dungeon/window/ui.py` | DPG 上下文 / 视口 / 主窗口构建、**副本字体对接**（经 `dungeon/window/fonts.py` 解析家族名→字体文件，按两档字号建 `dungeon_text_font` 与粗体 `dungeon_bold_font` 供文本组件使用——DPG 无字重 API，粗度靠选字体文件）、文本显示、布局自适应（`_relayout`）、输入事件、**F12 过程日志开关**、**A 自动播放 / F2 截图**（`toggle_autoplay` / `take_screenshot`，与文本组件工具条按钮共用入口）与 **顶部轻通知窗**（`_notify`，窗口级常驻） |
 | `dungeon/window/engine.py` | 推进核心：AI 流式生成、JSON 解析、伤亡结算、回放步进、关闭回调 `_on_close` |
 | `dungeon/window/triggers.py` | 触发器判定（所在章节 / 前置 / 条件）、章节进入、短暂视效、插入段落 |
@@ -287,8 +287,8 @@ run() → SessionResult
 
 ### 5.2 C8：宿主端口方法表
 
-`dungeon/window/host.py::HostPort`（缺省实现 = 无宿主），Tk 实现 `ui/common/tk_host.py::TkHost`，
-子进程实现 `ui/common/dungeon_child_host.py::ChildHost`（弹框/文件框走协议请父进程代答，见
+`dungeon/window/host.py::HostPort`（缺省实现 = 无宿主），Tk 实现 `ui/hosting/tk_host.py::TkHost`，
+子进程实现 `ui/hosting/dungeon_child_host.py::ChildHost`（弹框/文件框走协议请父进程代答，见
 [宿主边界与可移植性](window_host.md) §7）。
 
 | 端口方法 | 用途 | Tk 实现 |
@@ -299,7 +299,7 @@ run() → SessionResult
 | `discard_pending_quit()` | 丢弃视口原生关闭（X）留下的退出残留消息（见 §5-C12） | Win32 下 `PeekMessageW(..., WM_QUIT, WM_QUIT, PM_REMOVE)` |
 | `dialog(kind, title, message)` | 收尾提示 / 询问（`info`/`warning`/`error`/`ask`） | `ui.common.dialogs.*` |
 | `open_replay_file()` | 入口页加载回放；缺省实现返回 `None`（等价于用户取消） | `filedialog` + JSON 校验（解析在适配器侧） |
-| `launch_mini_game()` | 打开 **web 后端**小游戏窗口（`mini_game` 触发器按 manifest 分派；`py` 后端走会话内覆盖层舞台 `dungeon/window/minigame/`，不经端口）；结果经回调回传；缺省实现返回 `False` | 独立**子进程**跑 pywebview/WebView2（`ui/common/mini_game_host.py`，pywebview 强制占主线程），结果写 JSON 文件、watch 线程回调 |
+| `launch_mini_game()` | 打开 **web 后端**小游戏窗口（`mini_game` 触发器按 manifest 分派；`py` 后端走会话内覆盖层舞台 `dungeon/window/minigame/`，不经端口）；结果经回调回传；缺省实现返回 `False` | 独立**子进程**跑 pywebview/WebView2（`ui/hosting/mini_game_host.py`，pywebview 强制占主线程），结果写 JSON 文件、watch 线程回调 |
 | `register_active_window()` / `unregister_active_window()` | 让宿主整体退出时能找到活动副本窗口 | 沿 `master/parent` 链找持有 `_active_dungeon_window` 的主窗口 |
 | `default_font()` | 段落字体缺省家族 | `ui.common.fonts.dungeon_font_default()` |
 

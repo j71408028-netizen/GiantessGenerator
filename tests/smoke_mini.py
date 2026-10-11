@@ -24,7 +24,7 @@ import traceback
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Linux/X11：必须在 tkinter / dearpygui 建立 X 连接**之前**调 XInitThreads。
-from ui.common.x11_boot import boot_x11  # noqa: E402
+from ui.hosting.x11_boot import boot_x11  # noqa: E402
 
 boot_x11()
 
@@ -514,14 +514,14 @@ _REAL_WINDOW = {"cls": None, "stub": None}
 def _install_dungeon_stub():
     """把副本启动换成记录参数的桩，避免测试真的 spawn 子进程。
 
-    副本会话已在独立子进程里跑（``ui.common.dungeon_spawner``），桩因此打在
+    副本会话已在独立子进程里跑（``ui.hosting.dungeon_spawner``），桩因此打在
     spawner 入口上：记录 ``_launch_dungeon`` 装配的全部构造参数（键集合与窗口
     构造签名的一致性仍可验），并返回不会产生任何进程的空结果。
     """
     import inspect
 
     import dungeon.window as dungeon_window
-    import ui.common.dungeon_spawner as spawner
+    import ui.hosting.dungeon_spawner as spawner
 
     real_params = set(inspect.signature(
         dungeon_window.DungeonSessionWindow.__init__).parameters) - {"self"}
@@ -588,7 +588,7 @@ def _real_dungeon_run(app, root, cleanup_dirs):
     可重复调用（smoke_switch 的第 2、5 轮各一次）：桩只要装一次，重复装会
     把真函数也替换成桩。
     """
-    import ui.common.dungeon_spawner as spawner
+    import ui.hosting.dungeon_spawner as spawner
     import ui.mini.app as mini_app
     import ui.mini.dialogs as mini_dialogs
 

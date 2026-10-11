@@ -14,7 +14,7 @@
 **B. ``dungeon/window/**/*.py``（窗口层，含 ``component_pack/`` 子包）** —— 允许 ``dearpygui`` /
 ``services``，但**不允许** ``tkinter`` / ``customtkinter`` / ``ui.*``：宿主能力（尺寸/DPI、
 显隐、事件泵、弹框、字体、活动窗口登记）一律经 ``dungeon.window.host.HostPort``
-端口取得，Tk 相关实现只存在于 ``ui/common/tk_host.py``（L2，见
+端口取得，Tk 相关实现只存在于 ``ui/hosting/tk_host.py``（L2，见
 docs/Dungeon/window_host.md §3）。
 
 领域层需要的外部行为一律由调用方注入，典型例子见 ``dungeon/rules.py``：
@@ -45,7 +45,7 @@ FORBIDDEN_ROOTS = {
 WINDOW_FORBIDDEN_ROOTS = {
     "tkinter": "Tk 宿主细节（应由 dungeon.window.host.HostPort 端口提供）",
     "customtkinter": "Tk 宿主细节（应由 dungeon.window.host.HostPort 端口提供）",
-    "ui": "界面层（宿主适配器见 ui/common/tk_host.py）",
+    "ui": "界面层（宿主适配器见 ui/hosting/tk_host.py）",
 }
 # dungeon 自己的 UI 子包：领域层不得反向依赖
 DOMAIN_UI_SUBPACKAGE = "window"

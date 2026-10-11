@@ -35,7 +35,7 @@
 | 层 | 位置 | 职责 | 禁令 |
 |---|---|---|---|
 | 领域层 | `dungeon/` 包根 | 纯玩法逻辑 | 禁 import `dearpygui` / `tkinter` / `customtkinter` / `services` / `ui` / `dungeon.window` |
-| UI 层 | `dungeon/window/` | 窗口、DPG、宿主接线 | 禁 import `tkinter` / `customtkinter` / `ui`（宿主细节留在 `ui/common/tk_host.py`） |
+| UI 层 | `dungeon/window/` | 窗口、DPG、宿主接线 | 禁 import `tkinter` / `customtkinter` / `ui`（宿主细节留在 `ui/hosting/tk_host.py`） |
 | 编辑器 / 持久化 | `ui/scenario/`、`persistence/` | 方案编辑与落盘 | — |
 
 纪律：**领域层不认识 GUI、不认识服务层；UI 层负责接线与注入；外部行为一律注入，不反向 import。**
@@ -64,7 +64,7 @@
 ### 3.2 窗口层（`dungeon/window/`）
 
 - 所有需要 DPG / 服务层的代码在此；`background` `dispatcher` `launcher` `component_registry` `components` 均已从包根迁回 `window/`
-- 宿主能力（尺寸/DPI、显隐、事件泵、收尾弹框、活动窗口登记、字体）一律经 `dungeon/window/host.py::HostPort` 取得，Tk 实现是 `ui/common/tk_host.py::TkHost`，构造时注入（`DungeonSessionWindow(..., host=TkHost(self))`）
+- 宿主能力（尺寸/DPI、显隐、事件泵、收尾弹框、活动窗口登记、字体）一律经 `dungeon/window/host.py::HostPort` 取得，Tk 实现是 `ui/hosting/tk_host.py::TkHost`，构造时注入（`DungeonSessionWindow(..., host=TkHost(self))`）
 - 端口方法表见 [窗口文档](window.md) §5-C8
 
 ### 3.3 依赖倒置清单

@@ -5,7 +5,7 @@ pywebview（Windows 上走系统自带的 WebView2）强制 ``webview.start()`` 
 **主线程**上，而主程序的主线程属于 Tk / 副本 DPG 帧循环——所以小游戏窗口放进
 独立子进程，pywebview 独占子进程的主线程：
 
-- 源码运行：``python ui/common/mini_game_host.py <session.html> <目标关数> <结果.json>``
+- 源码运行：``python ui/hosting/mini_game_host.py <session.html> <目标关数> <结果.json>``
 - 打包运行：``<App>.exe --mini-game-host <session.html> <目标关数> <结果.json>``
   （由 ``main.main`` 的前置分支路由到 :func:`run`）
 

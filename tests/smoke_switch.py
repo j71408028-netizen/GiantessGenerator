@@ -13,7 +13,7 @@
   4. 再切回挂件并二次构建挂件（验证 ``ui.mini.pixel`` 的跨解释器缓存已清）；
   5. 挂件模式 → **再真实跑一局副本** → 再切回专业。
 
-副本会话自 2026-10 起运行在独立子进程里（``ui.common.dungeon_spawner``），
+副本会话自 2026-10 起运行在独立子进程里（``ui.hosting.dungeon_spawner``），
 父进程不再创建 DPG 上下文——曾让热切换静默杀进程的「``destroy_context()``
 终止 GLFW 后 Tk 根失去销毁能力」随之成为历史，第 2/5 轮改为守护这条隔离面：
 父进程全程 ``dpg_state.was_created()`` 为假。第 4 轮保护的是挂件层的字体度量
@@ -53,7 +53,7 @@ ensure_cwd()
 
 # Linux/X11：必须在 tkinter / dearpygui 建立 X 连接**之前**调 XInitThreads
 # （本脚本的 tkinter 都是函数内延迟 import，因此放在这里仍然足够早）。
-from ui.common.x11_boot import boot_x11  # noqa: E402
+from ui.hosting.x11_boot import boot_x11  # noqa: E402
 
 boot_x11()
 

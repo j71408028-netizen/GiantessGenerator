@@ -569,7 +569,7 @@ class ExplorationPanel(ctk.CTkFrame):
         self._launch_dungeon_with_data(data)
 
     def _launch_dungeon_with_data(self, data: dict):
-        from ui.common.dungeon_spawner import launch_dungeon_subprocess
+        from ui.hosting.dungeon_spawner import launch_dungeon_subprocess
         from ui.common.fonts import dungeon_font_default
 
         ai_config = resolve_ai_config(self.app.settings)

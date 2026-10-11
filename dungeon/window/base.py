@@ -242,7 +242,7 @@ class DungeonWindowBase:
 
         # 帧循环统计（自检/调试用）
         self.frames_rendered = 0
-        # 自检钩子：副本会话在独立子进程里跑（ui.common.dungeon_spawner），
+        # 自检钩子：副本会话在独立子进程里跑（ui.hosting.dungeon_spawner），
         # 冒烟自检经环境变量限制帧数，到帧按「用户点关闭键」收尾，避免
         # 无人值守的会话挂在帧循环里。正常使用不设置该变量，钩子不生效。
         try:
@@ -742,7 +742,7 @@ class DungeonWindowBase:
         """返回 (视口初始宽, 高, dpi_scale, 主窗口客户区宽, 高)。
 
         尺寸与 DPI 全部来自宿主端口：Tk 的 ``winfo_*`` 与 Windows 的
-        ``GetDpiForWindow``/``GetClientRect`` 都在 ``ui.common.tk_host.TkHost``
+        ``GetDpiForWindow``/``GetClientRect`` 都在 ``ui.hosting.tk_host.TkHost``
         里，window 层不直接碰宿主 API。
 
         ``_start_session`` 会在藏起宿主**之前**取一次并缓存在 ``_host_metrics``：

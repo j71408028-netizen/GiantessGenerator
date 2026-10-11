@@ -5,7 +5,7 @@ import traceback
 # Linux/X11：必须在**任何** X display 连接建立之前调 XInitThreads（Tk 与
 # Dear PyGui/GLFW 同进程共用 X server，libX11 默认不加锁是段错误/BadWindow 的
 # 经典成因）。因此这一段要留在 tkinter / dearpygui 之前，别往下挪。
-from ui.common.x11_boot import boot_x11  # noqa: E402
+from ui.hosting.x11_boot import boot_x11  # noqa: E402
 
 boot_x11()
 
@@ -456,8 +456,8 @@ def main():
     multiprocessing.freeze_support()
     if "--mini-game-host" in sys.argv:
         # 打包模式：内置小游戏子进程经应用可执行文件路由到这里
-        # （源码运行直接跑 ui/common/mini_game_host.py，不走本分支）
-        from ui.common.mini_game_host import run as run_mini_game_host
+        # （源码运行直接跑 ui/hosting/mini_game_host.py，不走本分支）
+        from ui.hosting.mini_game_host import run as run_mini_game_host
         run_mini_game_host(sys.argv)
         return
     from app.shell import run_app

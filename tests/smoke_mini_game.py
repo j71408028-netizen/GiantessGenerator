@@ -25,7 +25,7 @@ assert os.path.isfile(entry), entry
 out1 = os.path.join(tempfile.gettempdir(), "smoke_mg_auto.json")
 if os.path.exists(out1):
     os.remove(out1)
-child = os.path.join(ROOT, "ui", "common", "mini_game_host.py")
+child = os.path.join(ROOT, "ui", "hosting", "mini_game_host.py")
 proc = subprocess.Popen(
     [sys.executable, child, entry, "1", out1,
      "--auto-result", json.dumps({"won": True, "level": 1})],
@@ -56,7 +56,7 @@ except OSError:
 print("STEP1_OK", flush=True)
 
 # ---- 2) TkHost 启动 + 杀子进程 = 无结果 ----
-from ui.common.tk_host import TkHost  # noqa: E402
+from ui.hosting.tk_host import TkHost  # noqa: E402
 
 got = []
 h = TkHost()

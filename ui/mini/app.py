@@ -789,7 +789,7 @@ class MiniApp:
         )
 
     def _launch_dungeon(self, *, payload, config, scenario_id, character, mode):
-        from ui.common.dungeon_spawner import launch_dungeon_subprocess
+        from ui.hosting.dungeon_spawner import launch_dungeon_subprocess
         from ui.mini.dialogs import MiniDialogs
         ai_config = resolve_ai_config(self.settings)
         dungeon_font = self.settings.get("dungeon_font") or "Microsoft YaHei"

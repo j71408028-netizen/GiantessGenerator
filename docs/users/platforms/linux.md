@@ -62,7 +62,7 @@ server 是 `BadWindow` 与 `ImGui_ImplGlfw_WindowFocusCallback` 段错误的经�
 因此每个会建窗口的入口文件在**最顶部**（任何 `tkinter` / `dearpygui` 之前）都要：
 
 ```python
-from ui.common.x11_boot import boot_x11
+from ui.hosting.x11_boot import boot_x11
 
 boot_x11()          # 调 XInitThreads()，全进程一次性生效
 ```
@@ -75,7 +75,7 @@ boot_x11()          # 调 XInitThreads()，全进程一次性生效
 | `tests/smoke_switch.py` | `ensure_cwd()` 之后（该脚本的 tkinter 都是函数内延迟 import） |
 | `tests/smoke_mini.py` | 路径注入之后、`tkinter` 延迟到 `boot_x11()` 之后再 import |
 | `scripts/dungeon_autopilot.py` | 路径注入之后 |
-| `ui/common/tk_host.py` | `TkHost.__init__` 兜底（幂等，覆盖直接 new 宿主的脚本） |
+| `ui/hosting/tk_host.py` | `TkHost.__init__` 兜底（幂等，覆盖直接 new 宿主的脚本） |
 
 `XInitThreads()` 必须早于**第一条** X 连接；晚调不会报错但没有意义，`boot_x11()` 会在
 已经调用过时直接返回上次结果。这一切都有开关：`GIANTESS_X11=0` 可整体关掉 Linux 原生
@@ -87,13 +87,13 @@ Tk 的 `-topmost` 在 **GNOME Shell / XWayland 实测静默失效**：既不写
 `_NET_WM_STATE_ABOVE`，`attributes("-topmost")` 也一直回报 0（历史记录见
 附录B §4.4）。
 
-现在的实现（`ui/mini/topmost.py` + `ui/common/x11.py`，纯 stdlib ctypes，不引入
+现在的实现（`ui/mini/topmost.py` + `ui/hosting/x11.py`，纯 stdlib ctypes，不引入
 `python-xlib` / `pywinctl`）：
 
 1. 先照常调 Tk 的 `-topmost`（对 KWin 这类 WM 有效）；
 2. 再向 root 窗口发 EWMH `ClientMessage`（`_NET_WM_STATE` / `_NET_WM_STATE_ABOVE`，
    `source_indication=1`），只对**窗口管理器认的顶层窗口**发——Tk 的 `winfo_id()`
-   在 GNOME 下是客户区子窗口，`wm_frame` 是它的父窗口，`ui.common.x11.top_level_window()`
+   在 GNOME 下是客户区子窗口，`wm_frame` 是它的父窗口，`ui.hosting.x11.top_level_window()`
    负责上溯；
 3. 回读 `_NET_WM_STATE` 确认（WM 是异步的，最多重试两次）；
 4. 窗口尚未映射时无法回读，`<Map>` 事件后会自动再落一次。

@@ -14,10 +14,10 @@
 - 引入 ``ui.common.widgets`` / ``dialogs`` / ``managers`` —— 都是 CTk 控件或面向
   专业界面的弹窗，挂件一律用整窗换屏代替弹窗。
 
-允许：``ui.mini.*`` 自身、``ui.common.tk_host``（副本窗口的宿主端口适配，是挂件与
-dungeon 层之间的桥）、``ui.common.dungeon_spawner``（副本会话子进程的父进程侧，
-模块级零 CTk 依赖——副本会话已搬进独立子进程，挂件经它拉起并代答收尾弹框）、
-``ui.common.x11``（纯 stdlib ctypes 的 Linux/X11 原生支持，零 GUI 框架依赖）。
+允许：``ui.mini.*`` 自身、整包 ``ui.hosting``（进程与宿主基础设施：副本会话
+子进程的父/子两侧、宿主端口适配、X11 原生支持、小游戏宿主——包规约是**不顶层
+import CTk 组件**，需要弹框一律由调用方注入，缺省实现延迟到首次使用才
+import；``tests/check_mini_layering.py`` 之外的职责由包 docstring 承担）。
 外观模式住在 ``core.appearance``（零依赖，2026-10-06 从 ``ui/common/`` 下移），
 不属于 ``ui.*``，因此不受本白名单约束。
 
@@ -34,20 +34,16 @@ MINI_DIR = ROOT / "ui" / "mini"
 # 顶层/次级模块名 -> 为什么不能用
 FORBIDDEN_ROOTS = {
     "customtkinter": "CTk 外观库（挂件只用原生 tkinter）",
-    "dearpygui": "副本窗口框架（经 ui.common.tk_host 间接进入，不在界面层直接用）",
+    "dearpygui": "副本窗口框架（经 ui.hosting.tk_host 间接进入，不在界面层直接用）",
     "ui": "见 ALLOWED_UI 白名单以外的界面模块",
 }
 
 # ui.* 里挂件可以碰的例外（外观模式已下移 core.appearance，不再需要在此登记）
 ALLOWED_UI = {
     "ui.mini",
-    "ui.common.tk_host",
-    # 副本会话子进程的父进程侧（模块级零 CTk 依赖；TkHost 只在函数内惰性
-    # import，仅用于 spawn 前量视口尺寸）
-    "ui.common.dungeon_spawner",
-    # 纯 stdlib ctypes 的 Linux/X11 原生支持（XInitThreads / EWMH 置顶），零 GUI
-    # 框架依赖：挂件要写 _NET_WM_STATE_ABOVE 就靠它（见 ui/mini/topmost.py）。
-    "ui.common.x11",
+    # 整包放行 ui.hosting：进程与宿主基础设施，包规约是「不顶层 import CTk
+    # 组件」——弹框实现由调用方注入，缺省的 CTk 版延迟到首次使用才 import。
+    "ui.hosting",
 }
 
 
@@ -83,8 +79,8 @@ def check_module(path: Path):
                 violations += _check_target(alias.name, node.lineno)
         elif isinstance(node, ast.ImportFrom):
             if node.level == 0:
-                # ``from ui.common import appearance`` 要按完整目标名判定，
-                # 只看 ``ui.common`` 会把白名单里的子模块一并误杀。
+                # ``from ui.hosting import x11`` 要按完整目标名判定，
+                # 只看 ``ui.hosting`` 会把白名单里的子模块一并误杀。
                 base = node.module or ""
                 targets = [f"{base}.{alias.name}" for alias in node.names] or [base]
                 for target in targets:
@@ -113,7 +109,7 @@ def main() -> int:
         print(f"[check_mini_layering] FAILED {len(violations)} 处越界依赖")
         return 1
     print("[check_mini_layering] PASSED：挂件层无 customtkinter / ui.common.theme "
-          "依赖，只经 tk_host 与 core 层对外接触")
+          "依赖，只经 ui.hosting 与 core 层对外接触")
     return 0
 
 

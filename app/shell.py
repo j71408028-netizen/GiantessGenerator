@@ -19,7 +19,7 @@
   （``tkinter.font.Font`` 绑在具体解释器上，跨根复用会报
   ``application has been destroyed``）。
 
-副本会话自 2026-10 起运行在**独立子进程**里（``ui.common.dungeon_spawner``），
+副本会话自 2026-10 起运行在**独立子进程**里（``ui.hosting.dungeon_spawner``），
 父进程不再创建 DPG 上下文、不再 import dearpygui——曾长在「Tk 与 DPG 同进程
 共存」上的整套补救机器（保活视口 ``park_context`` 的兜底修复、根窗口退役等）
 随会话一起搬走，本模块不再过问。
@@ -148,12 +148,12 @@ def switch_to(root, mode: str, *, save=None) -> None:
     # 注 1：销毁后才「取消排队的 after」是没用的——那时命令已经删了，取消不取消
     # 都不会再报错；要清就得在销毁之前清，见 _quiesce_root。
     # 注 2：**不要**在这里碰 DPG——副本会话已搬进独立子进程
-    # （ui.common.dungeon_spawner），父进程从不创建 DPG 上下文；对从未建
+    # （ui.hosting.dungeon_spawner），父进程从不创建 DPG 上下文；对从未建
     # 上下文的 dearpygui 调用函数会直接段错误，不是异常。
 
 
 # ==================== 跑过副本之后的根窗口修复 ====================
-# （已随进程隔离删除：副本会话在独立子进程里跑（ui.common.dungeon_spawner），
+# （已随进程隔离删除：副本会话在独立子进程里跑（ui.hosting.dungeon_spawner），
 # 父进程不再创建 DPG 上下文，GLFW 的生命周期不再影响 Tk 根窗口。曾经的
 # 「保活视口 park_context + 兜底重建 + 根窗口退役」三件套见 git 历史。）
 

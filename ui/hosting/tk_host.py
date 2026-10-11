@@ -1,12 +1,12 @@
 """Tk / CTk 主程序侧的宿主适配器。
 
 把 ``dungeon.window.host.HostPort`` 的端口逐一映射到 Tkinter 与
-``ui.common.dialogs``：**所有 Tk 相关代码都留在本模块**，``dungeon/window/``
+界面弹框实现：**所有 Tk 相关代码都留在本模块**，``dungeon/window/``
 因此不再依赖 UI 层（``tests/check_dungeon_layering.py`` 会守住这条线）。
 
 用法（在 Tk 回调里）：::
 
-    from ui.common.tk_host import TkHost
+    from ui.hosting.tk_host import TkHost
     result = DungeonSessionWindow(..., host=TkHost(self)).run()
     if result.failed:
         ui.common.dialogs.showerror("错误", result.launch_error)
@@ -19,7 +19,6 @@ import sys
 import threading
 from ctypes import wintypes
 
-import ui.common.dialogs as dialogs
 from dungeon.window.host import (DIALOG_ASK, DIALOG_ERROR, DIALOG_INFO,
                                  DIALOG_WARNING, HostPort)
 from ui.common.fonts import dungeon_font_default
@@ -31,9 +30,6 @@ _WM_QUIT = 0x0012          #: DefWindowProc(WM_DESTROY) 投递的「退出进程
 _PM_REMOVE = 0x0001        #: PeekMessage 取出消息（不是只看一眼）
 _MAX_PENDING_QUIT_DRAIN = 16   #: 一次最多清几条（正常只会有一条）
 
-#: 缺省弹框实现（customtkinter 版）；纯 Tk 宿主可在构造时替换掉
-_DEFAULT_DIALOGS = dialogs
-
 
 class TkHost(HostPort):
     """宿主端口在 Tk 上的实现。``widget`` 为任意 Tk 控件（通常是调用方的父控件）。
@@ -44,21 +40,29 @@ class TkHost(HostPort):
       持有 ``_active_dungeon_window`` 的对象；挂件的主控 ``MiniApp`` 不是控件
       （不在这条链上），必须显式传入，否则主窗口退出时停不掉副本窗口。
     - ``dialogs``：弹框实现，需提供 ``showinfo/showwarning/showerror/askyesno``。
-      缺省用 ``ui.common.dialogs``（customtkinter 实现）；纯 Tk 宿主传入自己的
-      实现，避免为了一个提示框把 CTk 拉起来。
+      缺省用 ``ui.common.dialogs``（customtkinter 实现，首次用到才 import）；
+      纯 Tk 宿主传入自己的实现，避免为了一个提示框把 CTk 拉起来。
     """
 
     def __init__(self, widget=None, owner=None, dialogs=None):
         # Linux/X11：宿主适配器是「Tk 与 DPG 同进程」的接缝，在这里补一次
         # XInitThreads 兜底（正常已由各入口文件最顶部调用，此调用是幂等的）。
         try:
-            from ui.common.x11_boot import boot_x11
+            from ui.hosting.x11_boot import boot_x11
             boot_x11()
         except Exception:
             pass
         self.widget = widget
         self.owner = owner
-        self.dialogs = dialogs or _DEFAULT_DIALOGS
+        self._dialogs = dialogs
+
+    @property
+    def dialogs(self):
+        """弹框实现：注入优先，缺省的 CTk 版延迟到首次使用才拉起。"""
+        if self._dialogs is None:
+            import ui.common.dialogs as _ctk_dialogs
+            self._dialogs = _ctk_dialogs
+        return self._dialogs
 
     # ---------------- 内部工具 ----------------
     def _root(self):
@@ -221,7 +225,7 @@ class TkHost(HostPort):
 
         pywebview（Windows 上走系统自带的 WebView2）强制 ``webview.start()``
         占用主线程，而本进程的主线程属于 Tk / 副本 DPG 帧循环，因此窗口由
-        ``ui/common/mini_game_host.py`` 的子进程承载（打包模式经应用可执行
+        ``ui/hosting/mini_game_host.py`` 的子进程承载（打包模式经应用可执行
         文件 ``--mini-game-host`` 路由）。结算结果由子进程写 JSON 文件，本侧
         watch 线程读到后交给 ``on_result``（watch 线程上回调，接收方自行并入
         帧线程）；用户提前关窗或子进程异常 = ``on_result(None)``。

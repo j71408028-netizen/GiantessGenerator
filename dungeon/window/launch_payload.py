@@ -1,7 +1,7 @@
 """副本启动载荷：``DungeonSessionWindow`` 构造参数的进程间序列化。
 
-副本会话运行在独立子进程里（父进程侧见 ``ui.common.dungeon_spawner``，
-子进程侧见 ``ui.common.dungeon_child_host``），构造参数必须跨进程传递。
+副本会话运行在独立子进程里（父进程侧见 ``ui.hosting.dungeon_spawner``，
+子进程侧见 ``ui.hosting.dungeon_child_host``），构造参数必须跨进程传递。
 本模块把窗口的构造参数 dict 规范化为**纯数据**（dataclass 落成 dict、
 宿主侧概念剔除），并在子进程侧还原——还原后的 kwargs 可以直接
 

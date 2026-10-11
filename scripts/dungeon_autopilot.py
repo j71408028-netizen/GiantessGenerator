@@ -57,7 +57,7 @@ import traceback
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Linux/X11：必须在 tkinter / dearpygui 建立 X 连接**之前**调 XInitThreads。
-from ui.common.x11_boot import boot_x11  # noqa: E402
+from ui.hosting.x11_boot import boot_x11  # noqa: E402
 
 boot_x11()
 
@@ -197,7 +197,7 @@ EXIT_GRACE = 5.0
 
 #: 真 Tk 宿主：尺寸/DPI/显隐/事件泵全走适配器，只有弹框被换成记录器
 #: ——自检里弹真模态框会一直等用户点确定（`scene_tk_host` 曾因此挂死）。
-from ui.common.tk_host import TkHost  # noqa: E402
+from ui.hosting.tk_host import TkHost  # noqa: E402
 
 
 class RecordingTkHost(TkHost):
@@ -1041,7 +1041,7 @@ def scene_tk_host():
 
     root.after(100, beat)
 
-    # 真宿主适配器：尺寸/DPI/显隐/事件泵全部走 ui.common.tk_host.TkHost，
+    # 真宿主适配器：尺寸/DPI/显隐/事件泵全部走 ui.hosting.tk_host.TkHost，
     # 只有弹框换成记录器——自检里弹真模态框会一直等人点（挂死）。
     host = RecordingTkHost(root)
     win, _result = _make_window([("click", 3), ("close", None)], explore=False,

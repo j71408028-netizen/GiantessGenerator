@@ -2,7 +2,7 @@
 
 用法：``python tests/check_dungeon_child_dpi.py``
 
-副本会话运行在独立子进程里（``ui.common.dungeon_spawner``），而 DPI 感知是
+副本会话运行在独立子进程里（``ui.hosting.dungeon_spawner``），而 DPI 感知是
 **进程级**的、不随 multiprocessing 继承：主进程里由 CTk 建根窗口时开启的感知
 子进程拿不到。子进程若在父进程感知时停留在无感知状态，Windows 会把 DPG 视口
 的 96-DPI 逻辑坐标按系统缩放再放大一次——窗口与字体整体巨大（175% 缩放的
@@ -53,7 +53,7 @@ _PROBE = (
 )
 
 _SET_AWARE = (
-    "from ui.common.dungeon_child_host import _ensure_dpi_awareness\n"
+    "from ui.hosting.dungeon_child_host import _ensure_dpi_awareness\n"
     "_ensure_dpi_awareness()\n"
 )
 

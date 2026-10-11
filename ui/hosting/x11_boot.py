@@ -9,15 +9,15 @@
 
 用法（入口文件顶部，仍在 tkinter 之前）::
 
-    import ui.common.x11_boot  # noqa: F401  Linux/X11: 见模块 docstring
+    import ui.hosting.x11_boot  # noqa: F401  Linux/X11: 见模块 docstring
 
 或者显式调用以拿到结果（诊断用）::
 
-    from ui.common.x11_boot import boot_x11
+    from ui.hosting.x11_boot import boot_x11
     boot_x11()
 """
 
-from ui.common.x11 import init_x_threads
+from ui.hosting.x11 import init_x_threads
 
 __all__ = ["boot_x11"]
 

@@ -575,7 +575,7 @@ class ChallengeModePanel(ctk.CTkFrame):
 
         # L4：run() 返回结果对象（挑战模式无入口阶段，暂无需要处理的分支）。
         # 会话在独立子进程里跑（DPG/GLFW 独占子进程），参数与窗口构造一致。
-        from ui.common.dungeon_spawner import launch_dungeon_subprocess
+        from ui.hosting.dungeon_spawner import launch_dungeon_subprocess
 
         launch_dungeon_subprocess(
             host_window=self.gui.root, app=self.gui,

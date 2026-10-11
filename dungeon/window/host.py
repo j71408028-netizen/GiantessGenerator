@@ -24,7 +24,7 @@
 实现：
 
 - :class:`HostPort` —— 无宿主缺省实现（自动驾驶自检、将来换框架前的占位）；
-- ``ui.common.tk_host.TkHost`` —— 当前 Tk/CTk 主程序（唯一真实宿主）。
+- ``ui.hosting.tk_host.TkHost`` —— 当前 Tk/CTk 主程序（唯一真实宿主）。
 
 换框架时只需再写一个适配器，window 层一行不用改；具体见
 ``docs/Dungeon/window_host.md`` §5.1/§3（L2）。
