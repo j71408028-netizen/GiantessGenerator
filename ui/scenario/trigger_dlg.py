@@ -484,6 +484,7 @@ class TriggerEditDialog(BaseDialog):
                 return label
         return VISUAL_FILTERS[0][1]
 
+    def _show_action_frame(self, action_type):
         """仅显示当前动作类型的表单，其余动作帧隐藏。"""
         if action_type == "none":
             self.action_section_label.pack_forget()
