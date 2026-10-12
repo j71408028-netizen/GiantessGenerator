@@ -25,6 +25,7 @@ from dungeon.audio.chapters import (BGM_SUPPORTED_EXTS, CHAPTER_NONE,
                               MAX_BGM_VOLUME, normalize_chapters)
 from dungeon.coupling import (BULLA, COUPLING_LEVEL_LABELS, COUPLING_LEVELS,
                               SOLEA, VELUM, normalize_coupling_level)
+from dungeon.overrides import OVERRIDE_KEYS, OVERRIDE_LABELS
 from dungeon.audio.speech import (DEFAULT_VOICE_VOLUME, MAX_VOICE_VOLUME,
                             normalize_rate)
 from dungeon.audio.voice_fx import (MAX_INTENSITY, PARAM_LABELS, PARAM_RANGES,
@@ -164,7 +165,8 @@ def validate_scenario_config(config, *, scenario_dir: str = None) -> list:
                        terminating, scenario_dir, add,
                        coupling_level=config.get("coupling_level"))
     _validate_triggers(config.get("triggers"), chapter_names, terminating,
-                       trigger_names, custom_attrs, scenario_dir, add)
+                       trigger_names, custom_attrs, scenario_dir, add,
+                       coupling_level=config.get("coupling_level"))
 
     # 起始章节：进入副本后唯一的自动进入点（window/triggers.py::_enter_start_chapter）
     starts = [c["name"] for c in chapters if c.get("start") and c.get("name")]
@@ -576,7 +578,7 @@ def _validate_chapters(chapters_raw, effective, chapter_names, terminating,
 
 
 def _validate_triggers(triggers, chapter_names, terminating, trigger_names,
-                       custom_attrs, scenario_dir, add) -> None:
+                       custom_attrs, scenario_dir, add, coupling_level=None) -> None:
     if not isinstance(triggers, list):
         return  # 已在顶层报过
     seen = set()
@@ -685,13 +687,8 @@ def _validate_triggers(triggers, chapter_names, terminating, trigger_names,
                 add("warning", path + ".action_data.text_type",
                     f"未知段落类型「{text_type}」（允许：{', '.join(schema.TEXT_TYPE_KEYS)}）")
         elif action_type == "effect":
-            filter_key = str(action_data.get("filter") or "").strip()
-            if filter_key not in VISUAL_FILTER_KEYS:
-                add("warning", path + ".action_data.filter",
-                    f"未知滤镜「{filter_key}」（允许：{', '.join(VISUAL_FILTER_KEYS)}），运行时会跳过")
-            duration = action_data.get("duration", 1)
-            if not _is_number(duration) or duration < 1:
-                add("warning", path + ".action_data.duration", "持续步数必须是 ≥1 的数字")
+            _validate_effect_overrides(action_data, path, add,
+                                       coupling_level=coupling_level)
         elif action_type == "fx":
             fx_key = str(action_data.get("fx") or "").strip()
             if fx_key not in WINDOW_FX_KEYS:
@@ -707,6 +704,57 @@ def _validate_triggers(triggers, chapter_names, terminating, trigger_names,
                     "强度必须是 0~100 的数字（越界时运行时夹回区间）")
         elif action_type != "none":
             add("warning", action_path, f"未知动作类型「{action_type}」，运行时会跳过")
+
+
+def _validate_effect_overrides(action_data, path, add, coupling_level=None) -> None:
+    """章节效果短暂覆盖：逐维度检查，把「静默跳过」变成作者能改的诊断。
+
+    四个维度同名于 ``action_data`` 字段（见 ``dungeon/overrides.py``）：背景滤镜
+    ``filter`` / 音乐音量 ``bgm_volume`` / 语音效果 ``voice_fx`` / 敏感效果
+    ``sensitivity``。看的是**原文**——写错的滤镜、超范围音量只有原文看得出来，
+    归一化会把它们悄悄改成合法值或直接丢掉。
+    """
+    data = action_data if isinstance(action_data, dict) else {}
+    field_path = path + ".action_data"
+    if not any(key in data for key in OVERRIDE_KEYS):
+        labels = " / ".join(OVERRIDE_LABELS.get(key, key) for key in OVERRIDE_KEYS)
+        add("warning", field_path,
+            f"章节效果覆盖未指定任何维度（{labels}），运行时会跳过")
+    if "filter" in data:
+        key = str(data.get("filter") or "").strip()
+        if key and key not in VISUAL_FILTER_KEYS:
+            add("warning", field_path + ".filter",
+                f"未知滤镜「{key}」（允许：{', '.join(VISUAL_FILTER_KEYS)}；"
+                f"空串 = 清除滤镜），运行时会跳过")
+    if "bgm_volume" in data:
+        value = data.get("bgm_volume")
+        if not _is_number(value):
+            add("warning", field_path + ".bgm_volume",
+                "音乐音量必须是数字，加载时忽略该维度")
+        elif not 0 <= float(value) <= MAX_BGM_VOLUME:
+            add("warning", field_path + ".bgm_volume",
+                f"音乐音量需在 0~{MAX_BGM_VOLUME} 之间，加载时会自动夹取")
+    if "voice_fx" in data:
+        # 复用章节语音效果的逐档检查（空对象 = 显式清除，不产诊断）
+        _validate_voice_fx(data.get("voice_fx"), field_path, add,
+                           coupling_level=coupling_level)
+    if "sensitivity" in data:
+        raw = data.get("sensitivity")
+        if not isinstance(raw, list):
+            add("warning", field_path + ".sensitivity",
+                "敏感效果覆盖必须是数组（空数组 = 清除），加载时忽略该维度")
+        else:
+            for index, item in enumerate(raw):
+                item_path = f"{field_path}.sensitivity[{index}]"
+                if not isinstance(item, dict):
+                    add("warning", item_path, "敏感效果条目必须是对象")
+                    continue
+                for numeric in ("strength", "objective"):
+                    if numeric in item and not _is_number(item[numeric]):
+                        add("warning", item_path + "." + numeric, f"{numeric} 必须是数字")
+    duration = data.get("duration", 1)
+    if not _is_number(duration) or duration < 1:
+        add("warning", field_path + ".duration", "持续步数必须是 ≥1 的数字")
 
 
 def _validate_condition(condition, path, add, custom_attrs, trigger_names, depth=0) -> None:

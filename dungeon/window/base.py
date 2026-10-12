@@ -156,8 +156,12 @@ class DungeonWindowBase:
         # 章节背景音乐：一个人一条（bgm 与 background 共用同一套素材路径解析，
         # 因此把 background 的解析器注入进去，省得多写一份相对路径兜底）
         self.current_bgm_path = ""
-        # 章节对话语音效果（她 / 其他人两档），进章时由 triggers 填
+        # 章节对话语音效果（她 / 其他人两档），进章时由 triggers 填。
+        # current_voice_fx 是**当前生效值**（可能被「章节效果短暂覆盖」改写），
+        # 章节默认值留在 chapter_voice_fx，覆盖到期后据此回退。
         self.current_voice_fx = {}
+        self.chapter_voice_fx = {}
+        self._applied_voice_fx = {}
         self._bgm = BgmPlayer(resolver=self._background.resolve_path,
                               logger=process_log.log)
         # 对话语音：Solea/Bulla 的带说话人台词由它朗读（音色在会话初始化时
@@ -172,11 +176,14 @@ class DungeonWindowBase:
         self.current_replay_index = 0
         self.triggers = (scenario_config or {}).get("triggers", []) if not is_replay else []
         self.chapters = normalize_chapters((scenario_config or {}).get("chapters", []))
-        # 章节运行时状态：当前章节、章节持续敏感效果、短暂视效
+        # 章节运行时状态：当前章节、章节持续敏感效果、章节效果的短暂覆盖
         self.current_chapter = None
         self.chapter_sensitivity_effects = []
-        self.visual_effects = []
+        # 短暂覆盖条目：[{remaining, overrides}]，见 dungeon/overrides.py；
+        # 三个 _applied_* 记录各维度已落地值，避免每步重复刷背景 / 挪音量 / 重设语音
+        self.effect_overrides = []
         self._applied_visual_filter = None
+        self._applied_bgm_volume = None
         self.current_background_path = ""
         self.triggered_names = set()   # 已触发且不可再次触发的触发器
         self.fired_triggers = set()    # 至少触发过一次的触发器（前置条件判断用）

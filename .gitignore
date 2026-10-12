@@ -60,3 +60,6 @@ htmlcov/
 
 # 编辑器临时文件
 tempCodeRunnerFile.py
+
+# 副本方案在测试阶段暂不入库
+/data/packs/scenarios/

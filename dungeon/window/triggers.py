@@ -1,18 +1,23 @@
-"""触发器判定、章节进入、短暂视效与插入段落。
+"""触发器判定、章节进入、章节效果短暂覆盖与插入段落。
 
 触发器 = 条件（所在章节 + 前置触发器 + 条件规则） + 一个动作。
 章节自身没有条件：进入/离开都由触发器的 ``goto`` 动作执行，章节只描述
-身处其中时的背景与敏感效果。
+身处其中时的背景与敏感效果。``effect`` 动作则给这套环境加一层**限时覆盖**
+（背景滤镜 / 音乐音量 / 语音效果 / 敏感效果），走完步数后交还章节默认值，
+覆盖项的模型与合成规则见 ``dungeon/overrides.py``。
 """
 
 import random
 
 from dungeon import process_log
 from dungeon.actions import (ACTION_POSITIONS, EMPTY_ACTIONS, ENDING_ACTION,
-                             MINI_GAME_DEFAULT_ID, VISUAL_FILTER_KEYS,
-                             WINDOW_FX_KEYS, normalize_action_type)
-from dungeon.audio.chapters import (find_chapter, is_terminating_chapter,
+                             MINI_GAME_DEFAULT_ID, WINDOW_FX_KEYS,
+                             normalize_action_type)
+from dungeon.audio.chapters import (DEFAULT_BGM_VOLUME, chapter_bgm,
+                              find_chapter, is_terminating_chapter,
                               matches_scope, sensitivity_amount)
+from dungeon.overrides import (active_override, describe as describe_overrides,
+                               invalid_filter, parse_overrides)
 from dungeon.models import DungeonState, DungeonTextType
 from dungeon.response import canonical_history_entry
 from dungeon.rules import TriggerRules
@@ -98,8 +103,8 @@ class TriggerHandler:
             self._build_chapter_effect(effect)
             for effect in (chapter or {}).get("sensitivity", [])
         ]
-        # 换章清除上一章遗留的短暂视效，并让背景滤镜回到本章节默认值
-        self.visual_effects = []
+        # 换章清除上一章遗留的短暂覆盖，并让各维度回到本章节默认值
+        self.effect_overrides = []
         self._applied_visual_filter = None
 
         bg = background if background is not None else (chapter or {}).get("background")
@@ -140,9 +145,12 @@ class TriggerHandler:
         image_path = (background or {}).get("image_path")
         if not image_path:
             return
+        filter_key = background.get("filter_effect")
         self._set_background(image_path,
                              bool(background.get("smooth_transition", True)),
-                             background.get("filter_effect"))
+                             filter_key)
+        # 章节默认滤镜已经随背景落地，刷新缓存口径（覆盖到期时据此判断是否要重刷）
+        self._applied_visual_filter = filter_key or ""
 
     def _apply_chapter_bgm(self, bgm: dict = None):
         """应用章节的背景音乐。
@@ -154,8 +162,12 @@ class TriggerHandler:
             chapter = (find_chapter(self.chapters, self.current_chapter)
                        if self.current_chapter else None)
             bgm = (chapter or {}).get("bgm") or {}
-        self.current_bgm_path = str((bgm or {}).get("path") or "")
-        self._bgm.play(bgm or {})
+        bgm = bgm or {}
+        self.current_bgm_path = str(bgm.get("path") or "")
+        self._bgm.play(bgm)
+        # 记录实际落地的音量，供「音乐音量覆盖」到期时判断是否需要挪回去
+        self._applied_bgm_volume = (int(bgm.get("volume", DEFAULT_BGM_VOLUME))
+                                    if bgm.get("path") else None)
 
     def _apply_chapter_voice_fx(self, voice_fx: dict = None):
         """应用章节的对话语音物理效果（两档：她 / 其他人）。
@@ -163,54 +175,115 @@ class TriggerHandler:
         与 bgm 同一套语义：章节是「身处其中时的环境」，**没配就是不加效果**——
         走到没配效果的章节会把上一章的效果清掉，不会串味。具体哪一档作用于谁
         由语音层按说话人认（她走「她」档，主角与其余角色走「其他人」档）。
+
+        章节默认值存进 ``chapter_voice_fx``；实际生效值由 :meth:`_refresh_voice_fx`
+        按「覆盖优先、其次章节默认」算出来，覆盖到期后据此回退。
         """
         if voice_fx is None:
             chapter = (find_chapter(self.chapters, self.current_chapter)
                        if self.current_chapter else None)
             voice_fx = (chapter or {}).get("voice_fx") or {}
-        self.current_voice_fx = dict(voice_fx or {})
+        self.chapter_voice_fx = dict(voice_fx or {})
+        self._refresh_voice_fx()
+
+    def _set_background(self, image_path, smooth: bool = False, filter_effect=None):
+        """切换背景并记录当前图路径，供短暂覆盖重刷滤镜使用。"""
+        self.current_background_path = image_path or ""
+        self.change_background(image_path, smooth, filter_effect)
+
+    # ------------------ 章节效果短暂覆盖（effect） ------------------
+    def _active_override(self, key):
+        """某维度当前生效的覆盖值（后触发优先）；未被覆盖时返回 None。"""
+        return active_override(self.effect_overrides, key)
+
+    def _push_effect_override(self, overrides, duration):
+        """入队一条限时覆盖并立即刷新各维度。"""
+        self.effect_overrides.append({
+            "remaining": max(1, int(duration)),
+            "overrides": dict(overrides or {}),
+        })
+        self._refresh_effect_overrides()
+
+    def _refresh_effect_overrides(self):
+        """按当前生效的覆盖集合重算各维度，未覆盖的维度回到章节默认值。
+
+        每次覆盖入队/到期都整体重算，而不是「记录旧值、到期抄回去」：中途换章、
+        多条覆盖叠加时都不会把上一章或已失效的值翻出来。敏感效果无副作用需要
+        落地，读取时按 :meth:`_effective_sensitivity_effects` 现算。
+        """
+        self._refresh_visual_filter()
+        self._refresh_bgm_volume()
+        self._refresh_voice_fx()
+
+    def _refresh_visual_filter(self):
+        """按当前生效的滤镜覆盖重刷背景；无覆盖则恢复章节默认滤镜。"""
+        override = self._active_override("filter")
+        if override is None:
+            chapter = (find_chapter(self.chapters, self.current_chapter)
+                       if self.current_chapter else None)
+            target = ((chapter or {}).get("background") or {}).get("filter_effect") or ""
+        else:
+            target = override or ""
+        if target == self._applied_visual_filter:
+            return
+        self._applied_visual_filter = target
+        if not self.current_background_path:
+            if target:
+                process_log.log(f"[Trigger] 章节效果覆盖的背景滤镜 {target} 没有可用的背景，已忽略")
+            return
+        self._set_background(self.current_background_path, False, target)
+
+    def _refresh_bgm_volume(self):
+        """按当前生效的音量覆盖调整音乐；无覆盖则回到章节配置音量。
+
+        同一首曲子只挪音量、不从头重放（``BgmPlayer._apply`` 的既有语义）；
+        章节本就没有音乐时音量覆盖无处施加，直接忽略。
+        """
+        chapter = (find_chapter(self.chapters, self.current_chapter)
+                   if self.current_chapter else None)
+        bgm = chapter_bgm(chapter) if chapter else {}
+        if not bgm.get("path"):
+            self._applied_bgm_volume = None
+            return
+        override = self._active_override("bgm_volume")
+        volume = (int(bgm.get("volume", DEFAULT_BGM_VOLUME))
+                  if override is None else int(override))
+        if volume == self._applied_bgm_volume:
+            return
+        self._applied_bgm_volume = volume
+        self._bgm.play(dict(bgm, volume=volume))
+
+    def _refresh_voice_fx(self):
+        """按当前生效的语音覆盖重设效果；无覆盖则回到章节默认（可能是不加效果）。"""
+        override = self._active_override("voice_fx")
+        if override is None:
+            effective = dict(getattr(self, "chapter_voice_fx", None) or {})
+        else:
+            effective = dict(override or {})
+        if effective == getattr(self, "_applied_voice_fx", None):
+            return
+        self._applied_voice_fx = dict(effective)
+        self.current_voice_fx = dict(effective)
         speech = getattr(self, "_speech", None)
         if speech is not None:
             speech.set_effect(self.current_voice_fx)
 
-    def _set_background(self, image_path, smooth: bool = False, filter_effect=None):
-        """切换背景并记录当前图路径，供短暂视效重刷滤镜使用。"""
-        self.current_background_path = image_path or ""
-        self.change_background(image_path, smooth, filter_effect)
+    def _effective_sensitivity_effects(self):
+        """当前生效的持续敏感效果：有覆盖用覆盖，否则用章节默认（离开章节即空）。"""
+        override = self._active_override("sensitivity")
+        if override is None:
+            return list(self.chapter_sensitivity_effects)
+        return [self._build_chapter_effect(effect) for effect in override]
 
-    # ------------------ 短暂视效 ------------------
-    def _active_visual_filter(self):
-        """当前生效的视效滤镜（后触发的优先），无则返回 None。"""
-        for effect in reversed(self.visual_effects):
-            if effect.get("remaining", 0) > 0 and effect.get("filter"):
-                return effect["filter"]
-        return None
-
-    def _refresh_visual_effect(self):
-        """按当前生效的视效重刷背景滤镜；无视效则恢复章节默认滤镜。"""
-        active = self._active_visual_filter()
-        if active == self._applied_visual_filter:
+    def _apply_effect_overrides(self):
+        """每步收尾：消耗覆盖时长，到期后把各维度交还章节默认值。"""
+        if not self.effect_overrides:
             return
-        self._applied_visual_filter = active
-        if not self.current_background_path:
-            if active:
-                process_log.log(f"[Trigger] 短暂视效 {active} 没有可用的背景，已忽略")
-            return
-        effect_filter = active
-        if effect_filter is None:
-            chapter = (find_chapter(self.chapters, self.current_chapter)
-                       if self.current_chapter else None)
-            effect_filter = ((chapter or {}).get("background") or {}).get("filter_effect")
-        self._set_background(self.current_background_path, False, effect_filter)
-
-    def _apply_visual_effects(self):
-        """每步收尾：消耗视效持续时间，到期后恢复章节滤镜。"""
-        if not self.visual_effects:
-            return
-        for effect in self.visual_effects:
-            effect["remaining"] = effect.get("remaining", 0) - 1
-        self.visual_effects = [e for e in self.visual_effects if e["remaining"] > 0]
-        self._refresh_visual_effect()
+        for entry in self.effect_overrides:
+            entry["remaining"] = entry.get("remaining", 0) - 1
+        self.effect_overrides = [e for e in self.effect_overrides
+                                 if e.get("remaining", 0) > 0]
+        self._refresh_effect_overrides()
 
     # ------------------ 触发判定 ------------------
     def _begin_trigger_round(self):
@@ -359,18 +432,24 @@ class TriggerHandler:
                         self._last_mini_game_record = self._record_trigger_action(
                             trigger, action_type, action_data)
         elif action_type == "effect":
-            filter_key = str(action_data.get("filter") or "").strip()
-            if filter_key not in VISUAL_FILTER_KEYS:
-                process_log.log(f"[Trigger] 视效触发器 {trigger['name']} 的视效无效：{filter_key}，已跳过")
+            overrides = parse_overrides(action_data)
+            bad_filter = invalid_filter(overrides)
+            if bad_filter:
+                process_log.log(f"[Trigger] 章节效果覆盖触发器 {trigger['name']} 的滤镜无效："
+                                f"{bad_filter}，已跳过")
+                action_accepted = False
+            elif not overrides:
+                process_log.log(f"[Trigger] 章节效果覆盖触发器 {trigger['name']} "
+                                f"未指定任何覆盖维度，已跳过")
                 action_accepted = False
             else:
                 try:
                     duration = max(1, int(float(action_data.get("duration", 1))))
                 except (TypeError, ValueError):
                     duration = 1
-                self.visual_effects.append({"filter": filter_key, "remaining": duration})
-                self._refresh_visual_effect()
-                process_log.log(f"[Trigger] 已触发: {trigger['name']}，短暂视效 {filter_key}（{duration} 步）")
+                self._push_effect_override(overrides, duration)
+                process_log.log(f"[Trigger] 已触发: {trigger['name']}，章节效果覆盖"
+                                f"（{describe_overrides(overrides)}）{duration} 步")
                 self._record_trigger_action(trigger, action_type, action_data)
         elif action_type == "fx":
             # 窗口视效：整窗瞬时画面，按绝对时间消退；不阻塞任何动作
@@ -508,15 +587,14 @@ class TriggerHandler:
                                 allow_unknown=True)
             process_log.log(f"[Replay] 复现章节跳转: {name}")
         elif action_type == "effect":
-            filter_key = str(action_data.get("filter") or "").strip()
-            if filter_key:
+            overrides = parse_overrides(action_data)
+            if overrides and not invalid_filter(overrides):
                 try:
                     duration = max(1, int(float(action_data.get("duration", 1))))
                 except (TypeError, ValueError):
                     duration = 1
-                self.visual_effects.append({"filter": filter_key, "remaining": duration})
-                self._refresh_visual_effect()
-            process_log.log(f"[Replay] 复现短暂视效: {name}")
+                self._push_effect_override(overrides, duration)
+            process_log.log(f"[Replay] 复现章节效果覆盖: {name}")
         elif action_type == "fx":
             # 窗口视效按时长自消，回放按记录原样重放一次
             fx_key, duration, intensity = parse_fx_params(action_data)

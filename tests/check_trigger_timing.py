@@ -46,6 +46,8 @@ from dungeon.window.triggers import TriggerHandler  # noqa: E402
 # ---------------- 1. 动作注册表 ----------------
 check("fx 在运行时动作清单内", "fx" in actions_mod.NEW_ACTIONS)
 check("fx 展示名", actions_mod.action_label("fx") == "窗口视效")
+check("effect 展示名（章节效果短暂覆盖）",
+      actions_mod.action_label("effect") == "效果覆盖")
 check("窗口视效清单", actions_mod.WINDOW_FX_KEYS
       == ("flash", "shake", "invert", "rgb_split"), str(actions_mod.WINDOW_FX_KEYS))
 check("位置表顺序与分组", actions_mod.ACTION_POSITIONS
@@ -86,9 +88,13 @@ class _Dummy(TriggerHandler):
         self.pending_option = None
         self.pending_mini_game = None
         self.pending_ending = None
-        self.visual_effects = []
+        self.effect_overrides = []
         self.replay_data = []
         self._applied_visual_filter = None
+        self._applied_bgm_volume = None
+        self._applied_voice_fx = {}
+        self.chapter_voice_fx = {}
+        self.chapter_sensitivity_effects = []
         self.current_background_path = ""
         self.trigger_choices = {}
         self.fx_calls = []
@@ -145,7 +151,7 @@ dummy._window_fx = dummy
 dummy._begin_trigger_round()
 dummy.check_triggers()
 check("位置顺序派发：fx → 模态 → goto → effect → insert → none",
-      dummy.fx_calls and dummy.goto_calls == ["X"] and dummy.visual_effects
+      dummy.fx_calls and dummy.goto_calls == ["X"] and dummy.effect_overrides
       and dummy.pending_insertions,
       f"fx={dummy.fx_calls} goto={dummy.goto_calls}")
 check("同位置至多一个（配置序决定谁赢）",

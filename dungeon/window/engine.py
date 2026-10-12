@@ -416,8 +416,8 @@ class DungeonStoryEngine:
         self._start_ending_generation()
 
     def _finish_step(self, text_type, text, step_info, check_unlock: bool = False):
-        """步进收尾：结算短暂视效与伤亡、写入回放，并检查解锁与触发器。"""
-        self._apply_visual_effects()
+        """步进收尾：结算章节效果覆盖与伤亡、写入回放，并检查解锁与触发器。"""
+        self._apply_effect_overrides()
         casualty_increase = self._record_casualties(text_type, text)
 
         step_info["intrusion_after"] = self.dungeon_state.intrusion

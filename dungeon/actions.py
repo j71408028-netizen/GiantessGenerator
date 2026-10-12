@@ -1,10 +1,10 @@
 """副本触发器动作类型的单一注册表。
 
-注册表只登记**运行时真正支持的动作**——六种新版动作，外加只读兼容的结局：
+注册表只登记**运行时真正支持的动作**——七种新版动作，外加只读兼容的结局：
 
-- ``insert`` / ``option`` / ``effect`` / ``goto`` / ``mini_game`` / ``none``：
-  一次性的单步行为、跳转到章节、小游戏挑战，以及只标记条件成立的空动作。
-  编辑器为这六种提供新建入口。
+- ``insert`` / ``option`` / ``effect`` / ``fx`` / ``goto`` / ``mini_game`` /
+  ``none``：一次性的单步行为、章节效果短暂覆盖、窗口视效、跳转到章节、
+  小游戏挑战，以及只标记条件成立的空动作。编辑器为这七种提供新建入口。
 - ``ending``：旧配置里的结局触发器，**运行时已不再执行**（仅回放兼容）；
   新方案改由「结束章节」承担（章节属性 ``ending=True``），编辑器不再提供
   新建入口，并把存量条目显示为「旧版·已失效」。
@@ -32,7 +32,7 @@ ENDING_ACTION = "ending"
 ACTION_LABELS = {
     "insert": "插入文本",
     "option": "弹出选项",
-    "effect": "短暂视效",
+    "effect": "效果覆盖",
     "fx": "窗口视效",
     "goto": "跳转章节",
     "mini_game": "小游戏挑战",
@@ -46,9 +46,10 @@ EMPTY_ACTIONS = (None, "", "none")
 # 内置小游戏包的缺省 id（data/packs/minigames/ 下的目录名）
 MINI_GAME_DEFAULT_ID = "escape_giantess"
 
-# 短暂视效可选滤镜：本仓唯一的滤镜清单（键 + 展示名）。
+# 章节效果覆盖可选滤镜：本仓唯一的滤镜清单（键 + 展示名）。
 # background.py 在导入时校验其 PIL 映射的键与这里一致（不一致直接报错），
-# 校验器（dungeon/validate.py）也按这里的键检查配置。
+# 校验器（dungeon/validate.py）也按这里的键检查配置。空串是「显式清除滤镜」，
+# 与「不覆盖（沿用章节默认）」区分开，见 dungeon/overrides.py。
 VISUAL_FILTERS = (
     ("blur", "模糊"),
     ("smooth", "柔化"),
@@ -63,7 +64,7 @@ VISUAL_FILTERS = (
 )
 VISUAL_FILTER_KEYS = tuple(key for key, _label in VISUAL_FILTERS)
 
-# 窗口视效清单（键 + 展示名）：与「短暂视效」的重采样背景滤镜相对——
+# 窗口视效清单（键 + 展示名）：与「章节效果覆盖」的重采样背景滤镜相对——
 # 这些视效操作整个会话窗口（覆盖层 / 内容位移），以绝对时间（秒）消退，
 # 期间其他动作照常。运行时实现见 dungeon/window/fx.py（fx.py 导入时校验
 # 键一致），校验器（dungeon/validate.py）也按这里的键检查配置。
@@ -82,7 +83,7 @@ WINDOW_FX_KEYS = tuple(key for key, _label in WINDOW_FX)
 # 2. ``option`` / ``mini_game``  模态动作：占用步进，先于流程类占位；
 # 3. ``goto``          章节跳转：之后生效的 effect / insert 落在新章节里
 #                      （effect 若先于 goto 生效会被换章清除，等于白放）；
-# 4. ``effect``        短暂视效（背景滤镜）；
+# 4. ``effect``        章节效果短暂覆盖（背景滤镜 / 音乐音量 / 语音效果 / 敏感效果）；
 # 5. ``insert``        插入段落；
 # 6. ``none``          条件标记：最后才立，依赖它的触发器最早下一轮可见。
 ACTION_POSITIONS = (

@@ -36,7 +36,7 @@
 | `ui/hosting/tk_host.py` | 宿主端口的 Tk/CTk 适配器 `TkHost`——**window 层唯一的 Tk 细节所在地** |
 | `dungeon/window/ui.py` | DPG 上下文 / 视口 / 主窗口构建、**副本字体对接**（经 `dungeon/window/fonts.py` 解析家族名→字体文件，按两档字号建 `dungeon_text_font` 与粗体 `dungeon_bold_font` 供文本组件使用——DPG 无字重 API，粗度靠选字体文件）、文本显示、布局自适应（`_relayout`）、输入事件、**F12 过程日志开关**、**A 自动播放 / F2 截图**（`toggle_autoplay` / `take_screenshot`，与文本组件工具条按钮共用入口）与 **顶部轻通知窗**（`_notify`，窗口级常驻） |
 | `dungeon/window/engine.py` | 推进核心：AI 流式生成、JSON 解析、伤亡结算、回放步进、关闭回调 `_on_close` |
-| `dungeon/window/triggers.py` | 触发器判定（所在章节 / 前置 / 条件）、章节进入、短暂视效、插入段落 |
+| `dungeon/window/triggers.py` | 触发器判定（所在章节 / 前置 / 条件）、章节进入、章节效果短暂覆盖、插入段落 |
 | `dungeon/window/options.py` | 选项触发器：后台生成选项文字并弹出选择弹窗 |
 | `dungeon/window/ending.py` | 敏感效果结算与结局生成 |
 | `dungeon/window/persistence.py` | 统一收尾 `_finalize`、退出处理 `_handle_exit`、回放 / 报告保存（原子写）、结局索引 `data/user/endings.json`；弹框一律经宿主端口 |
@@ -190,7 +190,7 @@ run() → SessionResult
    ├─ _apply_prompted_unlocks（写入角色尺寸解锁）
    ├─ _start_detail_query：立即后台询问 AI「想了解的细节」（不阻塞推进）
    └─ _finish_step → 记录阈值跨越关键事件 → check_triggers：
-        章节跳转 / 插入段 / 选项弹窗 / 短暂视效 / 结局（结局另起线程生成 → 保存）
+        章节跳转 / 插入段 / 选项弹窗 / 章节效果覆盖 / 结局（结局另起线程生成 → 保存）
    └─ finally：下一次点击必然生成时 → _maybe_pregen_next 后台预生成下一段
 ```
 

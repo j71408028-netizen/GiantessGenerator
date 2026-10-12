@@ -335,7 +335,7 @@ _ACTION_LABEL = {
     "ending": "结局",
     "sensitivity": "敏感效果",
     "goto": "章节跳转",
-    "effect": "短暂视效",
+    "effect": "效果覆盖",
     "fx": "窗口视效",
     "none": "条件标记",
 }
@@ -393,10 +393,20 @@ def _render_trigger_record(entry: dict) -> str:
         body_parts.append(
             f"<div class='rp-trigger-body'>🚪 进入章节：{html.escape(target or '离开章节')}</div>")
     elif action_type == "effect":
-        filter_key = str(data.get("filter") or "").strip()
-        if filter_key:
+        parts = []
+        if "filter" in data:
+            key = str(data.get("filter") or "").strip()
+            parts.append(f"滤镜 {key or '清除'}")
+        if "bgm_volume" in data:
+            parts.append(f"音乐音量 {data.get('bgm_volume')}")
+        if "voice_fx" in data:
+            parts.append("语音效果" if data.get("voice_fx") else "语音效果（清除）")
+        if "sensitivity" in data:
+            parts.append("敏感效果" if data.get("sensitivity") else "敏感效果（清除）")
+        if parts:
             body_parts.append(
-                f"<div class='rp-trigger-body'>✨ 视效 {html.escape(filter_key)}"
+                f"<div class='rp-trigger-body'>✨ 章节效果覆盖："
+                f"{html.escape('、'.join(parts))}"
                 f"（{html.escape(str(data.get('duration', '')))} 步）</div>")
     elif action_type == "fx":
         fx_key = str(data.get("fx") or "").strip()

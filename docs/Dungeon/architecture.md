@@ -109,7 +109,7 @@ TriggerHandler, OptionHandler, EndingHandler, DungeonPersistence, ComponentHandl
 | `DungeonLaunchStages` | `launcher.py` | 入口阶段：动态背景轮播、方案选择、已达成结局图标循环、开始 / 回放 / 返回 |
 | `DungeonWindowUI` | `ui.py` | UI 构建、流式文本揭示动画、布局自适应、鼠标 / 键盘 / 视口回调 |
 | `DungeonStoryEngine` | `engine.py` | 步进核心：AI 生成、流式分句、属性演化、伤亡结算、收尾回调 |
-| `TriggerHandler` | `triggers.py` | 触发器判定、章节进出、短暂视效、窗口视效、插入段落 |
+| `TriggerHandler` | `triggers.py` | 触发器判定、章节进出、章节效果短暂覆盖、窗口视效、插入段落 |
 | `OptionHandler` | `options.py` | 选项触发器：后台生成选项文字 → 弹窗 → 记录选择 |
 | `EndingHandler` | `ending.py` | 章节敏感效果汇总、结局生成与结局文本构建 |
 | `DungeonPersistence` | `persistence.py` | 结局结算、回放 / 报告落盘、统一收尾 `_finalize(completed)` |
@@ -169,7 +169,7 @@ _generate_next_text()
   7. 后台      → _start_detail_query(正文)                             下次生成前用回放缓存解答
 
 _finish_step()
-  a. _apply_visual_effects()        短暂视效倒计时递减
+  a. _apply_effect_overrides()      章节效果覆盖倒计时递减，到期交还章节默认
   b. _record_casualties()           按身高 / 步长 / 破坏性算伤亡，追加 casualty_evolution
   c. replay_data.append(step_info)  一步一条完整快照
   d. _check_unlock_coord()          身材解锁
@@ -194,9 +194,9 @@ _finish_step()
 
 **一轮 = 一次步进收尾（或会话启动）+ 它派生的全部结算重判**（选项选择、小游戏结算，
 见 `triggers._begin_trigger_round`）：重判共享「本轮已触发」集合，同一触发器一轮内
-至多生效一次；被接纳即清空 `间隔计数`。effect 排在 goto 之后，换章后滤镜才生效
-（先于 goto 会被换章清除）。未知动作与旧版动作（`background` / `sensitivity` /
-`ending`）走通用跳过路径，`ending` 仅回放兼容。字段与参数详见
+至多生效一次；被接纳即清空 `间隔计数`。`effect`（章节效果短暂覆盖）排在 goto 之后，
+覆盖才落在新章节里（先于 goto 会被换章清除）。未知动作与旧版动作（`background` /
+`sensitivity` / `ending`）走通用跳过路径，`ending` 仅回放兼容。字段与参数详见
 [数据模型](script.md) §4–§6.1。
 
 ### 5.2 结束路径

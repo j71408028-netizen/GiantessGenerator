@@ -10,8 +10,12 @@ from dungeon.actions import (
 )
 from dungeon.window.minigame import list_mini_games, mini_game_params
 from dungeon.audio.chapters import (
-    CHAPTER_ANY, CHAPTER_ANY_LABEL, CHAPTER_NONE, CHAPTER_NONE_LABEL, chapter_names,
+    CHAPTER_ANY, CHAPTER_ANY_LABEL, CHAPTER_NONE, CHAPTER_NONE_LABEL,
+    DEFAULT_BGM_VOLUME, DEFAULT_SENSITIVITY_ATTR, MAX_BGM_VOLUME, chapter_names,
 )
+from dungeon.audio.voice_fx import (DEFAULT_INTENSITY, MAX_INTENSITY, PRESET_NONE,
+                                    SLOT_LABELS, SLOTS, label_of, preset_keys_for)
+from dungeon.overrides import parse_overrides
 # 旧版动作清单归校验器所有：这里只借来识别旧配置
 from dungeon.validate import LEGACY_ACTIONS
 from ui.ctk.dialogs import BaseDialog
@@ -49,9 +53,14 @@ class TriggerEditDialog(BaseDialog):
             "注意：选项触发器需要先填写有效选项，否则触发时会被跳过。"
         ),
         "effect": (
-            "短暂视效：在背景图上叠加一段限时滤镜，持续指定步数后自动恢复本章节的默认滤镜。\n"
-            "视效作用于当前背景图；若此时没有背景图，视效会被忽略。\n"
-            "换章会立即清除尚未结束的视效。"
+            "章节效果覆盖：在指定步数内临时改写本章节的「环境」，走完步数后各维度\n"
+            "交还章节默认值。可勾选覆盖的维度（至少勾一个，都不勾运行时跳过）：\n"
+            "· 背景滤镜：给当前背景叠一层滤镜；选「清除滤镜」则这段期间没有滤镜。\n"
+            "· 音乐音量：只改音量、不换曲；本章节没有音乐时忽略。\n"
+            "· 语音效果：覆盖对话语音的物理效果（她 / 其他人两档）；两档都留「不加效果」\n"
+            "  即这段期间不加效果。\n"
+            "· 敏感效果：临时替换本章节的持续敏感效果；不加条目即临时清空。\n"
+            "同名维度多条并存时后触发的优先，到期逐条回退；换章立即清除全部未到期的覆盖。"
         ),
         "fx": (
             "窗口视效：触发即播放一段作用于整个会话窗口的瞬时画面，按持续秒数（绝对时间）\n"
@@ -87,6 +96,8 @@ class TriggerEditDialog(BaseDialog):
     }
     OPERATOR_LABELS = (("且（全部满足）", "and"), ("或（任一满足）", "or"))
     GOTO_LEAVE_LABEL = "（离开章节）"
+    #: 「章节效果覆盖」滤镜下拉里表示**显式清除**的选项（写空串，区别于「不覆盖」）
+    EFFECT_FILTER_CLEAR_LABEL = "（清除滤镜）"
 
     def __init__(self, parent, trigger: dict, evolution_names=None, all_triggers=None,
                  scenario_repo=None, scenario_id=None, evolution_attrs=None, chapters=None):
@@ -96,8 +107,8 @@ class TriggerEditDialog(BaseDialog):
             all_triggers = []
         super().__init__(parent)
         self.title("编辑触发器")
-        self.geometry("540x680")
-        self.minsize(480, 600)
+        self.geometry("560x720")
+        self.minsize(500, 620)
         self.resizable(True, True)
         self.trigger = trigger if trigger is not None else {}
         self.evolution_names = evolution_names
@@ -159,9 +170,9 @@ class TriggerEditDialog(BaseDialog):
         btn_frame = ctk.CTkFrame(main, fg_color="transparent")
         btn_frame.pack(fill='x', pady=(0, 2))
         for action_type in NEW_ACTIONS:
-            ctk.CTkButton(btn_frame, text=action_label(action_type), width=76, height=28,
+            ctk.CTkButton(btn_frame, text=action_label(action_type), width=70, height=28,
                           font=self.UI_FONT,
-                          command=template_commands[action_type]).pack(side='left', padx=2)
+                          command=template_commands[action_type]).pack(side='left', padx=1)
 
         # 主滚动区：基础信息 -> 动作设置 -> 类型说明
         content = ctk.CTkScrollableFrame(main)
@@ -296,22 +307,241 @@ class TriggerEditDialog(BaseDialog):
         option_grid.grid_columnconfigure(1, weight=1)
         return frame
 
-    # ---------- 新版动作：短暂视效 / 跳转章节 ----------
+    # ---------- 新版动作：章节效果短暂覆盖 / 跳转章节 ----------
     def _build_effect_form(self, parent):
+        """四个可覆盖维度的勾选表单（不勾 = 沿用章节，勾 = 这段期间改写）。
+
+        背景滤镜 / 音乐音量 / 语音效果 / 敏感效果各自一个勾选；同名维度多条覆盖
+        并存时后触发的优先，所以这里只负责挑选值，合成由运行时按集合算。
+        """
         frame = ctk.CTkFrame(parent, fg_color="transparent")
-        row = ctk.CTkFrame(frame, fg_color="transparent")
-        row.pack(fill='x', pady=(2, 4))
-        ctk.CTkLabel(row, text="背景滤镜:", font=self.UI_FONT).pack(side='left')
-        self.effect_labels = [label for _key, label in VISUAL_FILTERS]
-        self.effect_var = tk.StringVar(value=self.effect_labels[0])
-        ctk.CTkComboBox(row, values=self.effect_labels, variable=self.effect_var,
-                        state="readonly", width=150, height=28,
-                        font=self.UI_FONT).pack(side='left', padx=(6, 16))
-        ctk.CTkLabel(row, text="持续步数:", font=self.UI_FONT).pack(side='left')
+        top = ctk.CTkFrame(frame, fg_color="transparent")
+        top.pack(fill='x', pady=(2, 6))
+        ctk.CTkLabel(top, text="持续步数:", font=self.UI_FONT).pack(side='left')
         self.effect_duration_var = tk.StringVar(value="1")
-        ctk.CTkEntry(row, textvariable=self.effect_duration_var, width=68, height=28,
-                     font=self.UI_FONT).pack(side='left', padx=(6, 0))
+        ctk.CTkEntry(top, textvariable=self.effect_duration_var, width=68, height=28,
+                     font=self.UI_FONT).pack(side='left', padx=(6, 10))
+        ctk.CTkLabel(top, text="（走完这么多步后各维度交还章节默认值）",
+                     font=self.UI_FONT_SMALL, text_color=TRIGGER_HINT).pack(side='left')
+
+        # --- 背景滤镜 ---
+        filter_row = ctk.CTkFrame(frame, fg_color="transparent")
+        filter_row.pack(fill='x', pady=(2, 3))
+        self.effect_filter_on = tk.BooleanVar(value=False)
+        self._effect_checkbox(filter_row, "背景滤镜", self.effect_filter_on).pack(side='left')
+        self.effect_filter_labels = [self.EFFECT_FILTER_CLEAR_LABEL] + \
+            [label for _key, label in VISUAL_FILTERS]
+        self.effect_filter_var = tk.StringVar(value=self.effect_filter_labels[0])
+        ctk.CTkComboBox(filter_row, values=self.effect_filter_labels,
+                        variable=self.effect_filter_var, state="readonly",
+                        width=150, height=28,
+                        font=self.UI_FONT).pack(side='left', padx=(8, 0))
+
+        # --- 音乐音量 ---
+        bgm_row = ctk.CTkFrame(frame, fg_color="transparent")
+        bgm_row.pack(fill='x', pady=(2, 3))
+        self.effect_bgm_on = tk.BooleanVar(value=False)
+        self._effect_checkbox(bgm_row, "音乐音量", self.effect_bgm_on).pack(side='left')
+        self.effect_bgm_volume_var = tk.IntVar(value=DEFAULT_BGM_VOLUME)
+        self.effect_bgm_label = ctk.CTkLabel(
+            bgm_row, text=str(DEFAULT_BGM_VOLUME), width=26, anchor='w', font=self.UI_FONT)
+        ctk.CTkSlider(bgm_row, from_=0, to=MAX_BGM_VOLUME,
+                      number_of_steps=MAX_BGM_VOLUME, variable=self.effect_bgm_volume_var,
+                      width=150, command=self._on_effect_bgm_change).pack(side='left', padx=(8, 0))
+        self.effect_bgm_label.pack(side='left', padx=(6, 0))
+
+        # --- 语音效果（她 / 其他人两档）---
+        voice_head = ctk.CTkFrame(frame, fg_color="transparent")
+        voice_head.pack(fill='x', pady=(4, 0))
+        self.effect_voice_on = tk.BooleanVar(value=False)
+        self._effect_checkbox(voice_head, "语音效果（两档都留「不加效果」= 这段期间不加效果）",
+                              self.effect_voice_on).pack(side='left')
+        self._build_effect_voice_rows(frame)
+
+        # --- 敏感效果 ---
+        sens_head = ctk.CTkFrame(frame, fg_color="transparent")
+        sens_head.pack(fill='x', pady=(6, 0))
+        self.effect_sens_on = tk.BooleanVar(value=False)
+        self._effect_checkbox(sens_head, "敏感效果（不加条目 = 这段期间临时清空）",
+                              self.effect_sens_on).pack(side='left')
+        ctk.CTkButton(sens_head, text="添加条目", width=76, height=26, font=self.UI_FONT,
+                      fg_color="transparent", border_width=1, corner_radius=8,
+                      text_color=TRIGGER_HINT, hover_color=TRIGGER_CMP_BTN_HOVER,
+                      border_color=TRIGGER_CMP_BTN,
+                      command=self._add_effect_sens_row).pack(side='right')
+        self.effect_sens_container = ctk.CTkFrame(frame, fg_color="transparent")
+        self.effect_sens_container.pack(fill='x', padx=(22, 0))
+        self.effect_sens_rows = []
+        self._effect_sens_hint = None
+        self._refresh_effect_sens_hint()
+
+        ctk.CTkLabel(
+            frame, justify='left', anchor='w', wraplength=460,
+            font=self.UI_FONT_SMALL, text_color=TRIGGER_HINT,
+            text="覆盖是逐维度的：只改勾选的维度，其余沿用章节默认。同名维度多条并存时"
+                 "后触发的优先，\n到期逐条回退；换章立即清除全部未到期的覆盖。"
+        ).pack(anchor='w', pady=(8, 0))
         return frame
+
+    def _effect_checkbox(self, parent, text, variable):
+        return ctk.CTkCheckBox(parent, text=text, variable=variable, font=self.UI_FONT,
+                               text_color=TRIGGER_TEXT, checkbox_width=20,
+                               checkbox_height=20)
+
+    def _on_effect_bgm_change(self, value):
+        self.effect_bgm_label.configure(text=str(int(float(value))))
+
+    def _build_effect_voice_rows(self, parent):
+        """两档语音效果的预设 + 强度（与章节编辑同一套预设，含「不加效果」）。"""
+        self._effect_fx_vars = {}
+        self._effect_fx_label_keys = {}
+        container = ctk.CTkFrame(parent, fg_color="transparent")
+        container.pack(fill='x', padx=(22, 0))
+        for slot in SLOTS:
+            keys = preset_keys_for(slot)
+            labels = [label_of(key) for key in keys]
+            self._effect_fx_label_keys[slot] = {label_of(key): key for key in keys}
+
+            row = ctk.CTkFrame(container, fg_color="transparent")
+            row.pack(fill='x', pady=2)
+            ctk.CTkLabel(row, text=f"{SLOT_LABELS[slot]}:", font=self.UI_FONT).pack(side='left')
+            preset_var = tk.StringVar(value=label_of(PRESET_NONE))
+            ctk.CTkComboBox(row, values=labels, variable=preset_var, state="readonly",
+                            width=150, height=28,
+                            font=self.UI_FONT).pack(side='left', padx=(6, 12))
+            ctk.CTkLabel(row, text="强度:", font=self.UI_FONT).pack(side='left')
+            intensity_var = tk.IntVar(value=DEFAULT_INTENSITY)
+            value_label = ctk.CTkLabel(row, text=str(DEFAULT_INTENSITY), width=30,
+                                       anchor='w', font=self.UI_FONT)
+            ctk.CTkSlider(row, from_=0, to=MAX_INTENSITY, number_of_steps=MAX_INTENSITY,
+                          variable=intensity_var, width=120).pack(side='left', padx=(6, 0))
+            value_label.pack(side='left', padx=(6, 0))
+            intensity_var.trace_add(
+                "write",
+                lambda *_a, label=value_label, var=intensity_var:
+                    label.configure(text=str(var.get())))
+            self._effect_fx_vars[slot] = (preset_var, intensity_var)
+
+    def _effect_voice_fx_from_ui(self) -> dict:
+        """收集两档效果；选了「不加效果」的档不写进覆盖（两档都空 = 显式清除）。"""
+        result = {}
+        for slot in SLOTS:
+            preset_var, intensity_var = self._effect_fx_vars[slot]
+            key = self._effect_fx_label_keys[slot].get(preset_var.get().strip(), PRESET_NONE)
+            if key == PRESET_NONE:
+                continue
+            result[slot] = {"preset": key,
+                            "intensity": max(0, min(MAX_INTENSITY,
+                                                   int(intensity_var.get())))}
+        return result
+
+    # ---------- 覆盖维度：敏感效果条目 ----------
+    def _add_effect_sens_row(self, effect: dict = None):
+        effect = effect or {}
+        row = ctk.CTkFrame(self.effect_sens_container, fg_color="transparent")
+        row.pack(fill='x', pady=2)
+        attrs = self.sens_targets or ["介入度", "破坏性"]
+        attr_var = tk.StringVar(value=effect.get("attr") or attrs[0]
+                                or DEFAULT_SENSITIVITY_ATTR)
+        ctk.CTkComboBox(row, values=attrs, variable=attr_var, state="readonly",
+                        width=130, height=28, font=self.UI_FONT).pack(side='left')
+        ctk.CTkLabel(row, text="强度:", font=self.UI_FONT).pack(side='left', padx=(10, 2))
+        strength_var = tk.StringVar(value=str(effect.get("strength", 1.0)))
+        ctk.CTkEntry(row, textvariable=strength_var, width=60, height=28,
+                     font=self.UI_FONT).pack(side='left')
+        ctk.CTkLabel(row, text="客观影响:", font=self.UI_FONT).pack(side='left', padx=(10, 2))
+        objective_var = tk.StringVar(value=str(effect.get("objective", 0.0)))
+        ctk.CTkEntry(row, textvariable=objective_var, width=60, height=28,
+                     font=self.UI_FONT).pack(side='left')
+
+        entry = {"frame": row, "attr_var": attr_var, "strength_var": strength_var,
+                 "objective_var": objective_var}
+        ctk.CTkButton(row, text="移除", width=48, height=28, font=self.UI_FONT,
+                      fg_color="transparent", border_width=1, corner_radius=8,
+                      text_color=TRIGGER_HINT, hover_color=TRIGGER_CMP_BTN_HOVER,
+                      border_color=TRIGGER_CMP_BTN,
+                      command=lambda: self._remove_effect_sens_row(entry)).pack(
+                          side='left', padx=(10, 0))
+        self.effect_sens_rows.append(entry)
+        self._refresh_effect_sens_hint()
+
+    def _remove_effect_sens_row(self, entry):
+        entry["frame"].destroy()
+        if entry in self.effect_sens_rows:
+            self.effect_sens_rows.remove(entry)
+        self._refresh_effect_sens_hint()
+
+    def _clear_effect_sens_rows(self):
+        for entry in list(self.effect_sens_rows):
+            entry["frame"].destroy()
+        self.effect_sens_rows = []
+        self._refresh_effect_sens_hint()
+
+    def _refresh_effect_sens_hint(self):
+        """没有条目时提示「空 = 临时清空」，有条目时收起提示。"""
+        hint = getattr(self, "_effect_sens_hint", None)
+        if self.effect_sens_rows:
+            if hint is not None:
+                hint.destroy()
+                self._effect_sens_hint = None
+            return
+        if hint is None:
+            self._effect_sens_hint = ctk.CTkLabel(
+                self.effect_sens_container,
+                text="（未添加条目：勾选后覆盖为空，即这段期间没有敏感效果）",
+                font=self.UI_FONT_SMALL, text_color=TRIGGER_HINT, anchor='w')
+            self._effect_sens_hint.pack(fill='x')
+
+    def _effect_sensitivity_from_ui(self) -> list:
+        result = []
+        for index, row in enumerate(self.effect_sens_rows, start=1):
+            try:
+                strength = float(row["strength_var"].get())
+            except ValueError:
+                raise ValueError(f"第 {index} 条敏感效果覆盖的强度必须是数字")
+            try:
+                objective = float(row["objective_var"].get())
+            except ValueError:
+                raise ValueError(f"第 {index} 条敏感效果覆盖的客观影响必须是数字")
+            attr = row["attr_var"].get().strip() or DEFAULT_SENSITIVITY_ATTR
+            result.append({"attr": attr, "strength": strength, "objective": objective})
+        return result
+
+    def _collect_effect_overrides(self) -> dict:
+        """按勾选收集覆盖维度；未勾选的维度不写进 action_data（= 沿用章节）。"""
+        data = {}
+        if self.effect_filter_on.get():
+            data["filter"] = self._effect_filter_label_to_key(self.effect_filter_var.get())
+        if self.effect_bgm_on.get():
+            data["bgm_volume"] = max(0, min(MAX_BGM_VOLUME,
+                                           int(self.effect_bgm_volume_var.get())))
+        if self.effect_voice_on.get():
+            data["voice_fx"] = self._effect_voice_fx_from_ui()
+        if self.effect_sens_on.get():
+            data["sensitivity"] = self._effect_sensitivity_from_ui()
+        return data
+
+    def _load_effect_overrides(self, action_data):
+        """把已有配置回填到四个维度（未写出的维度 = 不勾选）。"""
+        parsed = parse_overrides(action_data)
+        self.effect_filter_on.set("filter" in parsed)
+        self.effect_filter_var.set(
+            self._effect_filter_key_to_label(parsed.get("filter") or ""))
+        self.effect_bgm_on.set("bgm_volume" in parsed)
+        volume = int(parsed.get("bgm_volume", DEFAULT_BGM_VOLUME))
+        self.effect_bgm_volume_var.set(volume)
+        self._on_effect_bgm_change(volume)
+        self.effect_voice_on.set("voice_fx" in parsed)
+        voice = parsed.get("voice_fx") or {}
+        for slot in SLOTS:
+            spec = voice.get(slot) or {}
+            preset_var, intensity_var = self._effect_fx_vars[slot]
+            preset_var.set(label_of(spec.get("preset") or PRESET_NONE))
+            intensity_var.set(int(spec.get("intensity", DEFAULT_INTENSITY)))
+        self.effect_sens_on.set("sensitivity" in parsed)
+        self._clear_effect_sens_rows()
+        for effect in parsed.get("sensitivity") or []:
+            self._add_effect_sens_row(effect)
 
     # ---------- 新版动作：窗口视效 ----------
     def _build_fx_form(self, parent):
@@ -475,17 +705,21 @@ class TriggerEditDialog(BaseDialog):
             except (TypeError, ValueError):
                 continue
 
-    def _effect_label_to_key(self, label: str) -> str:
+    def _effect_filter_label_to_key(self, label: str) -> str:
+        """标签 → 滤镜键；「（清除滤镜）」映射为空串（显式清除）。"""
+        if label == self.EFFECT_FILTER_CLEAR_LABEL:
+            return ""
         for key, item_label in VISUAL_FILTERS:
             if item_label == label:
                 return key
-        return VISUAL_FILTER_KEYS[0]
+        return ""
 
-    def _effect_key_to_label(self, key: str) -> str:
+    def _effect_filter_key_to_label(self, key: str) -> str:
+        """滤镜键 → 标签；空串 / 未知键都显示为「（清除滤镜）」。"""
         for item_key, label in VISUAL_FILTERS:
             if item_key == key:
                 return label
-        return VISUAL_FILTERS[0][1]
+        return self.EFFECT_FILTER_CLEAR_LABEL
 
     def _show_action_frame(self, action_type):
         """仅显示当前动作类型的表单，其余动作帧隐藏。"""
@@ -929,8 +1163,8 @@ class TriggerEditDialog(BaseDialog):
             data["options"] = [{"id": i, "prompt": entry.get().strip()}
                                for i, entry in enumerate(self.option_entries) if entry.get().strip()]
         elif action_type == "effect":
-            data.update({"filter": self._effect_label_to_key(self.effect_var.get()),
-                         "duration": self.effect_duration_var.get().strip()})
+            data.update(self._collect_effect_overrides())
+            data["duration"] = self.effect_duration_var.get().strip()
         elif action_type == "fx":
             data.update({"fx": self._fx_label_to_key(self.fx_var.get()),
                          "duration": self.fx_duration_var.get().strip(),
@@ -958,8 +1192,8 @@ class TriggerEditDialog(BaseDialog):
             for entry, opt in zip(self.option_entries, action_data.get("options", [])):
                 entry.insert(0, opt.get("prompt", ""))
         elif action_type == "effect":
-            self.effect_var.set(self._effect_key_to_label(action_data.get("filter") or ""))
             self.effect_duration_var.set(str(action_data.get("duration", 1)))
+            self._load_effect_overrides(action_data)
         elif action_type == "fx":
             self.fx_var.set(self._fx_key_to_label(action_data.get("fx") or ""))
             self.fx_duration_var.set(str(action_data.get("duration", 0.8)))
@@ -986,7 +1220,7 @@ class TriggerEditDialog(BaseDialog):
         self.action_description_label.configure(text=text)
 
     def _effect_template(self):
-        self._set_action_template("effect", "新视效",
+        self._set_action_template("effect", "新效果覆盖",
                                   {"filter": VISUAL_FILTER_KEYS[0], "duration": 1})
 
     def _fx_template(self):
@@ -1062,17 +1296,25 @@ class TriggerEditDialog(BaseDialog):
             ui.ctk.dialogs.showerror("错误", f"所在章节 '{chapter_scope}' 不存在")
             return
 
-        # 短暂视效表单字段（仅视效动作生效）
+        # 章节效果覆盖表单字段（仅本动作生效）
         if action_type == "effect":
             try:
                 duration = int(float(self.effect_duration_var.get()))
             except ValueError:
-                ui.ctk.dialogs.showerror("错误", "视效的持续步数必须是数字")
+                ui.ctk.dialogs.showerror("错误", "章节效果覆盖的持续步数必须是数字")
                 return
             if duration < 1:
-                ui.ctk.dialogs.showerror("错误", "视效的持续步数至少为 1")
+                ui.ctk.dialogs.showerror("错误", "章节效果覆盖的持续步数至少为 1")
                 return
-            action_data["filter"] = self._effect_label_to_key(self.effect_var.get())
+            overrides = self._collect_effect_overrides()
+            if not overrides:
+                ui.ctk.dialogs.showerror(
+                    "错误", "请至少勾选一个要覆盖的维度"
+                            "（背景滤镜 / 音乐音量 / 语音效果 / 敏感效果）")
+                return
+            for key in ("filter", "bgm_volume", "voice_fx", "sensitivity"):
+                action_data.pop(key, None)
+            action_data.update(overrides)
             action_data["duration"] = duration
 
         # 窗口视效表单字段（仅窗口视效动作生效）
