@@ -11,7 +11,8 @@
    集合——同一触发器不重发，其他触发器可接力；开新轮后恢复；
 5. 旧版 ending：运行时不再执行（走退场提示路径，不启动结局生成）；
 6. 回放复现：fx 记录按解析后的参数原样重放；
-7. 校验器：fx 配置错误产出逐字段 warning；旧版 ending 报 LEGACY warning。
+7. 校验器：fx 配置错误产出逐字段 warning；旧版 ending 报 LEGACY warning；
+8. 条件一层或/且组合：嵌套求值、校验器分层告警。
 """
 
 import os
@@ -210,6 +211,58 @@ check("时长越界有诊断", any(p == "triggers[1].action_data.duration" for _
 check("强度越界有诊断", any(p == "triggers[1].action_data.intensity" for _l, p in msgs), str(msgs))
 check("旧版 ending 报 LEGACY warning", any(l == "warning" and p == "triggers[2].action"
                                           for l, p in msgs), str(msgs))
+
+# ---------------- 8. 条件一层或/且组合 ----------------
+from dungeon.rules import TriggerRules  # noqa: E402
+
+
+class _CondState:
+    """TriggerRules.evaluate 需要的最小状态切片。"""
+
+    total_steps = 3
+    steps_since_trigger = 1
+    chapter_steps = 2
+    total_casualties = 0
+    intrusion = 2.0
+    destruction = 4.0
+    casualty_evolution = []
+    custom_attrs = {"口上": 0.0}
+
+
+def _rule(key, comparator, value):
+    return {"key": key, "comparator": comparator, "value": value}
+
+
+def _group(operator, rules):
+    return {"operator": operator, "rules": rules}
+
+
+# (总计数==3 或 总计数==9) 且 (破坏性<=4 或 介入度>3.5) → 真两个括号都应成立
+_paren = _group("and", [_group("or", [_rule("总计数", "==", 3), _rule("总计数", "==", 9)]),
+                        _group("or", [_rule("破坏性", "<=", 4), _rule("介入度", ">", 3.5)])])
+check("嵌套条件 (a或b)且(c或d) 成立", TriggerRules.evaluate(_paren, _CondState()) is True)
+_swapped = _group("and", [_group("or", [_rule("总计数", "==", 9), _rule("总计数", "==", 1)]),
+                          _group("or", [_rule("破坏性", "<=", 4), _rule("介入度", ">", 3.5)])])
+check("嵌套条件首个括号不成立时整体为假", TriggerRules.evaluate(_swapped, _CondState()) is False)
+_deep = _group("or", [_group("and", [_rule("总计数", "==", 9), _rule("破坏性", ">=", 1)]),
+                      _rule("总计数", "==", 3)])
+check("更深嵌套运行时仍可求值", TriggerRules.evaluate(_deep, _CondState()) is True)
+check("组内空规则按恒真处理", TriggerRules.evaluate(_group("and", []), _CondState()) is True)
+
+# 校验器：一层组合合法，两层告警
+diag = validate_scenario_config({"chapters": [], "triggers": [
+    {"name": "g", "action_type": "none",
+     "condition": _group("and", [_group("or", [_rule("总计数", ">=", 1),
+                                               _rule("破坏性", ">=", 1)])])},
+    {"name": "h", "action_type": "none",
+     "condition": _group("and", [_group("or", [
+        _group("and", [_rule("总计数", ">=", 1)])])])},
+]})
+g_msgs = [d.path for d in diag if d.path.startswith("triggers[0]")]
+h_msgs = [(d.level, d.path) for d in diag if d.path.startswith("triggers[1]")]
+check("一层条件组合无告警", not g_msgs, str(g_msgs))
+check("两层条件组合有 warning", any(l == "warning" and p == "triggers[1].condition.rules[0].rules[0]"
+                                    for l, p in h_msgs), str(h_msgs))
 
 # ---------------- 汇总 ----------------
 _log.close()

@@ -168,7 +168,12 @@ class EvolutionRules:
 
 
 class TriggerRules:
-    """触发器条件的领域判断，不执行具体动作。"""
+    """触发器条件的领域判断，不执行具体动作。
+
+    ``rules`` 的元素除了叶子规则，还可以是 ``{"operator": ..., "rules": [...]}``
+    的子条件组（编辑器在连接符切换处自动加括号，生成的就是这种形状），
+    求值递归进行——编辑器约定只嵌套一层，运行时不设限。
+    """
 
     @staticmethod
     def evaluate(condition, state, trigger_choices=None):
@@ -179,6 +184,9 @@ class TriggerRules:
 
         results = []
         for rule in rules:
+            if isinstance(rule, dict) and isinstance(rule.get("rules"), list):
+                results.append(TriggerRules.evaluate(rule, state, trigger_choices))
+                continue
             key = rule.get("key")
             comparator = rule.get("comparator", ">=")
             expected = rule.get("value", 0)

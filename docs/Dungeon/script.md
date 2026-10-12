@@ -222,6 +222,11 @@ MCI 的坑：`play <alias> repeat` 只有 mpegvideo（mp3 等）认，waveaudio�
 
 - 比较符（`CONDITION_COMPARATORS`）：`>=` `<=` `>` `<` `==` `!=`
 - 整体关系（`CONDITION_OPERATORS`）：`and` / `or`
+- 一层组合：`rules` 的元素还可以是 `{"operator": ..., "rules": [...]}` 的子条件组
+  （求值递归），如 `(a或b)且(c或d)` 写作 `{"operator": "and", "rules": [
+  {"operator": "or", "rules": [a, b]}, {"operator": "or", "rules": [c, d]}]}`。
+  编辑器按「连接符切换处自动加括号」生成该形状；更深嵌套运行时也能求值，
+  但编辑器无法完整显示（校验器报 warning）。
 
 ## 6. 动作注册表
 

@@ -709,7 +709,7 @@ def _validate_triggers(triggers, chapter_names, terminating, trigger_names,
             add("warning", action_path, f"未知动作类型「{action_type}」，运行时会跳过")
 
 
-def _validate_condition(condition, path, add, custom_attrs, trigger_names) -> None:
+def _validate_condition(condition, path, add, custom_attrs, trigger_names, depth=0) -> None:
     if condition in (None, ""):
         return
     if not isinstance(condition, dict):
@@ -728,6 +728,14 @@ def _validate_condition(condition, path, add, custom_attrs, trigger_names) -> No
         return
     for index, rule in enumerate(rules):
         rule_path = f"{path}.rules[{index}]"
+        if isinstance(rule, dict) and isinstance(rule.get("rules"), list):
+            # 子条件组：编辑器在连接符切换处自动加括号生成的形状
+            if depth >= 1:
+                add("warning", rule_path,
+                    "条件组嵌套超过一层，编辑器无法完整显示，重新保存会丢失结构")
+            _validate_condition(rule, rule_path, add, custom_attrs, trigger_names,
+                                depth + 1)
+            continue
         if not isinstance(rule, dict):
             add("error", rule_path, "条件规则必须是对象")
             continue
