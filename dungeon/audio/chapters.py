@@ -14,6 +14,7 @@
 见 ``DungeonState.chapter_steps``）可在条件规则中判定。
 """
 
+from dungeon.audio import buses
 from dungeon.audio.voice_fx import normalize_voice_fx
 
 # 触发器 chapter 字段的特殊取值
@@ -37,12 +38,13 @@ DESTRUCTION_ATTR = "破坏性"
 DEFAULT_MAX_PARAGRAPHS = 99
 
 # ---------------- 章节背景音乐 ----------------
-#: 缺省音量（0-100）；与编者能在编辑器直接看到的取值一致（不是 0.0-1.0）
-DEFAULT_BGM_VOLUME = 70
+#: 缺省音量（0-100）；与编者能在编辑器直接看到的取值一致（不是 0.0-1.0）。
+#: 取值来自音频总线表（``dungeon.audio.buses``），与朗读共用一套电平口径。
+DEFAULT_BGM_VOLUME = buses.item_default(buses.BUS_MUSIC)
 #: 缺省切换淡入淡出秒数；0 表示硬切
 DEFAULT_BGM_FADE_SECONDS = 1.5
 #: 音量上限，越界值会被夹到这里
-MAX_BGM_VOLUME = 100
+MAX_BGM_VOLUME = buses.MAX_LEVEL
 #: 常见可用音频格式（仅用于选择与校验时的提示；实际能不能放出来由播放后端决定）
 BGM_SUPPORTED_EXTS = (".mp3", ".wav", ".ogg", ".flac", ".m4a", ".wma")
 

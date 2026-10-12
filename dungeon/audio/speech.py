@@ -35,6 +35,7 @@ import tempfile
 import threading
 import zlib
 
+from dungeon.audio import buses
 from dungeon.audio import voice_fx
 from dungeon.audio import open_track
 
@@ -49,10 +50,11 @@ DEFAULT_OTHER_VOICES = ("zh-CN-YunjianNeural", "zh-CN-YunyangNeural",
                         "zh-CN-XiaoyiNeural")
 #: 语速（edge-tts 的 ``rate``：``+0%`` 为常速）
 DEFAULT_RATE = "+0%"
-#: 默认音量 0-100（比背景音乐高一些，台词要压过配乐）
-DEFAULT_VOICE_VOLUME = 90
+#: 默认音量 0-100（比背景音乐高一些，台词要压过配乐）。取值来自音频总线表
+#: （``dungeon.audio.buses``），与背景音乐共用一套电平口径。
+DEFAULT_VOICE_VOLUME = buses.item_default(buses.BUS_VOICE)
 #: 音量上限
-MAX_VOICE_VOLUME = 100
+MAX_VOICE_VOLUME = buses.MAX_LEVEL
 #: 单句上限：超长台词不合成（又慢又容易失败，念出来也没人听）
 MAX_SPEECH_CHARS = 300
 
@@ -429,6 +431,8 @@ class SpeechDirector:
         渲染成功就不再开分拍轨。任何一步失败都只是"少点效果"，不拖垮朗读。
         """
         self._close_track()
+        # 音量走总线：内容电平（方案 voice.volume）→ 最终线性增益。
+        gain = buses.resolve_gain(buses.BUS_VOICE, item=self.volume)
         if spec:
             if voice_fx.has_effect(spec):
                 rendered = self._render(path, spec)
@@ -440,14 +444,13 @@ class SpeechDirector:
                 # 只有渲染能做的档（近距震耳这类纯过载）：退回原声并提示一次
                 self._warn_fx_unavailable(spec)
                 self.last_engine = "none"
-                self._start(path, self.volume / 100.0)
+                self._start(path, gain)
                 return
-            track = self._start(path, self.volume / 100.0)
+            track = self._start(path, gain)
             if track is None:
                 return
             self.last_engine = "playback"
-            effect = voice_fx.PlaybackFx(plan, path, self.volume / 100.0,
-                                         logger=self._note)
+            effect = voice_fx.PlaybackFx(plan, path, gain, logger=self._note)
             self._fx = effect
             try:
                 effect.run(track, lambda: generation != self._generation
@@ -457,7 +460,7 @@ class SpeechDirector:
             self._close_track()
             return
         self.last_engine = "none"
-        self._start(path, self.volume / 100.0)
+        self._start(path, gain)
 
     def _start(self, path, volume):
         """开一路音轨并起播，成功返回音轨；失败返回 None（只记一条日志）。"""

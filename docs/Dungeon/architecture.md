@@ -83,6 +83,7 @@
 | `models.py` | 运行态数据与枚举 | `DungeonTextType`（5 种段落类型 + 默认步进值）、`DungeonState`（坐标 / 自定义属性 / 计数 / 二阶步长） |
 | `rules.py` | 演化与条件求值 | `EvolutionRules`（转移矩阵、分节步长、属性演化）、`TriggerRules.evaluate` |
 | `chapters.py` | 章节模型与归一化 | `normalize_chapter(s)`、`normalize_chapters`、`normalize_bgm`、`find_chapter`、`is_terminating_chapter`、`overflow_jump_target`、`chapter_step_override`、`sensitivity_amount`、`matches_scope` |
+| `audio/buses.py` | 音频音量**总线单一真相源**（总控 → 音乐 / 语音 / 音效） | `BUSES` / `BUS_LABELS`、`item_default` / `bus_default`、`clamp_level`、`resolve_gain`（内容×总线×总控）、`to_db` / `db_gain`（dB 曲线，尚未接线）、`RECOMMENDED_DB_DEFAULTS` |
 | `audio.py` | 音频播放底座（纯领域，不碰 UI 框架） | `BgmPlayer.play/stop/shutdown/wait_idle`、`open_track`、`backend_name`、`set_backends`（MCI → pygame → 静音降级） |
 | `speech.py` | Solea/Bulla 对话的合成语音（纯领域） | `VoiceCaster.voice_for`（她 / 主角 / 配角按名字稳定映射）、`SpeechDirector.speak/stop/set_effect/shutdown`、`normalize_voice`、`RECOMMENDED_VOICES`、`edge_tts_available` |
 | `voice_fx.py` | 章节对话语音的**物理**声学效果（她 / 其他人两档） | `PRESETS`（预设单一真相源）、`normalize_voice_fx`、`resolved_params`、`playback_plan`（零依赖近似）、`render_wav`（可选解码器 + numpy）、`PlaybackFx`（分拍轨 + 音量包络） |

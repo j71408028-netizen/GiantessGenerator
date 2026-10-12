@@ -32,6 +32,8 @@ import time
 import zlib
 from dataclasses import dataclass, field
 
+from dungeon.audio import buses
+
 # ---------------- 两档 ----------------
 
 #: 巨大声源那一档（她本人：按 VoiceCaster 认名字/昵称）
@@ -516,11 +518,14 @@ def _write_wav(path, samples, rate):
 
 
 def _gain(volume) -> float:
-    """音量（0-100）→ 线性增益；渲染路线必须自己乘（WAV 上 MCI 设不了音量）。"""
-    value = _number(volume)
-    if value is None:
-        value = 100.0
-    return max(0.0, min(1.0, value / 100.0))
+    """音量（0-100）→ 线性增益；渲染路线必须自己乘（WAV 上 MCI 设不了音量）。
+
+    与朗读共用 ``BUS_VOICE`` 总线口径：这样「离线渲染」与「播放侧近似」两条
+    路线算出的音量一致，不会因为走哪条引擎而大小不同。
+    """
+    if _number(volume) is None:
+        volume = buses.MAX_LEVEL
+    return buses.resolve_gain(buses.BUS_VOICE, item=volume)
 
 
 def render_wav(src, dest_dir, spec, volume=100, decoder=None, logger=None):
