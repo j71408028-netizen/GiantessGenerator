@@ -151,7 +151,25 @@ MCI 的坑：`play <alias> repeat` 只有 mpegvideo（mp3 等）认，waveaudio�
 其余键是**手改 JSON 才用得上的高级参数**（编辑器只暴露预设 + 强度），取值范围单一
 真相源在 `voice_fx.PARAM_RANGES`：`pre_delay` / `muffle_hz` / `low_gain_db` / `drive` /
 `rumble_hz` / `rumble_level` / `tremor_hz` / `tremor_depth` / `echo_delay` / `echo_count` /
-`echo_decay` / `echo_wet`，越界运行时夹取、校验给 warning。
+`echo_decay` / `echo_wet` / `loudness_db`，越界运行时夹取、校验给 warning。
+
+**响度是声明量，不是副产物。** 同一句台词配上不同效果，响度天然会飘——实测
+（`.temp/voice_fx_loudness.py`，语音谱型代理信号）自然响度可跨 −1.3…+15.6 dB
+（≈2.8 档），而峰值几乎不动。所以每个预设在 `voice_fx.PRESETS` 里**声明**自己该有
+多响（`Preset.loudness_db`：dB，相对干声的 RMS 变化），渲染链末尾按实测 RMS 把结果
+拉回这个目标，`voice_fx.loudness_target(spec)` 是唯一入口。这不是「归一」（那会把
+所有效果拉成一样响），而是把响度差变成**可声明、可守卫**的设计值：
+
+- 全部声明值落在 `LOUDNESS_SPREAD_DB` = 9 dB（**= 1.5 个音量档**）的窗口里——这就是
+  「保留 1.5 档响度差异」的编码处；实测自然跨度 16.9 dB 被收窄到 9.0 dB，每个预设的
+  落点与声明值偏差 0.00 dB（`check_voice_fx_loudness.py` 守卫）。
+- 声明值一律**不高于**该预设的自然响度，于是对齐永远是「降」——降幅总能做到；而抬响
+  度要看峰值余量（`PEAK_CEILING`），余量不足时停在自然响度并在日志说明，**绝不削波**。
+- RMS 按**直达声段**量（预延迟偏移 + 干声长度），回声尾巴不算：那是直达声的余韵，
+  不是「这句话有多响」。
+- 想调某个效果的响度就改 `loudness_db`，**别靠堆 `drive` / `low_gain_db`**——那改了
+  音色，响度会被这条规则拉回目标。作者也可以在档里显式写 `loudness_db` 覆盖声明值
+  （夹取到 `LOUDNESS_RANGE`）。
 
 **两级引擎（互不叠加，按本机能力择优）**，实测数字见 [架构说明](architecture.md) §4.3：
 
@@ -162,11 +180,17 @@ MCI 的坑：`play <alias> repeat` 只有 mpegvideo（mp3 等）认，waveaudio�
 | 原声（`none`） | — | 无 | 没配效果；或预设纯渲染（`deafening_close`）而本机没解码器——此时日志留一条 |
 
 > **音量烘进样本**：渲染路线产出 WAV，而 MCI 的 waveaudio 设备**不认 `setaudio`**
-> （实测错误 261），播放层设不了音量，所以 `voice.level`（档位）在渲染时直接换算
-> 成线性增益乘进样本。
+> （实测错误 261），播放层设不了音量，所以 `voice.level`（档位）与**效果响度**在渲染
+> 时都直接换算成线性增益乘进样本。
 > 播放侧路线的音量仍走 `track.set_volume`（mp3 设备支持，实测可用）。
 > 顺带提醒：作者给 `bgm.path` 选了 `.wav` 时，Windows 上的 BGM 音量/淡入淡出同样
 > 不生效（同一条驱动限制），选 `.mp3` 才正常。
+
+> **两个引擎的响度锚点不同**：渲染路线能抬也能降（按声明值精确对齐）；播放侧近似
+> **只能降**（峰值就是原声，`PlaybackFx` 抬不动），所以它按 `voice_fx.playback_trim`
+> 衰减、目标 ≥ 0 时不衰减。于是两个引擎的**相对**摆幅一致（都是那 1.5 档），
+> **绝对**锚点差一个常数——装了 vs 没装解码器的机器上，「巨躯轰鸣比高空遥语响多少」
+> 一致，整体电平可能略有不同。
 
 降级与其余能力一致：解码失败 / 缺 numpy / 缺音频后端都只是「少点效果」，
 **不拖垮朗读**；效果渲染产物与合成音频同在会话临时目录里，收尾一起清掉。
@@ -337,10 +361,10 @@ MCI 的坑：`play <alias> repeat` 只有 mpegvideo（mp3 等）认，waveaudio�
 | 文件 | 职责 |
 |---|---|
 | `ui/scenario/chapter_trigger_mgr.py` | 章节与触发器**合并面板**：章节行加粗并按自定义颜色着色，其下缩进行是本章节触发器；「任意章节 / 无章节」的触发器排在最后。底部是新建章节 / 新建触发器与共用的编辑、删除、上移、下移 |
-| `ui/scenario/chapter_dlg.py` | 章节编辑：配色色板 + 手填 hex、起始 / 结束标记、最大段落数与超限跳转、背景导入、背景音乐（曲目 / 音量 / 循环 / 淡入淡出）、**对话语音物理效果（她 / 其他人两档的预设 + 强度）**、敏感效果增删、结束章节的结局结算与图标 |
-| `ui/scenario/trigger_dlg.py` | 触发器编辑：所在章节下拉、`跳转章节` / `章节效果覆盖`（四个覆盖维度：滤镜 / 音量 / 语音 / 敏感）/ `窗口视效` 表单、`节内计数` 条件键、旧版动作独立按钮行；`结局` 动作已从按钮行移除 |
+| `ui/scenario/chapter_dlg.py` | 章节编辑：配色色板 + 手填 hex、起始 / 结束标记、最大段落数与超限跳转、背景导入、背景音乐（曲目 / **档位** / 循环 / 淡入淡出）、**对话语音物理效果（她 / 其他人两档的预设 + 强度 + 只读「响度 ±dB」+ 预听）**、敏感效果增删、结束章节的结局结算与图标 |
+| `ui/scenario/trigger_dlg.py` | 触发器编辑：所在章节下拉、`跳转章节` / `章节效果覆盖`（四个覆盖维度：滤镜 / 音乐档位 / 语音效果 / 敏感）/ `窗口视效` 表单、`节内计数` 条件键、旧版动作独立按钮行；`结局` 动作已从按钮行移除 |
 | `ui/scenario/asset_import.py` | 背景 / 结局图标 / 背景音乐导入的共用实现（裁剪入库、相对路径；音频落 `<方案>/audio/`，不裁剪） |
-| `ui/scenario/sc_frame.py` | 方案级配置：耦合等级与主角称呼、**对话语音**（总开关 + 她 / 主角 / 其他角色的音色选择 + 语速 / 音量）、进入消耗、显示组件 |
+| `ui/scenario/sc_frame.py` | 方案级配置：耦合等级与主角称呼、**对话语音**（总开关 + 她 / 主角 / 其他角色的音色选择 + 语速 / 档位 + 预听 / 其它音色试听）、进入消耗、显示组件 |
 | `ui/scenario/component_mgr.py` | 显示组件卡片化管理（开关与参数改动自动保存） |
 
 配色与调序：
@@ -457,7 +481,9 @@ Solea / Bulla 耦合等级的对话分支会给每句台词标 `@说话人@`（�
 | 回放复现 | `kind: "chapter"` 记录带 `voice_fx`，`goto` 触发器记录带 `chapter_voice_fx` |
 | 按说话人分档 | `speech.py::_speak_job`（`VoiceCaster.role_of` 是她 → `her` 档，否则 `others`） |
 | 施加效果 | `speech.py::_play` → `voice_fx.render_wav`（离线渲染）/ `voice_fx.PlaybackFx`（分拍 + 音量包络）/ 原声 |
+| 响度对齐 | `voice_fx.loudness_target`（预设声明的 dB）× `_match_loudness`（渲染链末尾按实测 RMS 对齐，再让 `_limit` 守峰值）；播放侧按 `playback_trim` 衰减 |
 | 能力与降级 | `voice_fx.has_effect` / `decoder_name` / `playback_plan`；不可用时 `SpeechDirector._warn_fx_unavailable` 每个预设只提示一次 |
+| 编辑器**预听** | `dungeon/audio/preview.py::VoicePreview`（零 UI 依赖，与副本同一套合成 + 效果）；章节对话框两档各一个「预听」按钮 + 只读「响度 ±dB」标签；方案编辑器的音色行另有「预听 / 其它音色」试听音色与档位 |
 
 > 效果从属于朗读：全局开关关掉时 `enabled=False`，一句都不念，效果自然也不生效。
 

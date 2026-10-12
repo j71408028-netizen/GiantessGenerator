@@ -85,8 +85,9 @@
 | `chapters.py` | 章节模型与归一化 | `normalize_chapter(s)`、`normalize_chapters`、`normalize_bgm`、`find_chapter`、`is_terminating_chapter`、`overflow_jump_target`、`chapter_step_override`、`sensitivity_amount`、`matches_scope` |
 | `audio/buses.py` | 音频音量**总线单一真相源**（总控 → 音乐 / 语音 / 音效） | `BUSES` / `BUS_LABELS`、`STEPS` / `STEP_LABELS` / `STEP_DB` / `BUS_ANCHOR_DB`（档位与分层的 dB 单一真相源）、`step_options` / `step_choices`（编辑器档位候选）、`clamp_step` / `step_from_level`（0-4 档位与旧 0-100 迁移）、`levels_from_settings` / `set_bus_levels` / `effective_bus_level`（玩家侧实时电平，缺省 `DEFAULT_BUS_LEVELS`）、`bus_default` / `clamp_level` / `resolve_gain`（档位×总线×总控）、`to_ratio` / `to_db` / `db_gain` |
 | `audio.py` | 音频播放底座（纯领域，不碰 UI 框架） | `BgmPlayer.play/stop/shutdown/wait_idle`、`open_track`、`backend_name`、`set_backends`（MCI → pygame → 静音降级） |
-| `speech.py` | Solea/Bulla 对话的合成语音（纯领域） | `VoiceCaster.voice_for`（她 / 主角 / 配角按名字稳定映射）、`SpeechDirector.speak/stop/set_effect/shutdown`、`normalize_voice`、`RECOMMENDED_VOICES`、`edge_tts_available` |
-| `voice_fx.py` | 章节对话语音的**物理**声学效果（她 / 其他人两档） | `PRESETS`（预设单一真相源）、`normalize_voice_fx`、`resolved_params`、`playback_plan`（零依赖近似）、`render_wav`（可选解码器 + numpy）、`PlaybackFx`（分拍轨 + 音量包络） |
+| `speech.py` | Solea/Bulla 对话的合成语音（纯领域） | `VoiceCaster.voice_for`（她 / 主角 / 配角按名字稳定映射）、`SpeechDirector.speak/stop/set_effect/shutdown`、`synthesize`（合成**一句就返回路径**的入口，供编辑器预听）、`normalize_voice`、`normalize_rate`、`RECOMMENDED_VOICES`、`edge_tts_available` |
+| `voice_fx.py` | 章节对话语音的**物理**声学效果（她 / 其他人两档）；响度为**声明式设计量** | `PRESETS`（预设单一真相源，含 `Preset.loudness_db`）、`normalize_voice_fx`、`resolved_params`、`loudness_target` / `loudness_hint` / `playback_trim`（响度目标与其换算）、`LOUDNESS_SPREAD_DB`（摆幅窗口，9 dB＝1.5 档）、`_match_loudness`（渲染末尾按 RMS 对齐，峰值护栏优先）、`playback_plan`（零依赖近似）、`render_wav`（可选解码器 + numpy）、`PlaybackFx`（分拍轨 + 音量包络） |
+| `preview.py` | 编辑器里的语音**预听**（纯领域，零 UI 依赖） | `VoicePreview.play(voice, slot, rate, level, effect, text, on_done)`（合成一次、按当前效果放一次；`on_done` 在工作线程回调，Tk 调用方自行 `after` 回主线程）、`stop` / `wait_idle` / `shutdown`（关编辑器时收尾）、`SAMPLE_TEXT` |
 | `actions.py` | 动作类型单一注册表 | `NEW_ACTIONS`（insert/option/effect/goto/none）、`ENDING_ACTION`（只读兼容）、`ACTION_LABELS`、`VISUAL_FILTERS` |
 | `coupling.py` | 耦合等级与对应提示词 | `coupling_prompts`、`section_instruction`、`normalize_coupling_level` |
 | `prompts.py` | 系统与玩家提示词构建 | `DungeonPromptBuilder.build_system_prompt / build_user_prompt` |
@@ -149,6 +150,31 @@ edge-tts 7.2.8 / winmm MCI，探针脚本在临时目录跑，未入库）：
 
 因此的降级阶梯（`speech.SpeechDirector._play`）：**离线渲染 → 播放侧近似 → 原声**，
 三者互不叠加；任何一步失败只影响「听感」，不影响「出声」。
+
+### 4.4 效果响度：声明式设计量（非归一）
+
+上表的物理效果会在**峰值几乎不动（≤ +0.3 dB）**的前提下大幅改变 RMS：实测渲染链
+的 RMS 变化可跨 **−1.6…+11.5 dB**——同一个音量档位换个效果，响度差十几个 dB，
+作者填的档位管不到这一层。所以响度被提升为**每个预设声明的设计值**，而不是调参的副产物：
+
+| 设计点 | 做法 | 编码处 |
+|---|---|---|
+| 声明 | 每个预设写 `Preset.loudness_db`（dB，相对干声的 RMS 变化，满强度） | `PRESETS` |
+| 对齐 | 渲染链末尾按实测 RMS 把结果拉回声明目标（**不是**归一：各预设目标不同） | `loudness_target` → `_match_loudness` |
+| 护栏 | 抬响度前先看峰值余量；不足则停在自然响度（`peak_limited`），绝不削波；`_limit` 与对齐共用 `PEAK_CEILING=0.98` | `_match_loudness` / `_limit` |
+| 摆幅 | 全部预设必须落在 `LOUDNESS_SPREAD_DB = 9 dB`（＝1.5 档）窗口内 | 自检 `check_voice_fx_loudness.py` |
+| 覆盖 | 单档可写 `loudness_db` 显式覆盖（夹取到 `LOUDNESS_RANGE` ±12 dB） | `loudness_target` |
+
+**实测（`本机`，语音谱型代理信号，强度 100，`.temp/voice_fx_loudness.py`）**：
+9 个预设在渲染链里的**自然**响度跨度 **16.9 dB**，对齐后收窄到 **9.0 dB**（恰好
+1.5 档），逐预设落点偏差 **0.00 dB**，全程无削波（峰值 ≤ 0.98）。之所以是「收窄」
+而非「拉平」：声明值一律**不高于**该预设的自然响度，于是对齐永远是「降」——降幅
+总能做到，而抬响度要看峰值余量。
+
+**两条引擎的相对/绝对口径**：渲染路线把响度烘进样本，播放恒为 1.0；播放侧近似
+（零依赖）峰值顶在原声上、**抬不起**响度，只能按 `playback_trim`（≤1）做衰减。
+于是两条例子的**相对摆幅一致**（都按同一声明值走），**绝对锚点差一个常数**——
+装了 vs 没装解码器的机器听感仍有系统性偏移，这是零依赖近似的固有代价。
 
 ## 5. 一次步进的数据流
 

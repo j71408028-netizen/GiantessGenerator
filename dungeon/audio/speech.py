@@ -217,6 +217,23 @@ def _edge_synth(voice: str, rate: str, text: str, dest_dir: str):
     return path
 
 
+def synthesize(voice, rate, text, dest_dir=None):
+    """合成**一句**语音并返回音频路径（失败返回 None）。
+
+    :class:`SpeechDirector` 之外的单句入口：编辑器预听，以及任何「合成一次就
+    发出去」的场合。``dest_dir`` 省略时用系统临时目录（调用方自己清理）。
+    """
+    if dest_dir is None:
+        try:
+            dest_dir = tempfile.mkdtemp(prefix="voice_synth_")
+        except Exception:
+            return None
+    try:
+        return _edge_synth(voice, normalize_rate(rate), str(text or ""), dest_dir)
+    except Exception:
+        return None
+
+
 # ---------------- 播放调度 ----------------
 
 class SpeechDirector:
@@ -437,6 +454,11 @@ class SpeechDirector:
         优先级：**离线渲染**（有解码器 + numpy，采样级精确、跨平台一致）→
         **播放侧近似**（零依赖：延迟分拍轨 + 音量包络）→ **原声**。效果绝不叠加：
         渲染成功就不再开分拍轨。任何一步失败都只是"少点效果"，不拖垮朗读。
+
+        响度：渲染路线的响度**烘进样本**（``voice_fx`` 按预设声明值对齐），所以
+        播它时音量恒为 1.0；播放侧近似抬不起响度，只能按
+        :func:`voice_fx.playback_trim` 做**衰减**——两条例子的相对摆幅因此一致，
+        绝对锚点差一个常数（见 ``docs/Dungeon/script.md``）。
         """
         self._close_track()
         # 音量走总线：内容档位（方案 voice.level）→ 最终线性增益。
@@ -447,6 +469,8 @@ class SpeechDirector:
                 if rendered and self._start(rendered, 1.0) is not None:
                     self.last_engine = "render"
                     return
+            # 播放侧这条路走衰减版的音量（渲染路线的响度已烘进样本）
+            gain *= voice_fx.playback_trim(spec)
             plan = voice_fx.playback_plan(spec)
             if plan is None:
                 # 只有渲染能做的档（近距震耳这类纯过载）：退回原声并提示一次

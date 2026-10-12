@@ -11,9 +11,11 @@ from dungeon.audio.chapters import (
     DEFAULT_MAX_PARAGRAPHS, DEFAULT_SENSITIVITY_ATTR, bgm_level,
     chapter_names, normalize_chapter,
 )
+from dungeon.audio.preview import VoicePreview
+from dungeon.audio.speech import DEFAULT_RATE, normalize_voice
 from dungeon.audio.voice_fx import (DEFAULT_INTENSITY, MAX_INTENSITY, PRESET_NONE,
-                              SLOT_LABELS, SLOTS, label_of,
-                              preset_keys_for)
+                              SLOT_HER, SLOT_LABELS, SLOTS, label_of,
+                              loudness_hint, preset_keys_for)
 from ui.ctk.dialogs import BaseDialog
 from ui.ctk.widgets import OptionButton
 from ui.ctk.theme import (
@@ -54,6 +56,9 @@ class ChapterEditDialog(BaseDialog):
             or ["介入度", "破坏性"]
         self.sens_rows = []
         self._swatch_buttons = {}
+        # 预听：懒建（第一次点「预听」才起播放线程），关对话框时收尾
+        self._preview = None
+        self._preview_log = []
         self.transient(parent)
         # 抓取延到窗口可见之后（X11 要求 viewable，见 BaseDialog._grab_deferred）
         self._grab_deferred()
@@ -296,14 +301,20 @@ class ChapterEditDialog(BaseDialog):
 
     # ---------- 对话语音效果 ----------
     def _build_voice_fx_rows(self, parent):
-        """两档（她 / 其他人）：预设下拉 + 强度滑杆。
+        """两档（她 / 其他人）：预设下拉 + 强度滑杆 + 声明响度 + 预听。
 
         预设是**物理**效果（尺度 / 距离 / 空间），不是语气；按档给：她走巨大声源
         那组，主角与其余角色走普通尺度那组。高级参数（回声拍数、缓抖频率等）手改
         JSON 也能用，编辑器只暴露预设 + 强度，免得对话框变成调音台。
+
+        「响度」是只读的**声明值**（``voice_fx.Preset.loudness_db``）：渲染时按它把
+        实测响度拉回目标，所以各预设之间的响度差是设计出来的，不是调出来的——
+        想知道这一档选出来会有多响，看这个标签；想听，点「预听」。
         """
         self._fx_vars = {}
         self._fx_label_keys = {}
+        self._fx_loudness_labels = {}
+        self._fx_preview_buttons = {}
         container = ctk.CTkFrame(parent, fg_color="transparent")
         container.pack(fill='x', padx=6)
         for slot in SLOTS:
@@ -312,8 +323,10 @@ class ChapterEditDialog(BaseDialog):
             labels = [label_of(key) for key in keys]
             self._fx_label_keys[slot] = {label_of(key): key for key in keys}
 
-            row = ctk.CTkFrame(container, fg_color="transparent")
-            row.pack(fill='x', pady=3)
+            box = ctk.CTkFrame(container, fg_color="transparent")
+            box.pack(fill='x', pady=(3, 0))
+            row = ctk.CTkFrame(box, fg_color="transparent")
+            row.pack(fill='x')
             ctk.CTkLabel(row, text=f"{SLOT_LABELS[slot]}:", font=self.UI_FONT
                          ).pack(side='left')
             preset_var = tk.StringVar(
@@ -327,25 +340,131 @@ class ChapterEditDialog(BaseDialog):
                 value=int(fx.get("intensity", DEFAULT_INTENSITY)))
             ctk.CTkSlider(row, from_=0, to=MAX_INTENSITY,
                           number_of_steps=MAX_INTENSITY,
-                          variable=intensity_var, width=140,
+                          variable=intensity_var, width=150,
                           ).pack(side='left', padx=(6, 0))
             value_label = ctk.CTkLabel(row, text=str(intensity_var.get()),
                                        width=30, anchor='w', font=self.UI_FONT)
             value_label.pack(side='left', padx=(6, 0))
+
+            # 第二行：声明响度（只读）+ 预听
+            sub = ctk.CTkFrame(box, fg_color="transparent")
+            sub.pack(fill='x', padx=(48, 0), pady=(2, 0))
+            loud_label = ctk.CTkLabel(sub, text="", width=104, anchor='w',
+                                      font=self.UI_FONT_SMALL,
+                                      text_color=CHAPTER_TEXT_SOFT)
+            loud_label.pack(side='left')
+            audition = ctk.CTkButton(
+                sub, text="预听", width=52, height=24,
+                corner_radius=self.corner_radius, font=self.UI_FONT_SMALL,
+                fg_color=CHAPTER_HOVER, hover_color=CHAPTER_BORDER,
+                border_width=1, border_color=CHAPTER_BORDER,
+                text_color=CHAPTER_TEXT, command=lambda s=slot: self._preview_fx(s))
+            audition.pack(side='left', padx=(6, 0))
+
+            self._fx_vars[slot] = (preset_var, intensity_var)
+            self._fx_loudness_labels[slot] = loud_label
+            self._fx_preview_buttons[slot] = audition
             intensity_var.trace_add(
                 "write",
                 lambda *_a, label=value_label, var=intensity_var:
                     label.configure(text=str(var.get())))
-            self._fx_vars[slot] = (preset_var, intensity_var)
+            for var in (preset_var, intensity_var):
+                var.trace_add("write", lambda *_a, s=slot: self._refresh_fx_loudness(s))
+            self._refresh_fx_loudness(slot)
+
+        self._preview_status = ctk.CTkLabel(
+            parent, text="", anchor='w', font=self.UI_FONT_SMALL,
+            text_color=CHAPTER_HINT)
+        self._preview_status.pack(fill='x', padx=6, pady=(2, 0))
 
         ctk.CTkLabel(
             parent,
             text="效果是物理层面的：她按巨大尺度（低频轰鸣、旷野回声、空气缓抖），"
                  "其他人按普通尺度在同一个环境里（回声、隔墙、震地余波）——不含情绪语气。\n"
+                 "响度是预设的声明值（渲染时按实测 RMS 对齐，全表跨度 1.5 档）；"
+                 "预听会联网合成一句样例（首次约 1 秒）。\n"
                  "没装音频解码器（pip install miniaudio）的机器上，"
                  "「近距震耳」这类预设会退回原声，其余走零依赖的回声/缓抖近似。",
             justify='left', anchor='w', wraplength=560, font=self.UI_FONT_SMALL,
             text_color=CHAPTER_HINT).pack(fill='x', padx=6, pady=(4, 0))
+
+    def _refresh_fx_loudness(self, slot):
+        """刷新该档的只读「声明响度」（随预设/强度联动）。"""
+        label = self._fx_loudness_labels.get(slot)
+        if label is None:
+            return
+        preset_var, intensity_var = self._fx_vars[slot]
+        key = self._fx_label_keys[slot].get(preset_var.get().strip(), PRESET_NONE)
+        spec = {"preset": key, "intensity": int(intensity_var.get())}
+        label.configure(text=loudness_hint(spec) or "—")
+
+    def _voice_config(self) -> dict:
+        """方案级对话语音配置（预听用它取音色 / 语速 / 档位）；读不到就用默认。"""
+        if self._scenario_repo is not None and self.scenario_id:
+            try:
+                config = self._scenario_repo.load_config(self.scenario_id) or {}
+                return normalize_voice(config.get("voice"))
+            except Exception:
+                pass
+        return normalize_voice(None)
+
+    def _preview_fx(self, slot):
+        """预听这一档当前的效果（联网合成 → 渲染/播放侧近似 → 播一次）。"""
+        preset_var, intensity_var = self._fx_vars[slot]
+        key = self._fx_label_keys[slot].get(preset_var.get().strip(), PRESET_NONE)
+        if key == PRESET_NONE:
+            self._set_preview_status("先给这一档选一个效果预设，再点预听。")
+            return
+        voice = self._voice_config()
+        preview = self._ensure_preview()
+        if preview is None:
+            return
+        button = self._fx_preview_buttons.get(slot)
+        if button is not None:
+            button.configure(state="disabled", text="…")
+        self._set_preview_status(
+            f"正在合成「{label_of(key)}」的预听样例…（首次约 1 秒，需联网）")
+        spec = {"preset": key,
+                "intensity": max(0, min(MAX_INTENSITY, int(intensity_var.get())))}
+        preview.play(
+            voice["voice_her"] if slot == SLOT_HER else voice["voice_protagonist"],
+            slot=slot, rate=voice.get("rate", DEFAULT_RATE),
+            level=voice.get("level"), effect=spec,
+            on_done=lambda ok, msg, s=slot: self._on_preview_done(s, ok, msg))
+
+    def _ensure_preview(self):
+        if self._preview is None:
+            try:
+                self._preview = VoicePreview(logger=self._preview_log.append)
+            except Exception as exc:
+                self._set_preview_status(f"初始化预听失败：{exc}")
+                return None
+        return self._preview
+
+    def _set_preview_status(self, text: str):
+        label = getattr(self, "_preview_status", None)
+        if label is None:
+            return
+        try:
+            label.configure(text=text)
+        except tk.TclError:
+            pass
+
+    def _on_preview_done(self, slot, ok, message):
+        """工作线程的回调 → 回 Tk 主线程改按钮与状态（对话框可能已经关了）。"""
+        try:
+            self.after(0, lambda: self._finish_preview(slot, ok, message))
+        except tk.TclError:
+            pass
+
+    def _finish_preview(self, slot, ok, message):
+        button = self._fx_preview_buttons.get(slot)
+        if button is not None:
+            try:
+                button.configure(state="normal", text="预听")
+            except tk.TclError:
+                pass
+        self._set_preview_status("" if ok else f"预听失败：{message}")
 
     def _voice_fx_from_ui(self) -> dict:
         """收集两档效果；选了「不加效果」的那一档不写进配置。"""
@@ -569,3 +688,13 @@ class ChapterEditDialog(BaseDialog):
     def _cancel(self):
         self.result = None
         self.destroy()
+
+    def destroy(self):
+        """关对话框：先收预听（停播、收线程、清掉临时 WAV）再销毁。"""
+        preview, self._preview = getattr(self, "_preview", None), None
+        if preview is not None:
+            try:
+                preview.shutdown()
+            except Exception:
+                pass
+        super().destroy()

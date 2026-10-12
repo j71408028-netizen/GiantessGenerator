@@ -10,6 +10,7 @@ from dungeon.coupling import (COUPLING_LEVELS, DEFAULT_COUPLING_LEVEL, VELUM,
 from dungeon.rules import EvolutionRules
 from dungeon.schema import DEFAULT_TEXT_COMPONENT, normalize_text_component
 from dungeon.audio import buses
+from dungeon.audio.preview import VoicePreview
 from dungeon.audio.speech import (DEFAULT_OTHER_VOICES, DEFAULT_RATE, DEFAULT_VOICE_HER,
                             DEFAULT_VOICE_PROTAGONIST, DEFAULT_VOICE_LEVEL,
                             RECOMMENDED_VOICES, edge_tts_available, normalize_voice,
@@ -449,6 +450,25 @@ class ScenarioEditor(ctk.CTkFrame):
                      popup_fg_color=SC_PANEL_BG, popup_hover_color=SC_HOVER,
                      popup_text_color=_TITLE, popup_border_color=SC_BORDER_STRONG,
                      ).pack(side='left', padx=(6, 0))
+        # 预听：听音色 + 语速 + 档位（章节级效果在章节对话框里单独预听）
+        self._preview_button = ctk.CTkButton(
+            voice_tail, text="预听", width=52, height=26,
+            font=ui_fonts.ui_font(_F_SMALL), fg_color="transparent",
+            border_width=1, border_color=SC_BORDER_STRONG, text_color=SC_LINK,
+            hover_color=SC_HOVER, corner_radius=6,
+            command=lambda: self._preview_voice("her"))
+        self._preview_button.pack(side='left', padx=(8, 0))
+        ctk.CTkButton(
+            voice_tail, text="其它音色", width=68, height=26,
+            font=ui_fonts.ui_font(_F_SMALL), fg_color="transparent",
+            border_width=1, border_color=SC_BORDER_STRONG, text_color=SC_TEXT_SOFT,
+            hover_color=SC_HOVER, corner_radius=6,
+            command=lambda: self._preview_voice("other")).pack(side='left', padx=(6, 0))
+        self._preview_status = ctk.CTkLabel(
+            voice_card, text="", font=ui_fonts.ui_font(_F_SMALL),
+            text_color=_MUTED, anchor='w', justify='left',
+            wraplength=_LEFT_WIDTH - 40)
+        self._preview_status.pack(fill='x', padx=8, pady=(0, 4))
 
         ctk.CTkLabel(left_inner, text="系统初始提示",
                      font=ui_fonts.ui_font(_F_SMALL, "bold"),
@@ -765,6 +785,77 @@ class ScenarioEditor(ctk.CTkFrame):
         else:
             text = "仅带说话人的对话句会朗读，需联网合成（首次约 1 秒）"
         label.configure(text=text)
+
+    # ---------- 预听 ----------
+    def _preview_voice(self, kind: str = "her"):
+        """预听方案级语音（不带章节效果）：听音色 + 语速 + 档位。
+
+        ``kind``：``her`` 用她的音色，``other`` 用音色池里的第一个（配角音色按
+        名字分配，预听取池首做个代表）。章节级的**效果**在章节对话框里单独预听。
+        """
+        voice = self._voice_from_ui()
+        if kind == "other":
+            pool = voice.get("voice_other") or ()
+            voice_id = pool[0] if pool else ""
+        else:
+            voice_id = voice["voice_her"]
+        preview = self._ensure_preview()
+        if preview is None:
+            return
+        button = getattr(self, "_preview_button", None)
+        if button is not None:
+            button.configure(state="disabled", text="…")
+        self._set_preview_status("正在合成预听样例…（首次约 1 秒，需联网）")
+        preview.play(voice_id, rate=voice.get("rate", DEFAULT_RATE),
+                     level=voice.get("level"), effect=None,
+                     on_done=self._on_preview_done)
+
+    def _ensure_preview(self):
+        preview = getattr(self, "_preview", None)
+        if preview is None:
+            try:
+                preview = VoicePreview(
+                    logger=getattr(self, "_preview_log", []).append)
+            except Exception as exc:
+                self._set_preview_status(f"初始化预听失败：{exc}")
+                return None
+            self._preview = preview
+        return preview
+
+    def _set_preview_status(self, text: str):
+        label = getattr(self, "_preview_status", None)
+        if label is None:
+            return
+        try:
+            label.configure(text=text)
+        except Exception:
+            pass
+
+    def _on_preview_done(self, ok, message):
+        """工作线程的回调 → 回 Tk 主线程改按钮与状态（控件可能已销毁）。"""
+        try:
+            self.after(0, lambda: self._finish_preview(ok, message))
+        except Exception:
+            pass
+
+    def _finish_preview(self, ok, message):
+        button = getattr(self, "_preview_button", None)
+        if button is not None:
+            try:
+                button.configure(state="normal", text="预听")
+            except Exception:
+                pass
+        self._set_preview_status("" if ok else f"预听失败：{message}")
+
+    def destroy(self):
+        """销毁时收预听（停播、收线程、清临时 WAV）。"""
+        preview, self._preview = getattr(self, "_preview", None), None
+        if preview is not None:
+            try:
+                preview.shutdown()
+            except Exception:
+                pass
+        super().destroy()
 
     def _save_prompts(self):
         """仅保存提示词部分，不修改演化量和触发器"""
