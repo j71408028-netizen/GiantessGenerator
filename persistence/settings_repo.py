@@ -1,6 +1,8 @@
 import json
 import os
 
+from dungeon.audio.buses import DEFAULT_BUS_LEVELS
+
 
 class SettingsRepo:
     def __init__(self, data_dir: str = "data", world_state=None):
@@ -36,6 +38,9 @@ class SettingsRepo:
             # 副本对话语音总开关：关掉后所有方案都不出声（方案级 voice.enabled
             # 只在这个开关打开时才看）
             "dungeon_voice_enabled": True,
+            # 音频总线玩家电平（总音量 / 音乐 / 语音 / 音效），缺省 100 = 不衰减。
+            # 只有四条内容总线是「作者档位 + 玩家电平」两级，见 dungeon/audio/buses.py。
+            "audio_levels": dict(DEFAULT_BUS_LEVELS),
             "save_low_resolution_image": False,
             "use_preview_image_as_avatar": False,
             # 启动界面模式偏好：pro/mini 固定其一，exit=退出时模式

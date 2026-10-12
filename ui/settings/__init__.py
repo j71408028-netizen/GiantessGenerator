@@ -20,6 +20,7 @@ from persistence import PresetRepo, PersonalityRepo
 from persistence.name_repo import NameRepo, DEFAULT_NAME_TABLE
 from persistence.world_pack import list_behavior_packs
 from dungeon.terms import is_default_scenario
+from dungeon.audio import buses
 from services.challenges import ChallengeService
 import services.ui_mode as ui_mode
 from services.news import DEFAULT_NEWS_TABLE, NewsService
@@ -109,6 +110,10 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.quip_rate_factor = self.settings.get("quip_rate_factor", 1.0)
         self.info_update_rate = self.settings.get("info_update_rate", 0.5)
         self.blocked_words = normalize_blocked_words(self.settings.get("blocked_words", []))
+        # 音频总线玩家电平（总音量 / 音乐 / 语音 / 音效），见 dungeon/audio/buses.py
+        self.audio_levels = buses.levels_from_settings(self.settings)
+        self._bus_level_vars = {}
+        self._bus_level_labels = {}
 
         self._create_widgets()
         self._sync_all_states()
@@ -919,6 +924,46 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             value=self.settings.get("dungeon_voice_enabled", True))
         self.dungeon_voice_switch = self._make_switch(ctrl, self.dungeon_voice_var)
 
+        self._build_audio_section(self.disp_body, row)
+
+    def _build_audio_section(self, parent, row):
+        """音量：四条总线各一根 0-100 滑条（缺省 100 = 不衰减）。
+
+        与方案里的「档位」不同——档位是作者配内容时选的响度，这里拧的是玩家
+        自己那层总电平；两者相乘，见 ``dungeon/audio/buses.py`` 的三层单位表。
+        滑条只改内存中的待保存值，点「保存并返回」才落盘。
+        """
+        self._section_label(parent, row, "音量")
+        row += 1
+        for bus in buses.BUSES:
+            _, ctrl = self._make_row(parent, row, buses.BUS_LABELS[bus])
+            row += 1
+            var = tk.IntVar(value=self.audio_levels.get(bus, buses.MAX_LEVEL))
+            ctk.CTkSlider(
+                ctrl, from_=0, to=buses.MAX_LEVEL,
+                number_of_steps=buses.MAX_LEVEL, variable=var, width=150,
+                command=lambda value, b=bus: self._on_bus_level_change(b, value),
+            ).pack(side='left')
+            label = ctk.CTkLabel(
+                ctrl, text=str(var.get()), width=30, anchor='w',
+                font=_FONT, text_color=SETTINGS_LABEL)
+            label.pack(side='left', padx=(6, 0))
+            self._bus_level_vars[bus] = var
+            self._bus_level_labels[bus] = label
+
+    def _on_bus_level_change(self, bus, value):
+        label = self._bus_level_labels.get(bus)
+        if label is not None:
+            label.configure(text=str(int(float(value))))
+
+    def _sync_audio_levels(self):
+        """进入设置页时按持久化设置刷新音频滑条（面板常驻，需显式回读）。"""
+        self.audio_levels = buses.levels_from_settings(self.settings)
+        for bus, var in self._bus_level_vars.items():
+            level = self.audio_levels.get(bus, buses.MAX_LEVEL)
+            var.set(level)
+            self._bus_level_labels[bus].configure(text=str(level))
+
     def _on_ui_mode_changed(self, value):
         """记录「下次启动用哪套界面」，仅此而已。
 
@@ -1155,6 +1200,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.theme_palette = saved_palette
         # palette_display_names() 是 {配色名: 显示名}，这里要反查显示名
         self.palette_menu.set(palette_display_names().get(saved_palette, saved_palette))
+        self._sync_audio_levels()
 
     def _on_order_changed(self):
         self.comparison_order = self.order_var.get()
@@ -1350,6 +1396,8 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             "auto_save_replay": self.auto_save_replay_var.get(),
             "story_recent_count": self._story_recent_count_value(),
             "dungeon_voice_enabled": self.dungeon_voice_var.get(),
+            "audio_levels": {bus: int(self._bus_level_vars[bus].get())
+                             for bus in buses.BUSES},
             "save_low_resolution_image": self.save_low_resolution_var.get(),
             "use_preview_image_as_avatar": self.use_preview_avatar_var.get(),
             "info_update_rate": INFO_UPDATE_OPTIONS.get(self.info_update_var.get(), self.info_update_rate)

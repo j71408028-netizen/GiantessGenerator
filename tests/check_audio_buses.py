@@ -10,11 +10,15 @@
 4. **旧数据迁移**：``step_from_level`` 把 0-100 按响度就近折算成档位；
 5. 档位 → 增益：静音档归零、dB 表换算、**音乐锚点比语音低 6 dB**；
 6. ``resolve_gain`` 组合：档位 × 总线电平 × 总控，任一层归零即静音；
-7. 电平换算接口（``to_ratio`` / ``to_db`` / ``db_gain`` / ``clamp_level``）；
-8. **缺省对齐**：``DEFAULT_BGM_LEVEL`` / ``DEFAULT_VOICE_LEVEL`` 都取总线缺省档；
-9. **归一迁移**：``bgm_level`` / ``voice_level`` 优先新键、回退旧键；``normalize_*``
-   只产出 ``level``；``overrides.parse_overrides`` 两种键都认；
-10. 接线守卫：三条播放路径都改走总线，旧的 ``volume / 100`` 换算已消失。
+7. **玩家侧实时电平**：``levels_from_settings`` / ``set_bus_levels`` /
+   ``effective_bus_level`` 接管后影响 ``resolve_gain``，``None`` 交还缺省；
+8. 电平换算接口（``to_ratio`` / ``to_db`` / ``db_gain`` / ``clamp_level``）；
+9. **缺省对齐**：``DEFAULT_BGM_LEVEL`` / ``DEFAULT_VOICE_LEVEL`` 都取总线缺省档；
+10. **归一迁移**：``bgm_level`` / ``voice_level`` 优先新键、回退旧键；``normalize_*``
+    只产出 ``level``；``overrides.parse_overrides`` 两种键都认；
+11. **设置缺省**：``SettingsRepo`` 缺省含四条总线电平（取自总线单一真相源）；
+12. 接线守卫：三条播放路径都改走总线，副本窗口把 settings 电平装进混入层，
+    设置页读写 ``audio_levels``，旧的 ``volume / 100`` 换算已消失。
 """
 
 import math
@@ -166,7 +170,47 @@ check("step=None 走缺省档（与显式 3 一致）",
       near(buses.resolve_gain(buses.BUS_MUSIC),
            buses.resolve_gain(buses.BUS_MUSIC, step=3)))
 
-# ---------------- 7. 电平换算接口 ----------------
+# ---------------- 7. 玩家侧实时电平 ----------------
+check("levels_from_settings 缺省回退 100（未调过滑条 / 空 settings）",
+      buses.levels_from_settings({}) == {_b: 100 for _b in buses.BUSES}
+      and buses.levels_from_settings(None) == buses.DEFAULT_BUS_LEVELS,
+      buses.levels_from_settings({}))
+check("levels_from_settings 读 settings[audio_levels] 并夹取越界",
+      buses.levels_from_settings({"audio_levels": {"music": 40}})["music"] == 40
+      and buses.levels_from_settings({"audio_levels": {"voice": 999}})["voice"] == 100
+      and buses.levels_from_settings({"audio_levels": {"master": -5}})["master"] == 0,
+      buses.levels_from_settings({"audio_levels": {"music": 40, "voice": 999,
+                                                   "master": -5}}))
+check("levels_from_settings 结构坏掉时整体回退缺省",
+      buses.levels_from_settings({"audio_levels": "x"}) == buses.DEFAULT_BUS_LEVELS)
+
+check("未接管时 effective_bus_level 取缺省 100",
+      buses.effective_bus_level(buses.BUS_MUSIC) == 100
+      and buses.effective_bus_level(buses.BUS_MASTER) == 100)
+buses.set_bus_levels({buses.BUS_MUSIC: 30})
+check("set_bus_levels 缺项回退缺省、逐条生效",
+      buses.effective_bus_level(buses.BUS_MUSIC) == 30
+      and buses.effective_bus_level(buses.BUS_VOICE) == 100)
+buses.set_bus_levels({buses.BUS_MASTER: 100, buses.BUS_MUSIC: 50,
+                      buses.BUS_VOICE: 50, buses.BUS_SFX: 100})
+check("实时电平压到 resolve_gain（内容总线）",
+      buses.effective_bus_level(buses.BUS_MUSIC) == 50
+      and near(buses.resolve_gain(buses.BUS_MUSIC),
+               buses.step_gain(buses.BUS_MUSIC, 3) * 0.5),
+      buses.resolve_gain(buses.BUS_MUSIC))
+check("显式传参优先于实时值",
+      near(buses.resolve_gain(buses.BUS_VOICE, step=4, bus_level=100, master=100), 1.0))
+buses.set_bus_levels({buses.BUS_MASTER: 50, buses.BUS_MUSIC: 100,
+                      buses.BUS_VOICE: 100, buses.BUS_SFX: 100})
+check("总控实时电平也压到内容总线",
+      near(buses.resolve_gain(buses.BUS_VOICE, step=4), 0.5),
+      buses.resolve_gain(buses.BUS_VOICE, step=4))
+buses.set_bus_levels(None)
+check("set_bus_levels(None) 交还缺省（实时值不再生效）",
+      buses.effective_bus_level(buses.BUS_MUSIC) == 100
+      and near(buses.resolve_gain(buses.BUS_VOICE, step=4), 1.0))
+
+# ---------------- 8. 电平换算接口 ----------------
 check("clamp_level 夹取 / 回退",
       buses.clamp_level(150) == 100 and buses.clamp_level(-5) == 0
       and buses.clamp_level(None) == 100 and buses.clamp_level("x", 70) == 70)
@@ -181,7 +225,7 @@ check("to_db 与 db_gain 互逆",
       near(buses.db_gain(buses.to_db(50)), 0.5, tol=1e-9),
       buses.db_gain(buses.to_db(50)))
 
-# ---------------- 8. 模块缺省对齐 ----------------
+# ---------------- 9. 模块缺省对齐 ----------------
 check("章节 / 语音缺省档都取总线缺省（单一真相源）",
       chapters_mod.DEFAULT_BGM_LEVEL == buses.DEFAULT_STEP
       and speech_mod.DEFAULT_VOICE_LEVEL == buses.DEFAULT_STEP,
@@ -190,7 +234,7 @@ check("章节 / 语音档位上限都取总线上限",
       chapters_mod.MAX_BGM_LEVEL == buses.STEP_MAX
       and speech_mod.MAX_VOICE_LEVEL == buses.STEP_MAX)
 
-# ---------------- 9. 归一迁移 ----------------
+# ---------------- 10. 归一迁移 ----------------
 check("bgm_level 优先新键 level",
       chapters_mod.bgm_level({"level": 2}) == 2
       and chapters_mod.bgm_level({"level": 2, "volume": 70}) == 2)
@@ -223,7 +267,13 @@ check("describe 用档位中文名",
       overrides_mod.describe({"bgm_level": 2}) == "音乐档位=轻",
       overrides_mod.describe({"bgm_level": 2}))
 
-# ---------------- 10. 接线守卫 ----------------
+# ---------------- 11. 设置缺省 ----------------
+from persistence.settings_repo import SettingsRepo  # noqa: E402
+check("设置缺省含四条总线电平（取自总线单一真相源）",
+      SettingsRepo()._defaults.get("audio_levels") == buses.DEFAULT_BUS_LEVELS,
+      SettingsRepo()._defaults.get("audio_levels"))
+
+# ---------------- 12. 接线守卫 ----------------
 def _src(*parts):
     return open(os.path.join(_PROJECT_ROOT, *parts), encoding="utf-8").read()
 
@@ -232,6 +282,8 @@ _init_src = _src("dungeon", "audio", "__init__.py")
 _speech_src = _src("dungeon", "audio", "speech.py")
 _fx_src = _src("dungeon", "audio", "voice_fx.py")
 _chapters_src = _src("dungeon", "audio", "chapters.py")
+_base_src = _src("dungeon", "window", "base.py")
+_settings_src = _src("ui", "settings", "__init__.py")
 
 check("BgmPlayer 走 BUS_MUSIC 总线",
       "buses.resolve_gain(buses.BUS_MUSIC" in _init_src)
@@ -241,6 +293,11 @@ check("渲染音量走 BUS_VOICE 总线",
       "buses.resolve_gain(buses.BUS_VOICE" in _fx_src)
 check("档位经 buses.clamp_step 归一（播放侧）",
       "buses.clamp_step(" in _speech_src and "buses.clamp_step(" in _init_src)
+check("副本窗口把 settings 电平装进总线",
+      "buses.set_bus_levels(" in _base_src
+      and "buses.levels_from_settings(" in _base_src)
+check("设置页读写 audio_levels 并遍历总线表",
+      "audio_levels" in _settings_src and "buses.BUSES" in _settings_src)
 check("旧的 volume / 100 换算已从播放路径消失",
       "volume / 100.0" not in _init_src and "self.volume / 100" not in _speech_src)
 check("旧的 0-100 常量已从音源模块消失",

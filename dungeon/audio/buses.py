@@ -11,7 +11,7 @@
 | 层 | 谁在用 | 单位 | 范围 |
 |---|---|---|---|
 | 作者侧「档位」 | 章节 ``bgm.level`` / 方案 ``voice.level`` | **档** | ``0-4``（:data:`STEP_LABELS`） |
-| 玩家侧「滑条」 | 设置页（未落地） | 电平 | ``0-100``（:func:`to_ratio`） |
+| 玩家侧「滑条」 | 设置页四条滑条（``settings.audio_levels``） | 电平 | ``0-100``（:func:`to_ratio`） |
 | 内部「增益」 | 播放后端 | 线性 / dB | ``0.0-1.0``（:func:`db_gain`） |
 
 **为什么作者侧用档位而不是 0-100**：0-100 看着精细，其实是**假精度**——
@@ -34,9 +34,13 @@
 两套键并存会有歧义（``3`` 到底是「3% 音量」还是「中档」？），所以刻意
 **改名**而不是复用 ``volume``。
 
-**尚未接入**：``SfxPlayer`` 仍按 0-1 直传（且当前无调用方）；玩家滑条
-（总控 / 音乐 / 语音）是下一步，届时 :data:`DEFAULT_BUS_LEVELS` 会从
-「恒 100」变成玩家的实际档位。
+**玩家侧电平**存在 ``settings["audio_levels"]``（设置页四条滑条）。副本窗口
+开局时用 :func:`set_bus_levels` 把它装进来，播放路径**不必**逐处传参——
+:func:`resolve_gain` 缺省取 :func:`effective_bus_level`（实时值 > 缺省），
+所以滑条一改，三条内容总线同时跟着变。未接管的进程（没开副本）回退缺省
+:data:`DEFAULT_BUS_LEVELS`（恒 100 = 不衰减）。
+
+**尚未接入**：``SfxPlayer`` 仍按 0-1 直传（且当前无调用方）。
 """
 
 import math
@@ -222,26 +226,67 @@ def db_gain(db) -> float:
     return 10.0 ** (value / 20.0)
 
 
-#: 总线电平默认（玩家侧）：100 = 不衰减。滑条尚未落地，先恒为 100。
+#: 总线电平默认（玩家侧）：100 = 不衰减。玩家没调过滑条时用它。
 DEFAULT_BUS_LEVELS = {bus: MAX_LEVEL for bus in BUSES}
+
+#: 设置页里总线电平存的键（settings 字典）
+SETTINGS_KEY = "audio_levels"
 
 
 def bus_default(bus) -> int:
-    """某条总线的玩家电平缺省（当前都是 100 = 不衰减）。"""
+    """某条总线的玩家电平**缺省**（当前都是 100 = 不衰减）。"""
     return DEFAULT_BUS_LEVELS.get(bus, MAX_LEVEL)
+
+
+def levels_from_settings(settings) -> dict:
+    """从 settings 字典取出四条总线的玩家电平（缺项 / 非法值回退缺省）。
+
+    认不出结构时整体回退缺省——设置文件被手改坏不该让副本发不出声。
+    """
+    raw = (settings or {}).get(SETTINGS_KEY) or {}
+    if not isinstance(raw, dict):
+        return dict(DEFAULT_BUS_LEVELS)
+    return {bus: clamp_level(raw.get(bus), bus_default(bus)) for bus in BUSES}
+
+
+#: 玩家侧实时电平：副本窗口按 settings 装进来后用；``None`` = 未接管，回退缺省。
+_live_levels = None
+
+
+def set_bus_levels(levels=None):
+    """接管玩家侧总线电平（副本窗口装配时调用；``None`` = 交还缺省）。
+
+    四条总线一次给全，缺项回退缺省；传 ``None`` 清空，回到 :data:`DEFAULT_BUS_LEVELS`。
+    之所以用「进程内实时值」而不是给每个播放调用加参数：接线点（BgmPlayer /
+    SpeechDirector / voice_fx）散在三处、又被多条路径复用，逐处透传总线电平会
+    把玩家设置一路漏下去；音量本就该是全局混音状态，收在这里最省。
+    """
+    global _live_levels
+    if levels is None:
+        _live_levels = None
+    else:
+        _live_levels = {bus: clamp_level(levels.get(bus), bus_default(bus))
+                        for bus in BUSES}
+
+
+def effective_bus_level(bus) -> int:
+    """这条总线**当前生效**的玩家电平：实时值 > 缺省。"""
+    if _live_levels is None:
+        return bus_default(bus)
+    return _live_levels.get(bus, bus_default(bus))
 
 
 def resolve_gain(bus, step=None, bus_level=None, master=None) -> float:
     """算出一路声音的最终线性增益（0.0-1.0）。
 
     - ``step``：作者配的音量档位（``0-4``），缺省 :data:`DEFAULT_STEP`；
-    - ``bus_level``：这条总线的玩家电平（``0-100``），缺省 :func:`bus_default`；
-    - ``master``：总控电平（``0-100``），缺省总控缺省。
+    - ``bus_level``：这条总线的玩家电平（``0-100``），缺省 :func:`effective_bus_level`；
+    - ``master``：总控电平（``0-100``），缺省总控当前电平。
 
     档位先经 :func:`step_gain` 变成「含总线锚点」的增益，再乘玩家侧两层——
     这就是「总线」的含义：任一层拧小，整条链一起变小。
     """
     gain = step_gain(bus, DEFAULT_STEP if step is None else step)
-    gain *= to_ratio(clamp_level(bus_level, bus_default(bus)))
-    gain *= to_ratio(clamp_level(master, bus_default(BUS_MASTER)))
+    gain *= to_ratio(clamp_level(bus_level, effective_bus_level(bus)))
+    gain *= to_ratio(clamp_level(master, effective_bus_level(BUS_MASTER)))
     return max(0.0, min(1.0, gain))

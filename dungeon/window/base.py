@@ -20,7 +20,7 @@ import dearpygui.dearpygui as dpg
 
 from core.ai import create_client
 from dungeon import process_log
-from dungeon.audio import BgmPlayer
+from dungeon.audio import BgmPlayer, buses
 from dungeon.audio.speech import SpeechDirector, VoiceCaster, normalize_voice
 from dungeon.window.background import DungeonBackground
 from dungeon.window.fx import WindowFx
@@ -123,6 +123,9 @@ class DungeonWindowBase:
             self.settings = getattr(gui, "settings", None) or {}
         else:
             self.settings = {}
+        # 玩家侧音频总线电平（设置页滑条）装进混音层：三条播放路径（BGM /
+        # 朗读 / 语音效果渲染）都从 buses 取，不必逐处透传。
+        buses.set_bus_levels(buses.levels_from_settings(self.settings))
         self.ending_effects = {}
         self.ending_text = ""
         # 当前结局触发器信息（图标路径、触发器下标、已写入的索引记录）
