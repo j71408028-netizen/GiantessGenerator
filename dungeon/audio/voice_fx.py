@@ -497,7 +497,14 @@ def _add_taps(np, samples, rate, delay, count, decay, wet):
 
 
 def _limit(np, samples):
-    """只在过峰值时压回来：效果不该顺手把整句推响。"""
+    """只在过峰值时压回来——**它守的是峰值，不是响度**。
+
+    实测（``.temp/voice_fx_loudness.py``，语音谱型代理信号，强度 100）：峰值
+    变化一律 ≤ +0.3 dB，但 RMS 变化可达 **+11.5 dB**（「近距震耳」的过载 +
+    低频增益）。软饱和在峰值不变的前提下提高了波形密度，隆隆声则直接叠加
+    能量，两者都不触发这里的判据。也就是说「同一个音量档位，配上不同效果
+    后响度能差十几个 dB」是当前的真实行为——按档位听响度时必须知道这一层。
+    """
     peak = float(np.max(np.abs(samples))) if samples.size else 0.0
     if peak > 0.98:
         return (samples * (0.98 / peak)).astype(np.float32)
@@ -517,23 +524,22 @@ def _write_wav(path, samples, rate):
     return path
 
 
-def _gain(volume) -> float:
-    """音量（0-100）→ 线性增益；渲染路线必须自己乘（WAV 上 MCI 设不了音量）。
+def _gain(level) -> float:
+    """音量档位（0-4）→ 线性增益；渲染路线必须自己乘（WAV 上 MCI 设不了音量）。
 
     与朗读共用 ``BUS_VOICE`` 总线口径：这样「离线渲染」与「播放侧近似」两条
     路线算出的音量一致，不会因为走哪条引擎而大小不同。
     """
-    if _number(volume) is None:
-        volume = buses.MAX_LEVEL
-    return buses.resolve_gain(buses.BUS_VOICE, item=volume)
+    return buses.resolve_gain(buses.BUS_VOICE, step=level)
 
 
-def render_wav(src, dest_dir, spec, volume=100, decoder=None, logger=None):
+def render_wav(src, dest_dir, spec, level=buses.DEFAULT_STEP, decoder=None,
+               logger=None):
     """把 ``src`` 按 ``spec`` 渲染成一份 WAV；失败返回 None（静默降级）。
 
     处理链顺序即物理顺序：预延迟（距离）→ 空气吸收（低通）→ 躯体共振（低频
     增益）→ 次声隆隆 → 过载（软饱和）→ 空气缓抖（音量包络）→ 空间折回
-    （分拍回声）→ 限幅 → 音量。
+    （分拍回声）→ 限幅 → 音量档位。
 
     ``decoder`` 是注入接缝（``(path) -> (samples, rate) | None``）：自检在没有
     解码器的机器上也能验证「解不开就退回原声」这条降级路径。
@@ -555,13 +561,13 @@ def render_wav(src, dest_dir, spec, volume=100, decoder=None, logger=None):
     samples, rate = decoded
     try:
         return _render_chain(np, samples, int(rate), params, spec, src, dest_dir,
-                             volume)
+                             level)
     except Exception as exc:
         _log(logger, f"[VoiceFx] 渲染失败：{exc}")
         return None
 
 
-def _render_chain(np, samples, rate, params, spec, src, dest_dir, volume):
+def _render_chain(np, samples, rate, params, spec, src, dest_dir, level):
     """按 ``params`` 处理样本并落盘（拆出来只为让 ``render_wav`` 只做取舍）。"""
     y = np.asarray(samples, dtype=np.float32)
     if params.get("pre_delay"):
@@ -583,8 +589,8 @@ def _render_chain(np, samples, rate, params, spec, src, dest_dir, volume):
         y = _add_taps(np, y, rate, params.get("echo_delay", 0.3),
                       int(params["echo_count"]), params.get("echo_decay", 0.5),
                       params["echo_wet"])
-    y = _limit(np, y) * _gain(volume)
-    stamp = f"{os.path.basename(src)}|{spec_key(spec)}|{volume}"
+    y = _limit(np, y) * _gain(level)
+    stamp = f"{os.path.basename(src)}|{spec_key(spec)}|{level}"
     name = f"fx_{abs(zlib.crc32(stamp.encode('utf-8')))}.wav"
     os.makedirs(dest_dir, exist_ok=True)
     return _write_wav(os.path.join(dest_dir, name), y, rate)

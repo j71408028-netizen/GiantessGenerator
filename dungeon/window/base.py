@@ -183,7 +183,7 @@ class DungeonWindowBase:
         # 三个 _applied_* 记录各维度已落地值，避免每步重复刷背景 / 挪音量 / 重设语音
         self.effect_overrides = []
         self._applied_visual_filter = None
-        self._applied_bgm_volume = None
+        self._applied_bgm_level = None
         self.current_background_path = ""
         self.triggered_names = set()   # 已触发且不可再次触发的触发器
         self.fired_triggers = set()    # 至少触发过一次的触发器（前置条件判断用）
@@ -672,7 +672,7 @@ class DungeonWindowBase:
             other_voices=cfg["voice_other"],
         )
         self._speech.configure(caster=caster, rate=cfg["rate"],
-                               volume=cfg["volume"],
+                               level=cfg["level"],
                                enabled=global_on and cfg["enabled"],
                                effect=getattr(self, "current_voice_fx", None) or {})
 

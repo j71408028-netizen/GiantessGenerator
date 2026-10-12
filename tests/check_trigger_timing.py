@@ -91,7 +91,7 @@ class _Dummy(TriggerHandler):
         self.effect_overrides = []
         self.replay_data = []
         self._applied_visual_filter = None
-        self._applied_bgm_volume = None
+        self._applied_bgm_level = None
         self._applied_voice_fx = {}
         self.chapter_voice_fx = {}
         self.chapter_sensitivity_effects = []

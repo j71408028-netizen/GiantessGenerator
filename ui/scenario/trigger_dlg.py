@@ -9,9 +9,10 @@ from dungeon.actions import (
     WINDOW_FX, WINDOW_FX_KEYS, action_label, normalize_action_type,
 )
 from dungeon.window.minigame import list_mini_games, mini_game_params
+from dungeon.audio import buses
 from dungeon.audio.chapters import (
     CHAPTER_ANY, CHAPTER_ANY_LABEL, CHAPTER_NONE, CHAPTER_NONE_LABEL,
-    DEFAULT_BGM_VOLUME, DEFAULT_SENSITIVITY_ATTR, MAX_BGM_VOLUME, chapter_names,
+    DEFAULT_BGM_LEVEL, DEFAULT_SENSITIVITY_ATTR, chapter_names,
 )
 from dungeon.audio.voice_fx import (DEFAULT_INTENSITY, MAX_INTENSITY, PRESET_NONE,
                                     SLOT_LABELS, SLOTS, label_of, preset_keys_for)
@@ -337,18 +338,16 @@ class TriggerEditDialog(BaseDialog):
                         width=150, height=28,
                         font=self.UI_FONT).pack(side='left', padx=(8, 0))
 
-        # --- 音乐音量 ---
+        # --- 音乐档位 ---
         bgm_row = ctk.CTkFrame(frame, fg_color="transparent")
         bgm_row.pack(fill='x', pady=(2, 3))
         self.effect_bgm_on = tk.BooleanVar(value=False)
         self._effect_checkbox(bgm_row, "音乐音量", self.effect_bgm_on).pack(side='left')
-        self.effect_bgm_volume_var = tk.IntVar(value=DEFAULT_BGM_VOLUME)
-        self.effect_bgm_label = ctk.CTkLabel(
-            bgm_row, text=str(DEFAULT_BGM_VOLUME), width=26, anchor='w', font=self.UI_FONT)
-        ctk.CTkSlider(bgm_row, from_=0, to=MAX_BGM_VOLUME,
-                      number_of_steps=MAX_BGM_VOLUME, variable=self.effect_bgm_volume_var,
-                      width=150, command=self._on_effect_bgm_change).pack(side='left', padx=(8, 0))
-        self.effect_bgm_label.pack(side='left', padx=(6, 0))
+        self.effect_bgm_level_var = tk.StringVar(
+            value=buses.step_display(DEFAULT_BGM_LEVEL))
+        OptionButton(bgm_row, values=[label for label, _ in buses.step_choices()],
+                     variable=self.effect_bgm_level_var, width=96, height=28,
+                     font=self.UI_FONT).pack(side='left', padx=(8, 0))
 
         # --- 语音效果（她 / 其他人两档）---
         voice_head = ctk.CTkFrame(frame, fg_color="transparent")
@@ -387,9 +386,6 @@ class TriggerEditDialog(BaseDialog):
         return ctk.CTkCheckBox(parent, text=text, variable=variable, font=self.UI_FONT,
                                text_color=TRIGGER_TEXT, checkbox_width=20,
                                checkbox_height=20)
-
-    def _on_effect_bgm_change(self, value):
-        self.effect_bgm_label.configure(text=str(int(float(value))))
 
     def _build_effect_voice_rows(self, parent):
         """两档语音效果的预设 + 强度（与章节编辑同一套预设，含「不加效果」）。"""
@@ -513,8 +509,7 @@ class TriggerEditDialog(BaseDialog):
         if self.effect_filter_on.get():
             data["filter"] = self._effect_filter_label_to_key(self.effect_filter_var.get())
         if self.effect_bgm_on.get():
-            data["bgm_volume"] = max(0, min(MAX_BGM_VOLUME,
-                                           int(self.effect_bgm_volume_var.get())))
+            data["bgm_level"] = buses.step_from_display(self.effect_bgm_level_var.get())
         if self.effect_voice_on.get():
             data["voice_fx"] = self._effect_voice_fx_from_ui()
         if self.effect_sens_on.get():
@@ -527,10 +522,9 @@ class TriggerEditDialog(BaseDialog):
         self.effect_filter_on.set("filter" in parsed)
         self.effect_filter_var.set(
             self._effect_filter_key_to_label(parsed.get("filter") or ""))
-        self.effect_bgm_on.set("bgm_volume" in parsed)
-        volume = int(parsed.get("bgm_volume", DEFAULT_BGM_VOLUME))
-        self.effect_bgm_volume_var.set(volume)
-        self._on_effect_bgm_change(volume)
+        self.effect_bgm_on.set("bgm_level" in parsed)
+        self.effect_bgm_level_var.set(
+            buses.step_display(parsed.get("bgm_level", DEFAULT_BGM_LEVEL)))
         self.effect_voice_on.set("voice_fx" in parsed)
         voice = parsed.get("voice_fx") or {}
         for slot in SLOTS:
@@ -1312,7 +1306,7 @@ class TriggerEditDialog(BaseDialog):
                     "错误", "请至少勾选一个要覆盖的维度"
                             "（背景滤镜 / 音乐音量 / 语音效果 / 敏感效果）")
                 return
-            for key in ("filter", "bgm_volume", "voice_fx", "sensitivity"):
+            for key in ("filter", "bgm_level", "voice_fx", "sensitivity"):
                 action_data.pop(key, None)
             action_data.update(overrides)
             action_data["duration"] = duration

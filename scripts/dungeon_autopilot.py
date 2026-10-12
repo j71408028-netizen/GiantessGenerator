@@ -666,7 +666,7 @@ def scene_dialogue_voice():
         voice_cfg = {"enabled": True, "voice_her": "V_HER",
                      "voice_protagonist": "V_PRO",
                      "voice_other": ["A", "B", "C"], "rate": "+0%",
-                     "volume": 70}
+                     "level": 3}
         observed = {}
 
         def _speak(win):
@@ -800,7 +800,7 @@ def scene_chapter_voice_fx():
             [("check", _speak), ("check", _leave_chapter), ("check", _finale),
              ("close", None)],
             config_overrides={"chapters": cfg["chapters"],
-                              "voice": {"enabled": True, "volume": 80},
+                              "voice": {"enabled": True, "level": 3},
                               "coupling_level": "solea",
                               "protagonist_title": "主角"})
         check("语音效果：故障不在脚本里",
@@ -864,7 +864,7 @@ def scene_chapter_bgm():
         cfg = _scenario_config()
         cfg["chapters"] = [
             {"name": "音乐章", "start": True,
-             "bgm": {"path": wav, "volume": 30, "loop": True, "fade_seconds": 0}},
+             "bgm": {"path": wav, "level": 2, "loop": True, "fade_seconds": 0}},
             {"name": "静默章", "bgm": {}},
         ]
         observed = {}

@@ -9,10 +9,11 @@ from dungeon.coupling import (COUPLING_LEVELS, DEFAULT_COUPLING_LEVEL, VELUM,
                               coupling_label, normalize_coupling_level)
 from dungeon.rules import EvolutionRules
 from dungeon.schema import DEFAULT_TEXT_COMPONENT, normalize_text_component
+from dungeon.audio import buses
 from dungeon.audio.speech import (DEFAULT_OTHER_VOICES, DEFAULT_RATE, DEFAULT_VOICE_HER,
-                            DEFAULT_VOICE_PROTAGONIST, DEFAULT_VOICE_VOLUME,
-                            MAX_VOICE_VOLUME, RECOMMENDED_VOICES,
-                            edge_tts_available, normalize_voice)
+                            DEFAULT_VOICE_PROTAGONIST, DEFAULT_VOICE_LEVEL,
+                            RECOMMENDED_VOICES, edge_tts_available, normalize_voice,
+                            voice_level)
 from ui.ctk.widgets import (CTkScrollableDropdownFrame, CTkSegmentedControl,
                                OptionButton)
 from ui.ctk.dialogs import (BaseDialog, InputDialog, DLG_BORDER_STRONG,
@@ -438,13 +439,16 @@ class ScenarioEditor(ctk.CTkFrame):
                      border_color=SC_BORDER_STRONG).pack(side='left', padx=(6, 10))
         ctk.CTkLabel(voice_tail, text="音量", font=ui_fonts.ui_font(_F_SMALL),
                      text_color=_TITLE).pack(side='left')
-        self.voice_volume_var = ctk.StringVar(value=str(DEFAULT_VOICE_VOLUME))
-        ctk.CTkEntry(voice_tail, textvariable=self.voice_volume_var, width=48,
-                     height=26, font=ui_fonts.ui_font(_F_SMALL),
-                     text_color=_DARK, fg_color=SC_BG,
-                     border_color=SC_BORDER_STRONG).pack(side='left', padx=(6, 0))
-        ctk.CTkLabel(voice_tail, text="0-100", font=ui_fonts.ui_font(_F_SMALL),
-                     text_color=_MUTED).pack(side='left', padx=(4, 0))
+        self.voice_level_var = ctk.StringVar(
+            value=buses.step_display(DEFAULT_VOICE_LEVEL))
+        OptionButton(voice_tail, values=[label for label, _ in buses.step_choices()],
+                     variable=self.voice_level_var, width=88, height=26,
+                     font=ui_fonts.ui_font(_F_SMALL),
+                     fg_color=SC_BG, border_color=SC_BORDER_STRONG,
+                     hover_color=SC_HOVER, text_color=_TITLE,
+                     popup_fg_color=SC_PANEL_BG, popup_hover_color=SC_HOVER,
+                     popup_text_color=_TITLE, popup_border_color=SC_BORDER_STRONG,
+                     ).pack(side='left', padx=(6, 0))
 
         ctk.CTkLabel(left_inner, text="系统初始提示",
                      font=ui_fonts.ui_font(_F_SMALL, "bold"),
@@ -647,7 +651,7 @@ class ScenarioEditor(ctk.CTkFrame):
             self.voice.get("voice_protagonist", DEFAULT_VOICE_PROTAGONIST))
         self.voice_other_var.set("、".join(self.voice.get("voice_other") or ()))
         self.voice_rate_var.set(self.voice.get("rate", DEFAULT_RATE))
-        self.voice_volume_var.set(str(self.voice.get("volume", DEFAULT_VOICE_VOLUME)))
+        self.voice_level_var.set(buses.step_display(voice_level(self.voice)))
         self._refresh_voice_hint()
 
         for key, box in self.section_frames.items():
@@ -725,17 +729,13 @@ class ScenarioEditor(ctk.CTkFrame):
     def _voice_from_ui(self) -> dict:
         """收集对话语音配置（音色池按「、」或逗号分隔，空则回退默认池）。"""
         raw_others = re.split(r"[、,，;；\s]+", self.voice_other_var.get().strip())
-        try:
-            volume = int(float(self.voice_volume_var.get().strip()))
-        except (ValueError, AttributeError):
-            volume = self.voice.get("volume", DEFAULT_VOICE_VOLUME)
         return normalize_voice({
             "enabled": bool(self.voice_enabled_var.get()),
             "voice_her": self.voice_her_var.get().strip(),
             "voice_protagonist": self.voice_protagonist_var.get().strip(),
             "voice_other": [v for v in raw_others if v],
             "rate": self.voice_rate_var.get().strip(),
-            "volume": max(0, min(MAX_VOICE_VOLUME, volume)),
+            "level": buses.step_from_display(self.voice_level_var.get()),
         })
 
     def _pick_voice(self, var, append: bool = False):

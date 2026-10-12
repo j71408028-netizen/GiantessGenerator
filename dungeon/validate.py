@@ -21,13 +21,13 @@ from dataclasses import dataclass
 from dungeon import schema
 from dungeon.actions import (VISUAL_FILTER_KEYS, WINDOW_FX_KEYS,
                              normalize_action_type)
+from dungeon.audio import buses
 from dungeon.audio.chapters import (BGM_SUPPORTED_EXTS, CHAPTER_NONE,
-                              MAX_BGM_VOLUME, normalize_chapters)
+                              normalize_chapters)
 from dungeon.coupling import (BULLA, COUPLING_LEVEL_LABELS, COUPLING_LEVELS,
                               SOLEA, VELUM, normalize_coupling_level)
 from dungeon.overrides import OVERRIDE_KEYS, OVERRIDE_LABELS
-from dungeon.audio.speech import (DEFAULT_VOICE_VOLUME, MAX_VOICE_VOLUME,
-                            normalize_rate)
+from dungeon.audio.speech import normalize_rate
 from dungeon.audio.voice_fx import (MAX_INTENSITY, PARAM_LABELS, PARAM_RANGES,
                               PRESETS_BY_KEY, PRESET_NONE, SLOT_KEYS,
                               SLOT_LABELS, SLOTS, needs_render,
@@ -134,6 +134,42 @@ def format_diagnostics(diagnostics, *, include_info: bool = True) -> str:
 
 def _is_number(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _level_span_text() -> str:
+    """「0 静音、1 很轻、…、4 响」一行提示（诊断里解释档位含义）。"""
+    return "、".join(f"{step} {label}" for step, label in buses.step_options())
+
+
+def _check_audio_level(raw, path: str, add, key: str = "level",
+                       legacy: str = "volume") -> None:
+    """校一个音量**档位**字段：新键 ``key``（0-4），兼容旧 0-100 ``legacy``。
+
+    看**原文**而不是归一后的值——写错的档位会被悄悄夹取，作者却以为配好了
+    （与 ``_validate_bgm`` 同一个道理）。旧键报一条 info「已改为档位」而不是
+    错误：它是可迁移的历史写法，不是作者的笔误。
+    """
+    raw = raw if isinstance(raw, dict) else {}
+    if key in raw:
+        value = raw.get(key)
+        if not _is_number(value):
+            add("warning", f"{path}.{key}", "音量档位必须是数字，加载时回退默认档")
+            return
+        step = int(float(value))
+        if not buses.STEP_MIN <= step <= buses.STEP_MAX:
+            add("warning", f"{path}.{key}",
+                f"音量档位需在 {buses.STEP_MIN}~{buses.STEP_MAX}"
+                f"（{_level_span_text()}），加载时会自动夹到范围内")
+    elif legacy in raw:
+        value = raw.get(legacy)
+        add("info", f"{path}.{legacy}",
+            f"旧版音量（0-100）已改为档位（{buses.STEP_MIN}-{buses.STEP_MAX}），"
+            "保存时会自动折算")
+        if not _is_number(value):
+            add("warning", f"{path}.{legacy}", "音量必须是数字，加载时回退默认值")
+        elif not 0 <= float(value) <= buses.MAX_LEVEL:
+            add("warning", f"{path}.{legacy}",
+                f"音量需在 0~{buses.MAX_LEVEL} 之间，加载时会自动夹到范围内")
 
 
 # ---------------- 主入口 ----------------
@@ -252,8 +288,9 @@ def _validate_voice(voice_raw, coupling_level, add) -> None:
         return
     level = normalize_coupling_level(coupling_level)
     enabled = bool(voice_raw.get("enabled", True))
-    # 未知键只提示一次，避免和 chapters 那样逐条刷屏
-    unknown = [k for k in voice_raw if k not in schema.field_map(schema.VOICE_FIELDS)]
+    # 未知键只提示一次，避免和 chapters 那样逐条刷屏；``volume`` 是旧版音量键，不算未知
+    known = set(schema.field_map(schema.VOICE_FIELDS)) | {"volume"}
+    unknown = [k for k in voice_raw if k not in known]
     if unknown:
         add("info", "voice", f"未知字段：{', '.join(sorted(unknown))}（会原样保留）")
     if not enabled:
@@ -274,14 +311,7 @@ def _validate_voice(voice_raw, coupling_level, add) -> None:
     if rate and normalize_rate(rate) != rate:
         add("warning", "voice.rate", f"语速写法无法识别：{rate}（应如 +0% / -20%），"
                                      f"将按常速处理")
-    try:
-        volume = int(float(voice_raw.get("volume", DEFAULT_VOICE_VOLUME)))
-    except (TypeError, ValueError):
-        add("warning", "voice.volume", "音量不是数字，已按默认值处理")
-    else:
-        if not 0 <= volume <= MAX_VOICE_VOLUME:
-            add("warning", "voice.volume",
-                f"音量 {volume} 超出 0-{MAX_VOICE_VOLUME}，运行时会被夹取")
+    _check_audio_level(voice_raw, "voice", add)
 
 
 def _validate_section_prompts(section_prompts, add) -> None:
@@ -438,12 +468,7 @@ def _validate_bgm(raw_bgm, bgm, path: str, scenario_dir: str, add) -> None:
             f"音频后缀「{suffix}」不是常见格式（推荐：{recommended}），"
             f"能不能放出声取决于系统解码器")
     raw = raw_bgm if isinstance(raw_bgm, dict) else {}
-    volume = raw.get("volume")
-    if volume is not None and not _is_number(volume):
-        add("warning", f"{path}.bgm.volume", "音量必须是数字，加载时回退默认值")
-    elif _is_number(volume) and not 0 <= float(volume) <= MAX_BGM_VOLUME:
-        add("warning", f"{path}.bgm.volume",
-            f"音量需在 0~{MAX_BGM_VOLUME} 之间，加载时会自动夹到范围内")
+    _check_audio_level(raw, f"{path}.bgm", add)
     fade = raw.get("fade_seconds")
     if fade is not None and not (_is_number(fade) and float(fade) >= 0):
         add("warning", f"{path}.bgm.fade_seconds",
@@ -710,9 +735,9 @@ def _validate_effect_overrides(action_data, path, add, coupling_level=None) -> N
     """章节效果短暂覆盖：逐维度检查，把「静默跳过」变成作者能改的诊断。
 
     四个维度同名于 ``action_data`` 字段（见 ``dungeon/overrides.py``）：背景滤镜
-    ``filter`` / 音乐音量 ``bgm_volume`` / 语音效果 ``voice_fx`` / 敏感效果
-    ``sensitivity``。看的是**原文**——写错的滤镜、超范围音量只有原文看得出来，
-    归一化会把它们悄悄改成合法值或直接丢掉。
+    ``filter`` / 音乐档位 ``bgm_level``（兼容旧 ``bgm_volume``）/ 语音效果 ``voice_fx``
+    / 敏感效果 ``sensitivity``。看的是**原文**——写错的滤镜、超范围档位只有原文
+    看得出来，归一化会把它们悄悄改成合法值或直接丢掉。
     """
     data = action_data if isinstance(action_data, dict) else {}
     field_path = path + ".action_data"
@@ -726,14 +751,8 @@ def _validate_effect_overrides(action_data, path, add, coupling_level=None) -> N
             add("warning", field_path + ".filter",
                 f"未知滤镜「{key}」（允许：{', '.join(VISUAL_FILTER_KEYS)}；"
                 f"空串 = 清除滤镜），运行时会跳过")
-    if "bgm_volume" in data:
-        value = data.get("bgm_volume")
-        if not _is_number(value):
-            add("warning", field_path + ".bgm_volume",
-                "音乐音量必须是数字，加载时忽略该维度")
-        elif not 0 <= float(value) <= MAX_BGM_VOLUME:
-            add("warning", field_path + ".bgm_volume",
-                f"音乐音量需在 0~{MAX_BGM_VOLUME} 之间，加载时会自动夹取")
+    _check_audio_level(data, field_path, add,
+                       key="bgm_level", legacy="bgm_volume")
     if "voice_fx" in data:
         # 复用章节语音效果的逐档检查（空对象 = 显式清除，不产诊断）
         _validate_voice_fx(data.get("voice_fx"), field_path, add,

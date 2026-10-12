@@ -41,8 +41,8 @@ def check(name, ok, extra=""):
 
 
 from dungeon import schema  # noqa: E402
-from dungeon.audio.chapters import (DEFAULT_BGM_FADE_SECONDS, DEFAULT_BGM_VOLUME,  # noqa: E402
-                              MAX_BGM_VOLUME, normalize_bgm, normalize_chapter)
+from dungeon.audio.chapters import (DEFAULT_BGM_FADE_SECONDS, DEFAULT_BGM_LEVEL,  # noqa: E402
+                              MAX_BGM_LEVEL, normalize_bgm, normalize_chapter)
 from dungeon.validate import (  # noqa: E402
     format_diagnostics, has_errors, validate_scenario_config)
 
@@ -64,6 +64,7 @@ GOLDEN_EMPTY = {
     "chapters": [],
     "triggers": [],
     # 对话语音：默认开、音色取默认（字面量写死，改动默认值必须让这里先红）
+    # 音量是**档位** 0-4，缺省「中」（3）
     "voice": {
         "enabled": True,
         "voice_her": "zh-CN-XiaoxiaoNeural",
@@ -71,7 +72,7 @@ GOLDEN_EMPTY = {
         "voice_other": ("zh-CN-YunjianNeural", "zh-CN-YunyangNeural",
                         "zh-CN-XiaoyiNeural"),
         "rate": "+0%",
-        "volume": 90,
+        "level": 3,
     },
 }
 check("空方案模板与旧版 _empty_config 一致",
@@ -91,7 +92,7 @@ check("bgm 字段声明与 normalize 产出的键一致",
 
 # ---------------- 2b. 对话语音 schema ↔ normalize ↔ 接线 ----------------
 import dungeon.audio.speech as speech_mod  # noqa: E402
-from dungeon.audio.speech import MAX_VOICE_VOLUME, normalize_voice  # noqa: E402
+from dungeon.audio.speech import MAX_VOICE_LEVEL, normalize_voice  # noqa: E402
 
 check("方案级对话语音字段已在 schema 声明",
       "voice" in schema.known_scenario_keys())
@@ -100,9 +101,12 @@ check("voice 字段声明与 normalize 产出的键一致",
 check("语速非法值回退常速",
       normalize_voice({"rate": "快一点"})["rate"] == speech_mod.DEFAULT_RATE
       and normalize_voice({"rate": "+15%"})["rate"] == "+15%")
-check("音量越界被夹取",
-      normalize_voice({"volume": 500})["volume"] == MAX_VOICE_VOLUME
-      and normalize_voice({"volume": -3})["volume"] == 0)
+check("音量档位越界被夹取",
+      normalize_voice({"level": 9})["level"] == MAX_VOICE_LEVEL
+      and normalize_voice({"level": -3})["level"] == 0)
+check("旧 0-100 volume 迁移成档位（存盘只留 level）",
+      normalize_voice({"volume": 90})["level"] == 4
+      and "volume" not in normalize_voice({"volume": 90}))
 check("空音色回退默认、音色池空回退默认池",
       normalize_voice({"voice_her": "  ", "voice_other": []})["voice_her"]
       == speech_mod.DEFAULT_VOICE_HER
@@ -188,7 +192,7 @@ def _fake_synth(voice, rate, text, dest_dir):
 
 
 _real_backends = audio_mod.set_backends([_FakeTrack])
-_director = speech_mod.SpeechDirector(caster=_caster, rate="+10%", volume=80,
+_director = speech_mod.SpeechDirector(caster=_caster, rate="+10%", level=3,
                                       logger=_notes.append, synth=_fake_synth,
                                       enabled=True)
 check("叙述句（无说话人）不朗读", _director.speak("", "一段描写") is False)
@@ -350,18 +354,21 @@ check("未配音乐归一为空 dict（运行时按「无音乐」处理）",
       normalize_bgm(None) == {} and normalize_bgm({}) == {}
       and normalize_bgm({"path": "  "}) == {})
 check("bgm 默认补全", normalize_bgm({"path": "audio/a.ogg"}) == {
-    "path": "audio/a.ogg", "volume": DEFAULT_BGM_VOLUME, "loop": True,
+    "path": "audio/a.ogg", "level": DEFAULT_BGM_LEVEL, "loop": True,
     "fade_seconds": DEFAULT_BGM_FADE_SECONDS}, normalize_bgm({"path": "audio/a.ogg"}))
-_clamped = normalize_bgm({"path": "a.mp3", "volume": MAX_BGM_VOLUME + 400,
+_clamped = normalize_bgm({"path": "a.mp3", "level": MAX_BGM_LEVEL + 400,
                           "loop": False, "fade_seconds": -1})
-check("bgm 越界值被夹取（音量封顶、负淡入淡出归零）",
-      _clamped["volume"] == MAX_BGM_VOLUME and _clamped["loop"] is False
+check("bgm 越界值被夹取（档位封顶、负淡入淡出归零）",
+      _clamped["level"] == MAX_BGM_LEVEL and _clamped["loop"] is False
       and _clamped["fade_seconds"] == 0.0, _clamped)
+check("bgm 旧 volume 迁移成档位（存盘只留 level）",
+      normalize_bgm({"path": "a.mp3", "volume": 70})["level"] == 3
+      and "volume" not in normalize_bgm({"path": "a.mp3", "volume": 70}))
 
 _bgm_config = schema.empty_scenario_config()
 _bgm_config["chapters"] = [
     {"name": "开场", "start": True,
-     "bgm": {"path": "audio/nope.mp3", "volume": 500, "fade_seconds": "x"}},
+     "bgm": {"path": "audio/nope.mp3", "level": 9, "fade_seconds": "x"}},
     {"name": "终幕", "ending": True, "bgm": {"path": "audio/a.xyz"}},
 ]
 _bgm_diags = validate_scenario_config(_bgm_config, scenario_dir=_bgm_tmp)
@@ -375,12 +382,25 @@ def _expect_bgm(level, path_part, label):
 
 
 _expect_bgm("warning", "chapters[0].bgm.path", "背景音乐文件不存在")
-_expect_bgm("warning", "chapters[0].bgm.volume", "bgm 音量越界")
+_expect_bgm("warning", "chapters[0].bgm.level", "bgm 音量档位越界")
 _expect_bgm("warning", "chapters[0].bgm.fade_seconds", "bgm 淡入淡出非数字")
 _expect_bgm("warning", "chapters[1].bgm.path", "bgm 后缀不是常见格式")
 check("bgm 章节没有 scenarios_dir 时不报错路径存在性",
       not [d for d in validate_scenario_config(_bgm_config)
            if "bgm.path" in d.path and "不存在" in d.message])
+
+# 旧键 volume：报 info（可迁移的历史写法，不是笔误）
+_legacy_bgm_config = schema.empty_scenario_config()
+_legacy_bgm_config["chapters"] = [
+    {"name": "旧章", "start": True, "bgm": {"path": "a.mp3", "volume": 70}},
+    {"name": "旧终", "ending": True},
+]
+_legacy_diags = validate_scenario_config(_legacy_bgm_config)
+check("旧键 volume 报 info 而非错误（提示已改为档位）",
+      any(d.level == "info" and d.path.endswith(".bgm.volume")
+          for d in _legacy_diags)
+      and not [d for d in _legacy_diags if d.level == "error"],
+      format_diagnostics(_legacy_diags, include_info=True))
 
 # 存一轮再读：迁移不得丢字段，且坏值体现在读到的数据里（已夹取）
 from persistence.scenario_repo import ScenarioRepo as _Repo  # noqa: E402
@@ -389,7 +409,7 @@ _bgm_repo.save_config("_bgm", _bgm_config)
 _bgm_loaded = _bgm_repo.load_config("_bgm")
 check("存读一轮：章节 bgm 未丢失且坏值已修正",
       _bgm_loaded["chapters"][0]["bgm"]["path"] == "audio/nope.mp3"
-      and _bgm_loaded["chapters"][0]["bgm"]["volume"] == MAX_BGM_VOLUME
+      and _bgm_loaded["chapters"][0]["bgm"]["level"] == MAX_BGM_LEVEL
       and _bgm_loaded["chapters"][1]["bgm"]["loop"] is True,
       _bgm_loaded["chapters"])
 
@@ -541,7 +561,7 @@ check("章节列表显示语音效果列", "_format_voice_fx" in _mgr_src
 # ---- 整条链：假合成器 + 假音轨，从效果配置到分拍/调制/降级（不出声、不联网） ----
 _FakeTrack.events = []
 audio_mod.set_backends([_FakeTrack])
-_fx_director = speech_mod.SpeechDirector(caster=_caster, volume=80,
+_fx_director = speech_mod.SpeechDirector(caster=_caster, level=3,
                                          logger=_notes.append, synth=_fake_synth,
                                          enabled=True)
 try:
@@ -565,7 +585,7 @@ try:
     check("她那一档走播放侧并开了分拍（主声 + 2 拍）",
           _fx_director.last_engine == "playback" and len(_starts) == 3,
           (_fx_director.last_engine, _FakeTrack.events))
-    check("分拍音量按次第衰减（0.8 → 0.32 → 0.148）",
+    check("分拍音量按次第衰减（主声 > 拍1 > 拍2 > 0）",
           len(_starts) == 3 and _starts[0] > _starts[1] > _starts[2] > 0, _starts)
 
     _FakeTrack.events = []
@@ -641,7 +661,7 @@ _probe_notes = []
 _probe_resolver = {"tone.wav": os.path.join(_bgm_tmp, "tone.wav")}
 open(_probe_resolver["tone.wav"], "wb").write(b"RIFF....WAVEfmt ")
 _probe = audio_mod.BgmPlayer(resolver=_probe_resolver.get, logger=_probe_notes.append)
-_probe.play({"path": "tone.wav", "volume": 40, "loop": True, "fade_seconds": 0})
+_probe.play({"path": "tone.wav", "level": 3, "loop": True, "fade_seconds": 0})
 _probe.play({"path": "不在的曲子.mp3"})
 _probe.wait_idle()
 _probe.stop()

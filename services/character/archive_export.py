@@ -397,8 +397,10 @@ def _render_trigger_record(entry: dict) -> str:
         if "filter" in data:
             key = str(data.get("filter") or "").strip()
             parts.append(f"滤镜 {key or '清除'}")
-        if "bgm_volume" in data:
-            parts.append(f"音乐音量 {data.get('bgm_volume')}")
+        for _key, _label in (("bgm_level", "音乐档位"), ("bgm_volume", "音乐音量")):
+            if _key in data:
+                parts.append(f"{_label} {data.get(_key)}")
+                break
         if "voice_fx" in data:
             parts.append("语音效果" if data.get("voice_fx") else "语音效果（清除）")
         if "sensitivity" in data:

@@ -24,7 +24,7 @@ import threading
 import time
 
 from dungeon.audio import buses
-from dungeon.audio.chapters import DEFAULT_BGM_FADE_SECONDS
+from dungeon.audio.chapters import DEFAULT_BGM_FADE_SECONDS, DEFAULT_BGM_LEVEL
 
 
 class AudioTrack:
@@ -597,10 +597,9 @@ class BgmPlayer:
             return
 
         loop = bool(spec.get("loop", True))
-        # 音量走总线：内容电平（章节配的那个数）→ 最终线性增益。
-        volume = buses.clamp_level(spec.get("volume"),
-                                   buses.item_default(buses.BUS_MUSIC))
-        target = buses.resolve_gain(buses.BUS_MUSIC, item=volume)
+        # 音量走总线：内容档位（章节配的那个数）→ 最终线性增益。
+        level = buses.clamp_step(spec.get("level"), DEFAULT_BGM_LEVEL)
+        target = buses.resolve_gain(buses.BUS_MUSIC, step=level)
         try:
             fade = max(0.0, float(spec.get("fade_seconds",
                                            DEFAULT_BGM_FADE_SECONDS)))

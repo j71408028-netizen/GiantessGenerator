@@ -13,7 +13,7 @@ from dungeon import process_log
 from dungeon.actions import (ACTION_POSITIONS, EMPTY_ACTIONS, ENDING_ACTION,
                              MINI_GAME_DEFAULT_ID, WINDOW_FX_KEYS,
                              normalize_action_type)
-from dungeon.audio.chapters import (DEFAULT_BGM_VOLUME, chapter_bgm,
+from dungeon.audio.chapters import (DEFAULT_BGM_LEVEL, bgm_level, chapter_bgm,
                               find_chapter, is_terminating_chapter,
                               matches_scope, sensitivity_amount)
 from dungeon.overrides import (active_override, describe as describe_overrides,
@@ -165,9 +165,9 @@ class TriggerHandler:
         bgm = bgm or {}
         self.current_bgm_path = str(bgm.get("path") or "")
         self._bgm.play(bgm)
-        # 记录实际落地的音量，供「音乐音量覆盖」到期时判断是否需要挪回去
-        self._applied_bgm_volume = (int(bgm.get("volume", DEFAULT_BGM_VOLUME))
-                                    if bgm.get("path") else None)
+        # 记录实际落地的音量档位，供「音乐音量覆盖」到期时判断是否需要挪回去
+        # （bgm_level 兼容旧 volume，未存盘迁移的老方案也能取到正确档位）
+        self._applied_bgm_level = bgm_level(bgm) if bgm.get("path") else None
 
     def _apply_chapter_voice_fx(self, voice_fx: dict = None):
         """应用章节的对话语音物理效果（两档：她 / 其他人）。
@@ -212,7 +212,7 @@ class TriggerHandler:
         落地，读取时按 :meth:`_effective_sensitivity_effects` 现算。
         """
         self._refresh_visual_filter()
-        self._refresh_bgm_volume()
+        self._refresh_bgm_level()
         self._refresh_voice_fx()
 
     def _refresh_visual_filter(self):
@@ -233,8 +233,8 @@ class TriggerHandler:
             return
         self._set_background(self.current_background_path, False, target)
 
-    def _refresh_bgm_volume(self):
-        """按当前生效的音量覆盖调整音乐；无覆盖则回到章节配置音量。
+    def _refresh_bgm_level(self):
+        """按当前生效的音量覆盖调整音乐；无覆盖则回到章节配置的档位。
 
         同一首曲子只挪音量、不从头重放（``BgmPlayer._apply`` 的既有语义）；
         章节本就没有音乐时音量覆盖无处施加，直接忽略。
@@ -243,15 +243,15 @@ class TriggerHandler:
                    if self.current_chapter else None)
         bgm = chapter_bgm(chapter) if chapter else {}
         if not bgm.get("path"):
-            self._applied_bgm_volume = None
+            self._applied_bgm_level = None
             return
-        override = self._active_override("bgm_volume")
-        volume = (int(bgm.get("volume", DEFAULT_BGM_VOLUME))
-                  if override is None else int(override))
-        if volume == self._applied_bgm_volume:
+        override = self._active_override("bgm_level")
+        level = (int(bgm.get("level", DEFAULT_BGM_LEVEL))
+                 if override is None else int(override))
+        if level == self._applied_bgm_level:
             return
-        self._applied_bgm_volume = volume
-        self._bgm.play(dict(bgm, volume=volume))
+        self._applied_bgm_level = level
+        self._bgm.play(dict(bgm, level=level))
 
     def _refresh_voice_fx(self):
         """按当前生效的语音覆盖重设效果；无覆盖则回到章节默认（可能是不加效果）。"""

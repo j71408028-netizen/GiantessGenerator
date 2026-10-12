@@ -50,11 +50,11 @@ DEFAULT_OTHER_VOICES = ("zh-CN-YunjianNeural", "zh-CN-YunyangNeural",
                         "zh-CN-XiaoyiNeural")
 #: 语速（edge-tts 的 ``rate``：``+0%`` 为常速）
 DEFAULT_RATE = "+0%"
-#: 默认音量 0-100（比背景音乐高一些，台词要压过配乐）。取值来自音频总线表
-#: （``dungeon.audio.buses``），与背景音乐共用一套电平口径。
-DEFAULT_VOICE_VOLUME = buses.item_default(buses.BUS_VOICE)
-#: 音量上限
-MAX_VOICE_VOLUME = buses.MAX_LEVEL
+#: 默认音量**档位**（0-4，见 ``dungeon.audio.buses.STEP_LABELS``）：缺省「中」。
+#: 这是**缺省值**，方案里显式填的 ``level`` 优先。
+DEFAULT_VOICE_LEVEL = buses.DEFAULT_STEP
+#: 音量档位上限
+MAX_VOICE_LEVEL = buses.STEP_MAX
 #: 单句上限：超长台词不合成（又慢又容易失败，念出来也没人听）
 MAX_SPEECH_CHARS = 300
 
@@ -95,21 +95,29 @@ def normalize_rate(raw) -> str:
     return text
 
 
+def voice_level(raw) -> int:
+    """取朗读音量档位：优先新键 ``level``，回退旧 0-100 ``volume``（按响度就近折算）。"""
+    raw = raw if isinstance(raw, dict) else {}
+    if "level" in raw:
+        return buses.clamp_step(raw.get("level"), DEFAULT_VOICE_LEVEL)
+    if "volume" in raw:
+        return buses.step_from_level(raw.get("volume"), DEFAULT_VOICE_LEVEL)
+    return DEFAULT_VOICE_LEVEL
+
+
 def normalize_voice(raw) -> dict:
     """把方案里的对话语音配置补全为完整字典。
 
     其它角色音色是**列表**（按顺序给不同配角，同一名字固定一把嗓子）；
     空列表回退默认池。``enabled`` 缺省为 True——功能默认开，作者在编辑器里关。
+    ``level`` 是音量**档位**（0-4）；仍接受早期的 0-100 ``volume``，但产出只写
+    ``level``。
     """
     raw = raw if isinstance(raw, dict) else {}
     others = raw.get("voice_other")
     if not isinstance(others, (list, tuple)):
         others = []
     others = [str(item).strip() for item in others if str(item or "").strip()]
-    try:
-        volume = int(float(raw.get("volume", DEFAULT_VOICE_VOLUME)))
-    except (TypeError, ValueError):
-        volume = DEFAULT_VOICE_VOLUME
     return {
         "enabled": bool(raw.get("enabled", True)),
         "voice_her": str(raw.get("voice_her") or "").strip() or DEFAULT_VOICE_HER,
@@ -117,7 +125,7 @@ def normalize_voice(raw) -> dict:
                               or DEFAULT_VOICE_PROTAGONIST),
         "voice_other": tuple(others) or DEFAULT_OTHER_VOICES,
         "rate": normalize_rate(raw.get("rate")),
-        "volume": max(0, min(MAX_VOICE_VOLUME, volume)),
+        "level": voice_level(raw),
     }
 
 
@@ -222,11 +230,11 @@ class SpeechDirector:
     TICK_SECONDS = 0.1
 
     def __init__(self, caster=None, rate=DEFAULT_RATE,
-                 volume=DEFAULT_VOICE_VOLUME, logger=None, synth=None,
+                 level=DEFAULT_VOICE_LEVEL, logger=None, synth=None,
                  enabled=True):
         self.caster = caster
         self.rate = normalize_rate(rate)
-        self.volume = max(0, min(MAX_VOICE_VOLUME, int(volume)))
+        self.level = buses.clamp_step(level, DEFAULT_VOICE_LEVEL)
         self.enabled = bool(enabled)
         #: 章节级物理效果（两档：她 / 其他人），由窗口层在进章时填
         self.effect = {}
@@ -243,7 +251,7 @@ class SpeechDirector:
         self._track = None
         self._fx = None
         self._cache = {}
-        #: 效果渲染产物缓存 ``(原声路径, 效果指纹, 音量) -> wav 路径``
+        #: 效果渲染产物缓存 ``(原声路径, 效果指纹, 音量档位) -> wav 路径``
         self._render_cache = {}
         #: 最近一次实际使用的音色 / 效果 / 引擎（自检/排障用）
         self.last_voice = ""
@@ -256,15 +264,15 @@ class SpeechDirector:
         self._fx_warned = set()
 
     # ---------------- 对外 API（线程安全，立即返回） ----------------
-    def configure(self, caster=None, rate=None, volume=None, enabled=None,
+    def configure(self, caster=None, rate=None, level=None, enabled=None,
                   effect=None):
         """会话初始化后填入方案配置（探索模式要等方案选定才有）。"""
         if caster is not None:
             self.caster = caster
         if rate is not None:
             self.rate = normalize_rate(rate)
-        if volume is not None:
-            self.volume = max(0, min(MAX_VOICE_VOLUME, int(volume)))
+        if level is not None:
+            self.level = buses.clamp_step(level, DEFAULT_VOICE_LEVEL)
         if enabled is not None:
             self.enabled = bool(enabled)
         if effect is not None:
@@ -431,8 +439,8 @@ class SpeechDirector:
         渲染成功就不再开分拍轨。任何一步失败都只是"少点效果"，不拖垮朗读。
         """
         self._close_track()
-        # 音量走总线：内容电平（方案 voice.volume）→ 最终线性增益。
-        gain = buses.resolve_gain(buses.BUS_VOICE, item=self.volume)
+        # 音量走总线：内容档位（方案 voice.level）→ 最终线性增益。
+        gain = buses.resolve_gain(buses.BUS_VOICE, step=self.level)
         if spec:
             if voice_fx.has_effect(spec):
                 rendered = self._render(path, spec)
@@ -480,7 +488,7 @@ class SpeechDirector:
 
     def _render(self, path, spec):
         """按效果渲染一份 WAV（结果进缓存）；失败返回 None（调用方退回近似）。"""
-        key = (path, voice_fx.spec_key(spec), self.volume)
+        key = (path, voice_fx.spec_key(spec), self.level)
         cached = self._render_cache.get(key)
         if cached and os.path.exists(cached):
             return cached
@@ -489,7 +497,7 @@ class SpeechDirector:
                 self._tmp_dir = tempfile.mkdtemp(prefix="dungeon_voice_")
             except Exception:
                 return None
-        rendered = voice_fx.render_wav(path, self._tmp_dir, spec, self.volume,
+        rendered = voice_fx.render_wav(path, self._tmp_dir, spec, self.level,
                                        logger=self._note)
         if rendered:
             self._render_cache[key] = rendered

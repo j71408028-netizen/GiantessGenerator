@@ -5,15 +5,17 @@ import customtkinter as ctk
 
 import ui.ctk.dialogs
 from dungeon.actions import VISUAL_FILTERS
+from dungeon.audio import buses
 from dungeon.audio.chapters import (
-    CHAPTER_COLOR_PRESETS, DEFAULT_BGM_FADE_SECONDS, DEFAULT_BGM_VOLUME,
-    DEFAULT_MAX_PARAGRAPHS, DEFAULT_SENSITIVITY_ATTR, MAX_BGM_VOLUME,
+    CHAPTER_COLOR_PRESETS, DEFAULT_BGM_FADE_SECONDS,
+    DEFAULT_MAX_PARAGRAPHS, DEFAULT_SENSITIVITY_ATTR, bgm_level,
     chapter_names, normalize_chapter,
 )
 from dungeon.audio.voice_fx import (DEFAULT_INTENSITY, MAX_INTENSITY, PRESET_NONE,
                               SLOT_LABELS, SLOTS, label_of,
                               preset_keys_for)
 from ui.ctk.dialogs import BaseDialog
+from ui.ctk.widgets import OptionButton
 from ui.ctk.theme import (
     CHAPTER_BORDER, CHAPTER_HOVER, CHAPTER_TEXT, CHAPTER_TEXT_SOFT,
     CHAPTER_HINT, CHAPTER_ERR, CHAPTER_ERR_HOVER, CHAPTER_SWATCH_SELECTED_BORDER,
@@ -191,14 +193,10 @@ class ChapterEditDialog(BaseDialog):
         bgm_option_row = ctk.CTkFrame(bgm_frame, fg_color="transparent")
         bgm_option_row.pack(fill='x', pady=(6, 0))
         ctk.CTkLabel(bgm_option_row, text="音量:", font=self.UI_FONT).pack(side='left')
-        self.bgm_volume_var = tk.IntVar(value=int(bgm.get("volume", DEFAULT_BGM_VOLUME)))
-        self.bgm_volume_label = ctk.CTkLabel(
-            bgm_option_row, text=str(self.bgm_volume_var.get()), font=self.UI_FONT,
-            width=28, anchor='w')
-        ctk.CTkSlider(bgm_option_row, from_=0, to=MAX_BGM_VOLUME, number_of_steps=MAX_BGM_VOLUME,
-                      variable=self.bgm_volume_var, width=150,
-                      command=self._on_bgm_volume_change).pack(side='left', padx=(6, 0))
-        self.bgm_volume_label.pack(side='left', padx=(6, 0))
+        self.bgm_level_var = tk.StringVar(value=buses.step_display(bgm_level(bgm)))
+        OptionButton(bgm_option_row, values=[label for label, _ in buses.step_choices()],
+                     variable=self.bgm_level_var, width=96, height=28,
+                     font=self.UI_FONT).pack(side='left', padx=(6, 0))
         self.bgm_loop_var = tk.BooleanVar(value=bool(bgm.get("loop", True)))
         ctk.CTkCheckBox(bgm_option_row, text="循环播放", variable=self.bgm_loop_var,
                         font=self.UI_FONT, text_color=CHAPTER_TEXT,
@@ -291,9 +289,6 @@ class ChapterEditDialog(BaseDialog):
         self.smooth_var.set(True)
 
     # ---------- 背景音乐 ----------
-    def _on_bgm_volume_change(self, value):
-        self.bgm_volume_label.configure(text=str(int(float(value))))
-
     def _import_bgm(self):
         rel_path = import_bgm_audio(self, self._scenario_repo, self.scenario_id)
         if rel_path:
@@ -499,7 +494,7 @@ class ChapterEditDialog(BaseDialog):
                 return
             bgm = {
                 "path": audio_path,
-                "volume": max(0, min(MAX_BGM_VOLUME, int(self.bgm_volume_var.get()))),
+                "level": buses.step_from_display(self.bgm_level_var.get()),
                 "loop": bool(self.bgm_loop_var.get()),
                 "fade_seconds": fade_seconds,
             }

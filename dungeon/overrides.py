@@ -21,17 +21,17 @@
 """
 
 from dungeon.actions import VISUAL_FILTER_KEYS
-from dungeon.audio.chapters import (MAX_BGM_VOLUME,
-                                    normalize_sensitivity_effect)
+from dungeon.audio import buses
+from dungeon.audio.chapters import normalize_sensitivity_effect
 from dungeon.audio.voice_fx import SLOT_LABELS, normalize_voice_fx
 
 #: 可被短暂覆盖的四个维度：与 ``effect`` 动作 ``action_data`` 里的字段同名。
-OVERRIDE_KEYS = ("filter", "bgm_volume", "voice_fx", "sensitivity")
+OVERRIDE_KEYS = ("filter", "bgm_level", "voice_fx", "sensitivity")
 
 #: 维度展示名（日志、编辑器、诊断共用）。
 OVERRIDE_LABELS = {
     "filter": "背景滤镜",
-    "bgm_volume": "音乐音量",
+    "bgm_level": "音乐档位",
     "voice_fx": "语音效果",
     "sensitivity": "敏感效果",
 }
@@ -47,13 +47,29 @@ def _int_or_none(value):
         return None
 
 
+def _bgm_level_or_none(data) -> int:
+    """取音乐音量档位的覆盖值；没有该维度或解析不出数字时返回 ``None``。
+
+    优先新键 ``bgm_level``（0-4）；回退旧 0-100 ``bgm_volume``（按响度就近
+    折算成档位）。
+    """
+    if "bgm_level" in data:
+        value = _int_or_none(data.get("bgm_level"))
+        return None if value is None else buses.clamp_step(value)
+    if "bgm_volume" in data:
+        value = _int_or_none(data.get("bgm_volume"))
+        return None if value is None else buses.step_from_level(value)
+    return None
+
+
 def parse_overrides(action_data) -> dict:
     """从 ``effect`` 动作的 ``action_data`` 抽出覆盖项，只保留**显式写出**的维度。
 
     - ``filter``：``null`` / 空串 / ``"none"`` → ``""``（显式清除滤镜）；其余按
       原字符串返回，合法键由调用方按 :data:`dungeon.actions.VISUAL_FILTER_KEYS`
       判定（本模块不做取舍，免得把作者的笔误静默吞掉）。
-    - ``bgm_volume``：夹到 0~:data:`MAX_BGM_VOLUME` 的整数；解析不出数字则忽略该维度。
+    - ``bgm_level``：夹到 0~4 档的整数（旧键 ``bgm_volume`` 折算成档位）；
+      解析不出数字则忽略该维度。
     - ``voice_fx``：``normalize_voice_fx`` 归一（``{}`` = 显式清除）。
     - ``sensitivity``：逐条 ``normalize_sensitivity_effect``（``[]`` = 显式清除）。
     """
@@ -63,10 +79,9 @@ def parse_overrides(action_data) -> dict:
         raw = data.get("filter")
         text = "" if raw is None else str(raw).strip()
         out["filter"] = "" if text.lower() in ("", "none") else text
-    if "bgm_volume" in data:
-        value = _int_or_none(data.get("bgm_volume"))
-        if value is not None:
-            out["bgm_volume"] = max(0, min(MAX_BGM_VOLUME, value))
+    level = _bgm_level_or_none(data)
+    if level is not None:
+        out["bgm_level"] = level
     if "voice_fx" in data:
         out["voice_fx"] = normalize_voice_fx(data.get("voice_fx"))
     if "sensitivity" in data:
@@ -110,8 +125,8 @@ def describe(overrides) -> str:
         label = OVERRIDE_LABELS.get(key, key)
         if key == "filter":
             parts.append(f"{label}={value or '清除'}")
-        elif key == "bgm_volume":
-            parts.append(f"{label}={value}")
+        elif key == "bgm_level":
+            parts.append(f"{label}={buses.step_label(value)}")
         elif key == "voice_fx":
             slots = "、".join(SLOT_LABELS.get(slot, slot) for slot in value)
             parts.append(f"{label}={slots or '清除'}")

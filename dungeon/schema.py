@@ -17,12 +17,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from dungeon.actions import VISUAL_FILTER_KEYS
-from dungeon.audio.chapters import (DEFAULT_BGM_FADE_SECONDS, DEFAULT_BGM_VOLUME)
+from dungeon.audio import buses
+from dungeon.audio.chapters import (DEFAULT_BGM_FADE_SECONDS, DEFAULT_BGM_LEVEL)
 from dungeon.coupling import COUPLING_LEVELS, DEFAULT_COUPLING_LEVEL
 from dungeon.models import DungeonTextType
 from dungeon.audio.speech import (DEFAULT_OTHER_VOICES, DEFAULT_RATE,
-                            DEFAULT_VOICE_HER, DEFAULT_VOICE_PROTAGONIST,
-                            DEFAULT_VOICE_VOLUME, normalize_voice)
+                            DEFAULT_VOICE_HER, DEFAULT_VOICE_LEVEL,
+                            DEFAULT_VOICE_PROTAGONIST, normalize_voice)
 from dungeon.audio.voice_fx import (ALL_PRESET_KEYS, DEFAULT_INTENSITY, INT_PARAMS,
                               PARAM_LABELS, PARAM_RANGES, PRESET_NONE)
 
@@ -103,7 +104,10 @@ VOICE_FIELDS = (
     FieldSpec("voice_other", "list", "其他角色的音色池", DEFAULT_OTHER_VOICES,
               note="按顺序给不同配角，同一个说话人固定用一把嗓子"),
     FieldSpec("rate", "str", "语速", DEFAULT_RATE, note="如 +0% / -20% / +15%"),
-    FieldSpec("volume", "int", "音量 0-100", DEFAULT_VOICE_VOLUME),
+    FieldSpec("level", "int", "音量档位 0-4", DEFAULT_VOICE_LEVEL,
+              choices=buses.STEPS,
+              note="0 静音 / 1 很轻 / 2 轻 / 3 中 / 4 响；每档约 6 dB。"
+                   "语音档位 + 语音总线锚点；旧版 0-100 的 volume 会自动折算"),
 )
 
 # 迁移前遗留、``_migrate`` 会移除的顶层键（读到即提示作者清理）
@@ -144,7 +148,11 @@ BACKGROUND_FIELDS = (
 # 背景音乐：``path`` 相对方案目录，空串 = 本章节不放音乐
 BGM_FIELDS = (
     FieldSpec("path", "str", "音频文件（相对方案目录）", ""),
-    FieldSpec("volume", "int", "音量 0-100", DEFAULT_BGM_VOLUME),
+    FieldSpec("level", "int", "音量档位 0-4", DEFAULT_BGM_LEVEL,
+              choices=buses.STEPS,
+              note="0 静音 / 1 很轻 / 2 轻 / 3 中 / 4 响；每档约 6 dB。"
+                   "音乐总线锚点比语音低 6 dB，同样档位下配乐自然轻一层；"
+                   "旧版 0-100 的 volume 会自动折算"),
     FieldSpec("loop", "bool", "循环播放", True),
     FieldSpec("fade_seconds", "float", "切换淡入淡出秒数", DEFAULT_BGM_FADE_SECONDS),
 )

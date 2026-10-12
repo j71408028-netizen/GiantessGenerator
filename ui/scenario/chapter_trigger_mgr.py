@@ -7,9 +7,10 @@ import ui.ctk
 from dungeon.actions import (VISUAL_FILTERS, action_label,
                              normalize_action_type)
 from dungeon.validate import LEGACY_ACTIONS
+from dungeon.audio import buses
 from dungeon.audio.chapters import (
     CHAPTER_ANY, CHAPTER_NONE, CHAPTER_ANY_LABEL, CHAPTER_NONE_LABEL,
-    default_chapter_color, shade_for_mode,
+    bgm_level, default_chapter_color, shade_for_mode,
 )
 from dungeon.audio.voice_fx import SLOTS, label_of
 from ui.ctk.managers import TreeviewManager
@@ -264,9 +265,7 @@ class ChapterTriggerManager(TreeviewManager):
         if not audio_path:
             return "（无）"
         text = os.path.basename(str(audio_path))
-        volume = bgm.get("volume")
-        if isinstance(volume, (int, float)):
-            text += f" 音量{int(volume)}"
+        text += f" 音量{buses.step_label(bgm_level(bgm))}"
         if not bgm.get("loop", True):
             text += "（不循环）"
         return text

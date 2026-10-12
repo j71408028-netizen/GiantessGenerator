@@ -38,13 +38,13 @@ DESTRUCTION_ATTR = "破坏性"
 DEFAULT_MAX_PARAGRAPHS = 99
 
 # ---------------- 章节背景音乐 ----------------
-#: 缺省音量（0-100）；与编者能在编辑器直接看到的取值一致（不是 0.0-1.0）。
-#: 取值来自音频总线表（``dungeon.audio.buses``），与朗读共用一套电平口径。
-DEFAULT_BGM_VOLUME = buses.item_default(buses.BUS_MUSIC)
+#: 缺省音量**档位**（0-4，见 ``buses.STEP_LABELS``）：缺省「中」。
+#: 这是**缺省值**，章节里显式填的 ``level`` 优先。
+DEFAULT_BGM_LEVEL = buses.DEFAULT_STEP
 #: 缺省切换淡入淡出秒数；0 表示硬切
 DEFAULT_BGM_FADE_SECONDS = 1.5
-#: 音量上限，越界值会被夹到这里
-MAX_BGM_VOLUME = buses.MAX_LEVEL
+#: 音量档位上限，越界值会被夹到这里
+MAX_BGM_LEVEL = buses.STEP_MAX
 #: 常见可用音频格式（仅用于选择与校验时的提示；实际能不能放出来由播放后端决定）
 BGM_SUPPORTED_EXTS = (".mp3", ".wav", ".ogg", ".flac", ".m4a", ".wma")
 
@@ -90,8 +90,25 @@ def normalize_sensitivity_effect(raw: dict) -> dict:
     }
 
 
+def bgm_level(raw) -> int:
+    """取背景音乐的音量档位：优先新键 ``level``，回退旧 0-100 ``volume``。
+
+    两套键并存会有歧义（``3`` 到底是「3% 音量」还是「中档」？），所以只认
+    新键为准；旧键仅在缺失时按响度就近折算（:func:`buses.step_from_level`）。
+    """
+    raw = raw if isinstance(raw, dict) else {}
+    if "level" in raw:
+        return buses.clamp_step(raw.get("level"), DEFAULT_BGM_LEVEL)
+    if "volume" in raw:
+        return buses.step_from_level(raw.get("volume"), DEFAULT_BGM_LEVEL)
+    return DEFAULT_BGM_LEVEL
+
+
 def normalize_bgm(raw) -> dict:
-    """把配置里的背景音乐补全为 ``{path, volume, loop, fade_seconds}``。
+    """把配置里的背景音乐补全为 ``{path, level, loop, fade_seconds}``。
+
+    ``level`` 是音量**档位**（0-4）。仍接受早期的 0-100 ``volume``（折算成
+    档位），但产出一律只写 ``level``——存盘一次即完成迁移。
 
     缺曲目（``path`` 为空）时返回**空字典**——运行时视为「本章节不放音乐」，
     进入时会停掉上一章遗留的曲目；这也是编辑器里“没选音频”的存盘形态，
@@ -102,16 +119,12 @@ def normalize_bgm(raw) -> dict:
     if not path:
         return {}
     try:
-        volume = int(float(raw.get("volume", DEFAULT_BGM_VOLUME)))
-    except (TypeError, ValueError):
-        volume = DEFAULT_BGM_VOLUME
-    try:
         fade_seconds = float(raw.get("fade_seconds", DEFAULT_BGM_FADE_SECONDS))
     except (TypeError, ValueError):
         fade_seconds = DEFAULT_BGM_FADE_SECONDS
     return {
         "path": path,
-        "volume": max(0, min(MAX_BGM_VOLUME, volume)),
+        "level": bgm_level(raw),
         "loop": bool(raw.get("loop", True)),
         "fade_seconds": max(0.0, fade_seconds),
     }
