@@ -9,6 +9,7 @@ from dungeon.details import build_detail_query_prompt, parse_detail_queries
 from dungeon.models import DungeonTextType
 from dungeon.response import canonical_history_entry, extract_stream_text, parse_final_json
 from dungeon.splitter import split_full_text, split_stream_units, strip_speaker_markers
+from core.ai import describe_ai_error
 from core.logic import apply_size_unlock_updates, compute_casualty
 
 
@@ -526,7 +527,10 @@ class DungeonStoryEngine:
         if errors is None:
             self._session_errors = errors = []
         errors.append(message)
-        self._frame.call(lambda: self._show_ai_error(f"生成失败：{message}"))
+        # 玩家看的是可读原因（「连不上服务器」「API Key 无效」…），不是 SDK 原文；
+        # 原文仍留在 ``_session_errors`` 里供收尾报告与日志排查。
+        self._frame.call(lambda: self._show_ai_error(
+            f"生成失败：{describe_ai_error(error)}"))
 
     def _show_ai_error(self, message: str = ""):
         """在故事区提示 AI 错误（未配置客户端 / 生成失败）。"""

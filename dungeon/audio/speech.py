@@ -35,6 +35,7 @@ import tempfile
 import threading
 import zlib
 
+from core import netproxy
 from dungeon.audio import buses
 from dungeon.audio import voice_fx
 from dungeon.audio import open_track
@@ -180,14 +181,14 @@ class VoiceCaster:
 
 # ---------------- 合成 ----------------
 
-#: 代理的读取顺序（都不设就是直连）。前两个是本项目专用键，后两个是通用约定——
-#: 用户在系统里挂过代理，往往就期望所有联网功能都跟着走。
-_PROXY_ENV_KEYS = ("DUNGEON_TTS_PROXY", "EDGE_TTS_PROXY", "HTTPS_PROXY", "HTTP_PROXY")
+#: 语音**专用**的代理环境变量：优先于 ``core.netproxy`` 的通用键
+#: （``DUNGEON_NET_PROXY`` / ``HTTPS_PROXY`` / ``HTTP_PROXY``）。代理的整理与
+#: 「显式设置 > 环境变量 > 直连」口径统一在 ``core.netproxy``——它与 AI 文本生成
+#: 共用同一份设置，这里只声明语音多出来的两个键。
+_TTS_ENV_KEYS = ("DUNGEON_TTS_PROXY", "EDGE_TTS_PROXY")
 
-#: edge-tts 只认 http/https 代理：底层 aiohttp 不装 ``aiohttp-socks`` 走不了 SOCKS，
-#: 放行只会换来一个看不懂的连接错误，不如在 :func:`normalize_proxy` 就拦下来说清楚。
-_SUPPORTED_PROXY_SCHEMES = ("http", "https")
-_SOCKS_SCHEMES = ("socks", "socks4", "socks4a", "socks5", "socks5h")
+#: 全量读取顺序（语音专用在前，通用在后）；供诊断与自检使用。
+_PROXY_ENV_KEYS = _TTS_ENV_KEYS + netproxy.ENV_KEYS
 
 #: 旧合成主机。2026-10 起微软逐步对它回 403，全球分批铺开（edge-tts issue #490）。
 _LEGACY_WSS_HOST = "speech.platform.bing.com"
@@ -197,9 +198,6 @@ _LEGACY_WSS_HOST = "speech.platform.bing.com"
 #: 所以在本地补上——免得用户手上那版 edge-tts 一出新就集体哑掉。
 _V2_WSS_URL = ("wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1"
                "?Ocp-Apim-Subscription-Key={token}")
-
-#: 显式设置的代理（窗口层按 ``settings["voice_proxy"]`` 填进来）；空 = 交还环境变量
-_proxy = ""
 
 #: 上次成功的合成端点，下次优先复用（否则每次都要先撞一次已经不通的那个）。
 _working_wss_url = ""
@@ -213,54 +211,31 @@ _last_synth_error = ""
 
 
 def set_proxy(proxy=None) -> None:
-    """显式设置合成代理（``""`` / ``None`` = 交还给环境变量）。"""
-    global _proxy
-    _proxy = str(proxy or "").strip()
+    """显式设置合成代理（``""`` / ``None`` = 交还给环境变量）。
+
+    与 AI 文本生成共用 ``core.netproxy`` 的同一份覆盖值——设置页里就是同一个
+    「网络代理」框。这里保留函数名只为语音侧的调用点读起来直白。
+    """
+    netproxy.set_override(proxy)
 
 
 def normalize_proxy(proxy) -> str:
-    """把用户填的代理整理成 edge-tts 真能用的形式。
+    """把用户填的代理整理成库真能用的形式（实现见 ``core.netproxy``）。
 
-    - 空串 = 直连；
-    - 缺 scheme 就补 ``http://``——``127.0.0.1:7890`` 直接丢给 aiohttp 只会抛
-      ``InvalidURL``，用户等于白填；
-    - SOCKS 一律拒绝（见 ``_SOCKS_SCHEMES``）：aiohttp 不装 ``aiohttp-socks``
-      根本走不了 SOCKS。
-
-    不合法时抛 :class:`ValueError`，文案就是用户可见的原因。
+    语音与 AI 共用同一套整理规则：空串 = 直连、缺 scheme 补 ``http://``、
+    SOCKS / 未知协议明确拒绝。不合法时抛 :class:`ValueError`。
     """
-    text = str(proxy or "").strip()
-    if not text:
-        return ""
-    if "://" not in text:
-        text = "http://" + text
-    scheme = text.split("://", 1)[0].lower()
-    if scheme in _SOCKS_SCHEMES:
-        raise ValueError("SOCKS 代理不受支持，请改填 HTTP 代理"
-                         "（代理软件通常另有一个 HTTP/mixed 端口）")
-    if scheme not in _SUPPORTED_PROXY_SCHEMES:
-        raise ValueError(f"不支持的代理协议「{scheme}://」，请填 http:// 或 https://")
-    return text
+    return netproxy.normalize_proxy(proxy)
 
 
 def resolve_proxy() -> str:
-    """当前生效的代理：显式设置 > 环境变量 > 空串（直连）。
+    """当前生效的代理：显式设置 > 语音专用环境变量 > 通用环境变量 > 直连。
 
-    返回值已经过 :func:`normalize_proxy` 整理。**注意**：这里读到的代理会被
-    *显式* 传给 ``edge_tts.Communicate(proxy=...)``——这是必需的，不是多此一举：
-    aiohttp 的 ``trust_env`` 只对 ``http(s)://`` 生效，对 ``wss://`` 不认环境变量，
-    所以光靠环境变量代理，WebSocket 握手仍会走直连。
+    **注意**：解析结果会被 *显式* 传给 ``edge_tts.Communicate(proxy=...)``——
+    这不是多此一举：aiohttp 的 ``trust_env`` 只对 ``http(s)://`` 生效，对
+    ``wss://`` 不认环境变量，所以光靠环境变量代理，WebSocket 握手仍会走直连。
     """
-    raw = ""
-    if _proxy:
-        raw = _proxy
-    else:
-        for key in _PROXY_ENV_KEYS:
-            value = os.environ.get(key, "").strip()
-            if value:
-                raw = value
-                break
-    return normalize_proxy(raw)
+    return netproxy.resolve(extra_env=_TTS_ENV_KEYS)
 
 
 def last_synth_error() -> str:

@@ -50,7 +50,7 @@ import uuid
 from contextlib import contextmanager
 from typing import Optional
 
-from core.ai import get_ai_client
+from core.ai import get_ai_client, describe_ai_error
 from core.models import (ChatMessage, ChatParams, ChatState, CharacterSnapshot,
                     Topic)
 from persistence.character_repo import CharacterRepo
@@ -879,7 +879,7 @@ class ChatService:
             self.chat_repo.save(chat_state)
             return None
         except Exception as e:
-            return f"AI 调用失败：{e}"
+            return f"AI 调用失败：{describe_ai_error(e)}"
 
     def _request_parsed(self, state: CharacterSnapshot, chat_state: ChatState,
                         pending_text: str):
@@ -906,7 +906,7 @@ class ChatService:
                 parsed = parse_chat_response(raw)
             return parsed
         except Exception as e:
-            return {"_error": f"AI 调用失败：{e}"}
+            return {"_error": f"AI 调用失败：{describe_ai_error(e)}"}
 
     def _finish_exchange(self, state: CharacterSnapshot, chat_state: ChatState,
                          parsed: dict, topic_source: str = "user") -> dict:

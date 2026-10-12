@@ -15,13 +15,13 @@ if TYPE_CHECKING:
     from persistence.quip_repo import QuipRepo
 
 from core.logic import ALL_PART_NAMES, normalize_blocked_words
+from core import netproxy
 from core.address_model import world_of
 from persistence import PresetRepo, PersonalityRepo
 from persistence.name_repo import NameRepo, DEFAULT_NAME_TABLE
 from persistence.world_pack import list_behavior_packs
 from dungeon.terms import is_default_scenario
 from dungeon.audio import buses
-from dungeon.audio import speech as speech_audio
 from services.challenges import ChallengeService
 import services.ui_mode as ui_mode
 from services.news import DEFAULT_NEWS_TABLE, NewsService
@@ -925,18 +925,6 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             value=self.settings.get("dungeon_voice_enabled", True))
         self.dungeon_voice_switch = self._make_switch(ctrl, self.dungeon_voice_var)
 
-        # 语音合成代理（可留空）：微软的朗读接口对部分网络（典型是国区）返回
-        # 403，此时语音一句都合成不出来——填一条 HTTP 代理即可绕过。留空则
-        # 跟随环境变量 HTTPS_PROXY；见 dungeon/audio/speech.py 的 resolve_proxy。
-        _, ctrl = self._make_row(self.disp_body, row, "语音合成代理")
-        row += 1
-        self.voice_proxy_var = tk.StringVar(
-            value=self.settings.get("voice_proxy", "") or "")
-        self.voice_proxy_entry = self._make_entry(
-            ctrl, self.voice_proxy_var, width=200,
-            placeholder_text="留空 = 直连（或跟随 HTTPS_PROXY）")
-        self.voice_proxy_entry.pack(side='left')
-
         self._build_audio_section(self.disp_body, row)
 
     def _build_audio_section(self, parent, row):
@@ -1086,6 +1074,18 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             border_width=1, border_color=SETTINGS_INPUT_BORDER,
             corner_radius=8, font=ui_fonts.ui_font(12)
         ).pack(side='left', padx=(12, 0))
+        row += 1
+
+        # 网络代理（可留空）：语音合成与 AI 文本生成**共用**同一份联网代理，见
+        # core/netproxy.py。留空 = 直连（或跟随环境变量 HTTPS_PROXY）；填了就立即
+        # 对后续请求生效。VPN 的「系统代理」Python 看不见，那种情况必须填在这里。
+        _, proxy_control = self._make_row(parent, row, "网络代理")
+        self.net_proxy_var = tk.StringVar(
+            value=self.settings.get("net_proxy", "") or "")
+        self.net_proxy_entry = self._make_entry(
+            proxy_control, self.net_proxy_var, width=200,
+            placeholder_text="留空 = 直连（语音 / AI 共用）")
+        self.net_proxy_entry.pack(side='left')
 
     def _load_ai_configs(self):
         """Load named profiles from settings."""
@@ -1409,7 +1409,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             "auto_save_replay": self.auto_save_replay_var.get(),
             "story_recent_count": self._story_recent_count_value(),
             "dungeon_voice_enabled": self.dungeon_voice_var.get(),
-            "voice_proxy": self.voice_proxy_var.get().strip(),
+            "net_proxy": self.net_proxy_var.get().strip(),
             "audio_levels": {bus: int(self._bus_level_vars[bus].get())
                              for bus in buses.BUSES},
             "save_low_resolution_image": self.save_low_resolution_var.get(),
@@ -1426,8 +1426,9 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         # 先保存当前（自由）设置，再应用世界包启用/卸载更改
         self.settings_repo.save(self.settings)
 
-        # 合成代理改动立即生效（否则要等下一次切界面/进副本才重读）
-        speech_audio.set_proxy(self.settings.get("voice_proxy"))
+        # 网络代理改动立即生效（否则要等下一次切界面/进副本才重读）。
+        # 语音与 AI 共用同一份覆盖值——设一次两处都跟。
+        netproxy.set_override(self.settings.get("net_proxy"))
 
         try:
             self._apply_world_pack_changes_on_save()

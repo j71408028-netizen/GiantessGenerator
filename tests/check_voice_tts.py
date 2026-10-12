@@ -18,8 +18,8 @@ issue #490），合成直接失败、副本一句都不念。上游修法见 edg
    地址非法 / 其它；
 5. ``_edge_synth`` 每次先清空上次原因；没装 edge-tts 时给出可读原因且不抛异常；
 6. 失败原因能被**预听**复用（预听提示就是副本不出声的原因）；
-7. 接线守卫：settings 默认含 ``voice_proxy``；启动装配、副本子进程、设置页
-   保存三处都会 ``set_proxy``；
+7. 接线守卫：settings 默认含 ``net_proxy``（语音与 AI 共用的网络代理）；启动
+   装配、副本子进程、设置页保存三处都会设置它；
 8. 代理写法整理：缺 scheme 补 ``http://``，SOCKS / 未知协议明确拒绝；
 9. 端点候选首选新主机、旧主机回退；新主机失败会自动回落旧主机并记住可用端点；
    若已装版本已修好（不再指向旧主机）则不插手；
@@ -348,9 +348,9 @@ check("时钟校验失败 → 提到时间",
 
 # ---------------- 7. 接线守卫 ----------------
 
-check("settings 默认含 voice_proxy（空串 = 直连）",
-      SettingsRepo()._defaults.get("voice_proxy") == "",
-      SettingsRepo()._defaults.get("voice_proxy"))
+check("settings 默认含 net_proxy（空串 = 直连；语音与 AI 共用）",
+      SettingsRepo()._defaults.get("net_proxy") == "",
+      SettingsRepo()._defaults.get("net_proxy"))
 
 _shell_src = open(os.path.join(_PROJECT_ROOT, "app", "shell.py"),
                   encoding="utf-8").read()
@@ -360,14 +360,14 @@ _settings_src = open(os.path.join(_PROJECT_ROOT, "ui", "settings", "__init__.py"
                      encoding="utf-8").read()
 
 check("启动装配设置代理（app/shell.py）",
-      "speech_audio.set_proxy(settings.get(\"voice_proxy\"))" in _shell_src)
+      "netproxy.set_override(settings.get(\"net_proxy\"))" in _shell_src)
 check("副本子进程设置代理（dungeon/window/base.py，独立进程带不过来）",
-      "set_speech_proxy(" in _base_src
-      and "voice_proxy" in _base_src)
+      "netproxy.set_override(" in _base_src
+      and "net_proxy" in _base_src)
 check("设置页：有输入框、写进保存字典、保存后立即生效",
-      "voice_proxy_var" in _settings_src
-      and "\"voice_proxy\": self.voice_proxy_var.get().strip()" in _settings_src
-      and "speech_audio.set_proxy(self.settings.get(\"voice_proxy\"))" in _settings_src)
+      "net_proxy_var" in _settings_src
+      and "\"net_proxy\": self.net_proxy_var.get().strip()" in _settings_src
+      and "netproxy.set_override(self.settings.get(\"net_proxy\"))" in _settings_src)
 
 # ---------------- 结论 ----------------
 _log.flush()

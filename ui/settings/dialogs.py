@@ -17,7 +17,7 @@ from ui.ctk.theme import (
     SETTINGS_DLG_OK, SETTINGS_DLG_ERR,
 )
 
-from core.ai import PROVIDER_DEFAULTS, create_client
+from core.ai import PROVIDER_DEFAULTS, create_client, describe_ai_error
 
 
 class AIConfigDialog(BaseDialog):
@@ -151,7 +151,7 @@ class AIConfigDialog(BaseDialog):
                 base_url=cfg["url"] or None, model=cfg["model"] or None)
             ok, msg = client.test_connection()
         except Exception as e:
-            ok, msg = False, str(e)
+            ok, msg = False, describe_ai_error(e)
         self.after(0, lambda: self._test_done(ok, msg))
 
     def _test_done(self, ok, msg):

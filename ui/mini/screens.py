@@ -14,7 +14,7 @@ import uuid
 
 import tkinter as tk
 
-from core.ai import PROVIDER_DEFAULTS, create_client
+from core.ai import PROVIDER_DEFAULTS, create_client, describe_ai_error
 from core.logic import format_size
 from paths import APP_VERSION
 from ui.mini import pixel as px
@@ -251,7 +251,7 @@ class AIScreen(Screen):
                                    model=config["model"] or None)
             ok, message = client.test_connection()
         except Exception as e:
-            ok, message = False, str(e)
+            ok, message = False, describe_ai_error(e)
         self.after(0, lambda: self._test_done(ok, message))
 
     def _test_done(self, ok, message):

@@ -19,6 +19,7 @@ from collections import deque
 import dearpygui.dearpygui as dpg
 
 from core.ai import create_client
+from core import netproxy
 from dungeon import process_log
 from dungeon.audio import BgmPlayer, buses
 from dungeon.audio.speech import (SpeechDirector, VoiceCaster, normalize_voice,
@@ -589,6 +590,10 @@ class DungeonWindowBase:
     def _init_session(self, scenario_config):
         """新开副本：初始化 AI 客户端、提示词、演化状态与尺寸类别。"""
         scenario_config = scenario_config or {}
+        # 网络代理：语音与 AI 共用（见 core/netproxy.py）。**必须在创建 AI 客户端
+        # 之前设**——代理在客户端构造时定格；副本跑在独立子进程里，主进程设的代理
+        # 带不过来，这里按本进程读到的 settings 再设一次。
+        netproxy.set_override((self.settings or {}).get("net_proxy"))
         try:
             self.ai_client = create_client(
                 self.ai_config.get("provider"),
@@ -666,9 +671,9 @@ class DungeonWindowBase:
         （``current_voice_fx``）随它一起装配：全局关掉时自然不会出声。
         """
         cfg = normalize_voice((scenario_config or {}).get("voice"))
-        # 合成代理：副本跑在独立子进程里，主进程设的代理带不过来，这里按本进程
-        # 读到的 settings 再设一次（国区访问微软朗读接口会 403，见 speech.set_proxy）。
-        set_speech_proxy((self.settings or {}).get("voice_proxy"))
+        # 网络代理：语音与 AI 共用，副本子进程里按本进程读到的 settings 再设一次
+        # （主进程设的带不过来，见 core/netproxy.py）。
+        set_speech_proxy((self.settings or {}).get("net_proxy"))
         global_on = bool((self.settings or {}).get("dungeon_voice_enabled", True))
         caster = VoiceCaster(
             her_names=(self.name, self.nick),

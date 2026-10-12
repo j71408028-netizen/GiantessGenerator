@@ -469,17 +469,19 @@ Solea / Bulla 耦合等级的对话分支会给每句台词标 `@说话人@`（�
 > - **失败原因**记在 `speech.last_synth_error()`，按类分：403 / 401 / 超时 / 时钟
 >   （`SkewAdjustmentError`）/ SOCKS / 代理连不上 / 地址非法。副本的一次性告警与
 >   编辑器**预听**都复用它，不再笼统报「网络不可达 / 音色名有误」。
-> - **代理**由 `speech.set_proxy()` / `resolve_proxy()` 决定，优先级：
->   `settings["voice_proxy"]`（设置页「语音合成代理」）＞ 环境变量
->   `DUNGEON_TTS_PROXY` / `EDGE_TTS_PROXY` / `HTTPS_PROXY` / `HTTP_PROXY` ＞ 直连。
->   三个容易踩的点：**① 必须显式传给 `edge_tts.Communicate(proxy=...)`**——aiohttp 的
->   `trust_env` 只对 `http(s)://` 生效，对 `wss://` **不认环境变量**，光挂环境变量
->   代理，WebSocket 握手仍会走直连；② 没配代理时不传这个关键字（免得老版本
->   `TypeError`）；③ 代理地址先过 `normalize_proxy()`——缺 scheme 补 `http://`
->   （否则 aiohttp 抛 `InvalidURL`），**SOCKS 直接拒绝**（不装 `aiohttp-socks` 走不了，
->   请填代理软件的 HTTP/mixed 端口）。装配点三处：`app/shell.py`（启动 / 切界面）、
->   `window/base.py::_configure_voice`（**副本跑在独立子进程里，主进程设的代理带不过
->   来，必须在子进程再设一次**）、设置页保存后立即生效。
+> - **代理**由 `speech.set_proxy()` / `resolve_proxy()` 决定——它其实委托给
+>   **`core/netproxy`**（语音合成与 AI 文本生成**共用同一份**，设置页就一个
+>   「网络代理」框）。优先级：`settings["net_proxy"]` ＞ 语音专用环境变量
+>   `DUNGEON_TTS_PROXY` / `EDGE_TTS_PROXY` ＞ 通用环境变量 `DUNGEON_NET_PROXY` /
+>   `HTTPS_PROXY` / `HTTP_PROXY` ＞ 直连。三个容易踩的点：**① 必须显式传给
+>   `edge_tts.Communicate(proxy=...)`**——aiohttp 的 `trust_env` 只对 `http(s)://`
+>   生效，对 `wss://` **不认环境变量**，光挂环境变量代理，WebSocket 握手仍会走直连；
+>   ② 没配代理时不传这个关键字（免得老版本 `TypeError`）；③ 代理地址先过
+>   `normalize_proxy()`——缺 scheme 补 `http://`（否则 aiohttp 抛 `InvalidURL`），
+>   **SOCKS 直接拒绝**（不装 `aiohttp-socks` 走不了，请填代理软件的 HTTP/mixed 端口）。
+>   装配点三处：`app/shell.py`（启动 / 切界面）、`window/base.py::_configure_voice`
+>   （**副本跑在独立子进程里，主进程设的代理带不过来，必须在子进程再设一次**）、
+>   设置页保存后立即生效。
 
 线程模型同样沿用 `audio.py`：唯一一条后台线程串行处理「合成 → 播放」，
 `speak()` 只入队就返回，**新台词打断旧台词**（翻页时不该念上一页的），
@@ -489,7 +491,7 @@ Solea / Bulla 耦合等级的对话分支会给每句台词标 `@说话人@`（�
 |---|---|
 | 装配音色（方案配置 × 全局开关） | `window/base.py::_configure_voice`（`_init_session` / `_init_replay` 各调一次） |
 | 合成端点 | `speech._endpoint_candidates()`：新主机 `api.msedgeservices.com` 优先、旧主机回退（edge-tts PR #491 未并入时本地补齐） |
-| 合成代理 | `settings["voice_proxy"]` → `app/shell.py` 与 `window/base.py::_configure_voice` 各设一次（子进程独立）；失败原因见 `speech.last_synth_error()` |
+| 合成代理 | `settings["net_proxy"]` → `core/netproxy`（**语音与 AI 共用**）→ `app/shell.py` 与 `window/base.py` 各设一次（子进程独立）；失败原因见 `speech.last_synth_error()` |
 | 触发朗读 | `window/ui.py::_speak_item`（显示单元定稿时，叙述句无 `speaker` 直接返回） |
 
 > **配置优先级**：全局开关 `settings["dungeon_voice_enabled"]` 关掉时不看方案配置

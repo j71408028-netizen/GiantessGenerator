@@ -73,7 +73,8 @@
 |---|---|---|
 | 二阶量（步长）不适应边界衰减 | `EvolutionRules(step_decay=...)` | `window/base.py` 传 `StateService.decay_step_rates` |
 | AI 生成 / 提示词取材 | `DungeonPromptBuilder(self)` 读窗口实例公开属性 | `window/base.py` |
-| AI 客户端 | `self.ai_client`（`engine` 惰性检查，缺失时 `_show_ai_error`） | `window/base.py::create_client` |
+| AI 客户端 | `self.ai_client`（`engine` 惰性检查，缺失时 `_show_ai_error`） | `window/base.py::create_client`（按 `core/netproxy` 注入代理） |
+| 联网失败说清原因 | `describe_ai_error`（AI）/ `_describe_synth_error`（语音），同口径按 HTTP 状态码分类 | 各暴露点调用（见 §4.5） |
 | 剧情压缩用 AI | `StorySummarizer.maybe_compress(ai_client=...)`，失败回退内部算法 | `window/engine.py` |
 
 ## 4. 领域层模块地图
@@ -85,7 +86,7 @@
 | `chapters.py` | 章节模型与归一化 | `normalize_chapter(s)`、`normalize_chapters`、`normalize_bgm`、`find_chapter`、`is_terminating_chapter`、`overflow_jump_target`、`chapter_step_override`、`sensitivity_amount`、`matches_scope` |
 | `audio/buses.py` | 音频音量**总线单一真相源**（总控 → 音乐 / 语音 / 音效） | `BUSES` / `BUS_LABELS`、`STEPS` / `STEP_LABELS` / `STEP_DB` / `BUS_ANCHOR_DB`（档位与分层的 dB 单一真相源）、`step_options` / `step_choices`（编辑器档位候选）、`clamp_step` / `step_from_level`（0-4 档位与旧 0-100 迁移）、`levels_from_settings` / `set_bus_levels` / `effective_bus_level`（玩家侧实时电平，缺省 `DEFAULT_BUS_LEVELS`）、`bus_default` / `clamp_level` / `resolve_gain`（档位×总线×总控）、`to_ratio` / `to_db` / `db_gain` |
 | `audio.py` | 音频播放底座（纯领域，不碰 UI 框架） | `BgmPlayer.play/stop/shutdown/wait_idle`、`open_track`、`backend_name`、`set_backends`（MCI → pygame → 静音降级） |
-| `speech.py` | Solea/Bulla 对话的合成语音（纯领域） | `VoiceCaster.voice_for`（她 / 主角 / 配角按名字稳定映射）、`SpeechDirector.speak/stop/set_effect/shutdown`、`synthesize`（合成**一句就返回路径**的入口，供编辑器预听）、`set_proxy` / `resolve_proxy` / `normalize_proxy`（合成代理：显式设置 ＞ 环境变量 ＞ 直连；缺 scheme 补 `http://`、SOCKS 明确拒绝）、`_endpoint_candidates` / `synthesis_endpoints`（合成端点：新主机 `api.msedgeservices.com` 优先、旧主机回退，edge-tts PR #491 未并入时本地补齐）、`last_synth_error`（失败原因，日志与预听复用）、`normalize_voice`、`normalize_rate`、`RECOMMENDED_VOICES`、`edge_tts_available` |
+| `speech.py` | Solea/Bulla 对话的合成语音（纯领域） | `VoiceCaster.voice_for`（她 / 主角 / 配角按名字稳定映射）、`SpeechDirector.speak/stop/set_effect/shutdown`、`synthesize`（合成**一句就返回路径**的入口，供编辑器预听）、`set_proxy` / `resolve_proxy` / `normalize_proxy`（**委托** `core/netproxy`：语音与 AI 共用一份代理）、`_endpoint_candidates` / `synthesis_endpoints`（合成端点：新主机 `api.msedgeservices.com` 优先、旧主机回退，edge-tts PR #491 未并入时本地补齐）、`last_synth_error`（失败原因，日志与预听复用）、`normalize_voice`、`normalize_rate`、`RECOMMENDED_VOICES`、`edge_tts_available` |
 | `voice_fx.py` | 章节对话语音的**物理**声学效果（她 / 其他人两档）；响度为**声明式设计量** | `PRESETS`（预设单一真相源，含 `Preset.loudness_db`）、`normalize_voice_fx`、`resolved_params`、`loudness_target` / `loudness_hint` / `playback_trim`（响度目标与其换算）、`LOUDNESS_SPREAD_DB`（摆幅窗口，9 dB＝1.5 档）、`_match_loudness`（渲染末尾按 RMS 对齐，峰值护栏优先）、`playback_plan`（零依赖近似）、`render_wav`（可选解码器 + numpy）、`PlaybackFx`（分拍轨 + 音量包络） |
 | `preview.py` | 编辑器里的语音**预听**（纯领域，零 UI 依赖） | `VoicePreview.play(voice, slot, rate, level, effect, text, on_done)`（合成一次、按当前效果放一次；`on_done` 在工作线程回调，Tk 调用方自行 `after` 回主线程）、`stop` / `wait_idle` / `shutdown`（关编辑器时收尾）、`SAMPLE_TEXT` |
 | `actions.py` | 动作类型单一注册表 | `NEW_ACTIONS`（insert/option/effect/goto/none）、`ENDING_ACTION`（只读兼容）、`ACTION_LABELS`、`VISUAL_FILTERS` |
@@ -175,6 +176,38 @@ edge-tts 7.2.8 / winmm MCI，探针脚本在临时目录跑，未入库）：
 （零依赖）峰值顶在原声上、**抬不起**响度，只能按 `playback_trim`（≤1）做衰减。
 于是两条例子的**相对摆幅一致**（都按同一声明值走），**绝对锚点差一个常数**——
 装了 vs 没装解码器的机器听感仍有系统性偏移，这是零依赖近似的固有代价。
+
+### 4.5 联网功能：共用代理与统一的失败口径
+
+两处**需要联网**——语音合成（`audio/speech.py`，edge-tts）与 AI 文本生成
+（`core/ai.py`，OpenAI 兼容）——共用同一份设置与同一套「说清原因」的口径。
+
+| 关注点 | 做法 | 编码处 |
+|---|---|---|
+| 代理单一入口 | 显式覆盖 ＞ 语音专用环境变量（`DUNGEON_TTS_PROXY` / `EDGE_TTS_PROXY`）＞ 通用环境变量（`DUNGEON_NET_PROXY` / `HTTPS_PROXY` / `HTTP_PROXY`）＞ 直连 | `core/netproxy.resolve` / `set_override` |
+| 代理整理 | 缺 scheme 补 `http://`；SOCKS / 未知协议**明确拒绝**（aiohttp 与 httpx 都没装 SOCKS 支持，放行只会换来看不懂的连接错误） | `core/netproxy.normalize_proxy` |
+| 存储 | 设置页「网络代理」一个框 → `settings["net_proxy"]`（旧键 `voice_proxy` 在 `SettingsRepo.load` 自动迁移） | `persistence/settings_repo.py` |
+| 语音侧注入口 | 解析结果**显式**传给 `edge_tts.Communicate(proxy=...)`：aiohttp 的 `trust_env` 只认 `http(s)://`，对 `wss://` 不认环境变量，光挂环境变量握手仍走直连 | `audio/speech.py` |
+| AI 侧注入口 | 配了代理时构造 `openai.DefaultHttpxClient(proxy=...)` 注入 `OpenAI(http_client=...)`（用 openai 自己导出的类，免得直接 import httpx 多一条依赖声明）；没配就不传（交 SDK 默认读环境变量） | `core/ai.py::OpenAICompatibleClient.__init__` |
+| 失败说清 | 两端同口径，**看 HTTP 状态码**（各 SDK 异常都带 `status_code`）而非死认类型：401 / 403 / 404 / 429 / 400 / 5xx / 超时 / 连接 / 代理各给一句人话 | `speech._describe_synth_error` / `ai.describe_ai_error` |
+| 挂到界面 | 副本生成失败（`window/engine.py::_note_session_error`）、聊天失败（`services/chat`）、两处「测试连接」（`ui/settings/dialogs.py` / `ui/mini/screens.py`）都用可读原因；原始异常仍留在 `_session_errors` / 日志里 | 各调用点 |
+
+**为什么单独成模块**：`core` 只依赖 `infra`，`netproxy` 零第三方依赖（只用 `os`），
+于是 `dungeon`（语音）与 `core`（AI）都能安全引用。两个已知的坑（环境变量代理对
+WebSocket 不生效、VPN「系统代理」WinINET 对 Python 不可见）在两处是一样的，收在一处
+免得各错一次。
+
+**装配点**（`net_proxy` 在**创建 AI 客户端之前**生效，代理在客户端构造时定格）：
+`app/shell.py`（启动 / 每次切界面）、`dungeon/window/base.py::_init_session`（在建
+`ai_client` 前）与 `::_configure_voice`、设置页保存后立即生效。副本跑在**独立子进程**
+里，主进程设的代理带不过来，必须在子进程再设一次。
+
+守卫：`tests/check_ai_network.py`（AI 侧）、`tests/check_voice_tts.py`（语音侧）。
+
+> **行为变化（2026-10）**：对齐前 AI 文本生成**不读**这个代理设置，只走 SDK 默认
+> （环境变量）。对齐后它也读——好处是「一个代理管所有联网功能」，代价是**一个已经
+> 关掉的代理从此也会让 AI 连不上**（此前只是语音受影响）。所以连接类失败会**点名
+> 当前代理**并给出「清空或改用直连」的出路，而不是笼统说「连不上服务器」。
 
 ## 5. 一次步进的数据流
 
