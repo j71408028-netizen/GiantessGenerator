@@ -21,7 +21,8 @@ import dearpygui.dearpygui as dpg
 from core.ai import create_client
 from dungeon import process_log
 from dungeon.audio import BgmPlayer, buses
-from dungeon.audio.speech import SpeechDirector, VoiceCaster, normalize_voice
+from dungeon.audio.speech import (SpeechDirector, VoiceCaster, normalize_voice,
+                                 set_proxy as set_speech_proxy)
 from dungeon.window.background import DungeonBackground
 from dungeon.window.fx import WindowFx
 from dungeon.audio.chapters import normalize_chapters
@@ -665,6 +666,9 @@ class DungeonWindowBase:
         （``current_voice_fx``）随它一起装配：全局关掉时自然不会出声。
         """
         cfg = normalize_voice((scenario_config or {}).get("voice"))
+        # 合成代理：副本跑在独立子进程里，主进程设的代理带不过来，这里按本进程
+        # 读到的 settings 再设一次（国区访问微软朗读接口会 403，见 speech.set_proxy）。
+        set_speech_proxy((self.settings or {}).get("voice_proxy"))
         global_on = bool((self.settings or {}).get("dungeon_voice_enabled", True))
         caster = VoiceCaster(
             her_names=(self.name, self.nick),

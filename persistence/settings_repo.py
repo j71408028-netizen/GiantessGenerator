@@ -41,6 +41,10 @@ class SettingsRepo:
             # 音频总线玩家电平（总音量 / 音乐 / 语音 / 音效），缺省 100 = 不衰减。
             # 只有四条内容总线是「作者档位 + 玩家电平」两级，见 dungeon/audio/buses.py。
             "audio_levels": dict(DEFAULT_BUS_LEVELS),
+            # 语音合成代理（可留空）：微软朗读接口对部分网络返回 403，填一条
+            # HTTP 代理即可绕过。留空则回退到环境变量 HTTPS_PROXY，见
+            # dungeon/audio/speech.py 的 resolve_proxy。
+            "voice_proxy": "",
             "save_low_resolution_image": False,
             "use_preview_image_as_avatar": False,
             # 启动界面模式偏好：pro/mini 固定其一，exit=退出时模式

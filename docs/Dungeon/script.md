@@ -453,6 +453,21 @@ Solea / Bulla 耦合等级的对话分支会给每句台词标 `@说话人@`（�
 背景音乐的降级策略一致。播放复用 `dungeon/audio` 的后端（MCI → pygame →
 静音占位）。
 
+> **合成失败要说清原因，也要能走代理。** 微软的朗读接口会对**部分网络**（典型是
+> 国区）在 WebSocket 握手阶段返回 **HTTP 403**，此时一句都合成不出来——这不是
+> 代码问题：`edge-tts` 已是最新版（7.2.8），系统时钟与服务端一致，`Sec-MS-GEC-Version`
+> 换成 143/146/150/155/160/170 也照样 403，走代理或直连都是 403。所以：
+> - **失败原因**记在 `speech.last_synth_error()`（如「服务端拒绝连接（HTTP 403）
+>   ——微软朗读接口对部分网络限流，可在设置里填『语音合成代理』后重试」）。副本的
+>   一次性告警与编辑器**预听**都复用它，不再笼统报「网络不可达 / 音色名有误」。
+> - **代理**由 `speech.set_proxy()` / `resolve_proxy()` 决定，优先级：
+>   `settings["voice_proxy"]`（设置页「语音合成代理」）＞ 环境变量
+>   `DUNGEON_TTS_PROXY` / `EDGE_TTS_PROXY` / `HTTPS_PROXY` / `HTTP_PROXY` ＞ 直连。
+>   只在配了代理时才把 `proxy=` 传给 `edge_tts.Communicate`（没配就不传，免得老版本
+>   `TypeError`）。装配点三处：`app/shell.py`（启动 / 切界面）、
+>   `window/base.py::_configure_voice`（**副本跑在独立子进程里，主进程设的代理带不过
+>   来，必须在子进程再设一次**）、设置页保存后立即生效。
+
 线程模型同样沿用 `audio.py`：唯一一条后台线程串行处理「合成 → 播放」，
 `speak()` 只入队就返回，**新台词打断旧台词**（翻页时不该念上一页的），
 超长台词（`MAX_SPEECH_CHARS`，300 字）跳过，会话收尾收工并清掉临时音频。
@@ -460,6 +475,7 @@ Solea / Bulla 耦合等级的对话分支会给每句台词标 `@说话人@`（�
 | 接线 | 位置 |
 |---|---|
 | 装配音色（方案配置 × 全局开关） | `window/base.py::_configure_voice`（`_init_session` / `_init_replay` 各调一次） |
+| 合成代理 | `settings["voice_proxy"]` → `app/shell.py` 与 `window/base.py::_configure_voice` 各设一次（子进程独立）；失败原因见 `speech.last_synth_error()` |
 | 触发朗读 | `window/ui.py::_speak_item`（显示单元定稿时，叙述句无 `speaker` 直接返回） |
 
 > **配置优先级**：全局开关 `settings["dungeon_voice_enabled"]` 关掉时不看方案配置

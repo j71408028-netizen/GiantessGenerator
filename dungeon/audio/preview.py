@@ -249,6 +249,11 @@ class VoicePreview:
     # ---------------- 内部 ----------------
 
     def _synth_failure_reason(self) -> str:
+        """合成失败的原因：优先用 ``speech`` 记下的**真实**诊断（如 HTTP 403），
+        拿不到再退回通用文案——预听看到的原因就是副本里不出声的原因。"""
+        detail = _speech.last_synth_error()
+        if detail:
+            return f"合成失败：{detail}"
         if not _speech.edge_tts_available():
             return "合成不可用：未安装 edge-tts（pip install edge-tts）"
         return "合成失败：网络不可达或音色名有误"

@@ -72,11 +72,15 @@ def bootstrap():
     from paths import ensure_cwd
     from persistence import SettingsRepo
     from services.worlds import WorldManager
+    from dungeon.audio import speech as speech_audio
 
     ensure_cwd()
 
     settings_repo = SettingsRepo()
     settings = settings_repo.load()
+    # 语音合成代理（可留空）：微软朗读接口对部分网络返回 403，填了代理在此生效，
+    # 编辑器预听与即将启动的副本都用它；见 dungeon/audio/speech.py 的 resolve_proxy。
+    speech_audio.set_proxy(settings.get("voice_proxy"))
 
     world_manager = WorldManager(data_dir="data")
     active_id = settings.get("active_world")

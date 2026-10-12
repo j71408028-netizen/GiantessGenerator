@@ -180,21 +180,82 @@ class VoiceCaster:
 
 # ---------------- 合成 ----------------
 
+#: 代理的读取顺序（都不设就是直连）。前两个是本项目专用键，后两个是通用约定——
+#: 用户在系统里挂过代理，往往就期望所有联网功能都跟着走。
+_PROXY_ENV_KEYS = ("DUNGEON_TTS_PROXY", "EDGE_TTS_PROXY", "HTTPS_PROXY", "HTTP_PROXY")
+
+#: 显式设置的代理（窗口层按 ``settings["voice_proxy"]`` 填进来）；空 = 交还环境变量
+_proxy = ""
+#: 最近一次合成失败的**可读原因**（成功或还没试过时是空串）。
+#: 只作诊断用：副本的朗读线程与编辑器的预听线程可能并发写它，取到的可能是
+#: 「另一条路上刚发生的那次失败」——可读性够用，不追求严格归属。
+_last_synth_error = ""
+
+
+def set_proxy(proxy=None) -> None:
+    """显式设置合成代理（``""`` / ``None`` = 交还给环境变量）。"""
+    global _proxy
+    _proxy = str(proxy or "").strip()
+
+
+def resolve_proxy() -> str:
+    """当前生效的代理：显式设置 > 环境变量 > 空串（直连）。"""
+    if _proxy:
+        return _proxy
+    for key in _PROXY_ENV_KEYS:
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def last_synth_error() -> str:
+    """最近一次合成失败的可读原因（成功或还没试过时是空串）。"""
+    return _last_synth_error
+
+
+def _describe_synth_error(exc) -> str:
+    """把底层异常翻成一句人能读的原因（诊断用，不暴露栈）。"""
+    text = str(exc or "")
+    name = type(exc).__name__
+    if isinstance(exc, TypeError) and "proxy" in text.lower():
+        return "当前 edge-tts 版本不认识代理参数，请升级（pip install -U edge-tts）"
+    if "403" in text:
+        return ("服务端拒绝连接（HTTP 403）——微软朗读接口对部分网络限流，"
+                "可在设置里填「语音合成代理」后重试")
+    if "401" in text:
+        return "服务端拒绝连接（HTTP 401）——令牌或音色名可能不对"
+    if "timeout" in text.lower() or name == "TimeoutError":
+        return "连接超时——检查网络，或给「语音合成代理」填一个可用代理"
+    return f"网络或服务异常（{name}）"
+
+
 def _edge_synth(voice: str, rate: str, text: str, dest_dir: str):
     """用 edge-tts 合成一段语音，写到 ``dest_dir`` 并返回路径（失败返回 None）。
 
     失败一律静默（返回 None）：没装 edge-tts、没网、音色名写错、服务端抽风，
-    都不该让一局副本进行不下去。
+    都不该让一局副本进行不下去。但**原因**会记进 :func:`last_synth_error`——
+    「静默降级」不等于「说不清为什么」，否则用户只会看到「网络不可达」这种
+    既不准、也无从下手的提示。
+
+    微软的朗读接口会对部分网络（典型是国区）返回 403；此时给一条代理即可绕过，
+    见 :func:`set_proxy` / :func:`resolve_proxy`。
     """
+    global _last_synth_error
+    _last_synth_error = ""
     try:
         import asyncio
 
         import edge_tts
     except Exception:
+        _last_synth_error = "未安装 edge-tts（pip install edge-tts）"
         return None
 
+    proxy = resolve_proxy()
+
     async def _run():
-        communicate = edge_tts.Communicate(text, voice, rate=rate)
+        kwargs = {"proxy": proxy} if proxy else {}
+        communicate = edge_tts.Communicate(text, voice, rate=rate, **kwargs)
         chunks = []
         async for chunk in communicate.stream():
             if chunk.get("type") == "audio":
@@ -203,16 +264,19 @@ def _edge_synth(voice: str, rate: str, text: str, dest_dir: str):
 
     try:
         data = asyncio.run(_run())
-    except Exception:
+    except Exception as exc:
+        _last_synth_error = _describe_synth_error(exc)
         return None
     if not data:
+        _last_synth_error = "服务端没有返回音频（音色名可能不对，或服务端异常）"
         return None
     try:
         os.makedirs(dest_dir, exist_ok=True)
         path = os.path.join(dest_dir, f"voice_{abs(zlib.crc32(data))}.mp3")
         with open(path, "wb") as handle:
             handle.write(data)
-    except Exception:
+    except Exception as exc:
+        _last_synth_error = f"写入临时音频失败（{type(exc).__name__}）"
         return None
     return path
 
@@ -222,6 +286,9 @@ def synthesize(voice, rate, text, dest_dir=None):
 
     :class:`SpeechDirector` 之外的单句入口：编辑器预听，以及任何「合成一次就
     发出去」的场合。``dest_dir`` 省略时用系统临时目录（调用方自己清理）。
+
+    与副本朗读共用同一套代理（:func:`resolve_proxy`）与失败原因
+    （:func:`last_synth_error`）——预听看到的原因就是副本里不出声的原因。
     """
     if dest_dir is None:
         try:
@@ -442,8 +509,8 @@ class SpeechDirector:
         if not path:
             if not self._edge_warned:
                 self._edge_warned = True
-                self._note("[Voice] 语音合成不可用（未安装 edge-tts 或网络不可达），"
-                          "本局对话不出声")
+                reason = last_synth_error() or "合成未返回音频"
+                self._note(f"[Voice] 语音合成不可用：{reason}——本局对话不出声")
             return None
         self._cache[key] = path
         return path
