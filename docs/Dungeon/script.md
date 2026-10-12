@@ -71,9 +71,19 @@
 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---|---|
 | `path` | str | `""` | 音频文件，相对方案目录（编辑器导入的落在 `<方案>/audio/`）；空串 = 本章节不放音乐 |
-| `volume` | int | `70` | 音量 0-100（`chapters.DEFAULT_BGM_VOLUME`，越界夹到 `MAX_BGM_VOLUME`） |
+| `level` | int | `3` | 音量**档位** 0-4：`0` 静音 / `1` 很轻 / `2` 轻 / `3` 中 / `4` 响（越界夹到 `MAX_BGM_LEVEL`）。旧版 0-100 `volume` 仍能读入，按响度就近折算后**只写 `level`** |
 | `loop` | bool | `true` | 循环播放 |
 | `fade_seconds` | float | `1.5` | 切换时的淡入淡出秒数（`0` = 硬切） |
+
+> **为什么用档位而不是 0-100**：0-100 看着精细，其实是**假精度**——线性刻度下
+> `70` 与 `90` 只差 ≈2.2 dB，人耳几乎听不出，作者却要为此做无意义的微调。5 档
+> 每档约 6 dB（`audio/buses.STEP_DB`），恰好是人耳能明确分辨的步长。
+>
+> **分层落在总线锚点上**：同一档位下音乐比语音低 6 dB（`audio/buses.BUS_ANCHOR_DB`
+> ——音乐锚点 −6 dB、语音 0 dB），与业界（音乐 −6…−12 dB）一致，不必每章手填。
+> 缺省档是「中」（`3`）。**显式填的档位永远优先**，缺省只决定「没填时听到什么」。
+> 档位 → 线性增益的唯一入口是 `buses.step_gain` / `resolve_gain`（`step_db` 是
+> 这套换算的口径来源）。
 
 播放由领域模块 `dungeon/audio/`（包，`__init__` 即原 audio 模块）承担（**不依赖任何 UI 框架**）：Windows 走
 `winmm` 的 MCI（零依赖，mp3/wav/wma 同一套），非 Windows 退到 pygame（装了才用），
@@ -152,7 +162,8 @@ MCI 的坑：`play <alias> repeat` 只有 mpegvideo（mp3 等）认，waveaudio�
 | 原声（`none`） | — | 无 | 没配效果；或预设纯渲染（`deafening_close`）而本机没解码器——此时日志留一条 |
 
 > **音量烘进样本**：渲染路线产出 WAV，而 MCI 的 waveaudio 设备**不认 `setaudio`**
-> （实测错误 261），播放层设不了音量，所以 `voice.volume` 在渲染时直接乘进样本。
+> （实测错误 261），播放层设不了音量，所以 `voice.level`（档位）在渲染时直接换算
+> 成线性增益乘进样本。
 > 播放侧路线的音量仍走 `track.set_volume`（mp3 设备支持，实测可用）。
 > 顺带提醒：作者给 `bgm.path` 选了 `.wav` 时，Windows 上的 BGM 音量/淡入淡出同样
 > 不生效（同一条驱动限制），选 `.mp3` 才正常。
@@ -237,7 +248,7 @@ MCI 的坑：`play <alias> repeat` 只有 mpegvideo（mp3 等）认，waveaudio�
 |---|---|---|---|
 | `insert` | 插入文本 | `text, text_type, highlight, delayed` | 运行时；`delayed` 表示等下一段 AI 段落返回后再显示 |
 | `option` | 弹出选项 | `prompt, options[{id, prompt, text}]` | 运行时；选择按编号记入 `选择:<名字>` |
-| `effect` | 效果覆盖 | `filter, bgm_volume, voice_fx, sensitivity, duration` | 运行时；限时改写章节环境（背景滤镜 / 音乐音量 / 语音效果 / 敏感效果），`duration` 步后各维度交还章节默认值；只写出来的维度才被覆盖，详见 §7 |
+| `effect` | 效果覆盖 | `filter, bgm_level, voice_fx, sensitivity, duration` | 运行时；限时改写章节环境（背景滤镜 / 音乐档位 / 语音效果 / 敏感效果），`duration` 步后各维度交还章节默认值；只写出来的维度才被覆盖，详见 §7 |
 | `fx` | 窗口视效 | `fx, duration, intensity` | 运行时；操作整个会话窗口的瞬时画面（闪光 / 振动 / 反色 / 色差分离），`duration` 为绝对时间（秒，0.1~10），按 `intensity`（0~100）定峰值亮度 / 振幅 / 错位幅度；详见 §7 |
 | `goto` | 跳转章节 | `chapter`（空串 = 离开章节） | 运行时；进入目标章节，应用其背景与持续敏感效果 |
 | `mini_game` | 小游戏挑战 | `game, target_level, win_goto, lose_goto` | 运行时；按包 manifest 的 `backend` 分派：`py` → 会话窗口内覆盖层舞台（`dungeon/window/minigame/`，ESC=无结果中止），`web` → 子进程 pywebview 独立窗口；步进暂停，结果经 `finish(won, result)` 回传后按 `win_goto`/`lose_goto` 跳转（空串=原地继续），无结果=原地继续。结果随触发器记录落盘，回放不进游戏直接复现 |
@@ -281,7 +292,7 @@ MCI 的坑：`play <alias> repeat` 只有 mpegvideo（mp3 等）认，waveaudio�
 | 维度 | 键 | 取值 |
 |---|---|---|
 | 背景滤镜 | `filter` | 滤镜键（`actions.VISUAL_FILTERS`）或空串（这段期间清除滤镜）；无背景图时忽略 |
-| 音乐音量 | `bgm_volume` | 0~100 整数；只改音量不换曲，章节没配音乐时忽略 |
+| 音乐档位 | `bgm_level` | 0~4 整数档位（兼容旧 `bgm_volume` 的 0~100，按响度就近折算）；只改档位不换曲，章节没配音乐时忽略 |
 | 语音效果 | `voice_fx` | 与章节 `voice_fx` 同形（`her` / `others` 两档）；空对象 = 这段期间不加效果 |
 | 敏感效果 | `sensitivity` | 与章节 `sensitivity` 同形的数组；空数组 = 这段期间没有敏感效果 |
 
@@ -411,7 +422,7 @@ Solea / Bulla 耦合等级的对话分支会给每句台词标 `@说话人@`（�
 | `voice_protagonist` | str | `zh-CN-YunxiNeural` | 主角音色（按方案 `protagonist_title`，留空按「主角」认） |
 | `voice_other` | list | 三把备用嗓 | 其余角色的音色池，**按名字稳定映射**：同一个配角每局都是同一把嗓子 |
 | `rate` | str | `+0%` | 语速（`+10%` / `-20%`；非法写法回退常速） |
-| `volume` | int | `90` | 音量 0-100（越界夹取；比背景音乐默认高，台词要压过配乐） |
+| `level` | int | `3` | 音量**档位** 0-4（`0` 静音 / `1` 很轻 / `2` 轻 / `3` 中 / `4` 响；越界夹到 `MAX_VOICE_LEVEL`）。旧版 0-100 `volume` 仍能读入，折算后只写 `level`。语音是混音 0 dB 参考，同档位下比音乐高 6 dB（`audio/buses.BUS_ANCHOR_DB`） |
 
 合成走 **edge-tts**（微软神经网络语音，**需要联网**，`pip install edge-tts`），
 是**可选依赖**：没装或网络失败只在日志里留一条，不出声不该拖垮一局副本——与

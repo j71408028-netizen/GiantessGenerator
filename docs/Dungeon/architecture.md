@@ -83,7 +83,7 @@
 | `models.py` | 运行态数据与枚举 | `DungeonTextType`（5 种段落类型 + 默认步进值）、`DungeonState`（坐标 / 自定义属性 / 计数 / 二阶步长） |
 | `rules.py` | 演化与条件求值 | `EvolutionRules`（转移矩阵、分节步长、属性演化）、`TriggerRules.evaluate` |
 | `chapters.py` | 章节模型与归一化 | `normalize_chapter(s)`、`normalize_chapters`、`normalize_bgm`、`find_chapter`、`is_terminating_chapter`、`overflow_jump_target`、`chapter_step_override`、`sensitivity_amount`、`matches_scope` |
-| `audio/buses.py` | 音频音量**总线单一真相源**（总控 → 音乐 / 语音 / 音效） | `BUSES` / `BUS_LABELS`、`item_default` / `bus_default`、`clamp_level`、`resolve_gain`（内容×总线×总控）、`to_db` / `db_gain`（dB 曲线，尚未接线）、`RECOMMENDED_DB_DEFAULTS` |
+| `audio/buses.py` | 音频音量**总线单一真相源**（总控 → 音乐 / 语音 / 音效） | `BUSES` / `BUS_LABELS`、`STEPS` / `STEP_LABELS` / `STEP_DB` / `BUS_ANCHOR_DB`（档位与分层的 dB 单一真相源）、`step_options` / `step_choices`（编辑器档位候选）、`clamp_step` / `step_from_level`（0-4 档位与旧 0-100 迁移）、`bus_default` / `clamp_level` / `resolve_gain`（档位×总线×总控）、`to_ratio` / `to_db` / `db_gain` |
 | `audio.py` | 音频播放底座（纯领域，不碰 UI 框架） | `BgmPlayer.play/stop/shutdown/wait_idle`、`open_track`、`backend_name`、`set_backends`（MCI → pygame → 静音降级） |
 | `speech.py` | Solea/Bulla 对话的合成语音（纯领域） | `VoiceCaster.voice_for`（她 / 主角 / 配角按名字稳定映射）、`SpeechDirector.speak/stop/set_effect/shutdown`、`normalize_voice`、`RECOMMENDED_VOICES`、`edge_tts_available` |
 | `voice_fx.py` | 章节对话语音的**物理**声学效果（她 / 其他人两档） | `PRESETS`（预设单一真相源）、`normalize_voice_fx`、`resolved_params`、`playback_plan`（零依赖近似）、`render_wav`（可选解码器 + numpy）、`PlaybackFx`（分拍轨 + 音量包络） |
@@ -139,7 +139,7 @@ edge-tts 7.2.8 / winmm MCI，探针脚本在临时目录跑，未入库）：
 |---|---|---|
 | 合成服务只给 MP3 | `__stream` 里 `outputFormat` 是硬编码字面量；换成 `raw-24khz-16bit-mono-pcm` / `riff-…` / `ogg-…-opus` 一律 `NoAudioReceived` | **不能**指望服务端给 PCM → 效果必须自己算 |
 | `mstts:express-as` 风格 | `whispering` / `terrified` / `angry` / `sad` 全部 `NoAudioReceived` | 语气类预设做不了（也**不该**做，见 §2.4 定位） |
-| prosody `rate` / `pitch` / `volume` | 生效（`+40%` 语速 2.95s→2.11s；`pitch=-100Hz` 谱重心 3448→1664 Hz；`volume=-40%` RMS 0.089→0.053） | 语速/音量/变调是**合成侧**免费参数（本轮按用户要求不纳入效果，见 `voice.volume` 仍走原字段） |
+| prosody `rate` / `pitch` / `volume` | 生效（`+40%` 语速 2.95s→2.11s；`pitch=-100Hz` 谱重心 3448→1664 Hz；`volume=-40%` RMS 0.089→0.053） | 语速/音量/变调是**合成侧**免费参数（本轮按用户要求不纳入效果，见 `voice.level` 的音量档位仍走原字段） |
 | MP3 解码 | `miniaudio` 1.6 ms、`soundfile`（libsndfile 1.2.2）2.4 ms（2.95s 音频） | 离线渲染的代价可忽略（网络合成 ~1 s 才是瓶颈） |
 | numpy 效果链 | 缓抖 1.2 ms、三拍回声 0.7 ms、FFT 混响 47 ms（首帧），三者串联 7.3 ms | 全部在语音工作线程里做，不占帧循环 |
 | MCI 同一文件多路 | 同一文件开 8 个 alias 全部 `playing`；命令到 `playing` 0.3~1.0 ms | 播放侧「延迟分拍 = 回声」可行（零依赖） |
