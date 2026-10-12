@@ -184,8 +184,28 @@ class VoiceCaster:
 #: 用户在系统里挂过代理，往往就期望所有联网功能都跟着走。
 _PROXY_ENV_KEYS = ("DUNGEON_TTS_PROXY", "EDGE_TTS_PROXY", "HTTPS_PROXY", "HTTP_PROXY")
 
+#: edge-tts 只认 http/https 代理：底层 aiohttp 不装 ``aiohttp-socks`` 走不了 SOCKS，
+#: 放行只会换来一个看不懂的连接错误，不如在 :func:`normalize_proxy` 就拦下来说清楚。
+_SUPPORTED_PROXY_SCHEMES = ("http", "https")
+_SOCKS_SCHEMES = ("socks", "socks4", "socks4a", "socks5", "socks5h")
+
+#: 旧合成主机。2026-10 起微软逐步对它回 403，全球分批铺开（edge-tts issue #490）。
+_LEGACY_WSS_HOST = "speech.platform.bing.com"
+
+#: 新合成主机：微软 Edge 155 走这里，**沿用同一个旧令牌**，只是改挂
+#: ``Ocp-Apim-Subscription-Key``。上游修法见 edge-tts PR #491（7.2.8 尚未并入），
+#: 所以在本地补上——免得用户手上那版 edge-tts 一出新就集体哑掉。
+_V2_WSS_URL = ("wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1"
+               "?Ocp-Apim-Subscription-Key={token}")
+
 #: 显式设置的代理（窗口层按 ``settings["voice_proxy"]`` 填进来）；空 = 交还环境变量
 _proxy = ""
+
+#: 上次成功的合成端点，下次优先复用（否则每次都要先撞一次已经不通的那个）。
+_working_wss_url = ""
+#: 串行化「换端点 → 合成」这一段：``WSS_URL`` 是 edge-tts 的模块级全局，
+#: 并发改写会串台。合成本身也是串行的，代价可忽略。
+_endpoint_lock = threading.Lock()
 #: 最近一次合成失败的**可读原因**（成功或还没试过时是空串）。
 #: 只作诊断用：副本的朗读线程与编辑器的预听线程可能并发写它，取到的可能是
 #: 「另一条路上刚发生的那次失败」——可读性够用，不追求严格归属。
@@ -198,15 +218,49 @@ def set_proxy(proxy=None) -> None:
     _proxy = str(proxy or "").strip()
 
 
+def normalize_proxy(proxy) -> str:
+    """把用户填的代理整理成 edge-tts 真能用的形式。
+
+    - 空串 = 直连；
+    - 缺 scheme 就补 ``http://``——``127.0.0.1:7890`` 直接丢给 aiohttp 只会抛
+      ``InvalidURL``，用户等于白填；
+    - SOCKS 一律拒绝（见 ``_SOCKS_SCHEMES``）：aiohttp 不装 ``aiohttp-socks``
+      根本走不了 SOCKS。
+
+    不合法时抛 :class:`ValueError`，文案就是用户可见的原因。
+    """
+    text = str(proxy or "").strip()
+    if not text:
+        return ""
+    if "://" not in text:
+        text = "http://" + text
+    scheme = text.split("://", 1)[0].lower()
+    if scheme in _SOCKS_SCHEMES:
+        raise ValueError("SOCKS 代理不受支持，请改填 HTTP 代理"
+                         "（代理软件通常另有一个 HTTP/mixed 端口）")
+    if scheme not in _SUPPORTED_PROXY_SCHEMES:
+        raise ValueError(f"不支持的代理协议「{scheme}://」，请填 http:// 或 https://")
+    return text
+
+
 def resolve_proxy() -> str:
-    """当前生效的代理：显式设置 > 环境变量 > 空串（直连）。"""
+    """当前生效的代理：显式设置 > 环境变量 > 空串（直连）。
+
+    返回值已经过 :func:`normalize_proxy` 整理。**注意**：这里读到的代理会被
+    *显式* 传给 ``edge_tts.Communicate(proxy=...)``——这是必需的，不是多此一举：
+    aiohttp 的 ``trust_env`` 只对 ``http(s)://`` 生效，对 ``wss://`` 不认环境变量，
+    所以光靠环境变量代理，WebSocket 握手仍会走直连。
+    """
+    raw = ""
     if _proxy:
-        return _proxy
-    for key in _PROXY_ENV_KEYS:
-        value = os.environ.get(key, "").strip()
-        if value:
-            return value
-    return ""
+        raw = _proxy
+    else:
+        for key in _PROXY_ENV_KEYS:
+            value = os.environ.get(key, "").strip()
+            if value:
+                raw = value
+                break
+    return normalize_proxy(raw)
 
 
 def last_synth_error() -> str:
@@ -218,40 +272,73 @@ def _describe_synth_error(exc) -> str:
     """把底层异常翻成一句人能读的原因（诊断用，不暴露栈）。"""
     text = str(exc or "")
     name = type(exc).__name__
-    if isinstance(exc, TypeError) and "proxy" in text.lower():
+    low = text.lower()
+    if isinstance(exc, TypeError) and "proxy" in low:
         return "当前 edge-tts 版本不认识代理参数，请升级（pip install -U edge-tts）"
+    if "InvalidURL" in name or "invalid url" in low:
+        return "代理地址格式不对——请写成 http://主机:端口（如 http://127.0.0.1:7890）"
+    if "ProxyConnection" in name:
+        return "连不上代理——地址或端口不对，或代理软件没在运行"
+    if "socks" in low:
+        return "SOCKS 代理不受支持，请改填 HTTP 代理（代理软件通常另有 HTTP/mixed 端口）"
     if "403" in text:
-        return ("服务端拒绝连接（HTTP 403）——微软朗读接口对部分网络限流，"
-                "可在设置里填「语音合成代理」后重试")
+        return ("服务端拒绝连接（HTTP 403）——微软已把朗读合成迁到新主机，旧版 edge-tts"
+                "会普遍 403（上游 issue #490）；本程序已自动切到新主机，若仍 403，"
+                "请更新 edge-tts 或换网络/代理")
     if "401" in text:
         return "服务端拒绝连接（HTTP 401）——令牌或音色名可能不对"
-    if "timeout" in text.lower() or name == "TimeoutError":
+    if "SkewAdjustment" in name:
+        return "服务端时间校验未通过——请校准系统时间后重试"
+    if "timeout" in low or name == "TimeoutError":
         return "连接超时——检查网络，或给「语音合成代理」填一个可用代理"
     return f"网络或服务异常（{name}）"
 
 
-def _edge_synth(voice: str, rate: str, text: str, dest_dir: str):
-    """用 edge-tts 合成一段语音，写到 ``dest_dir`` 并返回路径（失败返回 None）。
+def _endpoint_candidates(edge_tts) -> list:
+    """按优先级给出要尝试的合成端点（首个为优先项）。
 
-    失败一律静默（返回 None）：没装 edge-tts、没网、音色名写错、服务端抽风，
-    都不该让一局副本进行不下去。但**原因**会记进 :func:`last_synth_error`——
-    「静默降级」不等于「说不清为什么」，否则用户只会看到「网络不可达」这种
-    既不准、也无从下手的提示。
-
-    微软的朗读接口会对部分网络（典型是国区）返回 403；此时给一条代理即可绕过，
-    见 :func:`set_proxy` / :func:`resolve_proxy`。
+    只在已装版本**仍指向旧主机**时才补上新主机——上游哪天把 PR #491 并进发行版，
+    这里就自动让位，不去覆盖人家的正确值。
     """
-    global _last_synth_error
-    _last_synth_error = ""
+    current = ""
     try:
-        import asyncio
+        current = str(getattr(edge_tts.communicate, "WSS_URL", "") or "")
+    except Exception:
+        current = ""
+    token = ""
+    try:
+        token = str(getattr(edge_tts.constants, "TRUSTED_CLIENT_TOKEN", "") or "")
+    except Exception:
+        token = ""
+    candidates = []
+    if _LEGACY_WSS_HOST in current and token:
+        candidates.append(_V2_WSS_URL.format(token=token))
+    if current:
+        candidates.append(current)
+    if _working_wss_url in candidates:
+        candidates.remove(_working_wss_url)
+        candidates.insert(0, _working_wss_url)
+    return candidates
 
+
+def synthesis_endpoints() -> list:
+    """当前会尝试的合成端点（首个优先）；供诊断与自检使用。"""
+    try:
         import edge_tts
     except Exception:
-        _last_synth_error = "未安装 edge-tts（pip install edge-tts）"
-        return None
+        return []
+    return _endpoint_candidates(edge_tts)
 
-    proxy = resolve_proxy()
+
+def _stream_once(edge_tts, url: str, text: str, voice: str, rate: str, proxy: str):
+    """在指定端点上跑一次合成，返回音频 bytes（没收到音频返回 ``b""``）。
+
+    ``url`` 为空 = 不插手，用库自己的端点。
+    """
+    import asyncio
+
+    module = edge_tts.communicate
+    original = getattr(module, "WSS_URL", None)
 
     async def _run():
         kwargs = {"proxy": proxy} if proxy else {}
@@ -263,12 +350,57 @@ def _edge_synth(voice: str, rate: str, text: str, dest_dir: str):
         return b"".join(chunks)
 
     try:
-        data = asyncio.run(_run())
-    except Exception as exc:
-        _last_synth_error = _describe_synth_error(exc)
+        if url and original is not None:
+            module.WSS_URL = url
+        return asyncio.run(_run())
+    finally:
+        if original is not None:
+            module.WSS_URL = original
+
+
+def _edge_synth(voice: str, rate: str, text: str, dest_dir: str):
+    """用 edge-tts 合成一段语音，写到 ``dest_dir`` 并返回路径（失败返回 None）。
+
+    失败一律静默（返回 None）：没装 edge-tts、没网、音色名写错、服务端抽风，
+    都不该让一局副本进行不下去。但**原因**会记进 :func:`last_synth_error`——
+    「静默降级」不等于「说不清为什么」，否则用户只会看到「网络不可达」这种
+    既不准、也无从下手的提示。
+
+    端点按 :func:`_endpoint_candidates` 依次尝试（新主机 → 旧主机），代理按
+    :func:`resolve_proxy` 显式传入。
+    """
+    global _last_synth_error, _working_wss_url
+    _last_synth_error = ""
+    try:
+        import edge_tts
+    except Exception:
+        _last_synth_error = "未安装 edge-tts（pip install edge-tts）"
         return None
+
+    try:
+        proxy = resolve_proxy()
+    except ValueError as exc:
+        _last_synth_error = str(exc)
+        return None
+
+    candidates = _endpoint_candidates(edge_tts) or [""]
+    data = b""
+    last_exc = None
+    with _endpoint_lock:
+        for url in candidates:
+            try:
+                data = _stream_once(edge_tts, url, text, voice, rate, proxy)
+            except Exception as exc:
+                last_exc = exc
+                data = b""
+            if data:
+                _working_wss_url = url
+                break
     if not data:
-        _last_synth_error = "服务端没有返回音频（音色名可能不对，或服务端异常）"
+        if last_exc is not None:
+            _last_synth_error = _describe_synth_error(last_exc)
+        else:
+            _last_synth_error = "服务端没有返回音频（音色名可能不对，或服务端异常）"
         return None
     try:
         os.makedirs(dest_dir, exist_ok=True)

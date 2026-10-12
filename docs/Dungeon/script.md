@@ -453,18 +453,31 @@ Solea / Bulla 耦合等级的对话分支会给每句台词标 `@说话人@`（�
 背景音乐的降级策略一致。播放复用 `dungeon/audio` 的后端（MCI → pygame →
 静音占位）。
 
-> **合成失败要说清原因，也要能走代理。** 微软的朗读接口会对**部分网络**（典型是
-> 国区）在 WebSocket 握手阶段返回 **HTTP 403**，此时一句都合成不出来——这不是
-> 代码问题：`edge-tts` 已是最新版（7.2.8），系统时钟与服务端一致，`Sec-MS-GEC-Version`
-> 换成 143/146/150/155/160/170 也照样 403，走代理或直连都是 403。所以：
-> - **失败原因**记在 `speech.last_synth_error()`（如「服务端拒绝连接（HTTP 403）
->   ——微软朗读接口对部分网络限流，可在设置里填『语音合成代理』后重试」）。副本的
->   一次性告警与编辑器**预听**都复用它，不再笼统报「网络不可达 / 音色名有误」。
+> **合成端点会自己找路，失败也要说清原因。** 2026-10 微软把朗读合成从旧主机
+> `speech.platform.bing.com` 迁到 `api.msedgeservices.com`，**全球分批铺开**
+> （先是欧洲，10-12 起北美也中招），铺到哪旧主机就在哪回 **HTTP 403**——所以这
+> 与「是不是国区」无关，也不是代码问题：`edge-tts` 已是最新（7.2.8），时钟与服务端
+> 一致，`Sec-MS-GEC-Version` 换 143/146/150/155/160/170 都照样 403。上游修法见
+> edge-tts **PR #491**（7.2.8 尚未并入）：**新主机沿用同一个旧令牌，只是改挂
+> `Ocp-Apim-Subscription-Key`**。本模块在本地补齐了这一步：
+>
+> - **端点回退** `speech._endpoint_candidates()`：装的那版若仍指向旧主机，就先生成
+>   新主机候选、再挂旧主机作回退（新主机成 403 就自动落回旧主机）；**已装版本哪天
+>   修好了（不再指向旧主机）就不插手**，不去覆盖人家的正确值。成功过的端点记在
+>   `_working_wss_url`，下次优先复用。改写 `edge_tts` 模块级 `WSS_URL` 是有状态的，
+>   所以「换端点 → 合成」整段由 `_endpoint_lock` 串行化。
+> - **失败原因**记在 `speech.last_synth_error()`，按类分：403 / 401 / 超时 / 时钟
+>   （`SkewAdjustmentError`）/ SOCKS / 代理连不上 / 地址非法。副本的一次性告警与
+>   编辑器**预听**都复用它，不再笼统报「网络不可达 / 音色名有误」。
 > - **代理**由 `speech.set_proxy()` / `resolve_proxy()` 决定，优先级：
 >   `settings["voice_proxy"]`（设置页「语音合成代理」）＞ 环境变量
 >   `DUNGEON_TTS_PROXY` / `EDGE_TTS_PROXY` / `HTTPS_PROXY` / `HTTP_PROXY` ＞ 直连。
->   只在配了代理时才把 `proxy=` 传给 `edge_tts.Communicate`（没配就不传，免得老版本
->   `TypeError`）。装配点三处：`app/shell.py`（启动 / 切界面）、
+>   三个容易踩的点：**① 必须显式传给 `edge_tts.Communicate(proxy=...)`**——aiohttp 的
+>   `trust_env` 只对 `http(s)://` 生效，对 `wss://` **不认环境变量**，光挂环境变量
+>   代理，WebSocket 握手仍会走直连；② 没配代理时不传这个关键字（免得老版本
+>   `TypeError`）；③ 代理地址先过 `normalize_proxy()`——缺 scheme 补 `http://`
+>   （否则 aiohttp 抛 `InvalidURL`），**SOCKS 直接拒绝**（不装 `aiohttp-socks` 走不了，
+>   请填代理软件的 HTTP/mixed 端口）。装配点三处：`app/shell.py`（启动 / 切界面）、
 >   `window/base.py::_configure_voice`（**副本跑在独立子进程里，主进程设的代理带不过
 >   来，必须在子进程再设一次**）、设置页保存后立即生效。
 
@@ -475,6 +488,7 @@ Solea / Bulla 耦合等级的对话分支会给每句台词标 `@说话人@`（�
 | 接线 | 位置 |
 |---|---|
 | 装配音色（方案配置 × 全局开关） | `window/base.py::_configure_voice`（`_init_session` / `_init_replay` 各调一次） |
+| 合成端点 | `speech._endpoint_candidates()`：新主机 `api.msedgeservices.com` 优先、旧主机回退（edge-tts PR #491 未并入时本地补齐） |
 | 合成代理 | `settings["voice_proxy"]` → `app/shell.py` 与 `window/base.py::_configure_voice` 各设一次（子进程独立）；失败原因见 `speech.last_synth_error()` |
 | 触发朗读 | `window/ui.py::_speak_item`（显示单元定稿时，叙述句无 `speaker` 直接返回） |
 
