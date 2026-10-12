@@ -105,179 +105,6 @@ class CTkSegmentedControl(customtkinter.CTkFrame):
         return self._current
 
 
-class CycleOptionButton(customtkinter.CTkFrame):
-    """固定档位的点击轮换控件（替代选项数量不会拓展的下拉框）。
-
-    左键切到下一档、右键切回上一档，到头循环；右缘画一枚指向右的单箭头，
-    提示点击推进到下一档。文字与箭头都直接绘制在控件自身的圆角画布上，
-    与底色浑然一体：不引入子控件，因此悬停换色时同步重绘、无残色，也不
-    会盖住边框线。
-    对外接口与 CTkOptionMenu 对齐：set() / get() / configure(values=, state=)。
-    """
-
-    # 箭头图案的单元盒尺寸（逻辑像素），坐标按此盒内设计
-    _MARKER_W = 15
-    _MARKER_H = 15
-    #: 图案距控件右缘的留白
-    _MARKER_MARGIN = 8
-    #: 文字区右缘 = 右缘留白 + 图案宽 + 缝隙
-    _TEXT_RESERVE = _MARKER_MARGIN + _MARKER_W + 3
-    #: 文字区左缘留白
-    _TEXT_PAD_LEFT = 8
-
-    def __init__(self, master, values=None, command=None, *, variable=None,
-                 width=120, height=27, corner_radius=7, border_width=1,
-                 font=None, fg_color=None, border_color=None, hover_color=None,
-                 text_color=None, text_color_disabled=None, marker_color=None,
-                 **kwargs):
-        fg_color = WIDGET_PANEL_BG if fg_color is None else fg_color
-        super().__init__(master, width=width, height=height,
-                         corner_radius=corner_radius, border_width=border_width,
-                         fg_color=fg_color,
-                         border_color=WIDGET_BORDER if border_color is None else border_color,
-                         **kwargs)
-        self._values = list(values or [])
-        self._command_cb = command
-        self._variable = variable
-        self._font = font or ui_fonts.ui_font(13)
-        # 注意：不能用 _fg_color/_hover_color——CTkFrame 基类的 configure 会把
-        # 同名属性改写成"当前底色"，悬停后常态色就被吞掉了，离开时无法恢复
-        self._normal_fg = fg_color
-        self._hover_fg = WIDGET_HOVER if hover_color is None else hover_color
-        self._text_color = WIDGET_TEXT if text_color is None else text_color
-        self._text_color_disabled = (
-            WIDGET_TEXT_MUTED if text_color_disabled is None else text_color_disabled)
-        self._marker_color = WIDGET_TEXT_SOFT if marker_color is None else marker_color
-        self._state = "normal"
-        self._current = self._values[0] if self._values else ""
-        if self._variable is not None:
-            # 变量里已有合法档位时以它为准，否则把档位回写到变量
-            current = self._variable.get()
-            if current in self._values:
-                self._current = current
-            elif self._current:
-                self._variable.set(self._current)
-
-        self.bind("<Enter>", self._on_enter, add="+")
-        self.bind("<Leave>", self._on_leave, add="+")
-        self.bind("<Button-1>", lambda e: self._step(1), add="+")
-        self.bind("<Button-3>", lambda e: self._step(-1), add="+")
-
-        # 基类首绘发生在子类属性就绪之前，且尺寸未变时不再触发重绘，
-        # 必须在此显式补一次，否则文字与箭头初始不可见
-        self._draw()
-
-    # ── 对外接口 ──
-    def set(self, value):
-        """切换显示值（不触发 command，与 CTkOptionMenu 一致）。"""
-        if value not in self._values:
-            return
-        self._current = value
-        if self._variable is not None:
-            self._variable.set(value)
-        self._draw_text()
-
-    def get(self):
-        return self._current
-
-    def configure(self, **kwargs):
-        if "values" in kwargs:
-            self._values = list(kwargs.pop("values") or [])
-            if self._current not in self._values:
-                self.set(self._values[0] if self._values else "")
-        if "state" in kwargs:
-            self._state = kwargs.pop("state")
-            self._refresh_state()
-        if "fg_color" in kwargs:
-            self._normal_fg = kwargs["fg_color"]
-        if "hover_color" in kwargs:
-            self._hover_fg = kwargs["hover_color"]
-        if "marker_color" in kwargs:
-            self._marker_color = kwargs.pop("marker_color")
-            self._draw_marker()
-        return super().configure(**kwargs)
-
-    def cget(self, attribute_name):
-        if attribute_name == "state":
-            return self._state
-        if attribute_name == "values":
-            return list(self._values)
-        return super().cget(attribute_name)
-
-    # ── 内部实现 ──
-    def _step(self, delta):
-        if self._state != "normal" or not self._values:
-            return
-        idx = self._values.index(self._current) if self._current in self._values else -1
-        self.set(self._values[(idx + delta) % len(self._values)])
-        if self._command_cb is not None:
-            self._command_cb(self._current)
-
-    def _refresh_state(self):
-        if self._state != "normal":
-            self._on_leave()
-        self._draw_text()
-        self._draw_marker()
-
-    def _on_enter(self, event=None):
-        if self._state != "normal":
-            return
-        customtkinter.CTkFrame.configure(self, fg_color=self._hover_fg)
-
-    def _on_leave(self, event=None):
-        customtkinter.CTkFrame.configure(self, fg_color=self._normal_fg)
-
-    def _draw(self, no_color_updates=False):
-        # 基类每次重绘都会重建圆角底与边框，画布内容必须在其后重画才能保持可见
-        super()._draw(no_color_updates)
-        self._draw_text()
-        self._draw_marker()
-
-    def _draw_text(self):
-        """把当前档位文字画在控件画布上（子控件式 label 会残留悬停底色）。"""
-        if not hasattr(self, "_text_color"):
-            return  # super().__init__ 期间的首绘，属性尚未就绪
-        canvas = getattr(self, "_canvas", None)
-        if canvas is None or not canvas.winfo_exists():
-            return
-        disabled = self._state != "normal"
-        color = self._apply_appearance_mode(
-            self._text_color_disabled if disabled else self._text_color)
-        scale = self._apply_widget_scaling
-        # 文字居中于左侧文字区（右缘为箭头让位）
-        cx = scale((self._TEXT_PAD_LEFT + self._current_width - self._TEXT_RESERVE) / 2)
-        canvas.delete("cycle_text")
-        if self._current:
-            canvas.create_text(cx, scale(self._current_height / 2),
-                               text=self._current, font=self._font, fill=color,
-                               anchor="center", tags="cycle_text")
-
-    def _draw_marker(self):
-        """在控件画布右缘绘制指向右的单箭头，提示点击推进到下一档。"""
-        if not hasattr(self, "_marker_color"):
-            return  # super().__init__ 期间的首绘，属性尚未就绪
-        canvas = getattr(self, "_canvas", None)
-        if canvas is None or not canvas.winfo_exists():
-            return
-        disabled = self._state != "normal"
-        color = self._apply_appearance_mode(
-            self._text_color_disabled if disabled else self._marker_color)
-        canvas.delete("cycle_marker")
-        scale = self._apply_widget_scaling
-        # 图案盒在控件内右缘留白、垂直居中
-        x0 = scale(self._current_width - self._MARKER_MARGIN - self._MARKER_W)
-        y0 = scale((self._current_height - self._MARKER_H) / 2)
-
-        def pt(u, v):
-            return (x0 + scale(u), y0 + scale(v))
-
-        # 带箭杆的单箭头，盒内垂直居中
-        canvas.create_polygon(
-            pt(2, 5.9), pt(9.5, 5.9), pt(9.5, 4.4), pt(13.5, 7.5),
-            pt(9.5, 10.6), pt(9.5, 9.1), pt(2, 9.1),
-            fill=color, outline="", tags="cycle_marker")
-
-
 class CTkScrollableDropdownFrame(customtkinter.CTkFrame):
     '''
     Advanced Scrollable Dropdown Frame class for customtkinter widgets
@@ -727,12 +554,24 @@ class CTkScrollableDropdownFrame(customtkinter.CTkFrame):
             self.widgets[key].configure(**kwargs)
 
 
-class _FlipUpDropdown(CTkScrollableDropdownFrame):
-    """贴底自动向上翻转的下拉弹层。
+class _TopAnchoredDropdown(CTkScrollableDropdownFrame):
+    """按钮顶部锚定的下拉弹层（近 Win11 设置项风格）。
 
-    基类只会把弹层放在按钮正下方（``place`` 于窗口内）；按钮贴近窗口底部、
-    下方放不下且上方有空间时，改为弹出在按钮上方，避免弹层被窗口下缘裁掉。
+    基类把弹层放在按钮正下方；这里改为弹层左上角与按钮左上角对齐、向下
+    展开盖住按钮，宽度与按钮一致；选项少时按内容收紧高度，超过上限才
+    滚动；底缘超出窗口时整体上移收进窗口。滚动条用更窄的细条。
     """
+
+    #: 每个候选按钮 pack 的上下边距（与 _init_buttons 的 pady=2 对应）
+    _ROW_PADY = 2
+    #: 弹层边框与候选列表的上下合计留白
+    _CHROME = 16
+    #: 细滚动条的宽度（逻辑像素）
+    _SCROLLBAR_WIDTH = 12
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.frame._scrollbar.configure(width=self._SCROLLBAR_WIDTH)
 
     def place_dropdown(self):
         top = self.attach.winfo_toplevel()
@@ -740,35 +579,49 @@ class _FlipUpDropdown(CTkScrollableDropdownFrame):
             scaling = self._get_widget_scaling()
         except AttributeError:
             scaling = 1.0
-        btn_top = (self.attach.winfo_rooty() - top.winfo_rooty()) / scaling
-        below = btn_top + self.attach.winfo_height() / scaling + 5
-        estimate = min(self.height, self.button_height * self.button_num + 55)
-        win_height = top.winfo_height() / scaling
-        if below + estimate > win_height and btn_top - estimate - 5 > 0:
-            self.y = max(5, btn_top - estimate - 5)
-        else:
-            self.y = None
+        self.y = max(0, (self.attach.winfo_rooty() - top.winfo_rooty()) / scaling)
         super().place_dropdown()
+        # 选项少时按内容收紧高度（每行 = 候选按钮 + 上下 pack 边距），
+        # 超过 height 上限才滚动
+        row = self.button_height + 2 * self._ROW_PADY
+        fit_height = max(row, min(self.height, row * self.button_num + self._CHROME))
+        self.height_new = fit_height
+        self._place_exact(self.x_pos, self.y, self.width_new, fit_height)
+        # 底缘超出窗口时整体上移收进窗口
+        overflow = self.y + fit_height - top.winfo_height() / scaling
+        if overflow > 0:
+            self.y = max(0, self.y - overflow)
+            self._place_exact(self.x_pos, self.y, self.width_new, fit_height)
+
+    def _place_exact(self, x, y, width, height):
+        """按逻辑尺寸精确落位。内部滚动区的请求尺寸总会把弹层自然尺寸撑得
+        比设定值大，必须关掉 propagation、以期望尺寸落几何。注意基类重写的
+        configure() 会把 width/height 当作弹层度量参数吞掉，这里绕过它直接
+        调 CTkFrame.configure 才能落到 tk 层的宽高选项上。"""
+        self.pack_propagate(False)
+        customtkinter.CTkFrame.configure(self, width=width, height=height)
+        self.place(x=x, y=y)
 
 
-class DropdownOptionButton(customtkinter.CTkButton):
-    """点击弹出候选下拉的按钮（按钮 + 下拉弹层组合，参考 creation_params_dlg）。
+class OptionButton(customtkinter.CTkButton):
+    """轻量选项控件：按钮 + 顶部锚定下拉弹层（近 Win11 设置项风格）。
 
-    按钮显示当前值（语义色由调用方指定），点击弹出候选菜单，选中后写回
-    ``variable`` 并触发 ``command``（与 CTkOptionMenu 一致：先落值后回调）。
-    对外接口对齐 CTkOptionButton / CycleOptionButton：``set()`` / ``get()``
-    / ``configure(values=)``。候选随外部状态变化时用 ``configure(values=)``
-    重建弹层列表。
-
-    空取值显示 ``placeholder``：CTkButton 对空文字不创建内部 label，弹层的
-    ``attach.focus()`` 会崩，占位文字同时提示此处可点选。弹层贴近窗口底部
-    放不下时自动向上翻转（见 ``_FlipUpDropdown``）。
+    按钮显示当前值，点击弹出候选列表——弹层左上角与按钮左上角对齐、向下
+    展开盖住按钮（见 ``_TopAnchoredDropdown``）。选中后写回 ``variable``（无
+    variable 时直接改按钮文字）并触发 ``command``，顺序与 CTkOptionMenu 一致：
+    先落值后回调。对外接口：``set()`` / ``get()`` / ``configure(values=,
+    state=)`` / ``cget("values")``；候选随外部状态变化用 ``configure(values=)``
+    重建弹层列表。空取值显示 ``placeholder``。
+    替代原 ScrollableComboBox（无搜索需求时过重）、DropdownOptionButton 与
+    CycleOptionButton 三套控件。
     """
 
     def __init__(self, master, values=None, command=None, *, variable=None,
-                 width=120, height=28, font=None, fg_color=None, hover_color=None,
-                 text_color=None, placeholder="…", popup_height=200, popup_width=None,
-                 popup_fg_color=None, popup_hover_color=None, popup_text_color=None,
+                 width=120, height=28, corner_radius=7, border_width=1, font=None,
+                 fg_color=None, border_color=None, hover_color=None,
+                 text_color=None, text_color_disabled=None, placeholder="…",
+                 popup_height=200, popup_width=None, popup_fg_color=None,
+                 popup_hover_color=None, popup_text_color=None,
                  popup_border_color=None, **kwargs):
         self._placeholder = placeholder
         self._variable = variable
@@ -782,13 +635,22 @@ class DropdownOptionButton(customtkinter.CTkButton):
         else:
             current = ""
         super().__init__(master, text=current or placeholder, width=width,
-                         height=height, font=font, fg_color=fg_color,
-                         hover_color=hover_color, text_color=text_color, **kwargs)
-        self._dropdown = _FlipUpDropdown(
+                         height=height, corner_radius=corner_radius,
+                         border_width=border_width, font=font,
+                         fg_color=WIDGET_PANEL_BG if fg_color is None else fg_color,
+                         border_color=WIDGET_BORDER if border_color is None else border_color,
+                         hover_color=WIDGET_HOVER if hover_color is None else hover_color,
+                         text_color=WIDGET_TEXT if text_color is None else text_color,
+                         text_color_disabled=(
+                             WIDGET_TEXT_MUTED if text_color_disabled is None
+                             else text_color_disabled),
+                         **kwargs)
+        self._dropdown = _TopAnchoredDropdown(
             attach=self, values=self._values, command=self._pick,
             height=popup_height,
             button_height=28,
-            width=popup_width if popup_width is not None else max(200, width),
+            # 弹层宽度与按钮一致（Win11 设置项风格），可用 popup_width 放宽
+            width=popup_width if popup_width is not None else width,
             fg_color=popup_fg_color or WIDGET_PANEL_BG,
             button_color=popup_fg_color or WIDGET_PANEL_BG,
             hover_color=popup_hover_color or WIDGET_HOVER,
@@ -841,80 +703,6 @@ class DropdownOptionButton(customtkinter.CTkButton):
             self.configure(text=choice or self._placeholder)
         if self._option_command is not None:
             self._option_command(choice)
-
-
-class ScrollableComboBox(customtkinter.CTkComboBox):
-    """带统一风格下拉列表的组合框（选项数量会变化的场景替代 OptionMenu）。
-
-    下拉列表交给 CTkScrollableDropdownFrame 渲染；CTkComboBox 自带的原生下拉
-    始终保持空列表，避免两套弹层同时弹出。state 传入 "normal" 一律按
-    "readonly" 处理，禁止手工输入与下拉框内容不一致的文本。
-    """
-
-    def __init__(self, master, values=None, command=None, *, variable=None,
-                 width=120, height=27, corner_radius=7, border_width=1, font=None,
-                 fg_color=None, border_color=None, button_color=None,
-                 button_hover_color=None, text_color=None,
-                 dropdown_fg_color=None, dropdown_hover_color=None,
-                 dropdown_text_color=None, dropdown_font=None,
-                 dropdown_height=160, dropdown_button_height=28, **kwargs):
-        font = font or ui_fonts.ui_font(13)
-        fg_color = WIDGET_PANEL_BG if fg_color is None else fg_color
-        border_color = WIDGET_BORDER if border_color is None else border_color
-        dropdown_fg_color = WIDGET_PANEL_BG if dropdown_fg_color is None else dropdown_fg_color
-        dropdown_hover_color = WIDGET_HOVER if dropdown_hover_color is None else dropdown_hover_color
-
-        super().__init__(
-            master, values=[], width=width, height=height,
-            corner_radius=corner_radius, border_width=border_width,
-            state="readonly", font=font, justify="left",
-            variable=variable, command=command,
-            fg_color=fg_color, border_color=border_color,
-            # CTkComboBox 右段边框也用 button_color 绘制，默认与边框同色外框才均匀；
-            # 悬停取更醒目的边框色，保持"按钮属于边框"的一体观感
-            button_color=border_color if button_color is None else button_color,
-            button_hover_color=(
-                WIDGET_BORDER_STRONG if button_hover_color is None else button_hover_color),
-            text_color=WIDGET_TEXT if text_color is None else text_color,
-            **kwargs
-        )
-
-        self._combo_values = list(values or [])
-        self._dropdown = CTkScrollableDropdownFrame(
-            attach=self, values=self._combo_values, command=self._on_dropdown_select,
-            height=dropdown_height, button_height=dropdown_button_height,
-            fg_color=dropdown_fg_color, button_color=dropdown_fg_color,
-            hover_color=dropdown_hover_color,
-            text_color=WIDGET_TEXT if dropdown_text_color is None else dropdown_text_color,
-            scrollbar_button_color=dropdown_hover_color,
-            scrollbar_button_hover_color=dropdown_hover_color,
-            frame_border_color=border_color, frame_border_width=1,
-            justify="left", font=dropdown_font or font,
-        )
-        # CTkComboBox 只对自身名为 ctkcombobox 的控件绑定箭头区域，子类需补绑
-        self._canvas.tag_bind("right_parts", "<Button-1>",
-                              lambda e: self._dropdown._iconify())
-        self._canvas.tag_bind("dropdown_arrow", "<Button-1>",
-                              lambda e: self._dropdown._iconify())
-
-    def _on_dropdown_select(self, value):
-        """列表选中后转发给外部 command（文本已由 attach.set() 写入）。"""
-        if self._command is not None:
-            self._command(value)
-
-    def configure(self, **kwargs):
-        if "values" in kwargs:
-            self._combo_values = list(kwargs.pop("values") or [])
-            self._dropdown.configure(values=self._combo_values)
-        if "state" in kwargs:
-            state = kwargs.pop("state")
-            kwargs["state"] = "readonly" if state == "normal" else state
-        return super().configure(**kwargs)
-
-    def cget(self, attribute_name):
-        if attribute_name == "values":
-            return list(self._combo_values)
-        return super().cget(attribute_name)
 
 
 class ClickableCard(ctk.CTkFrame):

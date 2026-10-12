@@ -20,7 +20,7 @@ from ui.ctk.theme import (
     TRIGGER_HINT, TRIGGER_KEY_BTN, TRIGGER_KEY_BTN_HOVER,
     TRIGGER_METRIC_BTN, TRIGGER_METRIC_BTN_HOVER, TRIGGER_TEXT,
 )
-from ui.ctk.widgets import DropdownOptionButton
+from ui.ctk.widgets import OptionButton
 
 
 class TriggerEditDialog(BaseDialog):
@@ -603,15 +603,15 @@ class TriggerEditDialog(BaseDialog):
     # ---------- 条件规则的直观化 ----------
     def _dropdown_button(self, parent, values, var, fg_color, hover_color,
                          width=110, command=None):
-        """语义色下拉按钮（见 DropdownOptionButton）：点击弹出候选菜单，选中写回 var。
+        """语义色下拉按钮（见 OptionButton）：点击弹出候选菜单，选中写回 var。
 
         ``values`` 是返回候选列表的函数（度量的候选随条件键变化），变化后由
         调用方对返回控件 ``configure(values=...)``；``command`` 在写回 var 之后触发。
         """
-        return DropdownOptionButton(
+        return OptionButton(
             parent, values=values(), variable=var,
             command=lambda _choice: command() if command else None,
-            width=width, font=self.UI_FONT,
+            width=width, font=self.UI_FONT, border_width=0,
             fg_color=fg_color, hover_color=hover_color, text_color=TRIGGER_BTN_TEXT)
 
     def _metric_options(self, key):

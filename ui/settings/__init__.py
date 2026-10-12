@@ -24,7 +24,7 @@ from services.challenges import ChallengeService
 import services.ui_mode as ui_mode
 from services.news import DEFAULT_NEWS_TABLE, NewsService
 from ui.ctk.widgets import (
-    CollapsibleBlock, StyleListBox, CycleOptionButton, ScrollableComboBox,
+    CollapsibleBlock, StyleListBox, OptionButton,
 )
 from ui.ctk import fonts as ui_fonts
 from ui.ctk.theme import (
@@ -254,26 +254,17 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             control.pack(side='left')
         return control
 
-    def _make_cycle_button(self, parent, values, command, variable=None, expand=True):
-        """选项数量固定的行：点击轮换，不弹下拉列表。"""
-        return self._pack_control(CycleOptionButton(
+    def _make_option_button(self, parent, values, command, variable=None, expand=True):
+        """行内选项控件统一用 widgets.OptionButton：按钮 + 顶部锚定下拉列表。"""
+        return self._pack_control(OptionButton(
             parent, values=values, command=command, variable=variable,
-            width=120, height=28, corner_radius=7, font=ui_fonts.ui_font(13),
+            width=120, height=28, corner_radius=7, font=_FONT,
             fg_color=SETTINGS_INPUT_BG, border_color=SETTINGS_INPUT_BORDER,
             hover_color=SETTINGS_INPUT_HOVER, text_color=SETTINGS_LABEL,
-            text_color_disabled=SETTINGS_TEXT_SOFT, marker_color=SETTINGS_TEXT_SOFT,
-        ), expand)
-
-    def _make_combo_box(self, parent, values, command, variable=None, expand=True):
-        """选项数量会变化的行：可编辑/可滚动的组合框。"""
-        return self._pack_control(ScrollableComboBox(
-            parent, values=values, command=command, variable=variable,
-            width=120, height=27, corner_radius=7, font=_FONT,
-            fg_color=SETTINGS_INPUT_BG, border_color=SETTINGS_INPUT_BORDER,
-            text_color=SETTINGS_LABEL,
-            dropdown_fg_color=SETTINGS_INPUT_BG,
-            dropdown_hover_color=SETTINGS_INPUT_HOVER,
-            dropdown_text_color=SETTINGS_LABEL,
+            text_color_disabled=SETTINGS_TEXT_SOFT,
+            popup_fg_color=SETTINGS_INPUT_BG,
+            popup_hover_color=SETTINGS_INPUT_HOVER,
+            popup_text_color=SETTINGS_LABEL,
         ), expand)
 
     def _make_entry(self, parent, variable, width=120, show=None, placeholder_text=None):
@@ -306,7 +297,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         row += 1
         world_options = {"出现": "appear", "绝对巨大化": "abs_giant", "相对巨大化": "rel_giant"}
         self.world_setting_var = tk.StringVar(value=self.world_setting)
-        self.world_setting_button = self._make_cycle_button(
+        self.world_setting_button = self._make_option_button(
             ctrl, list(world_options.keys()),
             self._on_world_option_changed, self.world_setting_var
         )
@@ -340,7 +331,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         name_tables = self.name_repo.get_tables()
         if self.name_table not in name_tables:
             name_tables.insert(0, self.name_table)
-        self.name_table_menu = self._make_combo_box(
+        self.name_table_menu = self._make_option_button(
             ctrl, name_tables,
             self._on_name_table_changed, self.name_table_var
         )
@@ -355,7 +346,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             news_tables.insert(0, self.news_table)
         if not news_tables:
             news_tables = [DEFAULT_NEWS_TABLE]
-        self.news_table_menu = self._make_combo_box(
+        self.news_table_menu = self._make_option_button(
             ctrl, news_tables,
             self._on_news_table_changed, self.news_table_var
         )
@@ -369,7 +360,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             preset_tables.insert(0, self.preset_table)
         if not preset_tables:
             preset_tables = ["default"]
-        self.preset_table_menu = self._make_combo_box(
+        self.preset_table_menu = self._make_option_button(
             ctrl, preset_tables,
             self._on_preset_table_changed, self.preset_table_var
         )
@@ -382,7 +373,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             personality_tables.insert(0, self.personality_table)
         if not personality_tables:
             personality_tables = ["default"]
-        self.personality_table_menu = self._make_combo_box(
+        self.personality_table_menu = self._make_option_button(
             ctrl, personality_tables,
             self._on_personality_table_changed, self.personality_table_var
         )
@@ -419,7 +410,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.world_pack_idle_frame = ctk.CTkFrame(ctrl, fg_color="transparent")
         self.world_pack_idle_frame.pack(side='left')
         self.world_pack_var = tk.StringVar(value="")
-        self.world_pack_menu = self._make_combo_box(
+        self.world_pack_menu = self._make_option_button(
             self.world_pack_idle_frame, [],
             self._on_world_pack_changed, self.world_pack_var, expand=False
         )
@@ -782,7 +773,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         row += 1
         order_options = {"匹配度": "match", "尺寸升序": "size_asc", "尺寸降序": "size_desc"}
         self.order_var = tk.StringVar(value=self.comparison_order)
-        self.order_button = self._make_cycle_button(
+        self.order_button = self._make_option_button(
             ctrl, list(order_options.keys()),
             self._on_order_option_changed, self.order_var
         )
@@ -859,7 +850,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         palette_options = {display: name
                            for name, display in palette_display_names().items()}
         self.palette_var = tk.StringVar(value=self.theme_palette)
-        self.palette_menu = self._make_combo_box(
+        self.palette_menu = self._make_option_button(
             ctrl, list(palette_options.keys()),
             self._on_palette_option_changed, self.palette_var
         )
@@ -872,7 +863,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         row += 1
         theme_options = {"亮色": "Light", "暗色": "Dark", "跟随系统": "System"}
         self.theme_mode_var = tk.StringVar(value=self.theme_mode)
-        self.theme_mode_button = self._make_cycle_button(
+        self.theme_mode_button = self._make_option_button(
             ctrl, list(theme_options.keys()),
             self._on_theme_option_changed, self.theme_mode_var
         )
@@ -896,7 +887,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         row += 1
         pref = self.settings.get(ui_mode.STARTUP_MODE_KEY, ui_mode.STARTUP_EXIT)
         self.ui_mode_var = tk.StringVar(value=ui_mode.label_of(pref))
-        self.ui_mode_button = self._make_cycle_button(
+        self.ui_mode_button = self._make_option_button(
             ctrl, [label for label, _pref in ui_mode.STARTUP_CHOICES],
             self._on_ui_mode_changed, self.ui_mode_var)
 
@@ -979,7 +970,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             if abs(value - self.info_update_rate) < 1e-9:
                 self.info_update_var.set(display)
                 break
-        self.info_update_button = self._make_cycle_button(
+        self.info_update_button = self._make_option_button(
             ctrl, list(INFO_UPDATE_OPTIONS.keys()),
             self._on_info_update_changed, self.info_update_var
         )
@@ -1015,7 +1006,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         # 第1行：下拉框和新建按钮并排
         _, ai_provider_control = self._make_row(parent, row, "选择配置")
         self.ai_provider_var = tk.StringVar(value=self._profile_name(self.ai_provider))
-        self.ai_provider_menu = self._make_combo_box(
+        self.ai_provider_menu = self._make_option_button(
             ai_provider_control, self._profile_names(),
             self._on_ai_provider_changed, self.ai_provider_var, expand=False
         )

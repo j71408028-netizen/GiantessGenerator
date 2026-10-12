@@ -52,6 +52,7 @@ htmlcov/
 /.workbuddy/
 .zcodeignore
 /.temp/
+/AGENTS.md
 
 # atomic 写临时文件与覆盖前备份（persistence/json_store.py）
 *.bak

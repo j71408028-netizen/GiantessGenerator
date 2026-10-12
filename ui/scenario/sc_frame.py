@@ -14,7 +14,7 @@ from dungeon.audio.speech import (DEFAULT_OTHER_VOICES, DEFAULT_RATE, DEFAULT_VO
                             MAX_VOICE_VOLUME, RECOMMENDED_VOICES,
                             edge_tts_available, normalize_voice)
 from ui.ctk.widgets import (CTkScrollableDropdownFrame, CTkSegmentedControl,
-                               CycleOptionButton)
+                               OptionButton)
 from ui.ctk.dialogs import (BaseDialog, InputDialog, DLG_BORDER_STRONG,
                                DLG_PANEL_BG, DLG_TEXT, DLG_TEXT_SOFT)
 from ui.scenario.chapter_trigger_mgr import ChapterTriggerManager
@@ -337,17 +337,17 @@ class ScenarioEditor(ctk.CTkFrame):
         head_row.pack(fill='x', padx=(0, 20))
         ctk.CTkLabel(head_row, text="耦合等级", font=ui_fonts.ui_font(_F_BIG),
                      text_color=_TITLE).pack(side='left')
-        # 循环切换按钮：复用 widgets.CycleOptionButton（左键下一档、右键上一档，
-        # 到头循环）；档位值用等级显示名，回调里再映射回等级键
-        self.coupling_cycle = CycleOptionButton(
+        # 选项按钮：复用 widgets.OptionButton（点击弹出档位下拉），档位值用
+        # 等级显示名，回调里再映射回等级键
+        self.coupling_option = OptionButton(
             head_row, values=[coupling_label(lv) for lv in COUPLING_LEVELS],
-            command=self._on_coupling_cycle,
-            width=110, height=26, corner_radius=8,
+            command=self._on_coupling_option,
+            width=110, height=26, corner_radius=8, border_width=1,
             font=ui_fonts.ui_font(_F_BIG, "bold"),
             fg_color="transparent", border_color=SC_BORDER_STRONG,
-            hover_color=SC_HOVER, text_color=SC_LINK, marker_color=SC_LINK)
-        self.coupling_cycle.set(coupling_label(self.coupling_level))
-        self.coupling_cycle.pack(side='left', padx=8)
+            hover_color=SC_HOVER, text_color=SC_LINK)
+        self.coupling_option.set(coupling_label(self.coupling_level))
+        self.coupling_option.pack(side='left', padx=8)
         self.entry_cost_var = ctk.StringVar(value="0")
         self.entry_cost_entry = ctk.CTkEntry(head_row, textvariable=self.entry_cost_var,
                                              width=64, font=ui_fonts.ui_font(_F_BIG),
@@ -927,14 +927,14 @@ class ScenarioEditor(ctk.CTkFrame):
         self.components = list(self.component_panel.components)
         self.components_params = dict(self.component_panel.components_params)
 
-    def _on_coupling_cycle(self, value):
-        """CycleOptionButton 回调：把轮换控件的档位标签映射回等级并刷新左栏。"""
+    def _on_coupling_option(self, value):
+        """OptionButton 回调：把选项控件的档位标签映射回等级并刷新左栏。"""
         self.coupling_level = normalize_coupling_level(value)
         self._refresh_coupling_widgets()
 
     def _refresh_coupling_widgets(self):
         """把当前耦合等级回显到左栏（轮换档位、说明、等级初始提示标签）。"""
-        self.coupling_cycle.set(coupling_label(self.coupling_level))
+        self.coupling_option.set(coupling_label(self.coupling_level))
         self.coupling_prompt_label.configure(
             text=coupling_initial_prompt(self.coupling_level))
         # 主角称呼仅在 Solea/Bulla 生效：Velum 时置灰提示
