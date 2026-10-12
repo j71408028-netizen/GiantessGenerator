@@ -16,8 +16,11 @@ from dungeon.audio.chapters import (
 from dungeon.validate import LEGACY_ACTIONS
 from ui.ctk.dialogs import BaseDialog
 from ui.ctk.theme import (
-    TRIGGER_TEXT, TRIGGER_HINT,
+    TRIGGER_BTN_TEXT, TRIGGER_CMP_BTN, TRIGGER_CMP_BTN_HOVER,
+    TRIGGER_HINT, TRIGGER_KEY_BTN, TRIGGER_KEY_BTN_HOVER,
+    TRIGGER_METRIC_BTN, TRIGGER_METRIC_BTN_HOVER, TRIGGER_TEXT,
 )
+from ui.ctk.widgets import DropdownOptionButton
 
 
 class TriggerEditDialog(BaseDialog):
@@ -93,8 +96,8 @@ class TriggerEditDialog(BaseDialog):
             all_triggers = []
         super().__init__(parent)
         self.title("编辑触发器")
-        self.geometry("540x620")
-        self.minsize(480, 540)
+        self.geometry("540x680")
+        self.minsize(480, 600)
         self.resizable(True, True)
         self.trigger = trigger if trigger is not None else {}
         self.evolution_names = evolution_names
@@ -516,16 +519,9 @@ class TriggerEditDialog(BaseDialog):
         frame.pack(fill='x', pady=(0, 4))
         top = ctk.CTkFrame(frame, fg_color="transparent")
         top.pack(fill='x', pady=(0, 4))
-        ctk.CTkLabel(top, text="各规则间关系", font=self.UI_FONT).pack(side='left')
-        self.condition_operator_var = tk.StringVar(value=self.OPERATOR_LABELS[0][0])
-        op_labels = [label for label, _code in self.OPERATOR_LABELS]
-        ctk.CTkComboBox(top, values=op_labels, variable=self.condition_operator_var,
-                        state="readonly", width=170, height=28,
-                        font=self.UI_FONT).pack(side='left', padx=(8, 0))
-        ctk.CTkLabel(top, text="最多 3 条，整行留空表示忽略",
+        ctk.CTkLabel(top, text="规则间连接符", font=self.UI_FONT).pack(side='left')
+        ctk.CTkLabel(top, text="切换连接符处自动加括号；最多 4 条，整行留空表示忽略",
                      font=self.UI_FONT_SMALL).pack(side='left', padx=10)
-        self.condition_operator_var.trace_add(
-            "write", lambda *_a: self._update_condition_preview())
 
         # 条件预览：把所有规则实时翻译成中文句子，数组判定更直观
         self.cond_preview = ctk.CTkLabel(
@@ -535,38 +531,54 @@ class TriggerEditDialog(BaseDialog):
         self.cond_preview.pack(fill='x', padx=6, pady=(0, 4))
 
         self.condition_rows = []
+        # 行间连接符（第 i 个连接第 i 与第 i+1 行）；切换处预览加括号、保存时成组
+        self.condition_connectors = []
+        op_labels = [label for label, _code in self.OPERATOR_LABELS]
         base_keys = list(dict.fromkeys(
             self.evolution_names + ["介入度", "破坏性", "总伤亡", "总计数", "间隔计数",
                                     "节内计数", "伤亡数组"]))
         # 维护选择数组（整数记录）的触发器：选项分支 + 小游戏（返回值=达成关数）
         base_keys += [f"选择:{t['name']}" for t in self.all_triggers
                       if t.get("name") and t.get("action_type") in ("option", "mini_game")]
-        for index in range(3):
+        for index in range(4):
+            if index > 0:
+                conn_row = ctk.CTkFrame(frame, fg_color="transparent")
+                conn_row.pack(fill='x', pady=0)
+                ctk.CTkLabel(conn_row, text="── 连接:", font=self.UI_FONT_SMALL
+                             ).pack(side='left')
+                conn_var = tk.StringVar(value=self.OPERATOR_LABELS[0][0])
+                ctk.CTkOptionMenu(conn_row, values=op_labels, variable=conn_var,
+                                  width=150, height=26, font=self.UI_FONT
+                                  ).pack(side='left', padx=(6, 0))
+                conn_var.trace_add("write", lambda *_a: self._update_condition_preview())
+                self.condition_connectors.append(conn_var)
             row = ctk.CTkFrame(frame, fg_color="transparent")
             row.pack(fill='x', pady=3)
             key_var = tk.StringVar()
-            key_widget = ctk.CTkComboBox(row, values=base_keys or ["总计数"], variable=key_var,
-                                         state="readonly", width=150, height=28,
-                                         font=self.UI_FONT,
-                                         command=lambda _v, i=index: self._sync_condition_row(i))
-            key_widget.grid(row=0, column=0, sticky='w')
+            key_button = self._dropdown_button(
+                row, lambda: base_keys or ["总计数"], key_var,
+                TRIGGER_KEY_BTN, TRIGGER_KEY_BTN_HOVER, width=150,
+                command=lambda i=index: self._sync_condition_row(i))
+            key_button.grid(row=0, column=0, sticky='w')
             metric_var = tk.StringVar(value=self._metric_options("总伤亡")[0][0])
-            metric_widget = ctk.CTkComboBox(row, values=[], variable=metric_var,
-                                            state="readonly", width=100, height=28,
-                                            font=self.UI_FONT,
-                                            command=lambda _v, i=index: self._sync_condition_row(i))
-            metric_widget.grid(row=0, column=1, padx=(6, 0))
+            metric_button = self._dropdown_button(
+                row,
+                lambda kv=key_var: [lab for lab, _c in self._metric_options(kv.get().strip())],
+                metric_var, TRIGGER_METRIC_BTN, TRIGGER_METRIC_BTN_HOVER, width=104,
+                command=lambda i=index: self._sync_condition_row(i))
+            metric_button.grid(row=0, column=1, padx=(6, 0))
             target_var = tk.StringVar()
             target_widget = ctk.CTkEntry(row, textvariable=target_var, width=68,
                                          height=28, font=self.UI_FONT,
                                          placeholder_text="目标编号")
             target_widget.grid(row=0, column=2, padx=(6, 0))
             comparator_var = tk.StringVar(value=">=")
-            comparator_widget = ctk.CTkComboBox(
-                row, values=[">=", "<=", ">", "<", "==", "!="],
-                variable=comparator_var, state="readonly", width=58, height=28,
-                font=self.UI_FONT)
-            comparator_widget.grid(row=0, column=3, padx=(6, 0))
+            comparator_button = self._dropdown_button(
+                row, lambda: [">=", "<=", ">", "<", "==", "!="], comparator_var,
+                TRIGGER_CMP_BTN, TRIGGER_CMP_BTN_HOVER, width=58)
+            comparator_button.grid(row=0, column=3, padx=(6, 0))
+            comparator_var.trace_add(
+                "write", lambda *_a, i=index: self._update_condition_preview())
             value_var = tk.StringVar()
             value_widget = ctk.CTkEntry(row, textvariable=value_var, width=88,
                                         height=28, font=self.UI_FONT,
@@ -580,8 +592,8 @@ class TriggerEditDialog(BaseDialog):
             self.condition_rows.append({
                 "key_var": key_var, "metric_var": metric_var, "target_var": target_var,
                 "comparator_var": comparator_var, "value_var": value_var, "window_var": window_var,
-                "key_widget": key_widget, "metric_widget": metric_widget,
-                "target_widget": target_widget, "comparator_widget": comparator_widget,
+                "key_widget": key_button, "metric_widget": metric_button,
+                "target_widget": target_widget, "comparator_widget": comparator_button,
                 "value_widget": value_widget, "window_widget": window_widget,
             })
             for var in (value_var, target_var, window_var):
@@ -589,6 +601,19 @@ class TriggerEditDialog(BaseDialog):
             self._sync_condition_row(index)
 
     # ---------- 条件规则的直观化 ----------
+    def _dropdown_button(self, parent, values, var, fg_color, hover_color,
+                         width=110, command=None):
+        """语义色下拉按钮（见 DropdownOptionButton）：点击弹出候选菜单，选中写回 var。
+
+        ``values`` 是返回候选列表的函数（度量的候选随条件键变化），变化后由
+        调用方对返回控件 ``configure(values=...)``；``command`` 在写回 var 之后触发。
+        """
+        return DropdownOptionButton(
+            parent, values=values(), variable=var,
+            command=lambda _choice: command() if command else None,
+            width=width, font=self.UI_FONT,
+            fg_color=fg_color, hover_color=hover_color, text_color=TRIGGER_BTN_TEXT)
+
     def _metric_options(self, key):
         """按规则键返回可选的数组统计方式（展示文案, 内部代码）。"""
         if key.startswith("选择:"):
@@ -683,12 +708,110 @@ class TriggerEditDialog(BaseDialog):
             return f"伤亡数组累计条数 {cmp_text} {value}"
         return f"{key}{cmp_text}{value}"
 
+    def _filled_rows(self):
+        """非全空的规则行下标（升序）；部分填写也计入，交给收集阶段报错。"""
+        filled = []
+        for index, row in enumerate(self.condition_rows):
+            if row["key_var"].get().strip() or row["value_var"].get().strip():
+                filled.append(index)
+        return filled
+
+    def _effective_connectors(self, filled):
+        """已填规则之间的有效连接符（and/or）。
+
+        连接符属于其上方的空隙（第 i 个连接第 i-1、i 行）：中间行整行留空时，
+        该空隙被跳过，以后一条已填行上方的连接符为准。
+        """
+        return [self._op_label_to_code(self.condition_connectors[cur - 1].get())
+                for prev, cur in zip(filled, filled[1:])]
+
+    @staticmethod
+    def _split_condition_groups(leaves, conns):
+        """把叶子序列按连接符切成条件组：连接符切换处即括号边界。
+
+        顶层连接符取第一处切换后的连接符（无切换时即唯一连接符）；
+        与顶层不同的连接符的极大连续段各自成组，其余叶子保持独立。
+        返回 (顶层连接符, [(组内连接符或 None, [叶子...]), ...])——
+        组内连接符为 None 表示独立叶子（单元素组，不需要括号）。
+        """
+        if not leaves:
+            return "and", []
+        top_op = conns[0] if conns else "and"
+        for prev, cur in zip(conns, conns[1:]):
+            if cur != prev:
+                top_op = cur
+                break
+        groups = []
+        current = [leaves[0]]
+        current_op = None
+        for connector, leaf in zip(conns, leaves[1:]):
+            if connector == top_op:
+                groups.append((current_op, current))
+                current = [leaf]
+                current_op = None
+            else:
+                if current_op is None:
+                    current_op = connector
+                current.append(leaf)
+        groups.append((current_op, current))
+        return top_op, groups
+
+    @staticmethod
+    def _build_condition(leaves, conns):
+        """按连接符分段组条件：同连接符连续段嵌套成子条件组，段间用顶层连接符。
+
+        全部同连接符时保持扁平结构（与旧格式一致，不产生无谓的嵌套）。
+        """
+        top_op, groups = TriggerEditDialog._split_condition_groups(leaves, conns)
+        rules = []
+        for op, group in groups:
+            if op and len(group) > 1:
+                rules.append({"operator": op, "rules": group})
+            else:
+                rules.extend(group)
+        return {"operator": top_op, "rules": rules}
+
+    @staticmethod
+    def _flatten_condition(condition):
+        """把（可能一层嵌套的）条件摊平为 (叶子, 叶子间连接符)。
+
+        组内叶子之间用组内连接符，组边界处用顶层连接符——与
+        ``_build_condition`` 互为逆操作；更深的嵌套超出编辑器表达能力，忽略。
+        """
+        if not isinstance(condition, dict):
+            return [], []
+        top_op = condition.get("operator")
+        top_op = top_op if top_op in ("and", "or") else "and"
+        leaves, conns = [], []
+
+        def push(rule, connector):
+            if leaves:
+                conns.append(connector)
+            leaves.append(rule)
+
+        for rule in (condition.get("rules") or []):
+            if isinstance(rule, dict) and isinstance(rule.get("rules"), list):
+                sub_op = rule.get("operator")
+                sub_op = sub_op if sub_op in ("and", "or") else top_op
+                for sub_index, sub in enumerate(rule["rules"]):
+                    if isinstance(sub, dict) and isinstance(sub.get("rules"), list):
+                        continue
+                    push(sub, sub_op if sub_index > 0 else top_op)
+            else:
+                push(rule, top_op)
+        return leaves, conns
+
     def _update_condition_preview(self):
         texts = []
-        for row in self.condition_rows:
+        filled = []
+        for index, row in enumerate(self.condition_rows):
             key = row["key_var"].get().strip()
             value = row["value_var"].get().strip()
+            if not key and not value:
+                continue
+            filled.append(index)
             if not key or not value:
+                texts.append("（未填完整）")
                 continue
             rule = {
                 "key": key,
@@ -713,18 +836,27 @@ class TriggerEditDialog(BaseDialog):
                 except ValueError:
                     rule["window"] = window
             texts.append(self._rule_to_text(rule))
-        op = self._op_label_to_code(self.condition_operator_var.get())
+        conns = self._effective_connectors(filled)
         if not texts:
             preview = "（留空或整行未填 → 无条件触发）"
         else:
-            preview = (" 且 " if op == "and" else " 或 ").join(texts)
+            top_op, groups = self._split_condition_groups(texts, conns)
+            parts = []
+            for op, group in groups:
+                text = (" 且 " if op == "and" else " 或 ").join(group)
+                if op:  # 同连接符连续段：编辑器自动加括号的地方
+                    text = f"（{text}）"
+                parts.append(text)
+            preview = (" 且 " if top_op == "and" else " 或 ").join(parts)
         self.cond_preview.configure(text="条件预览: " + preview)
 
     def _load_condition_controls(self):
         condition = self.trigger.get("condition") or self.DEFAULT_CONDITION_TEMPLATE
-        self.condition_operator_var.set(self._op_code_to_label(condition.get("operator", "and")))
-        for index, rule in enumerate(condition.get("rules", [])[:4]):
-            row = self.condition_rows[index]
+        leaves, conns = self._flatten_condition(condition)
+        for index, row in enumerate(self.condition_rows):
+            if index >= len(leaves):
+                break
+            rule = leaves[index]
             key = rule.get("key", "")
             row["key_var"].set(key)
             row["comparator_var"].set(rule.get("comparator", ">="))
@@ -733,14 +865,19 @@ class TriggerEditDialog(BaseDialog):
             row["target_var"].set(str(rule.get("target", "")) if rule.get("target") is not None else "")
             row["window_var"].set(str(rule.get("window", "")) if rule.get("window") is not None else "")
             self._sync_condition_row(index)
+        for index, conn_var in enumerate(self.condition_connectors):
+            conn_var.set(self._op_code_to_label(conns[index]) if index < len(conns)
+                         else self.OPERATOR_LABELS[0][0])
 
     def _collect_condition(self):
         rules = []
-        for row in self.condition_rows:
+        filled = []
+        for index, row in enumerate(self.condition_rows):
             key = row["key_var"].get().strip()
             value = row["value_var"].get().strip()
             if not key and not value:
                 continue
+            filled.append(index)
             if not key or not value:
                 raise ValueError("条件规则的关键字和值必须同时填写")
             try:
@@ -769,7 +906,7 @@ class TriggerEditDialog(BaseDialog):
             rules.append(rule)
         if not rules:
             return copy.deepcopy(self.DEFAULT_CONDITION_TEMPLATE)
-        return {"operator": self._op_label_to_code(self.condition_operator_var.get()), "rules": rules}
+        return self._build_condition(rules, self._effective_connectors(filled))
 
     def _load_action_controls(self, action_data):
         action_data = action_data or {}

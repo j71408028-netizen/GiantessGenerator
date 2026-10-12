@@ -12,7 +12,7 @@
 5. 旧版 ending：运行时不再执行（走退场提示路径，不启动结局生成）；
 6. 回放复现：fx 记录按解析后的参数原样重放；
 7. 校验器：fx 配置错误产出逐字段 warning；旧版 ending 报 LEGACY warning；
-8. 条件一层或/且组合：嵌套求值、校验器分层告警。
+8. 条件一层或/且组合：嵌套求值、校验器分层告警、编辑器组切分往返。
 """
 
 import os
@@ -263,6 +263,28 @@ h_msgs = [(d.level, d.path) for d in diag if d.path.startswith("triggers[1]")]
 check("一层条件组合无告警", not g_msgs, str(g_msgs))
 check("两层条件组合有 warning", any(l == "warning" and p == "triggers[1].condition.rules[0].rules[0]"
                                     for l, p in h_msgs), str(h_msgs))
+
+# 编辑器组切分 / 扁平化往返（不实例化对话框，只调静态方法）
+from ui.scenario.trigger_dlg import TriggerEditDialog  # noqa: E402
+
+_leaves = [_rule("总计数", "==", i) for i in range(4)]
+_mixed = TriggerEditDialog._build_condition(_leaves, ["or", "and", "or"])
+check("连接符 or/and/or → (a或b)且(c或d)",
+      _mixed == _group("and", [_group("or", _leaves[:2]), _group("or", _leaves[2:])]), str(_mixed))
+check("混合连接符往返无损",
+      TriggerEditDialog._flatten_condition(_mixed) == (_leaves, ["or", "and", "or"]),
+      str(TriggerEditDialog._flatten_condition(_mixed)))
+_flat = TriggerEditDialog._build_condition(_leaves[:3], ["or", "or"])
+check("连接符不变保持扁平旧格式",
+      _flat == {"operator": "or", "rules": _leaves[:3]}, str(_flat))
+_prefix = TriggerEditDialog._build_condition(_leaves[:3], ["and", "or"])
+check("连接符 and/or → (a且b)或c",
+      _prefix == _group("or", [_group("and", _leaves[:2]), _leaves[2]]), str(_prefix))
+check("前缀组合往返无损",
+      TriggerEditDialog._flatten_condition(_prefix) == (_leaves[:3], ["and", "or"]))
+_legacy = {"operator": "or", "rules": _leaves[:2]}
+check("旧扁平格式回填为同连接符", TriggerEditDialog._flatten_condition(_legacy)
+      == (_leaves[:2], ["or"]), str(TriggerEditDialog._flatten_condition(_legacy)))
 
 # ---------------- 汇总 ----------------
 _log.close()

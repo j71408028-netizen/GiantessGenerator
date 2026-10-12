@@ -308,9 +308,17 @@ class ChapterTriggerManager(TreeviewManager):
         rules = cond.get("rules", [])
         if not rules:
             return "无规则"
-        parts = [f"{r.get('key', '')}{r.get('comparator', '>=')}{r.get('value', 0)}"
-                 for r in rules]
+        return self._format_condition_group(cond)
+
+    def _format_condition_group(self, cond: dict) -> str:
         joiner = " 且 " if cond.get("operator", "and") == "and" else " 或 "
+        parts = []
+        for rule in cond.get("rules", []):
+            if isinstance(rule, dict) and isinstance(rule.get("rules"), list):
+                parts.append(f"（{self._format_condition_group(rule)}）")
+            else:
+                parts.append(f"{rule.get('key', '')}{rule.get('comparator', '>=')}"
+                             f"{rule.get('value', 0)}")
         return joiner.join(parts)
 
     # ---------- 数据访问 ----------

@@ -727,6 +727,122 @@ class CTkScrollableDropdownFrame(customtkinter.CTkFrame):
             self.widgets[key].configure(**kwargs)
 
 
+class _FlipUpDropdown(CTkScrollableDropdownFrame):
+    """贴底自动向上翻转的下拉弹层。
+
+    基类只会把弹层放在按钮正下方（``place`` 于窗口内）；按钮贴近窗口底部、
+    下方放不下且上方有空间时，改为弹出在按钮上方，避免弹层被窗口下缘裁掉。
+    """
+
+    def place_dropdown(self):
+        top = self.attach.winfo_toplevel()
+        try:
+            scaling = self._get_widget_scaling()
+        except AttributeError:
+            scaling = 1.0
+        btn_top = (self.attach.winfo_rooty() - top.winfo_rooty()) / scaling
+        below = btn_top + self.attach.winfo_height() / scaling + 5
+        estimate = min(self.height, self.button_height * self.button_num + 55)
+        win_height = top.winfo_height() / scaling
+        if below + estimate > win_height and btn_top - estimate - 5 > 0:
+            self.y = max(5, btn_top - estimate - 5)
+        else:
+            self.y = None
+        super().place_dropdown()
+
+
+class DropdownOptionButton(customtkinter.CTkButton):
+    """点击弹出候选下拉的按钮（按钮 + 下拉弹层组合，参考 creation_params_dlg）。
+
+    按钮显示当前值（语义色由调用方指定），点击弹出候选菜单，选中后写回
+    ``variable`` 并触发 ``command``（与 CTkOptionMenu 一致：先落值后回调）。
+    对外接口对齐 CTkOptionButton / CycleOptionButton：``set()`` / ``get()``
+    / ``configure(values=)``。候选随外部状态变化时用 ``configure(values=)``
+    重建弹层列表。
+
+    空取值显示 ``placeholder``：CTkButton 对空文字不创建内部 label，弹层的
+    ``attach.focus()`` 会崩，占位文字同时提示此处可点选。弹层贴近窗口底部
+    放不下时自动向上翻转（见 ``_FlipUpDropdown``）。
+    """
+
+    def __init__(self, master, values=None, command=None, *, variable=None,
+                 width=120, height=28, font=None, fg_color=None, hover_color=None,
+                 text_color=None, placeholder="…", popup_height=200, popup_width=None,
+                 popup_fg_color=None, popup_hover_color=None, popup_text_color=None,
+                 popup_border_color=None, **kwargs):
+        self._placeholder = placeholder
+        self._variable = variable
+        self._option_command = command
+        self._values = list(values or [])
+        self._current = ""
+        if variable is not None:
+            current = variable.get()
+        elif self._values:
+            current = self._current = self._values[0]
+        else:
+            current = ""
+        super().__init__(master, text=current or placeholder, width=width,
+                         height=height, font=font, fg_color=fg_color,
+                         hover_color=hover_color, text_color=text_color, **kwargs)
+        self._dropdown = _FlipUpDropdown(
+            attach=self, values=self._values, command=self._pick,
+            height=popup_height,
+            button_height=28,
+            width=popup_width if popup_width is not None else max(200, width),
+            fg_color=popup_fg_color or WIDGET_PANEL_BG,
+            button_color=popup_fg_color or WIDGET_PANEL_BG,
+            hover_color=popup_hover_color or WIDGET_HOVER,
+            text_color=popup_text_color or WIDGET_TEXT,
+            scrollbar_button_color=popup_hover_color or WIDGET_HOVER,
+            scrollbar_button_hover_color=popup_border_color or WIDGET_MENU_HOVER,
+            frame_border_color=popup_border_color or WIDGET_MENU_HOVER,
+            frame_border_width=1, justify="left")
+        if variable is not None:
+            variable.trace_add(
+                "write", lambda *_a: self.configure(
+                    text=variable.get() or self._placeholder))
+
+    # ── 对外接口（对齐 CTkOptionMenu）──
+    def set(self, value):
+        """切换显示值（不触发 command，与 CTkOptionMenu 一致）。"""
+        if value not in self._values:
+            return
+        self._current = value
+        if self._variable is not None:
+            self._variable.set(value)
+        else:
+            self.configure(text=value or self._placeholder)
+
+    def get(self):
+        if self._variable is not None:
+            return self._variable.get()
+        return self._current
+
+    def configure(self, **kwargs):
+        if "values" in kwargs:
+            self._values = list(kwargs.pop("values") or [])
+            if self._current not in self._values and self._variable is None:
+                self._current = self._values[0] if self._values else ""
+                self.configure(text=self._current or self._placeholder)
+            self._dropdown.configure(values=self._values)
+        return super().configure(**kwargs)
+
+    def cget(self, attribute_name):
+        if attribute_name == "values":
+            return list(self._values)
+        return super().cget(attribute_name)
+
+    # ── 内部实现 ──
+    def _pick(self, choice):
+        self._current = choice
+        if self._variable is not None:
+            self._variable.set(choice)
+        else:
+            self.configure(text=choice or self._placeholder)
+        if self._option_command is not None:
+            self._option_command(choice)
+
+
 class ScrollableComboBox(customtkinter.CTkComboBox):
     """带统一风格下拉列表的组合框（选项数量会变化的场景替代 OptionMenu）。
 

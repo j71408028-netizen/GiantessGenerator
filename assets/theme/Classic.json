@@ -506,6 +506,13 @@
     "//trigger": "触发器对话框 · ui/scenario/trigger_dlg.py",
     "TRIGGER_TEXT": { "$role": "text-body" },
     "TRIGGER_HINT": { "$pair": ["brown.800", "warm-gray.400"] },
+    "TRIGGER_BTN_TEXT": { "$pair": ["#FFFFFF", "warm-gray.1000"] },
+    "TRIGGER_KEY_BTN": { "$role": "feature-blue" },
+    "TRIGGER_KEY_BTN_HOVER": { "$pair": ["sky.800", "sky.600"] },
+    "TRIGGER_METRIC_BTN": { "$role": "state-success" },
+    "TRIGGER_METRIC_BTN_HOVER": { "$pair": ["emerald.900", "emerald.500"] },
+    "TRIGGER_CMP_BTN": { "$role": "state-warning" },
+    "TRIGGER_CMP_BTN_HOVER": { "$pair": ["amber.600", "amber.200"] },
 
     "//dependency": "依赖图对话框 · ui/scenario/dependency_dlg.py",
     "DEPENDENCY_TEXT": { "$role": "text-body" },
