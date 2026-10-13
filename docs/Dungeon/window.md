@@ -326,7 +326,7 @@ DungeonSessionWindow(...).run()                      # 不传 = HostPort()，无
 | 分句器 / 说话人标记 | `python tests/check_splitter.py` |
 | 新增 import / 分层 | `python tests/check_dungeon_layering.py`（窗口层含 `component_pack/` 子包） |
 | 新增 dpg 生命周期 / 线程调用（stop/create/destroy、Timer、join） | `python tests/check_dungeon_window_contract.py`（C1 / C4 / C5 的机械可查部分） |
-| schema / 校验器 | `python tests/check_scenario_schema.py`；批量校验 `python tests/check_scenarios.py --errors-only` |
+| schema / 校验器 | `python tests/check_scenario_schema.py`；批量校验 `python scripts/scenario_validate.py --errors-only` |
 
 无 GUI 守卫（`check_dungeon_layering.py` / `check_dungeon_finalize.py` / `check_splitter.py` 等）+
 真窗口冒烟（`dungeon_autopilot.py`）才算绿。判定方式见 [调试自动化](window_automation.md) §4：**按子进程输出判定，不看退出码**

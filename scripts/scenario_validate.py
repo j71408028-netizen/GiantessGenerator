@@ -1,12 +1,18 @@
-"""批量校验副本方案配置（CLI）。
+"""批量校验副本方案配置（CLI，校验的是**用户数据**不是代码）。
 
 用法::
 
-    python tests/check_scenarios.py [--data-dir <dir>] [--scenario <id>]
-    python tests/check_scenarios.py --errors-only   # 只展示错误级
+    python scripts/scenario_validate.py [--data-dir <dir>] [--scenario <id>]
+    python scripts/scenario_validate.py --errors-only   # 只展示错误级
 
 对每个方案跑 ``dungeon.validate.validate_scenario_config()``（含资产存在性检查），
-输出诊断报告；有任何 error 级诊断时退出码为 1（可挂 CI / 自查）。
+输出诊断报告；有任何 error 级诊断时退出码为 1（CI 的「默认方案校验」step 用它）。
+
+它原在 ``tests/``（``check_scenarios.py``），2026-10-13 移到 ``scripts/``：校验
+对象是 ``data/`` 下的用户方案而不是仓库代码——本地编辑自己的方案出错会弄红
+``run_checks.py``，而 CI 的干净检出里没有这些方案、永远不红，方向是反的；而且它
+会被 ``run_checks.py``（按 ``check_*`` 自动发现）和 CI 的显式 step 各跑一遍。
+移出后 ``tests/`` 只留代码守卫，本工具由 CI 显式调用。
 
 校验规则与接入点的关系：编辑器保存时（``ScenarioRepo.save_config`` 记录诊断）与
 副本启动前（``window/base.py::_load_session_config``，error 阻止进入）用的是

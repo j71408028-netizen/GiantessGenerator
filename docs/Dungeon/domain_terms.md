@@ -41,7 +41,7 @@
 | `tests/check_scenario_schema.py` | schema 单一真相源 + 校验器规则自检 |
 | `tests/check_dungeon_finalize.py` | 收尾路径回归 |
 | `tests/check_dungeon_layering.py` | 领域层不得依赖 UI / 服务层的分层守卫 |
-| `tests/check_scenarios.py` | 离线批量校验所有方案 |
+| `scripts/scenario_validate.py` | 离线批量校验所有方案 |
 
 命令：见 [副本文档索引](README.md) §4。
 

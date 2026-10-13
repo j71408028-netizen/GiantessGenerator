@@ -298,7 +298,7 @@ normalize_chapter / ScenarioRepo._migrate（手写，行为经过实战）
 |---|---|---|
 | 编辑器保存 | `ScenarioRepo.save_config()` | 计算并留存诊断（warning / info 不阻断） |
 | 副本启动前 | `window/base.py::_load_session_config()` | **error 阻止进入副本**，warning 打到控制台 |
-| 离线批量 / CI | `tests/check_scenarios.py` | 有 error 时退出码 1 |
+| 离线批量 / CI | `scripts/scenario_validate.py` | 有 error 时退出码 1 |
 
 诊断分三级：`error`（悬空跳转目标、无起始章节、空选项列表…）/ `warning`（未知条件键、废弃动作、失效前置引用、资产缺失…）/ `info`（无结局路径、旧版字段、未知顶层键…）。
 

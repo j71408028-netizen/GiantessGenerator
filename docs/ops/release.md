@@ -54,7 +54,7 @@ git status --short           # 应为空
 
 # 1) 门禁全绿（离线守卫 + 默认方案校验）
 python tests/run_checks.py
-python tests/check_scenarios.py
+python scripts/scenario_validate.py
 
 # 2) 定版本号 → 提交
 #    改 paths.py: APP_VERSION = "1.0.0"

@@ -397,7 +397,7 @@ MCI 的坑：`play <alias> repeat` 只有 mpegvideo（mp3 等）认，waveaudio�
 |---|---|---|
 | 编辑器保存 | `ScenarioRepo.save_config()` | 诊断记入 `last_diagnostics`，编辑器弹窗汇总 error |
 | 副本启动前 | `window/base.py::_load_session_config()` | error 级阻止进入 |
-| 离线批量 / CI | `tests/check_scenarios.py` | error 退出码 1 |
+| 离线批量 / CI | `scripts/scenario_validate.py` | error 退出码 1 |
 
 ### 9.2 迁移与兼容
 

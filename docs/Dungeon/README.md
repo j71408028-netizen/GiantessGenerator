@@ -20,7 +20,7 @@
 | 我要改… | 先看 | 然后跑 |
 |---|---|---|
 | 方案配置字段 / 默认值 | `dungeon/schema.py`（单一真相源）+ [数据模型](script.md) §2、§4 | `check_scenario_schema.py` |
-| 校验规则（error / warning / info） | [数据模型](script.md) §9 | `check_scenario_schema.py`、`check_scenarios.py` |
+| 校验规则（error / warning / info） | [数据模型](script.md) §9 | `check_scenario_schema.py`、`scripts/scenario_validate.py` |
 | 章节 / 触发器运行时行为 | [数据模型](script.md) §3、§5–§6 | `dungeon_autopilot.py` |
 | 演化、转移矩阵、段落步长 | [架构](architecture.md) §4 | `check_scenario_schema.py`（演化链路守卫） |
 | 窗口生命周期 / 关闭 / 收尾 | [窗口](window.md) §2、§3 | `dungeon_autopilot.py`、`check_dungeon_finalize.py` |
@@ -62,12 +62,12 @@
 | `check_component_pack.py` | 显示组件包：加载链（常驻包来源 / 必需 id）、文本家族与 schema 一致、组件契约与服务面（替身 ctx 只实现服务面 + AST 扫 `ctx._x` 越界）、元数据 `label`/`description`、`param_specs` 结构与 `min/max` 夹取、tag 前缀冲突、组件包不 `print` 且类都登记进 `REGISTRY`、外部包覆盖、隐藏 DPG 上下文里的 `build/layout/refresh/destroy` 冒烟与控件无残留 | `python tests/check_component_pack.py` |
 | `check_dungeon_finalize.py` | 原子写 / `.bak` / 损坏回退 + `_finalize` 完成与未完成两条路径 | `python tests/check_dungeon_finalize.py` |
 | `check_scenario_naming.py` | 命名守卫（旧标识符残留）+ 兼容读与迁移行为 | `python tests/check_scenario_naming.py` |
-| `check_scenarios.py` | 离线批量校验所有 / 单个方案，有 error 时退出码 1 | `python tests/check_scenarios.py --errors-only` |
 
-> 另有两支**不判红**的人工工具在 `scripts/`：`child_dpi_probe.py`（副本子进程 DPI
-> 感知探针）与 `platform_api_report.py`（Windows 专有 API 落点清单，发布 macOS 前
-> 过一眼）。二者原先在 `tests/`，2026-10-13 移出——只打印清单、不给出结论的脚本
-> 不该占 CI 门禁位。分句器/语音链路等仍由 `tests/` 的守卫覆盖。
+> 另有三支**不判红**的人工/批量工具在 `scripts/`：`child_dpi_probe.py`（副本子进程
+> DPI 感知探针）、`platform_api_report.py`（Windows 专有 API 落点清单，发布 macOS
+> 前过一眼）、`scenario_validate.py`（方案批量校验，CI 的「默认方案校验」step 显式
+> 调用）。三者原先在 `tests/`，2026-10-13 移出——只打印清单、不给出结论，或校验的是
+> 用户数据而不是代码的脚本，不该占 CI 门禁位。分句器/语音链路等仍由 `tests/` 的守卫覆盖。
 
 需显示器（GUI 冒烟层，不进无 GUI 门禁）：
 
