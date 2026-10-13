@@ -16,12 +16,15 @@
 9. **缺省对齐**：``DEFAULT_BGM_LEVEL`` / ``DEFAULT_VOICE_LEVEL`` 都取总线缺省档；
 10. **归一迁移**：``bgm_level`` / ``voice_level`` 优先新键、回退旧键；``normalize_*``
     只产出 ``level``；``overrides.parse_overrides`` 两种键都认；
-11. **设置缺省**：``SettingsRepo`` 缺省含四条总线电平（取自总线单一真相源），
-    且不再有语音总开关 ``dungeon_voice_enabled``；旧键按「关着 → 语音电平折算成 0」迁移；
-12. 接线守卫：三条播放路径都改走总线，副本窗口把 settings 电平装进混入层，
-    设置页读写 ``audio_levels``，旧的 ``volume / 100`` 换算已消失。
+11. **设置缺省**：``SettingsRepo.load()`` 在空数据目录下补全出四条总线电平
+    （取自总线单一真相源），且不再有语音总开关 ``dungeon_voice_enabled``；
+    旧键按「关着 → 语音电平折算成 0」迁移；
+12. 接线：播放路径**实测**走总线（假后端下 BgmPlayer 起播音量 = 音乐总线增益，
+    不再在源码里找字符串）；副本窗口装配与设置页读写按 AST 认引用；
+    旧的 ``volume / 100`` 换算与 0-100 常量不得回归。
 """
 
+import ast
 import json
 import math
 import os
@@ -269,15 +272,9 @@ check("describe 用档位中文名",
       overrides_mod.describe({"bgm_level": 2}) == "音乐档位=轻",
       overrides_mod.describe({"bgm_level": 2}))
 
-# ---------------- 11. 设置缺省 ----------------
+# ---------------- 11. 设置缺省（公开 load()，不读私有 _defaults） ----------------
 from persistence.settings_repo import SettingsRepo  # noqa: E402
-check("设置缺省含四条总线电平（取自总线单一真相源）",
-      SettingsRepo()._defaults.get("audio_levels") == buses.DEFAULT_BUS_LEVELS,
-      SettingsRepo()._defaults.get("audio_levels"))
-check("设置缺省不再有语音总开关（撤掉的选项不该留在缺省里）",
-      "dungeon_voice_enabled" not in SettingsRepo()._defaults)
 
-# ---------------- 11b. 旧键 dungeon_voice_enabled → 语音总线电平 ----------------
 _tmp_dir = tempfile.mkdtemp(prefix="audio_buses_settings_")
 os.makedirs(os.path.join(_tmp_dir, "user"), exist_ok=True)
 _settings_path = os.path.join(_tmp_dir, "user", "settings.json")
@@ -286,6 +283,17 @@ _settings_path = os.path.join(_tmp_dir, "user", "settings.json")
 def _write_settings(payload):
     with open(_settings_path, "w", encoding="utf-8") as handle:
         json.dump(payload, handle)
+
+
+# 空数据目录 = 全新安装：load() 补全缺省后返回的就是缺省值本身
+_defaults_loaded = SettingsRepo(data_dir=_tmp_dir).load()
+check("设置缺省含四条总线电平（取自总线单一真相源）",
+      _defaults_loaded.get("audio_levels") == buses.DEFAULT_BUS_LEVELS,
+      _defaults_loaded.get("audio_levels"))
+check("设置缺省不再有语音总开关（撤掉的选项不该留在缺省里）",
+      "dungeon_voice_enabled" not in _defaults_loaded)
+
+# ---------------- 11b. 旧键 dungeon_voice_enabled → 语音总线电平 ----------------
 
 
 _write_settings({"dungeon_voice_enabled": False,
@@ -304,31 +312,99 @@ check("旧开关开着 → 只删键，不碰电平",
       and "dungeon_voice_enabled" not in _loaded,
       _loaded.get("audio_levels"))
 
-# ---------------- 12. 接线守卫 ----------------
+# ---------------- 12. 播放路径接线 ----------------
+# 播放侧真的走总线：用假后端实测起播音量——源码里出现某个字符串不算数。
+import dungeon.audio as audio_mod  # noqa: E402
+
+
+class _RecordingTrack:
+    """假音频后端：只记录收到的起播/音量指令，不碰音频设备。"""
+
+    events = []
+
+    @classmethod
+    def supported(cls):
+        return True
+
+    @classmethod
+    def open(cls, path):
+        return cls(path)
+
+    def __init__(self, path=""):
+        self._path = path
+
+    def start(self, loop=False, volume=1.0):
+        self.events.append(("start", round(float(volume), 4)))
+        return True
+
+    def set_volume(self, volume):
+        self.events.append(("volume", round(float(volume), 4)))
+
+    def tick(self):
+        pass
+
+    def finished(self):
+        return True
+
+    def stop(self):
+        pass
+
+    def close(self):
+        pass
+
+
+def _mentions(rel_path, *, name=None, attr=None, literal=None):
+    """AST 级引用检查：文件里出现过指定名字 / 属性 / 字符串常量即算数。
+
+    比源码子串耐格式化（引号、换行、注释都不影响），也只在真的删掉这处引用时
+    才红——而那正是要守的契约。跨层接线离线做不了行为测试，这是最贴近的一档。
+    """
+    tree = ast.parse(open(os.path.join(_PROJECT_ROOT, rel_path),
+                          encoding="utf-8").read())
+    for node in ast.walk(tree):
+        if name and isinstance(node, ast.Name) and node.id == name:
+            return True
+        if attr and isinstance(node, ast.Attribute) and node.attr == attr:
+            return True
+        if literal and isinstance(node, ast.Constant) and node.value == literal:
+            return True
+    return False
+
+
+_bgm_tmp = tempfile.mkdtemp(prefix="audio_buses_bgm_")
+_tone = os.path.join(_bgm_tmp, "tone.wav")
+_real_backends = audio_mod.set_backends([_RecordingTrack])
+_bgm = audio_mod.BgmPlayer(resolver=lambda _p: _tone, logger=None)
+try:
+    _RecordingTrack.events = []
+    _bgm.play({"path": "tone.wav", "level": 3, "loop": True, "fade_seconds": 0})
+    _bgm.wait_idle()
+    # 起播从 0 淡入到目标（fade=0 即一步 set_volume），末条指令就是目标音量
+    _expected = buses.resolve_gain(buses.BUS_MUSIC, step=3)
+    _last = _RecordingTrack.events[-1][1] if _RecordingTrack.events else None
+    check("BgmPlayer 起播音量 = 音乐总线增益（档位 3，实测非源码串）",
+          _last is not None and abs(_last - _expected) < 1e-3,
+          (_RecordingTrack.events, _expected))
+finally:
+    _bgm.shutdown()
+    audio_mod.set_backends(_real_backends)
+
+
 def _src(*parts):
     return open(os.path.join(_PROJECT_ROOT, *parts), encoding="utf-8").read()
 
 
 _init_src = _src("dungeon", "audio", "__init__.py")
 _speech_src = _src("dungeon", "audio", "speech.py")
-_fx_src = _src("dungeon", "audio", "voice_fx.py")
 _chapters_src = _src("dungeon", "audio", "chapters.py")
-_base_src = _src("dungeon", "window", "base.py")
-_settings_src = _src("ui", "settings", "__init__.py")
 
-check("BgmPlayer 走 BUS_MUSIC 总线",
-      "buses.resolve_gain(buses.BUS_MUSIC" in _init_src)
-check("SpeechDirector 走 BUS_VOICE 总线",
-      "buses.resolve_gain(buses.BUS_VOICE" in _speech_src)
-check("渲染音量走 BUS_VOICE 总线",
-      "buses.resolve_gain(buses.BUS_VOICE" in _fx_src)
-check("档位经 buses.clamp_step 归一（播放侧）",
-      "buses.clamp_step(" in _speech_src and "buses.clamp_step(" in _init_src)
 check("副本窗口把 settings 电平装进总线",
-      "buses.set_bus_levels(" in _base_src
-      and "buses.levels_from_settings(" in _base_src)
-check("设置页读写 audio_levels 并遍历总线表",
-      "audio_levels" in _settings_src and "buses.BUSES" in _settings_src)
+      _mentions("dungeon/window/base.py", attr="set_bus_levels")
+      and _mentions("dungeon/window/base.py", attr="levels_from_settings"))
+check("设置页读写 audio_levels 键",
+      _mentions("ui/settings/__init__.py", literal="audio_levels"))
+check("设置页滑条遍历总线表（新增总线自动出滑条）",
+      _mentions("ui/settings/__init__.py", attr="BUSES"))
 check("旧的 volume / 100 换算已从播放路径消失",
       "volume / 100.0" not in _init_src and "self.volume / 100" not in _speech_src)
 check("旧的 0-100 常量已从音源模块消失",

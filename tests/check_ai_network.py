@@ -19,9 +19,12 @@ AI 文本生成（``core/ai.py``，OpenAI 兼容）却一直把 ``str(e)`` 原�
    SOCKS / 未装 openai / 配置类 ValueError 原文；
 5. ``test_connection`` 用可读原因；
 6. settings 迁移：旧键 ``voice_proxy`` → ``net_proxy``（都设时新键胜、旧键被清）；
-7. 接线守卫：设置、启动装配、副本子进程、以及各暴露点都接上。
+7. 接线：settings 缺省走公开 ``load()``；设置页 / 挂件 / 副本 / 聊天四个暴露点
+   按 AST 认 ``describe_ai_error`` 引用（启动装配与副本子进程的代理接线由
+   ``check_voice_tts`` 的 ``set_override`` AST 检查覆盖）。
 """
 
+import ast
 import json
 import os
 import sys
@@ -236,22 +239,37 @@ try:
     check("旧键为空：新键取默认空串（不误迁移）",
           _loaded.get("net_proxy") == "", repr(_loaded.get("net_proxy")))
 
-    # ---------------- 7. 接线守卫 ----------------
-    check("settings 默认含 net_proxy",
-          SettingsRepo()._defaults.get("net_proxy") == "",
-          SettingsRepo()._defaults.get("net_proxy"))
+    # ---------------- 7. 接线：缺省与四个暴露点 ----------------
+    def _uses(rel_path, name):
+        """AST 级引用检查：文件里引用了指定名字 / 属性即算数。
 
-    def _src(*parts):
-        return open(os.path.join(_PROJECT_ROOT, *parts), encoding="utf-8").read()
+        比源码子串耐格式化（引号、换行、注释都不影响），也只在真的删掉这处
+        调用时才红——跨层接线离线做不了行为测试，这是最贴近的一档。
+        """
+        tree = ast.parse(open(os.path.join(_PROJECT_ROOT, rel_path),
+                              encoding="utf-8").read())
+        for node in ast.walk(tree):
+            if ((isinstance(node, ast.Name) and node.id == name)
+                    or (isinstance(node, ast.Attribute) and node.attr == name)):
+                return True
+        return False
+
+    # 空数据目录 = 全新安装：公开 load() 拿缺省，不读私有 _defaults
+    _tmp_defaults = tempfile.mkdtemp(prefix="ai_net_defaults_")
+    os.makedirs(os.path.join(_tmp_defaults, "user"), exist_ok=True)
+    _defaults_loaded = SettingsRepo(data_dir=_tmp_defaults).load()
+    check("settings 默认含 net_proxy（空串 = 直连）",
+          _defaults_loaded.get("net_proxy") == "",
+          repr(_defaults_loaded.get("net_proxy")))
 
     check("设置页连接测试用可读原因",
-          "describe_ai_error" in _src("ui", "settings", "dialogs.py"))
+          _uses("ui/settings/dialogs.py", "describe_ai_error"))
     check("挂件连接测试用可读原因",
-          "describe_ai_error" in _src("ui", "mini", "screens.py"))
+          _uses("ui/mini/screens.py", "describe_ai_error"))
     check("副本生成失败用可读原因",
-          "describe_ai_error" in _src("dungeon", "window", "engine.py"))
+          _uses("dungeon/window/engine.py", "describe_ai_error"))
     check("聊天 AI 失败用可读原因",
-          "describe_ai_error" in _src("services", "chat", "__init__.py"))
+          _uses("services/chat/__init__.py", "describe_ai_error"))
 finally:
     _log.flush()
     sys.stdout = sys.__stdout__
