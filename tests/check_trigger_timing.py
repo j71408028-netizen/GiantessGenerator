@@ -39,9 +39,9 @@ def check(name, ok, extra=""):
 
 
 import dungeon.actions as actions_mod  # noqa: E402
+from _trigger_host import TriggerHost  # noqa: E402
 from dungeon.validate import validate_scenario_config  # noqa: E402
 from dungeon.window.fx import parse_fx_params  # noqa: E402
-from dungeon.window.triggers import TriggerHandler  # noqa: E402
 
 # ---------------- 1. 动作注册表 ----------------
 check("fx 在运行时动作清单内", "fx" in actions_mod.NEW_ACTIONS)
@@ -84,55 +84,8 @@ check("下界夹紧", parse_fx_params({"duration": 0, "intensity": 999})
       == ("", 0.1, 100.0))
 
 # ---------------- 3-4. 判定顺序 / 同位配额 / 轮次防重发 ----------------
-class _State:
-    steps_since_trigger = 0
-    total_steps = 0
-
-
-class _Dummy(TriggerHandler):
-    """触发判定的最小宿主：条件恒真，动作只记录不执行。"""
-
-    def __init__(self, triggers):
-        self.triggers = triggers
-        self.triggered_names = set()
-        self.fired_triggers = set()
-        self._round_fired = set()
-        self.dungeon_state = _State()
-        self.current_chapter = ""
-        self.chapters = [{"name": "X"}]
-        self.pending_insertions = []
-        self.pending_option = None
-        self.pending_mini_game = None
-        self.pending_ending = None
-        self.effect_overrides = []
-        self.replay_data = []
-        self._applied_visual_filter = None
-        self._applied_bgm_level = None
-        self._applied_voice_fx = {}
-        self.chapter_voice_fx = {}
-        self.chapter_sensitivity_effects = []
-        self.current_background_path = ""
-        self.trigger_choices = {}
-        self.fx_calls = []
-        self.goto_calls = []
-        self.ending_calls = []
-
-    def evaluate_condition(self, condition, state):
-        return True
-
-    def _enter_chapter(self, name, record=False, **kw):
-        self.current_chapter = name
-        self.goto_calls.append(name)
-        return True
-
-    def _start_ending_generation(self):
-        self.ending_calls.append(True)
-
-    def _start_option_generation(self):
-        pass
-
-    def start(self, fx_key, duration, intensity):
-        self.fx_calls.append((fx_key, duration, intensity))
+# 宿主替身来自 tests/_trigger_host.py（与 check_effect_override 共用）；
+# record_goto=True：_enter_chapter 只记录章节名，这里要断言 goto 派发。
 
 
 TRIGGERS = [
@@ -162,8 +115,7 @@ TRIGGERS = [
      "repeatable": True},
 ]
 
-dummy = _Dummy(TRIGGERS)
-dummy._window_fx = dummy
+dummy = TriggerHost(TRIGGERS, record_goto=True)
 dummy._begin_trigger_round()
 dummy.check_triggers()
 check("位置顺序派发：fx → 模态 → goto → effect → insert → none",
@@ -191,9 +143,8 @@ check("新轮恢复：fx一重新生效", dummy._round_fired == {"fx一"} | {"�
       str(dummy._round_fired))
 
 # 不可再触发的触发器不进新一轮
-dummy2 = _Dummy([{"name": "一次性", "action_type": "fx",
-                  "action_data": {"type": "fx", "fx": "flash"}, "repeatable": False}])
-dummy2._window_fx = dummy2
+dummy2 = TriggerHost([{"name": "一次性", "action_type": "fx",
+                  "action_data": {"type": "fx", "fx": "flash"}, "repeatable": False}], record_goto=True)
 dummy2._begin_trigger_round()
 dummy2.check_triggers()
 dummy2._begin_trigger_round()
@@ -202,17 +153,15 @@ check("不可再触发：第二轮起跳过", len(dummy2.fx_calls) == 1
       and "一次性" in dummy2.triggered_names)
 
 # ---------------- 5. 旧版 ending 退场 ----------------
-legacy = _Dummy([{"name": "旧结局", "action_type": "ending",
-                  "action_data": {"type": "ending", "name": "终局"}, "repeatable": True}])
-legacy._window_fx = legacy
+legacy = TriggerHost([{"name": "旧结局", "action_type": "ending",
+                  "action_data": {"type": "ending", "name": "终局"}, "repeatable": True}], record_goto=True)
 legacy._begin_trigger_round()
 legacy.check_triggers()
 check("旧版 ending 不再执行（不启动结局生成）", legacy.ending_calls == []
       and legacy.pending_ending is None and not legacy._round_fired)
 
 # ---------------- 6. 回放复现 ----------------
-replay = _Dummy([])
-replay._window_fx = replay
+replay = TriggerHost([], record_goto=True)
 replay._replay_trigger({"name": "窗", "action_type": "fx",
                         "action_data": {"fx": "invert", "duration": 2, "intensity": 90}})
 check("回放复现窗口视效", replay.fx_calls == [("invert", 2.0, 90.0)], str(replay.fx_calls))

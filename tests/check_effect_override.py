@@ -22,6 +22,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # tests/：兄弟模块 _trigger_host
 
 _report_path = os.path.join(tempfile.mkdtemp(prefix="effect_override_"), "report.txt")
 _log = open(_report_path, "w", encoding="utf-8")
@@ -41,11 +42,10 @@ def check(name, ok, extra=""):
 
 
 import dungeon.actions as actions_mod  # noqa: E402
+from _trigger_host import CHAPTERS_AB, SENSITIVITY_A, TriggerHost  # noqa: E402
 from dungeon.overrides import (active_override, describe, invalid_filter,  # noqa: E402
                                parse_overrides)
 from dungeon.validate import validate_scenario_config  # noqa: E402
-from dungeon.window.ending import EndingHandler  # noqa: E402
-from dungeon.window.triggers import TriggerHandler  # noqa: E402
 
 # ---------------- 1. 覆盖模型 ----------------
 _regacy = parse_overrides({"filter": "blur", "duration": 2})
@@ -85,83 +85,12 @@ check("describe 不炸", isinstance(describe(_full), str) and describe({}) == "�
 
 
 # ---------------- 2-4. 运行时合成 / 恢复 ----------------
-class _State:
-    total_steps = 0
-    steps_since_trigger = 0
-    chapter_steps = 0
+# 宿主替身来自 tests/_trigger_host.py（与 check_trigger_timing 共用）；这里用缺省
+# record_goto=False：走 EndingHandler 的真实换章实现，把四个维度交还章节默认。
 
 
-class _Bgm:
-    def __init__(self):
-        self.calls = []
-
-    def play(self, spec):
-        self.calls.append(dict(spec or {}))
-        self.last = dict(spec or {})
-
-
-class _Speech:
-    def __init__(self):
-        self.effects = []
-
-    def set_effect(self, spec=None):
-        self.effects.append(dict(spec or {}))
-
-
-class _Host(TriggerHandler, EndingHandler):
-    """最小宿主：替身承接副作用，条件恒真，章节 A/B 各自带环境。"""
-
-    def __init__(self, triggers=None):
-        self.triggers = triggers or []
-        self.triggered_names = set()
-        self.fired_triggers = set()
-        self._round_fired = set()
-        self.dungeon_state = _State()
-        self.chapters = [
-            {"name": "A",
-             "background": {"image_path": "a.png", "filter_effect": "blur"},
-             "bgm": {"path": "a.mp3", "level": 3},
-             "voice_fx": {"her": {"preset": "giant_boom", "intensity": 60}}},
-            {"name": "B"},
-        ]
-        self.current_chapter = "A"
-        self.chapter_sensitivity_effects = [{"attr": "介入度", "amount": 1.0}]
-        self.chapter_voice_fx = {"her": {"preset": "giant_boom", "intensity": 60}}
-        self.current_voice_fx = dict(self.chapter_voice_fx)
-        self.effect_overrides = []
-        self._applied_visual_filter = "blur"
-        self._applied_bgm_level = 3
-        self._applied_voice_fx = dict(self.chapter_voice_fx)
-        self.current_background_path = "a.png"
-        self.personality = None
-        self.character = None
-        self.replay_data = []
-        self.pending_insertions = []
-        self.pending_option = None
-        self.pending_mini_game = None
-        self.pending_ending = None
-        self.trigger_choices = {}
-        self.bg_calls = []
-        self.fx_calls = []
-        self._bgm = _Bgm()
-        self._speech = _Speech()
-
-    # --- 替身 ---
-    def change_background(self, image_path, smooth, filter_effect):
-        self.bg_calls.append((image_path, smooth, filter_effect))
-
-    def evaluate_condition(self, condition, state):
-        return True
-
-    def _current_action_points(self):
-        # 真实宿主在 window/base.py 提供；挑战模式无角色时返回 None
-        return getattr(self.character, "action_points", None)
-
-    def _start_option_generation(self):
-        pass
-
-
-host = _Host()
+host = TriggerHost(chapters=CHAPTERS_AB, current_chapter="A",
+                   sensitivity_effects=SENSITIVITY_A)
 # 滤镜：覆盖 → 恢复
 host._push_effect_override(parse_overrides({"filter": "smooth", "duration": 2}), 2)
 check("滤镜覆盖立即落地",
@@ -223,7 +152,8 @@ check("换章后落到新章默认（B 无背景/无音乐/无语音/无敏感�
       and host.current_voice_fx == {} and host._apply_sensitivity_mods() == {})
 
 # 回放：按记录原样复现
-replay = _Host()
+replay = TriggerHost(chapters=CHAPTERS_AB, current_chapter="A",
+                     sensitivity_effects=SENSITIVITY_A)
 replay._enter_chapter("A")
 replay._replay_trigger({"name": "覆盖", "action_type": "effect",
                         "action_data": {"filter": "detail", "bgm_level": 1, "duration": 3}})
@@ -237,8 +167,10 @@ check("回放复现覆盖",
 
 # ---------------- 3. 派发 ----------------
 def _dispatch_host(action_data, repeatable=True):
-    h = _Host([{"name": "E", "action_type": "effect", "action_data": action_data,
-                "repeatable": repeatable}])
+    h = TriggerHost([{"name": "E", "action_type": "effect", "action_data": action_data,
+                      "repeatable": repeatable}],
+                    chapters=CHAPTERS_AB, current_chapter="A",
+                    sensitivity_effects=SENSITIVITY_A)
     h._begin_trigger_round()
     h.check_triggers()
     return h
