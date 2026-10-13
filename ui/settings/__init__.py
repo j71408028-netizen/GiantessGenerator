@@ -153,7 +153,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.gen_header = self.gen_block.header
         self.gen_body = self.gen_block.body
 
-        self.disp_block = CollapsibleBlock(self.right_col, "显示", body_padx=(6, 12), body_pady=(6, 12),
+        self.disp_block = CollapsibleBlock(self.right_col, "外观", body_padx=(6, 12), body_pady=(6, 12),
                                            on_toggle=self._schedule_fit)
         self.archive_block = CollapsibleBlock(self.right_col, "档案", body_padx=(6, 12), body_pady=(15, 12),
                                               on_toggle=self._schedule_fit)
@@ -803,19 +803,12 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.confusion_var = tk.BooleanVar(value=self.enable_confusion)
         self.confusion_switch = self._make_switch(ctrl, self.confusion_var)
 
-        _, ctrl = self._make_row(self.archive_body, row, "副本记忆窗口大小")
-        row += 1
-        self.story_recent_var = tk.StringVar(
-            value=str(self.settings.get("story_recent_count", 20)))
-        self.story_recent_entry = self._make_entry(ctrl, self.story_recent_var, width=64)
-        self.story_recent_entry.pack(side='left')
-
         _, ctrl = self._make_row(self.gen_body, row, "屏蔽词")
         row += 1
         self.blocked_words_var = tk.StringVar(value=", ".join(self.blocked_words))
         self.blocked_words_entry = self._make_entry(
-            ctrl, self.blocked_words_var, width=180,
-            placeholder_text="用逗号分隔"
+            ctrl, self.blocked_words_var, width=190,
+            placeholder_text="（逗号分隔）"
         )
         self.blocked_words_entry.pack(side='left')
 
@@ -836,6 +829,16 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         row += 1
         self.use_preview_avatar_var = tk.BooleanVar(value=self.settings.get("use_preview_image_as_avatar", False))
         self.use_preview_avatar_switch = self._make_switch(ctrl, self.use_preview_avatar_var)
+
+        self._section_label(self.gen_body, row, "副本引擎")
+        row += 1
+
+        _, ctrl = self._make_row(self.gen_body, row, "记忆窗口大小")
+        row += 1
+        self.story_recent_var = tk.StringVar(
+            value=str(self.settings.get("story_recent_count", 20)))
+        self.story_recent_entry = self._make_entry(ctrl, self.story_recent_var, width=64)
+        self.story_recent_entry.pack(side='left')
 
         self._section_label(self.gen_body, row, "部位设置")
         row += 1
@@ -936,7 +939,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             var = tk.IntVar(value=self.audio_levels.get(bus, buses.MAX_LEVEL))
             ctk.CTkSlider(
                 ctrl, from_=0, to=buses.MAX_LEVEL,
-                number_of_steps=buses.MAX_LEVEL, variable=var, width=150,
+                number_of_steps=buses.MAX_LEVEL // 5, variable=var, width=120,
                 command=lambda value, b=bus: self._on_bus_level_change(b, value),
             ).pack(side='left')
             label = ctk.CTkLabel(
@@ -1040,7 +1043,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
 
     def _build_ai_section(self, parent, row):
         # AI设置标题
-        self._section_label(parent, row, "副本 AI 设置")
+        self._section_label(parent, row, "网络与 AI")
         row += 1
 
         # 第1行：下拉框和新建按钮并排
@@ -1077,8 +1080,8 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.net_proxy_var = tk.StringVar(
             value=self.settings.get("net_proxy", "") or "")
         self.net_proxy_entry = self._make_entry(
-            proxy_control, self.net_proxy_var, width=200,
-            placeholder_text="留空 = 直连（语音 / AI 共用）")
+            proxy_control, self.net_proxy_var, width=190,
+            placeholder_text="直连")
         self.net_proxy_entry.pack(side='left')
 
     def _load_ai_configs(self):
