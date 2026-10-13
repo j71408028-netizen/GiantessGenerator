@@ -4,21 +4,22 @@
 输出：控制台一行 ASCII 结论 + UTF-8 报告文件路径。
 
 覆盖：
-1. 空方案模板 golden 对比（与改名前的 ``_empty_config`` 完全一致）；
-2. ``normalize_chapter`` 产出的字段都在 schema 声明内（防再次漂移）；
+1. 空方案模板的**键集合**稳定（不再钉默认值，默认值由 normalize/校验器覆盖）；
+2. ``schema`` ↔ ``normalize`` 一致性：章节 / 对话语音 / 背景音乐 / 语音效果；
 3. 滤镜键单一出处（``actions.VISUAL_FILTERS`` ↔ ``background._PIL_FILTERS``）；
 4. 校验器规则用例（合成坏配置的每类诊断 + 干净配置零误报）；
-5. ``ScenarioRepo.save_config`` 诊断接入。
+5. ``ScenarioRepo.save_config`` 诊断接入与旧写法迁移；
 6. 演化规则的配置链路：``transition_matrix`` / ``section_steps`` 真的进
-   ``EvolutionRules``（含 window/base.py 的接线守卫）。
+   ``EvolutionRules``（AST 认注入，不再逐字比对源码）。
+
+音频端到端链（说话人分档 / 队列 / 三条引擎路径 / 降级 / BGM 播放收尾）已拆到
+``tests/check_audio_chain.py``，本文件只留 schema 与校验器。
 """
 
 import json
 import os
-import struct
 import sys
 import tempfile
-import wave
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -46,37 +47,31 @@ from dungeon.audio.chapters import (DEFAULT_BGM_FADE_SECONDS, DEFAULT_BGM_LEVEL,
 from dungeon.validate import (  # noqa: E402
     format_diagnostics, has_errors, validate_scenario_config)
 
-# ---------------- 1. 空方案模板 golden 对比 ----------------
-GOLDEN_EMPTY = {
-    "initial_prompt": "",
-    "coupling_level": "velum",
-    "protagonist_title": "",
-    "text_component": "text",
-    "entry_action_cost": 0,
-    "ending_policy": "required",
-    "section_prompts": {"background": "", "branch": "", "dialog": "",
-                        "interaction": "", "action": ""},
-    "evolution_attrs": [
-        {"type": "intrusion", "name": "介入度", "display_state": "collapse"},
-        {"type": "destruction", "name": "破坏性", "display_state": "collapse"},
-        {"type": "casualty", "name": "总伤亡", "display_state": "collapse"},
-    ],
-    "chapters": [],
-    "triggers": [],
-    # 对话语音：默认开、音色取默认（字面量写死，改动默认值必须让这里先红）
-    # 音量是**档位** 0-4，缺省「中」（3）
-    "voice": {
-        "enabled": True,
-        "voice_her": "zh-CN-XiaoxiaoNeural",
-        "voice_protagonist": "zh-CN-YunxiNeural",
-        "voice_other": ("zh-CN-YunjianNeural", "zh-CN-YunyangNeural",
-                        "zh-CN-XiaoyiNeural"),
-        "rate": "+0%",
-        "level": 3,
-    },
+# ---------------- 1. 空方案模板键集合 ----------------
+# 只钉「有哪些键」，不钉默认值：默认音色 / 默认档位改了不该让门禁红，字段少了或
+# 多了才该红。默认值的行为由下面的 normalize / 校验器覆盖。
+_GOLDEN_EMPTY_KEYS = {
+    "initial_prompt", "coupling_level", "protagonist_title", "text_component",
+    "entry_action_cost", "ending_policy", "section_prompts", "evolution_attrs",
+    "chapters", "triggers", "voice",
 }
-check("空方案模板与旧版 _empty_config 一致",
-      schema.empty_scenario_config() == GOLDEN_EMPTY)
+_empty = schema.empty_scenario_config()
+check("空方案模板的顶层键集合稳定",
+      set(_empty) == _GOLDEN_EMPTY_KEYS,
+      set(_empty) ^ _GOLDEN_EMPTY_KEYS)
+check("空方案模板的顶层键都在 schema 声明内",
+      set(_empty) <= set(schema.known_scenario_keys()),
+      set(_empty) - set(schema.known_scenario_keys()))
+check("section_prompts 的键与段落类型一致",
+      set(_empty["section_prompts"]) == set(schema.TEXT_TYPE_KEYS),
+      set(_empty["section_prompts"]) ^ set(schema.TEXT_TYPE_KEYS))
+check("voice 的键与 schema 声明一致",
+      set(_empty["voice"]) == set(schema.field_map(schema.VOICE_FIELDS)),
+      set(_empty["voice"]) ^ set(schema.field_map(schema.VOICE_FIELDS)))
+check("内置演化属性三项齐（type 有序）",
+      [attr["type"] for attr in _empty["evolution_attrs"]]
+      == list(schema.BUILTIN_EVOLUTION_ATTRS),
+      [attr["type"] for attr in _empty["evolution_attrs"]])
 
 # ---------------- 2. schema ↔ normalize 一致性 ----------------
 normalized = normalize_chapter({"name": "示例"}, 0)
@@ -125,94 +120,6 @@ check("同一个配角每次都是同一把嗓子",
       _caster.voice_for("军官") == _caster.voice_for("军官"))
 check("不同配角的嗓子分得开",
       len({_caster.voice_for(n) for n in ("军官", "居民", "队长")}) > 1)
-
-# 播放层接线（领域 → 窗口）：坏接线会让功能静默失效，这里盯住两端
-import dungeon.audio as audio_mod  # noqa: E402
-import dungeon.window.base as base_mod  # noqa: E402
-import dungeon.window.ui as ui_mod  # noqa: E402
-
-_base_src = open(os.path.join(_PROJECT_ROOT, "dungeon", "window", "base.py"),
-                 encoding="utf-8").read()
-_ui_src = open(os.path.join(_PROJECT_ROOT, "dungeon", "window", "ui.py"),
-               encoding="utf-8").read()
-check("会话持有语音导演并在收尾时收工",
-      "SpeechDirector(" in _base_src and "self._speech.shutdown()" in _base_src)
-check("语音按方案配置装配（静音走语音总线，不再有全局开关）",
-      'enabled=cfg["enabled"]' in _base_src
-      and "dungeon_voice_enabled" not in _base_src)
-check("带说话人的显示单元定稿时触发朗读",
-      "def _speak_item" in _ui_src and "director.speak(" in _ui_src)
-check("语音播放复用音频后端接缝", "open_track" in speech_mod.__dict__
-      or "open_track" in dir(speech_mod))
-
-# 假合成器 + 假音轨：整条链路跑一遍，不出声、不联网
-_notes = []
-_synth_calls = []
-
-
-class _FakeTrack:
-    name = "fake"
-    #: 收到的指令 ``[(动作, 音量), ...]``，效果链据此断言分拍与调制
-    events = []
-
-    @classmethod
-    def supported(cls):
-        return True
-
-    @classmethod
-    def open(cls, path):
-        return cls(path)
-
-    def __init__(self, path=""):
-        self.started = None
-        self.closed = False
-        self._path = path
-
-    def start(self, loop=False, volume=1.0):
-        self.started = (loop, volume)
-        self.events.append(("start", round(float(volume), 3), self._path))
-        return True
-
-    def set_volume(self, volume):
-        self.events.append(("volume", round(float(volume), 3), self._path))
-
-    def finished(self):
-        return True
-
-    def close(self):
-        self.closed = True
-        self.events.append(("close", None, self._path))
-
-
-def _fake_synth(voice, rate, text, dest_dir):
-    _synth_calls.append((voice, rate, text))
-    path = os.path.join(dest_dir, f"{abs(hash(text))}.mp3")
-    with open(path, "wb") as handle:
-        handle.write(b"fake")
-    return path
-
-
-_real_backends = audio_mod.set_backends([_FakeTrack])
-_director = speech_mod.SpeechDirector(caster=_caster, rate="+10%", level=3,
-                                      logger=_notes.append, synth=_fake_synth,
-                                      enabled=True)
-check("叙述句（无说话人）不朗读", _director.speak("", "一段描写") is False)
-check("空台词不朗读", _director.speak("莉莉", "   ") is False)
-check("超长台词不朗读",
-      _director.speak("莉莉", "啊" * (speech_mod.MAX_SPEECH_CHARS + 1)) is False)
-check("带说话人的台词排上队", _director.speak("莉莉", "你跑不掉的") is True)
-check("等到台词处理完", _director.wait_idle(4.0))
-check("合成用的是她的音色与方案语速",
-      _synth_calls and _synth_calls[-1][0] == "V_HER"
-      and _synth_calls[-1][1] == "+10%", _synth_calls)
-check("朗读过的音色有留痕", _director.last_voice == "V_HER")
-check("关掉就不出声",
-      (_director.configure(enabled=False) or _director.speak("莉莉", "再来一句"))
-      is False)
-_director.shutdown()
-check("收尾后语音线程已收工", _director.worker_alive is False
-      and _director.speaking is False)
-audio_mod.set_backends(_real_backends)
 
 # ---------------- 3. 滤镜键单一出处 ----------------
 import dungeon.actions as actions_mod  # noqa: E402
@@ -414,20 +321,9 @@ check("存读一轮：章节 bgm 未丢失且坏值已修正",
       and _bgm_loaded["chapters"][1]["bgm"]["loop"] is True,
       _bgm_loaded["chapters"])
 
-# 播放层接线（领域 → 窗口）：接线漏了功能会静默失效，这里盯住两端
-_base_src = open(os.path.join(_PROJECT_ROOT, "dungeon", "window", "base.py"),
-                 encoding="utf-8").read()
-_trg_src = open(os.path.join(_PROJECT_ROOT, "dungeon", "window", "triggers.py"),
-                encoding="utf-8").read()
-check("window/base.py 创建会话级 BgmPlayer", "BgmPlayer(" in _base_src)
-check("window/base.py 会话收尾关闭背景音乐", "_bgm.shutdown()" in _base_src)
-check("triggers.py 进入章节时应用 bgm", "_apply_chapter_bgm" in _trg_src)
-check("triggers.py 回放带着 bgm 复现", '"bgm"' in _trg_src
-      and "record.get(\"bgm\")" in _trg_src)
-
 # ---------------- 4c. 章节对话语音效果（她 / 其他人两档） ----------------
-# 物理效果而非语气：接线漏了会静默失效，所以这里既盯 schema ↔ normalize，
-# 也盯「谁用哪一档 → 用哪条引擎 → 降级」这条链。
+# 这里只盯 schema ↔ normalize ↔ 校验器；「谁用哪一档 → 哪条引擎 → 降级」的端到端
+# 链在 tests/check_audio_chain.py。
 import dungeon.audio.voice_fx as fx_mod  # noqa: E402
 from dungeon.audio.voice_fx import (DEFAULT_INTENSITY, MAX_INTENSITY,  # noqa: E402
                               PARAM_RANGES, PRESET_NONE, SLOT_HER,
@@ -537,141 +433,11 @@ check("干净配置带效果：零 warning",
                         "voice_fx": {"her": {"preset": "open_valley"}}}],
       }) if d.level == "warning"]))
 
-# ---- 接线字符串：坏了会静默失效，所以两端都要看 ----
-_speech_src = open(os.path.join(_PROJECT_ROOT, "dungeon", "audio", "speech.py"),
-                   encoding="utf-8").read()
-_dlg_src = open(os.path.join(_PROJECT_ROOT, "ui", "scenario", "chapter_dlg.py"),
-                encoding="utf-8").read()
-_mgr_src = open(os.path.join(_PROJECT_ROOT, "ui", "scenario",
-                             "chapter_trigger_mgr.py"), encoding="utf-8").read()
-check("triggers.py 进章时应用语音效果", "_apply_chapter_voice_fx" in _trg_src)
-check("triggers.py 进章/回放/跳转三处都带 voice_fx",
-      '"voice_fx"' in _trg_src and "record.get(\"voice_fx\")" in _trg_src
-      and "chapter_voice_fx" in _trg_src)
-check("window/base.py 装配章节效果", "current_voice_fx" in _base_src
-      and "effect=" in _base_src)
-check("speech.py 按说话人分档（她那一档只给她）",
-      "SLOT_HER" in _speech_src and "role_of" in _speech_src)
-check("speech.py 三条引擎路径都在", "render" in _speech_src
-      and "playback" in _speech_src and "_warn_fx_unavailable" in _speech_src)
-check("编辑器暴露两档效果", "_voice_fx_from_ui" in _dlg_src
-      and "语音效果" in _dlg_src)
-check("章节列表显示语音效果列", "_format_voice_fx" in _mgr_src
-      and "语音效果" in _mgr_src)
-
-# ---- 整条链：假合成器 + 假音轨，从效果配置到分拍/调制/降级（不出声、不联网） ----
-_FakeTrack.events = []
-audio_mod.set_backends([_FakeTrack])
-_fx_director = speech_mod.SpeechDirector(caster=_caster, level=3,
-                                         logger=_notes.append, synth=_fake_synth,
-                                         enabled=True)
-try:
-    _fx_director.set_effect({"her": {"preset": "open_valley", "intensity": 80},
-                             "others": {"preset": "trembling_ground",
-                                        "intensity": 70}})
-    check("效果已按两档归一",
-          _fx_director.effect == normalize_voice_fx(
-              {"her": {"preset": "open_valley", "intensity": 80},
-               "others": {"preset": "trembling_ground", "intensity": 70}}),
-          _fx_director.effect)
-    check("分档取配置：她拿到她的预设",
-          effect_for(_fx_director.effect, SLOT_HER)["preset"] == "open_valley"
-          and effect_for(_fx_director.effect, SLOT_OTHERS)["preset"]
-          == "trembling_ground")
-
-    _FakeTrack.events = []
-    _fx_director.speak("莉莉", "你跑不掉的")
-    _fx_director.wait_idle(6.0)
-    _starts = [v for kind, v, _p in _FakeTrack.events if kind == "start"]
-    check("她那一档走播放侧并开了分拍（主声 + 2 拍）",
-          _fx_director.last_engine == "playback" and len(_starts) == 3,
-          (_fx_director.last_engine, _FakeTrack.events))
-    check("分拍音量按次第衰减（主声 > 拍1 > 拍2 > 0）",
-          len(_starts) == 3 and _starts[0] > _starts[1] > _starts[2] > 0, _starts)
-
-    _FakeTrack.events = []
-    _fx_director.speak("军官", "全体撤退")     # 配角：走「其他人」那一档
-    _fx_director.wait_idle(4.0)
-    _fx_director.speak("主角", "等等！")       # 主角同样走「其他人」那一档
-    _fx_director.wait_idle(4.0)
-    _kinds = [kind for kind, _v, _p in _FakeTrack.events]
-    check("其他人那一档只有缓抖：每句 1 起播 + 音量调制",
-          _kinds.count("start") == 2 and _kinds.count("volume") >= 2, _FakeTrack.events)
-
-    _FakeTrack.events = []
-    _fx_director.set_effect({})                # 走到没配效果的章节
-    _fx_director.speak("莉莉", "我回来了")
-    _fx_director.wait_idle(4.0)
-    _kinds = [kind for kind, _v, _p in _FakeTrack.events]
-    check("离开章节后效果清空：只起播一次、不动音量",
-          _fx_director.last_engine == "none" and _kinds.count("start") == 1
-          and _kinds.count("volume") == 0, (_fx_director.last_engine, _kinds))
-
-    # 渲染路线：注入解码器（本机可能没装 miniaudio/soundfile，缺口就在 _decode）
-    _fx_tmp = tempfile.mkdtemp(prefix="scenario_fx_")
-    _fx_src = os.path.join(_fx_tmp, "src.wav")
-    with wave.open(_fx_src, "wb") as _handle:
-        _handle.setnchannels(1)
-        _handle.setsampwidth(2)
-        _handle.setframerate(24000)
-        _handle.writeframes(struct.pack("<h", 6000) * 6000)     # 0.25s 方波
-    _original_decode = fx_mod._decode
-
-    def _fx_decode(_path):
-        import numpy as np
-        with wave.open(_fx_src, "rb") as _handle:
-            _raw = _handle.readframes(_handle.getnframes())
-        return np.frombuffer(_raw, dtype="<i2").astype("float32") / 32768.0, 24000
-
-    fx_mod._decode = _fx_decode
-    try:
-        _FakeTrack.events = []
-        _fx_director.set_effect({"her": {"preset": "giant_boom", "intensity": 80}})
-        _fx_director.speak("莉莉", "轰鸣着靠近")
-        _fx_director.wait_idle(4.0)
-        _started_paths = [_p for _k, _v, _p in _FakeTrack.events if _k == "start"]
-        check("有解码器时走离线渲染（engine=render、只起播一次）",
-              _fx_director.last_engine == "render" and len(_started_paths) == 1,
-              (_fx_director.last_engine, _FakeTrack.events))
-        check("渲染产物留在临时目录（音量烘进样本，走 waveaudio）",
-              any(str(_p).endswith(".wav") for _p in _started_paths),
-              _started_paths)
-    finally:
-        fx_mod._decode = _original_decode
-
-    # 解不开 → 静默降级（引擎不该炸，也不该不出声）
-    _rendered = fx_mod.render_wav(_fx_src, _fx_tmp,
-                                  {"preset": "open_valley", "intensity": 80},
-                                  decoder=lambda _path: None)
-    check("解码失败 → 不产出渲染文件（调用方退回原声）", _rendered is None,
-          _rendered)
-    check("解码器可用性可查询（编辑器提示与校验用）",
-          isinstance(fx_mod.decoder_name(), str))
-    check("没配效果不走渲染",
-          fx_mod.render_wav(_fx_src, _fx_tmp, {}) is None)
-finally:
-    _fx_director.shutdown()
-    audio_mod.set_backends(_real_backends)
-    check("效果链收尾：语音线程已收工", _fx_director.worker_alive is False)
-
-# 播放层本身：没有音频后端也必须能走完播放/停止/收尾（不能拖垮一局副本）
-from dungeon import audio as audio_mod  # noqa: E402
-
-check("当前环境有明确的音频后端结论", bool(audio_mod.backend_name()))
-_probe_notes = []
-_probe_resolver = {"tone.wav": os.path.join(_bgm_tmp, "tone.wav")}
-open(_probe_resolver["tone.wav"], "wb").write(b"RIFF....WAVEfmt ")
-_probe = audio_mod.BgmPlayer(resolver=_probe_resolver.get, logger=_probe_notes.append)
-_probe.play({"path": "tone.wav", "level": 3, "loop": True, "fade_seconds": 0})
-_probe.play({"path": "不在的曲子.mp3"})
-_probe.wait_idle()
-_probe.stop()
-_probe.wait_idle()
-_probe.shutdown()
-check("播放器在缺/坏音频文件时不抛异常且能收工",
-      not _probe.playing and not _probe.worker_alive
-      and any("音频文件不存在" in line for line in _probe_notes),
-      _probe_notes)
+# ---- 端到端音频链已拆到 tests/check_audio_chain.py ----
+#
+# 原先这里还有一串「两端都要看」的源码串断言（base.py / triggers.py / speech.py /
+# 编辑器 UI 里出现过某个方法名或字符串），外加一整套假合成器 + 替身后端链。前者守
+# 的是当时的写法，后者属于音频行为而非 schema——所以接线断言删掉，行为链搬走。
 
 # ---------------- 5. ScenarioRepo.save_config 诊断接入 ----------------
 from persistence.scenario_repo import ScenarioRepo  # noqa: E402

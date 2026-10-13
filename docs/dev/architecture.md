@@ -45,8 +45,9 @@
 | `tests/check_mini_layering.py` | 挂件层禁 CTk、禁 `ui.ctk.{theme,fonts,widgets,dialogs}` |
 | `tests/check_entrypoints.py` | 构建脚本的入口 / 图标 / `--add-data` 源路径存在性 + 全仓悬空 import |
 
-另有 `check_scenario_schema.py` 守住副本方案字段的**端到端接线**（`schema` 声明 →
-`normalize` 产出 → 源码级接线字符串），加字段时别漏，见 §5.4。
+另有 `check_scenario_schema.py` 守住副本方案字段的**声明 ↔ 产出 ↔ 校验器**（`schema`
+→ `normalize` → `validate`）；音频端到端链（说话人分档 / 三条引擎路径 / 降级 /
+播放收尾）在 `check_audio_chain.py`。加字段时别漏，见 §5.4。
 
 ### 1.3 当前实测数字（2026-10-06）
 
@@ -183,8 +184,9 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 
 `schema.py` 声明 → `chapters.py` 的 `normalize_*` 接入 `normalize_chapter` → 领域能力模块
 （如 `dungeon/audio.py`）→ `window/` 接线（生命周期 + 进入章节时应用）→ `validate.py` 诊断 →
-编辑器 UI（导入 + 编辑区 + 列表列）→ **守卫断言**（`check_scenario_schema.py`）。
-漏掉最后一步会静默失效。详见 `docs/Dungeon/script.md`。
+编辑器 UI（导入 + 编辑区 + 列表列）→ **GUI 冒烟 / 人工核对**。离线守卫只到
+`validate` 与音频链行为（`check_scenario_schema.py` / `check_audio_chain.py`）；
+编辑器接线漏了不会离线报错，但会静默失效。详见 `docs/Dungeon/script.md`。
 
 ---
 

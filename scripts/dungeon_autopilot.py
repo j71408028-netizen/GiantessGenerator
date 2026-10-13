@@ -18,7 +18,7 @@ callback-thread  真实按键回调（SendMessage 直投 WM_KEYDOWN）的执行�
                  ——DPG 2.3.1 默认把回调派发到工作线程，须由手动回调管理收拢
                  （见 ui._build_ui 的 configure_app 与 base._run_frame_loop）
 chapter-bgm      章节背景音乐接线：起始章节起播 → 跳到无音乐章节停播 → 收尾收工
-                 （用替身后端，自检不出声；真实后端由 check_scenario_schema 探）
+                 （用替身后端，自检不出声；真实后端由 check_audio_chain 探）
 chapter-voice-fx 章节对话语音效果（物理尺度，不是语气）：她那一档开分拍回声 →
                  其他人那一档缓抖 → 叙述句不念 → 换章清效果 → 回放带配置 → 收尾
                  （假合成器不联网、替身后端不出声）
@@ -861,7 +861,7 @@ def scene_chapter_voice_fx():
 def scene_chapter_bgm():
     """章节背景音乐：进配了音乐的章节起播，跳到没配音乐的章节停播。
 
-    真实后端只在``check_scenario_schema``里探一次（那台机器上有没有可用后端
+    真实后端只在``check_audio_chain``里探一次（那台机器上有没有可用后端
     不该决定自检成败），这里换成替身后端——要盯的是**接线**：章节配置有没有
     真的传到播放器、离开音乐章节有没有静下来、会话收尾有没有收干净。
     """
