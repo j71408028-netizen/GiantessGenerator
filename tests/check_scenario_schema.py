@@ -137,8 +137,9 @@ _ui_src = open(os.path.join(_PROJECT_ROOT, "dungeon", "window", "ui.py"),
                encoding="utf-8").read()
 check("会话持有语音导演并在收尾时收工",
       "SpeechDirector(" in _base_src and "self._speech.shutdown()" in _base_src)
-check("语音按方案配置 + 全局开关装配",
-      "dungeon_voice_enabled" in _base_src)
+check("语音按方案配置装配（静音走语音总线，不再有全局开关）",
+      'enabled=cfg["enabled"]' in _base_src
+      and "dungeon_voice_enabled" not in _base_src)
 check("带说话人的显示单元定稿时触发朗读",
       "def _speak_item" in _ui_src and "director.speak(" in _ui_src)
 check("语音播放复用音频后端接缝", "open_track" in speech_mod.__dict__

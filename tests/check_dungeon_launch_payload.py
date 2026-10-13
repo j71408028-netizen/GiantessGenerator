@@ -81,7 +81,7 @@ def main():
         "body_parts": {"head": 1.0},
         "character": character, "character_repo": object(),
         "gui": object(),             # 宿主侧：剔除
-        "settings": {"dungeon_voice_enabled": True, "story_recent_count": 20},
+        "settings": {"story_recent_count": 20, "net_proxy": ""},
         "mode": "explore",
         "scenario_ids": ["scenario-a", "scenario-b"],
         "host": object(),            # 宿主侧：剔除

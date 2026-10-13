@@ -918,13 +918,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.dungeon_font_entry = self._make_entry(ctrl, self.dungeon_font_var, width=150)
         self.dungeon_font_entry.pack(side='left')
 
-        # 对话语音总开关：关掉后所有副本方案都不出声，音色仍在方案里留着
-        _, ctrl = self._make_row(self.disp_body, row, "朗读副本对话")
-        row += 1
-        self.dungeon_voice_var = tk.BooleanVar(
-            value=self.settings.get("dungeon_voice_enabled", True))
-        self.dungeon_voice_switch = self._make_switch(ctrl, self.dungeon_voice_var)
-
+        # 「朗读副本对话」总开关已撤掉：不想听就把下面「音量」里的语音拧到 0
         self._build_audio_section(self.disp_body, row)
 
     def _build_audio_section(self, parent, row):
@@ -1408,7 +1402,6 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             "auto_save_report": self.auto_save_report_var.get(),
             "auto_save_replay": self.auto_save_replay_var.get(),
             "story_recent_count": self._story_recent_count_value(),
-            "dungeon_voice_enabled": self.dungeon_voice_var.get(),
             "net_proxy": self.net_proxy_var.get().strip(),
             "audio_levels": {bus: int(self._bus_level_vars[bus].get())
                              for bus in buses.BUSES},

@@ -16,11 +16,13 @@
 9. **缺省对齐**：``DEFAULT_BGM_LEVEL`` / ``DEFAULT_VOICE_LEVEL`` 都取总线缺省档；
 10. **归一迁移**：``bgm_level`` / ``voice_level`` 优先新键、回退旧键；``normalize_*``
     只产出 ``level``；``overrides.parse_overrides`` 两种键都认；
-11. **设置缺省**：``SettingsRepo`` 缺省含四条总线电平（取自总线单一真相源）；
+11. **设置缺省**：``SettingsRepo`` 缺省含四条总线电平（取自总线单一真相源），
+    且不再有语音总开关 ``dungeon_voice_enabled``；旧键按「关着 → 语音电平折算成 0」迁移；
 12. 接线守卫：三条播放路径都改走总线，副本窗口把 settings 电平装进混入层，
     设置页读写 ``audio_levels``，旧的 ``volume / 100`` 换算已消失。
 """
 
+import json
 import math
 import os
 import sys
@@ -272,6 +274,35 @@ from persistence.settings_repo import SettingsRepo  # noqa: E402
 check("设置缺省含四条总线电平（取自总线单一真相源）",
       SettingsRepo()._defaults.get("audio_levels") == buses.DEFAULT_BUS_LEVELS,
       SettingsRepo()._defaults.get("audio_levels"))
+check("设置缺省不再有语音总开关（撤掉的选项不该留在缺省里）",
+      "dungeon_voice_enabled" not in SettingsRepo()._defaults)
+
+# ---------------- 11b. 旧键 dungeon_voice_enabled → 语音总线电平 ----------------
+_tmp_dir = tempfile.mkdtemp(prefix="audio_buses_settings_")
+os.makedirs(os.path.join(_tmp_dir, "user"), exist_ok=True)
+_settings_path = os.path.join(_tmp_dir, "user", "settings.json")
+
+
+def _write_settings(payload):
+    with open(_settings_path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle)
+
+
+_write_settings({"dungeon_voice_enabled": False,
+                 "audio_levels": {bus: 100 for bus in buses.BUSES}})
+_loaded = SettingsRepo(data_dir=_tmp_dir).load()
+check("旧开关关着 → 语音电平折算成 0（其余总线不动）",
+      _loaded.get("audio_levels", {}).get(buses.BUS_VOICE) == 0
+      and _loaded["audio_levels"].get(buses.BUS_MUSIC) == 100
+      and "dungeon_voice_enabled" not in _loaded,
+      (sorted(_loaded), _loaded.get("audio_levels")))
+
+_write_settings({"dungeon_voice_enabled": True})
+_loaded = SettingsRepo(data_dir=_tmp_dir).load()
+check("旧开关开着 → 只删键，不碰电平",
+      _loaded.get("audio_levels") == buses.DEFAULT_BUS_LEVELS
+      and "dungeon_voice_enabled" not in _loaded,
+      _loaded.get("audio_levels"))
 
 # ---------------- 12. 接线守卫 ----------------
 def _src(*parts):

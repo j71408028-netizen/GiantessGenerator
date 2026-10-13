@@ -1,7 +1,7 @@
 import json
 import os
 
-from dungeon.audio.buses import DEFAULT_BUS_LEVELS
+from dungeon.audio.buses import BUS_VOICE, DEFAULT_BUS_LEVELS
 
 
 class SettingsRepo:
@@ -35,11 +35,10 @@ class SettingsRepo:
             "auto_save_report": False,
             "auto_save_replay": False,
             "story_recent_count": 20,
-            # 副本对话语音总开关：关掉后所有方案都不出声（方案级 voice.enabled
-            # 只在这个开关打开时才看）
-            "dungeon_voice_enabled": True,
             # 音频总线玩家电平（总音量 / 音乐 / 语音 / 音效），缺省 100 = 不衰减。
             # 只有四条内容总线是「作者档位 + 玩家电平」两级，见 dungeon/audio/buses.py。
+            # 「不想听对话语音」由语音这一条拧到 0 表达——旧键
+            # ``dungeon_voice_enabled`` 会在 load 时折算到这里。
             "audio_levels": dict(DEFAULT_BUS_LEVELS),
             # 网络代理（可留空）：语音合成与 AI 文本生成**共用**，见 core/netproxy.py。
             # 留空则回退到环境变量（DUNGEON_NET_PROXY / HTTPS_PROXY / HTTP_PROXY）。
@@ -64,6 +63,16 @@ class SettingsRepo:
             if not data.get("net_proxy") and data.get("voice_proxy"):
                 data["net_proxy"] = data["voice_proxy"]
             data.pop("voice_proxy", None)
+            # 旧键迁移：``dungeon_voice_enabled``（已撤掉的总开关）→ 语音总线电平。
+            # 关过开关的人替他拧到 0——撤掉选项后声音不该自己回来；开着的人不动。搬完删掉旧键。
+            if "dungeon_voice_enabled" in data:
+                if not data.get("dungeon_voice_enabled"):
+                    levels = data.get("audio_levels")
+                    levels = (dict(levels) if isinstance(levels, dict)
+                              else dict(DEFAULT_BUS_LEVELS))
+                    levels[BUS_VOICE] = 0
+                    data["audio_levels"] = levels
+                data.pop("dungeon_voice_enabled", None)
             for k, v in self._defaults.items():
                 if k not in data:
                     data[k] = v

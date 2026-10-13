@@ -23,7 +23,8 @@ chapter-voice-fx 章节对话语音效果（物理尺度，不是语气）：她
                  其他人那一档缓抖 → 叙述句不念 → 换章清效果 → 回放带配置 → 收尾
                  （假合成器不联网、替身后端不出声）
 dialogue-voice   Solea/Bulla 对话语音接线：她/主角/配角分嗓子 → 叙述句不念 →
-                 全局开关关掉一声不吭 → 收尾收工（假合成器不联网、替身后端不出声）
+                 语音总线拧到 0 一声不吭（连合成都省）→ 收尾收工
+                 （假合成器不联网、替身后端不出声）
 session-close    挑战模式直进会话 → 步进若干 → 点 X 关闭（走「未完成」收尾）
 entry-cancel     探索模式入口页 → 点「返回」（入口退出，不应落盘）
 entry-start      探索模式入口页 → 点「开始副本」→ 步进 → 点 X 关闭
@@ -652,13 +653,15 @@ def _fake_synth(dest_dir=None):
 
 
 def scene_dialogue_voice():
-    """Solea/Bulla 对话语音：谁说话谁出声，关掉就安静，收尾收干净。
+    """Solea/Bulla 对话语音：谁说话谁出声，静音就安静，收尾收干净。
 
     与 ``chapter-bgm`` 同款替身策略——真实合成要联网、真实播放会出声，自检
-    只盯**接线**：方案音色有没有传到播放器、说话人有没有分对嗓子、全局开关
-    关掉时是不是一声不吭、会话收尾后线程与临时文件有没有留下。
+    只盯**接线**：方案音色有没有传到播放器、说话人有没有分对嗓子、把设置页
+    「音量」里的语音拧到 0 时是不是连合成都省了、会话收尾后线程与临时文件
+    有没有留下。
     """
     from dungeon import audio as audio_mod
+    from dungeon.audio import buses as buses_mod
     _FakeTrack.events = []
     synth, calls = _fake_synth()
     previous = audio_mod.set_backends((_FakeTrack,))
@@ -686,14 +689,18 @@ def scene_dialogue_voice():
             observed["tmp_dir"] = win._speech._tmp_dir
 
         def _mute(win):
-            # 全局开关关掉：不看方案配置，一句都不该念
-            win.settings["dungeon_voice_enabled"] = False
-            win._configure_voice(win.scenario_config)
+            # 玩家把「音量」里的语音拧到 0（设置里的全局开关已撤掉）：
+            # 方案配置不再看，一句都不该念——也不该白合成一次
+            levels = dict(win.settings.get("audio_levels") or {})
+            levels[buses_mod.BUS_VOICE] = 0
+            win.settings["audio_levels"] = levels
+            buses_mod.set_bus_levels(levels)
             calls.clear()
-            win._speak_item({"speaker": "自检角色", "text": "关掉后不该出声"})
+            win._speak_item({"speaker": "自检角色", "text": "调 0 后不该出声"})
             win._speech.wait_idle(2.0)
             observed["muted_calls"] = list(calls)
-            observed["muted_enabled"] = win._speech.enabled
+            observed["muted_speak"] = win._speech.speak("自检角色", "再来一句")
+            observed["muted_voices"] = list(_FakeTrack.events)
 
         win, _result = _make_window(
             [("check", _speak), ("check", _mute), ("close", None)],
@@ -711,9 +718,10 @@ def scene_dialogue_voice():
         check("语音：合成产物真的起了播",
               any(kind == "start" for kind, _ in _FakeTrack.events),
               _FakeTrack.events)
-        check("语音：全局开关关掉后一声不吭",
-              observed.get("muted_enabled") is False
-              and not observed.get("muted_calls"), observed.get("muted_calls"))
+        check("语音：语音拧到 0 后一声不吭（连合成都省了）",
+              observed.get("muted_speak") is False
+              and not observed.get("muted_calls"),
+              (observed.get("muted_speak"), observed.get("muted_calls")))
         check("语音：会话收尾后线程已收工", win._speech.worker_alive is False)
         check("语音：临时音频已清理",
               not observed.get("tmp_dir")
@@ -721,6 +729,7 @@ def scene_dialogue_voice():
               observed.get("tmp_dir"))
     finally:
         audio_mod.set_backends(previous)
+        buses_mod.set_bus_levels(None)      # 交还缺省，免得串到后面的场景
 
 
 def scene_chapter_voice_fx():

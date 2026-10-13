@@ -170,7 +170,7 @@ class DungeonWindowBase:
         self._bgm = BgmPlayer(resolver=self._background.resolve_path,
                               logger=process_log.log)
         # 对话语音：Solea/Bulla 的带说话人台词由它朗读（音色在会话初始化时
-        # 按方案配置 + 全局开关填进去，见 _configure_voice）
+        # 按方案配置填进去，见 _configure_voice）
         self._speech = SpeechDirector(logger=process_log.log, enabled=False)
 
         # 入口阶段（dungeon.window.launcher.DungeonLaunchStages）与会话阶段共用同一 DPG 生命周期
@@ -664,17 +664,17 @@ class DungeonWindowBase:
         self._configure_voice(scenario_config)
 
     def _configure_voice(self, scenario_config=None):
-        """按方案配置 + 全局开关装配对话语音（Solea/Bulla 对话句朗读）。
+        """按方案配置装配对话语音（Solea/Bulla 对话句朗读）。
 
-        全局开关（``settings["dungeon_voice_enabled"]``）关掉时不看方案配置——
-        "我不想要声音"是比"这个方案想配音"更强的意图。章节级的物理效果
-        （``current_voice_fx``）随它一起装配：全局关掉时自然不会出声。
+        「玩家不想听」不再有独立开关——把设置页「音量」里的**语音总线**拧到 0
+        即可：既不看方案配置，也不合成（见 ``dungeon/audio/speech.py`` 的总线
+        判空）。章节级的物理效果（``current_voice_fx``）随它一起装配：语音不出声
+        时自然不会有效果。
         """
         cfg = normalize_voice((scenario_config or {}).get("voice"))
         # 网络代理：语音与 AI 共用，副本子进程里按本进程读到的 settings 再设一次
         # （主进程设的带不过来，见 core/netproxy.py）。
         set_speech_proxy((self.settings or {}).get("net_proxy"))
-        global_on = bool((self.settings or {}).get("dungeon_voice_enabled", True))
         caster = VoiceCaster(
             her_names=(self.name, self.nick),
             # 注意逗号：单元素元组写成 ``(x)`` 会得到字符串，遍历时按字符拆开
@@ -684,8 +684,7 @@ class DungeonWindowBase:
             other_voices=cfg["voice_other"],
         )
         self._speech.configure(caster=caster, rate=cfg["rate"],
-                               level=cfg["level"],
-                               enabled=global_on and cfg["enabled"],
+                               level=cfg["level"], enabled=cfg["enabled"],
                                effect=getattr(self, "current_voice_fx", None) or {})
 
     def _init_replay(self, replay_data):

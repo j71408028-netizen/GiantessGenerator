@@ -21,6 +21,9 @@
 ``speak()`` 只入队就返回；**新台词打断旧台词**（按生成号丢弃迟到的一步），
 会话收尾 :meth:`SpeechDirector.shutdown` 收工。
 
+**静音**只有两个来源：方案自己关掉（``voice.enabled=False``）或玩家把设置页
+「音量」里的**语音总线**拧到 0（含总控拧到 0）。后者是「一句都不合成也不播」的真静音。
+
 **物理效果**：章节可以按「她 / 其他人」两档给对话句配物理声学效果（她作为巨大娘
 的尺度、距离与所处空间的后果，不是语气）——见 ``dungeon/audio/voice_fx.py``。效果在
 本模块的播放环节施加：有解码器就离线渲染成 WAV（音量烘进样本），没有就走零依赖的
@@ -478,9 +481,17 @@ class SpeechDirector:
         """
         self.effect = voice_fx.normalize_voice_fx(spec)
 
+    def _silent(self) -> bool:
+        """语音总线是否被拧到了 0（语音电平 × 总控电平 × 方案档位，任一层归零即静音）。
+
+        「不想听」靠玩家把「音量」里的语音拧到 0 表达。做成**真静音**：
+        不联网、不占工作线程，也不会有「合成不可用」的告警把日志刷满。
+        """
+        return buses.resolve_gain(buses.BUS_VOICE, step=self.level) <= 0.0
+
     def speak(self, speaker, text) -> bool:
-        """念一句台词；返回是否真的排上了队。"""
-        if not self.enabled or self._stopped:
+        """念一句台词；返回是否真的排上了队（关掉 / 静音 / 叙述句都不入队）。"""
+        if not self.enabled or self._stopped or self._silent():
             return False
         body = str(text or "").strip()
         if not body or not _clean_name(speaker):
@@ -582,6 +593,8 @@ class SpeechDirector:
                 self._note(f"[Voice] 朗读任务异常: {exc}")
 
     def _speak_job(self, generation, speaker, body):
+        if self._silent():
+            return      # 排队之后玩家才把语音拧到 0：这一句连合成都不做
         caster = self.caster
         voice = caster.voice_for(speaker) if caster is not None else DEFAULT_VOICE_HER
         # 两档分法：她本人走「她」那一档（她在场景里的物理尺度与其他人不是一回事）；

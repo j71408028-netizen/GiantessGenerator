@@ -441,7 +441,7 @@ Solea / Bulla 耦合等级的对话分支会给每句台词标 `@说话人@`（�
 
 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---|---|
-| `enabled` | bool | `true` | 本方案是否朗读；还要过全局开关（设置 → 显示 →「朗读副本对话」） |
+| `enabled` | bool | `true` | 本方案是否朗读；此外还要过玩家侧的**语音总线**（设置 →「音量」→ 语音，拧到 0 即静音） |
 | `voice_her` | str | `zh-CN-XiaoxiaoNeural` | 她的音色（按本局角色名 / 昵称认） |
 | `voice_protagonist` | str | `zh-CN-YunxiNeural` | 主角音色（按方案 `protagonist_title`，留空按「主角」认） |
 | `voice_other` | list | 三把备用嗓 | 其余角色的音色池，**按名字稳定映射**：同一个配角每局都是同一把嗓子 |
@@ -489,18 +489,21 @@ Solea / Bulla 耦合等级的对话分支会给每句台词标 `@说话人@`（�
 
 | 接线 | 位置 |
 |---|---|
-| 装配音色（方案配置 × 全局开关） | `window/base.py::_configure_voice`（`_init_session` / `_init_replay` 各调一次） |
+| 装配音色（按方案配置） | `window/base.py::_configure_voice`（`_init_session` / `_init_replay` 各调一次） |
 | 合成端点 | `speech._endpoint_candidates()`：新主机 `api.msedgeservices.com` 优先、旧主机回退（edge-tts PR #491 未并入时本地补齐） |
 | 合成代理 | `settings["net_proxy"]` → `core/netproxy`（**语音与 AI 共用**）→ `app/shell.py` 与 `window/base.py` 各设一次（子进程独立）；失败原因见 `speech.last_synth_error()` |
 | 触发朗读 | `window/ui.py::_speak_item`（显示单元定稿时，叙述句无 `speaker` 直接返回） |
 
-> **配置优先级**：全局开关 `settings["dungeon_voice_enabled"]` 关掉时不看方案配置
-> ——「我不想要声音」比「这个方案想配音」更强。
->
 > **玩家侧还有一层**：设置页的四条总线滑条（`settings["audio_levels"]`，总音量 /
 > 音乐 / 语音 / 音效）在方案档位之外再乘一次，装进混音层见
 > `dungeon/audio/buses.py::set_bus_levels`（副本窗口开局时按 settings 装配）。
 > 于是「她说什么」的响度 = **方案档位 × 总线电平 × 总控电平**。
+>
+> **「不想听语音」就是语音电平拧到 0**——原先独立总开关 `settings["dungeon_voice_enabled"]` 已撤掉。
+> 这一档是**真静音**：`speech.SpeechDirector._silent()` 在档位 × 语音电平 × 总控
+> 归零时直接返回，**连合成都不做**（不联网、不占工作线程、离线也不会刷告警），
+> 所以「调到 0」等价于旧的「关掉开关」。旧设置文件里残留的键在
+> `persistence/settings_repo.py::load` 迁移：关过的折算成语音电平 0，然后删键。
 
 ### 10.1 章节级物理效果（`voice_fx`）
 
@@ -517,7 +520,8 @@ Solea / Bulla 耦合等级的对话分支会给每句台词标 `@说话人@`（�
 | 能力与降级 | `voice_fx.has_effect` / `decoder_name` / `playback_plan`；不可用时 `SpeechDirector._warn_fx_unavailable` 每个预设只提示一次 |
 | 编辑器**预听** | `dungeon/audio/preview.py::VoicePreview`（零 UI 依赖，与副本同一套合成 + 效果）；章节对话框两档各一个「预听」按钮 + 只读「响度 ±dB」标签；方案编辑器的音色行另有「预听 / 其它音色」试听音色与档位 |
 
-> 效果从属于朗读：全局开关关掉时 `enabled=False`，一句都不念，效果自然也不生效。
+> 效果从属于朗读：方案关掉时 `enabled=False`、或玩家把语音电平拧到 0（见 §10），
+> 都是一句都不念，效果自然也不生效。
 
 ---
 
