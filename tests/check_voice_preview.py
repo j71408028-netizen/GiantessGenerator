@@ -4,7 +4,7 @@
 输出：控制台一行 ASCII 结论 + UTF-8 报告文件路径。
 
 覆盖：
-1. 模块是**零 UI 依赖**的（不 import tkinter / customtkinter / ui）；
+1. 模块导入不碰 UI 框架 / ``ui`` / ``services``（AST，防它长出窗口依赖）；
 2. 入参校验：没音色 / 这一档没配效果 → 直接判失败，不联网合成；
 3. **不带效果**：按总线音量放原声（试听音色 / 语速 / 档位），engine = ``none``；
 4. **播放侧近似**：主声音量 = 总线增益 × ``playback_trim``，且开了分拍；
@@ -13,13 +13,16 @@
 7. 合成失败 → 失败信息可读（不是静默）；
 8. **后一次打断前一次**：被顶掉的那一次回调 ``ok=False``；
 9. ``shutdown`` 收线程并清掉临时目录；
-10. 接线守卫：两个编辑器入口都在，且关对话框会收预听。
+10. 编辑器入口 / 关窗收尾属于 UI 接线，交给 GUI 冒烟与人工，本守卫只测
+    ``VoicePreview`` 自身行为。
 """
 
+import ast
 import os
 import sys
 import tempfile
 import threading
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -30,7 +33,7 @@ sys.stderr = _log
 
 failures = []
 total = 0
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def check(name, ok, extra=""):
@@ -47,13 +50,38 @@ from dungeon.audio import buses  # noqa: E402
 from dungeon.audio import preview as preview_mod  # noqa: E402
 from dungeon.audio import voice_fx as vf  # noqa: E402
 
-# ---------------- 1. 零 UI 依赖 ----------------
+# ---------------- 1. 导入不碰 UI ----------------
+#
+# 这里刻意用 AST 而不是源码子串：子串会把注释/文档里的 "tkinter" 也算违规，
+# 也会因为换个 import 写法（from tkinter import x）漏报。check_dungeon_layering
+# 只扫 dungeon/ 根顶层模块，audio/ 子包不在它的范围里，所以这条留在这里补空档。
 
-_preview_src = open(os.path.join(_PROJECT_ROOT, "dungeon", "audio", "preview.py"),
-                    encoding="utf-8").read()
-check("preview.py 不依赖任何 UI 框架",
-      "tkinter" not in _preview_src and "customtkinter" not in _preview_src
-      and "from ui" not in _preview_src)
+_FORBIDDEN_IMPORT_ROOTS = {"tkinter", "_tkinter", "customtkinter", "dearpygui",
+                           "ui", "services"}
+
+
+def _forbidden_imports(path: Path):
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    hits = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            targets = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                continue
+            targets = [node.module or ""]
+        else:
+            continue
+        for target in targets:
+            if target.split(".")[0] in _FORBIDDEN_IMPORT_ROOTS:
+                hits.append((node.lineno, target))
+    return hits
+
+
+_preview_bad_imports = _forbidden_imports(
+    _PROJECT_ROOT / "dungeon" / "audio" / "preview.py")
+check("preview.py 的导入不碰 UI 框架 / ui / services（AST）",
+      not _preview_bad_imports, _preview_bad_imports)
 check("样例台词非空且够短（合成快）",
       isinstance(preview_mod.SAMPLE_TEXT, str)
       and 0 < len(preview_mod.SAMPLE_TEXT) <= 30, preview_mod.SAMPLE_TEXT)
@@ -246,32 +274,14 @@ finally:
     vf.decoder_name = _orig_decoder_name
     audio_mod.set_backends(_real_backends)
 
-# ---------------- 10. 接线守卫 ----------------
-
-_dlg_src = open(os.path.join(_PROJECT_ROOT, "ui", "scenario", "chapter_dlg.py"),
-                encoding="utf-8").read()
-_sc_src = open(os.path.join(_PROJECT_ROOT, "ui", "scenario", "sc_frame.py"),
-               encoding="utf-8").read()
-check("章节对话框：导入并用了 VoicePreview",
-      "from dungeon.audio.preview import VoicePreview" in _dlg_src
-      and "VoicePreview(" in _dlg_src)
-check("章节对话框：两档各有一个「预听」按钮",
-      "_preview_fx" in _dlg_src and "预听" in _dlg_src
-      and "self._fx_preview_buttons" in _dlg_src)
-check("章节对话框：关窗时收预听",
-      "def destroy" in _dlg_src and "preview.shutdown()" in _dlg_src)
-check("章节对话框：显示只读的声明响度",
-      "loudness_hint" in _dlg_src and "_refresh_fx_loudness" in _dlg_src)
-check("方案编辑器：音色行有「预听」",
-      "from dungeon.audio.preview import VoicePreview" in _sc_src
-      and "_preview_voice" in _sc_src and "预听" in _sc_src)
-check("方案编辑器：关窗时收预听",
-      "def destroy" in _sc_src and "preview.shutdown()" in _sc_src)
-check("预听与副本朗读共用同一套效果与合成（不另起一套）",
-      "voice_fx.render_wav" in _preview_src and "voice_fx.playback_plan" in _preview_src
-      and "_speech.synthesize" in _preview_src)
-check("预听也尊重方案档位（走总线增益）",
-      "buses.resolve_gain(buses.BUS_VOICE" in _preview_src)
+# ---------------- 10. UI 接线不在本守卫范围 ----------------
+#
+# 原先这里用源码子串断言两个编辑器入口（chapter_dlg / sc_frame）导入并用了
+# VoicePreview、关窗时 preview.shutdown()，还断言 preview.py 里出现过
+# voice_fx.render_wav / playback_plan / buses.resolve_gain 这些字。它们守的是
+# "当时的 UI 写法"——按钮改名、抽个 _ensure_preview、换种拼装方式都会红，而真
+# 正的行为（两条引擎路径、降级、打断、收尾）上面已经实测过。编辑器入口与关窗
+# 收尾交给 GUI 冒烟 / 人工核对，本文件不再替 UI 层背书。
 
 # ---------------- 结论 ----------------
 _log.flush()

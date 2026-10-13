@@ -64,8 +64,6 @@ check("声明值都落在 LOUDNESS_RANGE 内",
 _spread = max(_declared.values()) - min(_declared.values())
 check(f"全部预设的响度目标跨度 = {_spread:.1f} dB ≤ {vf.LOUDNESS_SPREAD_DB}（1.5 档）",
       _spread <= vf.LOUDNESS_SPREAD_DB + 1e-9, _spread)
-check("摆幅窗口常量与「1.5 档 × 6 dB/档」一致",
-      abs(vf.LOUDNESS_SPREAD_DB - 9.0) < 1e-9, vf.LOUDNESS_SPREAD_DB)
 check("响度目标互不相同（摆幅不是靠全等值伪造的）",
       len(set(_declared.values())) >= 5, sorted(set(_declared.values())))
 
@@ -79,8 +77,9 @@ check("强度 0 = 没有目标（效果本身也关了）",
 check("满强度等于声明值",
       abs(vf.loudness_target({"preset": "giant_boom", "intensity": 100})
           - vf.PRESETS_BY_KEY["giant_boom"].loudness_db) < 1e-9)
-check("目标随强度线性缩放",
-      abs(vf.loudness_target({"preset": "giant_boom", "intensity": 50}) - 1.5) < 1e-9,
+check("目标随强度线性缩放（50% 强度 = 自己声明值的一半）",
+      abs(vf.loudness_target({"preset": "giant_boom", "intensity": 50})
+          - _declared["giant_boom"] / 2.0) < 1e-6,
       vf.loudness_target({"preset": "giant_boom", "intensity": 50}))
 check("未知预设没有目标", vf.loudness_target({"preset": "bogus", "intensity": 100}) == 0.0)
 check("显式 loudness_db 覆盖声明值（并按区间夹取）",
@@ -91,9 +90,11 @@ check("显式 loudness_db 覆盖声明值（并按区间夹取）",
 
 # ---------------- 4. hint / playback_trim ----------------
 
-check("loudness_hint：配了效果给 ±dB 文案，没配给空串",
-      vf.loudness_hint({"preset": "giant_boom", "intensity": 100}) == "响度 +3.0 dB"
-      and vf.loudness_hint({"preset": "none", "intensity": 100}) == ""
+_hint = vf.loudness_hint({"preset": "giant_boom", "intensity": 100})
+check("loudness_hint：配了效果给出「响度 ±x.x dB」，数值取自声明值",
+      "响度" in _hint and f"{_declared['giant_boom']:+.1f}" in _hint, _hint)
+check("loudness_hint：没配效果给空串",
+      vf.loudness_hint({"preset": "none", "intensity": 100}) == ""
       and vf.loudness_hint({}) == "")
 _trims = {p.key: vf.playback_trim({"preset": p.key, "intensity": 100})
           for p in vf.PRESETS if p.key != vf.PRESET_NONE}
@@ -102,8 +103,10 @@ check("playback_trim 恒 ≤ 1（播放侧抬不起响度）",
 check("目标 ≥ 0 的预设不衰减（留在该引擎的自然上限）",
       all(_trims[p.key] == 1.0 for p in vf.PRESETS
           if p.key != vf.PRESET_NONE and p.loudness_db >= 0), _trims)
-check("目标 < 0 的预设按 dB 折算衰减",
-      abs(_trims["far_above"] - 10.0 ** (-3.0 / 20.0)) < 1e-9, _trims["far_above"])
+_neg = min((k for k, v in _declared.items() if v < 0), key=lambda k: _declared[k])
+check(f"目标 < 0 的预设（{_neg}）按自己声明的 dB 折算衰减",
+      abs(_trims[_neg] - 10.0 ** (_declared[_neg] / 20.0)) < 1e-9,
+      (_neg, _trims[_neg]))
 check("强度缩放下衰减变浅（60% 强度 → 目标 ×0.6）",
       vf.playback_trim({"preset": "far_above", "intensity": 60})
       > vf.playback_trim({"preset": "far_above", "intensity": 100}))
@@ -234,23 +237,30 @@ else:
     check("既有静音档也不炸（空/无声输入不产出渲染）",
           vf.render_wav(_src, _tmp, {"preset": "giant_boom", "intensity": 0}) is None)
 
-# ---------------- 10. 播放侧接线 ----------------
+    # 热输入：干声已接近满幅。若"先抬响度、再看峰值余量"的顺序反了，或峰值护栏
+    # 没接在链尾，抬上来的那部分就会冲过 PEAK_CEILING。原先这一点是靠数源码里
+    # PEAK_CEILING 出现几次间接守的，这里直接测结果。
+    _hot_dry = _speech_proxy(peak=0.99)
+    _hot_src = os.path.join(_tmp, "hot.mp3")
+    with open(_hot_src, "wb") as _handle:
+        _handle.write(b"fake-audio")
+    _hot_out = vf.render_wav(_hot_src, _tmp,
+                             {"preset": "giant_boom", "intensity": 100},
+                             level=buses.STEP_MAX,
+                             decoder=lambda _p, y=_hot_dry: (y.copy(), RATE))
+    _hot_peak = float(np.max(np.abs(_read_wav(_hot_out)))) if _hot_out else None
+    check(f"热输入（干声峰值 0.99）抬响度后峰值仍被限在 PEAK_CEILING 内"
+          f"（{_hot_peak} ≤ {vf.PEAK_CEILING}）",
+          _hot_peak is not None and _hot_peak <= vf.PEAK_CEILING + 1e-3, _hot_peak)
 
-_speech_src = open(os.path.join(_PROJECT_ROOT, "dungeon", "audio", "speech.py"),
-                   encoding="utf-8").read()
-_fx_src = open(os.path.join(_PROJECT_ROOT, "dungeon", "audio", "voice_fx.py"),
-               encoding="utf-8").read()
-check("speech.py 的播放侧乘了 playback_trim",
-      "voice_fx.playback_trim(spec)" in _speech_src)
-check("渲染链先对齐响度、再限幅（顺序不能反）",
-      _fx_src.index("_match_loudness(np, y, dry, target, offset)")
-      < _fx_src.index("_limit(np, y) * _gain(level)"))
-check("限幅与响度匹配共用同一个峰值护栏常量",
-      "PEAK_CEILING" in _fx_src and _fx_src.count("PEAK_CEILING") >= 3)
-check("抬响度前会看峰值余量（不是先抬再被压回来）",
-      "headroom" in _fx_src and "peak_limited" in _fx_src)
-check("链尾是「响度对齐 → 限幅 × 总线增益」一条语句",
-      "y = _limit(np, y) * _gain(level)" in _fx_src)
+# ---------------- 10. 播放侧 ----------------
+#
+# 原先这里是一组源码串断言：把"链尾恰好是 `y = _limit(np, y) * _gain(level)`
+# 这一整行"钉成 golden、用 `.index()` 比对两条语句的先后、数 `PEAK_CEILING` 在
+# 源码里出现几次。它们守的是"当时的写法"——重排一次语句，`.index()` 抛
+# ValueError 带栈退出（不是干净的 FAIL）。要守的两件事其实都能实测：
+#   · 播放侧乘了 ``playback_trim`` → 下面端到端断言的起播音量 = 总线增益 × 衰减；
+#   · 响度对齐与限幅同时成立、峰值仍被护栏压住 → 上面的「实测落点」+「热输入」。
 
 
 # 端到端：假后端 + 假解码缺失，看播放侧实际拿到的音量

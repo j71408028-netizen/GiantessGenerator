@@ -18,14 +18,17 @@ issue #490），合成直接失败、副本一句都不念。上游修法见 edg
    地址非法 / 其它；
 5. ``_edge_synth`` 每次先清空上次原因；没装 edge-tts 时给出可读原因且不抛异常；
 6. 失败原因能被**预听**复用（预听提示就是副本不出声的原因）；
-7. 接线守卫：settings 默认含 ``net_proxy``（语音与 AI 共用的网络代理）；启动
-   装配、副本子进程、设置页保存三处都会设置它；
+7. 接线：``net_proxy`` 默认值为空串（直连）；语音侧写的与 AI 文本生成读的是
+   ``core.netproxy`` 里**同一份**覆盖值；三处装配点（启动 / 副本子进程 / 设置页
+   保存）确实会写它——按 AST 认 ``.set_override(...)`` 调用，改引号、换行、空白
+   都不会误报，删掉这行接线仍会红；
 8. 代理写法整理：缺 scheme 补 ``http://``，SOCKS / 未知协议明确拒绝；
 9. 端点候选首选新主机、旧主机回退；新主机失败会自动回落旧主机并记住可用端点；
    若已装版本已修好（不再指向旧主机）则不插手；
 10. 两个端点都失败时仍给出可读原因（含 403）。
 """
 
+import ast
 import os
 import sys
 import tempfile
@@ -346,28 +349,64 @@ check("时钟校验失败 → 提到时间",
       "时间" in _d2(_SkewAdjustmentError("No server date in headers")),
       _d2(_SkewAdjustmentError("boom")))
 
-# ---------------- 7. 接线守卫 ----------------
+# ---------------- 7. 接线 ----------------
 
-check("settings 默认含 net_proxy（空串 = 直连；语音与 AI 共用）",
-      SettingsRepo()._defaults.get("net_proxy") == "",
-      SettingsRepo()._defaults.get("net_proxy"))
+# 默认值走公开的 load()，并给一个空的 data_dir：既证明"新装默认是直连"，又不会
+# 碰到真实 data/ 里用户自己填过的代理。
+check("settings 默认 net_proxy 为空串（直连；语音与 AI 共用同一个键）",
+      SettingsRepo(data_dir=tempfile.mkdtemp(prefix="voice_tts_settings_"))
+      .load().get("net_proxy") == "")
 
-_shell_src = open(os.path.join(_PROJECT_ROOT, "app", "shell.py"),
-                  encoding="utf-8").read()
-_base_src = open(os.path.join(_PROJECT_ROOT, "dungeon", "window", "base.py"),
-                 encoding="utf-8").read()
-_settings_src = open(os.path.join(_PROJECT_ROOT, "ui", "settings", "__init__.py"),
-                     encoding="utf-8").read()
+# "共用"的实测口径：语音侧写的、AI 侧读的都是 core.netproxy 里同一份覆盖值
+from core import netproxy as _netproxy  # noqa: E402
 
-check("启动装配设置代理（app/shell.py）",
-      "netproxy.set_override(settings.get(\"net_proxy\"))" in _shell_src)
-check("副本子进程设置代理（dungeon/window/base.py，独立进程带不过来）",
-      "netproxy.set_override(" in _base_src
-      and "net_proxy" in _base_src)
-check("设置页：有输入框、写进保存字典、保存后立即生效",
-      "net_proxy_var" in _settings_src
-      and "\"net_proxy\": self.net_proxy_var.get().strip()" in _settings_src
-      and "netproxy.set_override(self.settings.get(\"net_proxy\"))" in _settings_src)
+speech.set_proxy("http://shared-proxy:9")
+check("语音设置代理 = 写进 core.netproxy 的共用覆盖值",
+      _netproxy.resolve() == "http://shared-proxy:9", _netproxy.resolve())
+_netproxy.set_override("http://set-elsewhere:1")
+check("别处写进共用覆盖值，语音也认（三处装配点写的都是它）",
+      speech.resolve_proxy() == "http://set-elsewhere:1", speech.resolve_proxy())
+speech.set_proxy(None)
+_netproxy.set_override("")
+
+
+def _module_tree(rel_path):
+    """解析仓库里的模块，返回 AST；读不到 / 解析不了返回 None。"""
+    try:
+        with open(os.path.join(_PROJECT_ROOT, rel_path), encoding="utf-8") as handle:
+            return ast.parse(handle.read())
+    except (OSError, SyntaxError):
+        return None
+
+
+def _writes_shared_proxy(tree):
+    """AST 扫：模块里有没有 ``<某对象>.set_override(...)`` 调用。
+
+    刻意用 AST 而不是源码子串——改引号、换行、动空白都不会误报，而删掉这处装配
+    仍会红。要守的只是"这里还在写代理"，没必要连那行字面量长什么样一起钉死。
+    """
+    return any(isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+               and node.func.attr == "set_override" for node in ast.walk(tree))
+
+
+for _rel, _why in (
+    ("app/shell.py", "启动装配"),
+    ("dungeon/window/base.py", "副本子进程（独立进程，主进程设的带不过来）"),
+    ("ui/settings/__init__.py", "设置页保存后立即生效"),
+):
+    _tree = _module_tree(_rel)
+    if _tree is None:
+        check(f"{_why}：{_rel} 可读可解析", False, "源码读取/解析失败")
+        continue
+    check(f"{_why}：{_rel} 会写共用代理（.set_override）", _writes_shared_proxy(_tree))
+
+_settings_tree = _module_tree("ui/settings/__init__.py")
+_settings_strings = ({
+    node.value for node in ast.walk(_settings_tree)
+    if isinstance(node, ast.Constant) and isinstance(node.value, str)
+} if _settings_tree is not None else set())
+check("设置页把 net_proxy 存进设置字典（否则重启即失效）",
+      "net_proxy" in _settings_strings)
 
 # ---------------- 结论 ----------------
 _log.flush()
