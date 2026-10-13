@@ -62,7 +62,11 @@
 | `check_dungeon_finalize.py` | 原子写 / `.bak` / 损坏回退 + `_finalize` 完成与未完成两条路径 | `python tests/check_dungeon_finalize.py` |
 | `check_scenario_naming.py` | 命名守卫（旧标识符残留）+ 兼容读与迁移行为 | `python tests/check_scenario_naming.py` |
 | `check_scenarios.py` | 离线批量校验所有 / 单个方案，有 error 时退出码 1 | `python tests/check_scenarios.py --errors-only` |
-| `check_platform_compat.py` | Windows 专有 API 使用点清单（发布 macOS 前必读） | `python tests/check_platform_compat.py` |
+
+> 另有两支**不判红**的人工工具在 `scripts/`：`child_dpi_probe.py`（副本子进程 DPI
+> 感知探针）与 `platform_api_report.py`（Windows 专有 API 落点清单，发布 macOS 前
+> 过一眼）。二者原先在 `tests/`，2026-10-13 移出——只打印清单、不给出结论的脚本
+> 不该占 CI 门禁位。分句器/语音链路等仍由 `tests/` 的守卫覆盖。
 
 需显示器（GUI 冒烟层，不进无 GUI 门禁）：
 

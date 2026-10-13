@@ -149,8 +149,10 @@ Tk 代码，`tests/check_mini_layering.py` 白名单放行 `dungeon_spawner` 的
 （载荷 `dpi_aware` → 子进程 `_ensure_dpi_awareness`，档位与 CTk 相同的
 `shcore.SetProcessDpiAwareness(2)`）。父感知而子不感知，Windows 会把视口的
 96-DPI 逻辑坐标按系统缩放再放大一次（窗口与字体巨大）；父（挂件版）刻意无感知
-而子感知，视口会比主窗口小一圈。守卫：`tests/check_dungeon_child_dpi.py`
-（探针子进程对比注册表 `AppliedDPI` 真值，>100% 缩放的机器上是回归锁）。
+而子感知，视口会比主窗口小一圈。诊断：`scripts/child_dpi_probe.py`（拉两个子进程
+打印各自的 `GetDpiForSystem()` 与注册表 `AppliedDPI`，人工对照）。原先它是
+`tests/check_dungeon_child_dpi.py` 的判红守卫，2026-10-13 移出 `tests/`——"感知
+探针应等于 `AppliedDPI`"这个前提在真机上不成立（本机 168 vs 192，见该脚本文末）。
 
 父进程侧随之删除/简化的死机器：`app/shell.py` 的根窗口修复三件套
 （`_root_needs_repair` / `_revive_dpg_for_teardown` / `_retire_root`）、

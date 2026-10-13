@@ -19,6 +19,8 @@ GUI 冒烟）在 `tests/`，由 `python tests/run_checks.py` 统一驱动；另�
 |---|---|---|
 | `dungeon_autopilot.py` | 真窗口自动驾驶 | 副本窗口全生命周期回归（15 场景，需显示器）：构造 → `run()` → 步进 → 关闭 → 落盘。最强回归，`--in-process` 连跑全部场景，`--scene <名> --isolate` 单跑。**进 CI**（`.github/workflows/gui-smoke.yml`，跳 `text-components` 实跑 14 个） |
 | `escape_sim.py` | 无头模拟 | escape_giantess 小游戏模拟（无显示器可跑）：地图生成 / 出生点连通性 / bot 实跑结算。是 `dungeon_autopilot` 对应 DPG 场景的前置逻辑验证 |
+| `child_dpi_probe.py` | 探针（**不判红**） | 副本子进程 DPI 感知：拉两个子进程打印各自的 `GetDpiForSystem()` 与注册表 `AppliedDPI`，人工对照。原 `tests/check_dungeon_child_dpi.py`——"感知探针应等于 AppliedDPI"的前提在真机不成立（本机 168 vs 192），当门禁只会长期报红，2026-10-13 迁来 |
+| `platform_api_report.py` | 报告（**不判红**） | Windows 专有 API 落点清单，发布 macOS 前过一眼。原 `tests/check_platform_compat.py`；它原先兼守的"模态对话框不得构造期裸 `grab_set()`"判红约束已归 `tests/check_modal_grabs.py` 专职（AST 版 + 行为分支），2026-10-13 迁来 |
 
 ## 已落地归档（留档备查，不再演进）
 
@@ -40,7 +42,8 @@ GUI 冒烟）在 `tests/`，由 `python tests/run_checks.py` 统一驱动；另�
 |---|---|
 | `_out/dpg_probe/` | `dpg_probe/` 各探针的 `_*.txt` / `*.dmp` / `_dpg_bindings.json`（共享常量 `OUT_DIR` / `out()` 在 `dpg_probe/_outdir.py`） |
 
-`dungeon_autopilot.py` / `escape_sim.py` / 两个迁移脚本都不落盘（迁移脚本直写 `data/`）。
+`dungeon_autopilot.py` / `escape_sim.py` / 两个迁移脚本 / 两个探针
+（`child_dpi_probe.py`、`platform_api_report.py`）都不落盘（迁移脚本直写 `data/`）。
 
 ## 附录：dpg_probe/ 说明
 
