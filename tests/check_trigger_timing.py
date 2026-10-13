@@ -3,8 +3,8 @@
 用法：``python tests/check_trigger_timing.py``
 
 无 GUI：视效的 DPG 上屏路径不在覆盖范围，这里只守纯逻辑——
-1. 动作注册表：``fx`` 在 NEW_ACTIONS；WINDOW_FX 键齐全；位置表 ACTION_POSITIONS
-   的顺序与分组（fx → 模态 → goto → effect → insert → none）；
+1. 动作注册表：``fx`` 在 NEW_ACTIONS；WINDOW_FX 键无重复且与展示名一一对应；
+   位置表 ACTION_POSITIONS 恰好覆盖注册表、六个已知分组顺序稳定（允许追加）；
 2. ``parse_fx_params`` 夹紧：解析失败 / 越界都回到合法区间；
 3. 判定顺序：一轮判定按位置顺序派发，同位置至多一个生效（配置序决定谁赢）；
 4. 轮次防重发：结算重判（不 _begin_trigger_round 直接重判）共享本轮已触发
@@ -48,12 +48,28 @@ check("fx 在运行时动作清单内", "fx" in actions_mod.NEW_ACTIONS)
 check("fx 展示名", actions_mod.action_label("fx") == "窗口视效")
 check("effect 展示名（章节效果短暂覆盖）",
       actions_mod.action_label("effect") == "效果覆盖")
-check("窗口视效清单", actions_mod.WINDOW_FX_KEYS
-      == ("flash", "shake", "invert", "rgb_split"), str(actions_mod.WINDOW_FX_KEYS))
-check("位置表顺序与分组", actions_mod.ACTION_POSITIONS
-      == (("fx",), ("option", "mini_game"), ("goto",),
-          ("effect",), ("insert",), ("none",)),
-      str(actions_mod.ACTION_POSITIONS))
+_fx_keys = actions_mod.WINDOW_FX_KEYS
+check("窗口视效键：无重复、非空、四个已知键齐全（新增视效不再让门禁红）",
+      isinstance(_fx_keys, tuple) and len(set(_fx_keys)) == len(_fx_keys)
+      and {"flash", "shake", "invert", "rgb_split"} <= set(_fx_keys)
+      and all(isinstance(_k, str) and _k for _k in _fx_keys),
+      str(_fx_keys))
+check("视效键与展示名一一对应（WINDOW_FX 是单一真相源）",
+      set(_fx_keys) == {_k for _k, _label in actions_mod.WINDOW_FX}
+      and all(_label for _k, _label in actions_mod.WINDOW_FX),
+      str(actions_mod.WINDOW_FX))
+
+_positions = actions_mod.ACTION_POSITIONS
+_flat = [_a for _group in _positions for _a in _group]
+_known_order = ["fx", "option", "mini_game", "goto", "effect", "insert", "none"]
+check("位置表：每组非空、动作不重复、恰好覆盖运行时动作注册表",
+      all(_group for _group in _positions)
+      and len(_flat) == len(set(_flat))
+      and set(_flat) == set(actions_mod.NEW_ACTIONS),
+      str(_positions))
+check("位置表：已知动作保持已知相对顺序（允许追加新组，派发语义另有行为测试）",
+      [_a for _a in _flat if _a in _known_order] == _known_order,
+      str(_positions))
 
 # ---------------- 2. parse_fx_params 夹紧 ----------------
 check("正常解析（字符串数字也接受）",

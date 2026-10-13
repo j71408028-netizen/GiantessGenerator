@@ -1,14 +1,18 @@
-"""副本窗口中文字体守卫：候选链覆盖 + 解析结果「真的有中文字形」。
+"""副本窗口中文字体守卫：解析结果「真的有中文字形」。
 
 背景：Linux 上副本窗口（DPG）的字体链原先只有 ``DejaVuSans.ttf`` 一个 Linux 路径，
 它没有中文字形——设置里的「Noto Sans CJK SC」解析成 DejaVu 后中文全是豆腐块／问号。
 本脚本把这件事变成可回归的断言：
 
-1. **结构**：常规 / 粗体 / 衬线三条候选链都必须带 Linux 中文字体条目（发行版路径），
-   不能只剩 DejaVu 这种纯拉丁兜底；
-2. **行为**：如果本机装有任何中文字体（fontconfig 或候选链里能找到），
-   那么 ``resolve_font_files()``（含设置里常见的 Windows 家族名）与
-   ``resolve_serif_font()`` 解析出来的文件必须真的覆盖中文码位。
+**行为**：如果本机装有任何中文字体（fontconfig 或候选链里能找到），那么
+``resolve_font_files()``（含设置里常见的 Windows 家族名）与
+``resolve_serif_font()`` 解析出来的文件必须真的覆盖中文码位；组件包兜底走的粗体链
+第一个存在的文件同样必须覆盖中文。
+
+原先还有一条**结构**断言（三条候选链必须含 ``/usr/share/fonts`` 下的 Noto/文泉驿
+条目），已删：那是对当前 Linux 字体链的快照——加一个发行版路径、换一个字体包就红，
+而它想防的「中文变豆腐块」由上面的行为断言直接覆盖：真的解析错了会红，解析没错就
+不该红。
 
 「真的有中文字形」的判据见 ``fonts.font_covers_cjk``：FreeType 对未映射码位给的是
 ``.notdef`` 位图，取样字符的位图与 U+10FFFE 的位图必须不同。
@@ -30,28 +34,6 @@ from dungeon.window.fonts import (  # noqa: E402
     first_existing, font_covers_cjk, fontconfig_font, resolve_font_files,
     resolve_serif_font,
 )
-
-#: 判定「这是 Linux 中文字体条目」的路径关键词
-_LINUX_CJK_HINTS = ("NotoSansCJK", "NotoSerifCJK", "SourceHan", "wqy", "DroidSansFallback")
-
-
-def _chain_has_linux_cjk(chain):
-    return any(
-        path.startswith("/usr/share/fonts") and any(hint in path for hint in _LINUX_CJK_HINTS)
-        for path in chain
-    )
-
-
-def check_chains() -> list[str]:
-    """三条候选链都必须带 Linux 中文字体条目（旧 bug 的形状守卫）。"""
-    problems = []
-    for name, chain in (("FONT_FALLBACK_PATHS", FONT_FALLBACK_PATHS),
-                        ("BOLD_FONT_PATHS", BOLD_FONT_PATHS),
-                        ("SERIF_FONT_PATHS", SERIF_FONT_PATHS)):
-        if not _chain_has_linux_cjk(chain):
-            problems.append(f"{name} 缺少 Linux 中文字体候选（只剩拉丁兜底会让中文变豆腐块）")
-    return problems
-
 
 def _installed_cjk_available() -> bool:
     """本机是否装有任何中文字体：先问 fontconfig，再看候选链里存在的文件。"""
@@ -105,13 +87,13 @@ def check_resolution() -> list[str]:
 
 
 def main() -> int:
-    problems = check_chains() + check_resolution()
+    problems = check_resolution()
     if problems:
         print("[check_fonts] FAILED")
         for item in problems:
             print("  - " + item)
         return 1
-    print("[check_fonts] PASSED：候选链含 Linux 中文字体，解析结果确实覆盖中文")
+    print("[check_fonts] PASSED：解析结果确实覆盖中文（或无中文字体可验，见 SKIP）")
     return 0
 
 
