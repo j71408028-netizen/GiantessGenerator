@@ -2,6 +2,10 @@
 
 背景图与结局图标都要走“选图 → 裁剪（可选）→ 存入副本目录 → 记相对路径”
 这一套流程，触发器对话框与章节对话框共用这里的实现。
+
+固定文本（章节字段 ``fixed_text``，见 ``dungeon/script_text``）走同一套素材
+管理：正文落在 ``<方案>/texts/``，章节里只记相对路径。文本不需要裁剪，但需要
+读回来做解析预览 / 内置编辑，因此读写 helper 也收在这里。
 """
 
 import datetime
@@ -15,6 +19,8 @@ from dungeon.audio.chapters import BGM_SUPPORTED_EXTS
 from ui.ctk.dialogs import ImageCropDialog
 
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp")
+#: 固定文本可用的后缀（导入时其它后缀会被补成 .txt）
+TEXT_EXTS = (".txt", ".md")
 
 
 def save_cropped_image(cropped_path: str, dest_path: str):
@@ -162,3 +168,125 @@ def import_ending_icon(parent, scenario_repo, scenario_id) -> str:
         ui.ctk.dialogs.showerror("错误", f"保存结局图标失败: {e}")
         return ""
     return os.path.relpath(dest_path, dungeon_dir).replace("\\", "/")
+
+
+# ---------------- 固定文本（fixed_text） ----------------
+
+def _scenario_dir(scenario_repo, scenario_id) -> str:
+    """方案目录；方案 / 仓库不可用时返回空串。"""
+    if not (scenario_repo and scenario_id):
+        return ""
+    try:
+        return scenario_repo.scenario_dir(scenario_id) or ""
+    except Exception:
+        return ""
+
+
+def script_text_abs_path(scenario_repo, scenario_id, rel_path) -> str:
+    """把相对方案目录的固定文本路径解析成绝对路径（解析不出来返回空串）。"""
+    rel = str(rel_path or "").strip().replace("\\", "/")
+    if not rel:
+        return ""
+    if os.path.isabs(rel):
+        return os.path.normpath(rel)
+    base = _scenario_dir(scenario_repo, scenario_id)
+    if not base:
+        return ""
+    return os.path.normpath(os.path.join(base, rel))
+
+
+def read_script_text(scenario_repo, scenario_id, rel_path):
+    """读取固定文本内容，返回 ``(内容|None, 失败原因)``。
+
+    编码与 ``dungeon.script_text.load_script_file`` 同一套口径
+    （utf-8 → gbk → utf-8 容错替换），保证「编辑器里看到的」和「运行时读到的」
+    是同一份文本。
+    """
+    path = script_text_abs_path(scenario_repo, scenario_id, rel_path)
+    if not path:
+        return None, "无法解析方案目录"
+    if not os.path.isfile(path):
+        return None, "文件不存在"
+    for encoding in ("utf-8", "gbk"):
+        try:
+            with open(path, "r", encoding=encoding) as handle:
+                return handle.read(), ""
+        except UnicodeDecodeError:
+            continue
+        except OSError as exc:
+            return None, str(exc)
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            return handle.read(), ""
+    except OSError as exc:
+        return None, str(exc)
+
+
+def write_script_text(scenario_repo, scenario_id, rel_path, text) -> bool:
+    """把文本写回方案目录（UTF-8 + LF，自动建目录）；失败弹框并返回 False。"""
+    path = script_text_abs_path(scenario_repo, scenario_id, rel_path)
+    if not path:
+        ui.ctk.dialogs.showerror("错误", "无法解析方案目录，无法保存文本")
+        return False
+    try:
+        parent_dir = os.path.dirname(path)
+        if parent_dir:
+            os.makedirs(parent_dir, exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text or "")
+    except OSError as exc:
+        ui.ctk.dialogs.showerror("错误", f"保存文本失败：{exc}")
+        return False
+    return True
+
+
+def import_script_text(parent, scenario_repo, scenario_id) -> str:
+    """选一个现成文本拷入 ``<方案>/texts/``，返回相对方案目录的路径。
+
+    文本不像图片需要裁剪，拷进来即可；同名文件覆盖前先问一句。
+    用户取消、方案目录不可用时返回空字符串。
+    """
+    file_path = filedialog.askopenfilename(
+        title="选择文本文件",
+        filetypes=[("文本文件", "*.txt *.md"), ("所有文件", "*.*")])
+    if not file_path:
+        return ""
+    base = _scenario_dir(scenario_repo, scenario_id)
+    if not base:
+        ui.ctk.dialogs.showerror("错误", "无法解析方案目录，无法保存文本文件")
+        return ""
+    texts_dir = os.path.join(base, "texts")
+    try:
+        os.makedirs(texts_dir, exist_ok=True)
+    except OSError as exc:
+        ui.ctk.dialogs.showerror("错误", f"创建 texts 目录失败：{exc}")
+        return ""
+    basename = os.path.basename(file_path)
+    if os.path.splitext(basename)[1].lower() not in TEXT_EXTS:
+        basename += ".txt"
+    dest_path = os.path.join(texts_dir, basename)
+    if os.path.exists(dest_path):
+        if not ui.ctk.dialogs.askyesno("文件已存在", f"文本 {basename} 已存在，是否覆盖？"):
+            return ""
+    try:
+        shutil.copy2(file_path, dest_path)
+    except OSError as exc:
+        ui.ctk.dialogs.showerror("错误", f"保存文本文件失败：{exc}")
+        return ""
+    return os.path.relpath(dest_path, base).replace("\\", "/")
+
+
+def suggest_script_path(scenario_repo, scenario_id, chapter_name) -> str:
+    """给还没有文本的章节起一个不冲突的默认路径 ``texts/<章节名>.txt``。"""
+    safe = re.sub(r"[^\w\u4e00-\u9fff-]", "_",
+                  str(chapter_name or "").strip())[:40] or "chapter"
+    base = _scenario_dir(scenario_repo, scenario_id)
+    if not base:
+        return f"texts/{safe}.txt"
+    texts_dir = os.path.join(base, "texts")
+    candidate = f"{safe}.txt"
+    index = 1
+    while os.path.exists(os.path.join(texts_dir, candidate)):
+        index += 1
+        candidate = f"{safe}_{index}.txt"
+    return f"texts/{candidate}"

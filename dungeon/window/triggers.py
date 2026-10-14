@@ -14,8 +14,9 @@ from dungeon.actions import (ACTION_POSITIONS, EMPTY_ACTIONS, ENDING_ACTION,
                              MINI_GAME_DEFAULT_ID, WINDOW_FX_KEYS,
                              normalize_action_type)
 from dungeon.audio.chapters import (DEFAULT_BGM_LEVEL, bgm_level, chapter_bgm,
-                              find_chapter, is_terminating_chapter,
-                              matches_scope, sensitivity_amount)
+                              chapter_fixed_text, find_chapter,
+                              is_terminating_chapter, matches_scope,
+                              sensitivity_amount)
 from dungeon.overrides import (active_override, describe as describe_overrides,
                                invalid_filter, parse_overrides)
 from dungeon.models import DungeonState, DungeonTextType
@@ -73,6 +74,28 @@ class TriggerHandler:
                                          action_points=self._current_action_points()),
         }
 
+    # ------------------ 固定文本章节 ------------------
+    def _current_fixed_text(self) -> dict:
+        """当前章节的固定文本配置（无章节 / 非固定文本章节返回空字典）。
+
+        回放模式一律返回空——回放按记录复现，不再走脚本推进。
+        """
+        if getattr(self, "is_replay", False):
+            return {}
+        chapter = find_chapter(getattr(self, "chapters", None), self.current_chapter)
+        return chapter_fixed_text(chapter)
+
+    def _in_fixed_text_chapter(self) -> bool:
+        """当前是否处于固定文本章节（章节配了 ``fixed_text.path``）。"""
+        return bool(self._current_fixed_text().get("path"))
+
+    def _reset_script_progress(self):
+        """清空固定文本进度（换章调用；回到同一章会从第一段重放）。"""
+        self._script = None
+        self._script_key = None
+        self._script_index = 0
+        self._script_exhausted = False
+
     def _enter_chapter(self, name, record: bool = False, background=None,
                        bgm=None, voice_fx=None, allow_unknown: bool = False) -> bool:
         """进入章节（``""`` 表示离开章节）。
@@ -99,6 +122,8 @@ class TriggerHandler:
 
         self.current_chapter = name or None
         self.dungeon_state.chapter_steps = 0
+        # 固定文本章节：换章即重置脚本进度（未播完就跳走 = 进度丢弃）
+        self._reset_script_progress()
         self.chapter_sensitivity_effects = [
             self._build_chapter_effect(effect)
             for effect in (chapter or {}).get("sensitivity", [])
@@ -333,6 +358,12 @@ class TriggerHandler:
             return False
         action_accepted = True
         if action_type == "insert":
+            # 固定文本章节按脚本段落推进：插入段要写进 AI 对话历史并触发预生成，
+            # 与文本流是两套推进模型，混用会打乱步序——直接跳过并留一行日志
+            if self._in_fixed_text_chapter():
+                process_log.log(f"[Trigger] 插入触发器 {trigger['name']} 位于固定文本章节内，"
+                                f"已跳过（文本流不支持插入）")
+                return False
             text = str(action_data.get("text", "")).strip()
             if not text:
                 process_log.log(f"[Trigger] 插入触发器 {trigger['name']} 缺少插入文本，已跳过")

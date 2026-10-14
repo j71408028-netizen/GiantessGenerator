@@ -416,8 +416,10 @@ class DungeonWindowUI:
             self._update_text_display()
 
     def _display_text(self, text: str, text_type: DungeonTextType, highlight: bool = False,
-                      speaker: str = None):
-        prefix = self._display_type_prefix(text_type)
+                      speaker: str = None, prefix: str = None):
+        # 固定文本段落自带类型前缀（没写类型的段落前缀为空串，回放按记录复现）；
+        # 其余调用方不传 prefix，仍按段落类型算
+        prefix = self._display_type_prefix(text_type) if prefix is None else prefix
         self.story_history.append({"type_str": prefix, "text": text,
                                    "highlight": highlight, "speaker": speaker})
         self._update_text_display()

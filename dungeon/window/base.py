@@ -198,6 +198,13 @@ class DungeonWindowBase:
         self.pending_insertions = deque()
         # 当前逻辑段落（一次 AI 输出）内待揭示的显示段落（内置分句器切分）
         self._pending_units = []
+        # 固定文本章节（章节字段 fixed_text）的脚本文本与推进进度：
+        # _script 为解析后的 Script，_script_key 是 (章节名, 路径) 缓存键，
+        # _script_index 是下一段下标；换章时整体重置（见 triggers._enter_chapter）
+        self._script = None
+        self._script_key = None
+        self._script_index = 0
+        self._script_exhausted = False
         # 上屏游标（限速 30 字/秒的仿流式输出）：当前显示段落的逐字状态，
         # 真流式下目标文本随 chunk 增长；同时为自动播放记录停留到期时刻。
         self._reveal = None

@@ -122,6 +122,12 @@ class TriggerEditDialog(BaseDialog):
         self.sens_targets = [a["name"] for a in self.evolution_attrs
                              if a.get("name") and a.get("type") != "casualty"] or evolution_names
         self.chapter_names = chapter_names(chapters)
+        # 固定文本章节：这些章节里「插入文本」与文本流是两套推进模型，运行时被跳过
+        self.fixed_chapter_names = {
+            str(c.get("name") or "")
+            for c in (chapters or [])
+            if isinstance(c, dict) and (c.get("fixed_text") or {}).get("path")
+        }
         self.transient(parent)
         # 抓取延到窗口可见之后（X11 要求 viewable，见 BaseDialog._grab_deferred）
         self._grab_deferred()
@@ -170,10 +176,13 @@ class TriggerEditDialog(BaseDialog):
         }
         btn_frame = ctk.CTkFrame(main, fg_color="transparent")
         btn_frame.pack(fill='x', pady=(0, 2))
+        self.action_buttons = {}
         for action_type in NEW_ACTIONS:
-            ctk.CTkButton(btn_frame, text=action_label(action_type), width=70, height=28,
-                          font=self.UI_FONT,
-                          command=template_commands[action_type]).pack(side='left', padx=1)
+            button = ctk.CTkButton(btn_frame, text=action_label(action_type),
+                                   width=70, height=28, font=self.UI_FONT,
+                                   command=template_commands[action_type])
+            button.pack(side='left', padx=1)
+            self.action_buttons[action_type] = button
 
         # 主滚动区：基础信息 -> 动作设置 -> 类型说明
         content = ctk.CTkScrollableFrame(main)
@@ -200,6 +209,9 @@ class TriggerEditDialog(BaseDialog):
             common, values=self._chapter_scope_labels(), variable=self.chapter_var,
             state="readonly", width=250, height=28, font=self.UI_FONT)
         self.chapter_combo.grid(row=1, column=1, sticky='w', padx=5, pady=(4, 0))
+        # 所在章节决定「插入文本」是否可用（固定文本章节里与文本流冲突）
+        self.chapter_var.trace_add(
+            "write", lambda *_a: self._refresh_action_availability())
 
         ctk.CTkLabel(common, text="前置条件 (名称, 逗号分隔):", font=self.UI_FONT).grid(
             row=2, column=0, sticky='w', padx=5, pady=(5, 0))
@@ -250,6 +262,7 @@ class TriggerEditDialog(BaseDialog):
         self._load_condition_controls()
         self._load_action_controls(self.trigger.get("action_data", {}))
         self._update_action_description()
+        self._refresh_action_availability()
 
         # 确定/取消按钮
         btn_frame2 = ctk.CTkFrame(main, fg_color="transparent")
@@ -1206,11 +1219,30 @@ class TriggerEditDialog(BaseDialog):
             self._rebuild_minigame_params(action_data)
         self._update_action_description()
 
+    def _is_fixed_scope(self) -> bool:
+        """当前「所在章节」是不是固定文本章节。"""
+        return (self._chapter_label_to_scope(self.chapter_var.get())
+                in getattr(self, "fixed_chapter_names", set()))
+
+    def _refresh_action_availability(self):
+        """固定文本章节内「插入文本」不可用（与文本流冲突，运行时被跳过）。"""
+        button = getattr(self, "action_buttons", {}).get("insert")
+        if button is not None:
+            try:
+                button.configure(state="disabled" if self._is_fixed_scope() else "normal")
+            except tk.TclError:
+                pass
+        self._update_action_description()
+
     def _update_action_description(self):
         """只显示当前动作类型的详细参数说明。"""
         title = action_label(self.current_action_type)
         description = self.ACTION_DESCRIPTIONS.get(self.current_action_type, "")
         text = f"【{title}】\n{description}" if title else ""
+        if self.current_action_type == "insert" and self._is_fixed_scope():
+            text += ("\n\n⚠ 所在章节是固定文本章节：插入文本要在 AI 对话历史里"
+                     "衔接并触发预生成，与文本流是两套推进模型，运行时会被跳过。"
+                     "请把这段内容写进脚本的逻辑段落。")
         self.action_description_label.configure(text=text)
 
     def _effect_template(self):

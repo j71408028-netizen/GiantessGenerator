@@ -16,6 +16,7 @@ from dungeon.audio.speech import DEFAULT_RATE, normalize_voice
 from dungeon.audio.voice_fx import (DEFAULT_INTENSITY, MAX_INTENSITY, PRESET_NONE,
                               SLOT_HER, SLOT_LABELS, SLOTS, label_of,
                               loudness_hint, preset_keys_for)
+from dungeon.script_text import parse_script
 from ui.ctk.dialogs import BaseDialog
 from ui.ctk.widgets import OptionButton
 from ui.ctk.theme import (
@@ -23,7 +24,10 @@ from ui.ctk.theme import (
     CHAPTER_HINT, CHAPTER_ERR, CHAPTER_ERR_HOVER, CHAPTER_SWATCH_SELECTED_BORDER,
 )
 from ui.scenario.asset_import import (import_background_image,
-                                      import_bgm_audio, import_ending_icon)
+                                      import_bgm_audio, import_ending_icon,
+                                      import_script_text, read_script_text,
+                                      suggest_script_path)
+from ui.scenario.text_editor_dlg import ScriptTextDialog
 
 NO_FILTER_LABEL = "（不使用滤镜）"
 OVERFLOW_LEAVE_LABEL = "（离开章节）"
@@ -68,8 +72,21 @@ class ChapterEditDialog(BaseDialog):
 
     # ---------- 构建 ----------
     def _build_ui(self):
-        main = ctk.CTkFrame(self, fg_color="transparent")
-        main.pack(fill='both', expand=True, padx=14, pady=12)
+        outer = ctk.CTkFrame(self, fg_color="transparent")
+        outer.pack(fill='both', expand=True, padx=14, pady=12)
+
+        # 底部按钮条先按 side='bottom' 占位，滚动区吃掉剩余空间：
+        # 章节配置项越多（环境 / 音乐 / 语音 / 固定文本 / 敏感效果），
+        # 小屏上越不能把「确定 / 取消」挤出可视区
+        buttons = ctk.CTkFrame(outer, fg_color="transparent")
+        buttons.pack(side='bottom', pady=(12, 0))
+        ctk.CTkButton(buttons, text="确定", width=88, height=28, font=self.UI_FONT,
+                      command=self._ok).pack(side='left', padx=5)
+        ctk.CTkButton(buttons, text="取消", width=88, height=28, font=self.UI_FONT,
+                      command=self._cancel).pack(side='left', padx=5)
+
+        main = ctk.CTkScrollableFrame(outer, fg_color="transparent")
+        main.pack(side='top', fill='both', expand=True)
         section_label = dict(font=self.SECTION_FONT, anchor='w')
 
         ctk.CTkLabel(main, text="章节信息", **section_label).pack(fill='x', pady=(0, 4))
@@ -139,6 +156,40 @@ class ChapterEditDialog(BaseDialog):
         self.ending_frame = ctk.CTkFrame(main, fg_color="transparent")
         self._build_ending_fields(self.ending_frame)
         self._toggle_ending_ui()
+
+        # ---------- 固定文本（不走 AI 生成，按现成文本逐段推进）----------
+        ctk.CTkLabel(main, text="固定文本（本章不走 AI 生成，播放现成文本）",
+                     **section_label).pack(fill='x', pady=(10, 4))
+        script_frame = ctk.CTkFrame(main, fg_color="transparent")
+        script_frame.pack(fill='x', padx=6)
+
+        script_row = ctk.CTkFrame(script_frame, fg_color="transparent")
+        script_row.pack(fill='x')
+        ctk.CTkLabel(script_row, text="文本:", font=self.UI_FONT).pack(side='left')
+        fixed_text = self.chapter.get("fixed_text") or {}
+        self.fixed_path_var = tk.StringVar(value=fixed_text.get("path", ""))
+        ctk.CTkEntry(script_row, textvariable=self.fixed_path_var, height=28,
+                     font=self.UI_FONT).pack(side='left', fill='x', expand=True,
+                                             padx=(6, 6))
+        ctk.CTkButton(script_row, text="导入文本", width=84, height=28, font=self.UI_FONT,
+                      command=self._import_script).pack(side='left')
+        ctk.CTkButton(script_row, text="编辑", width=56, height=28, font=self.UI_FONT,
+                      fg_color="transparent", border_width=1, corner_radius=8,
+                      text_color=CHAPTER_TEXT_SOFT, hover_color=CHAPTER_HOVER,
+                      border_color=CHAPTER_BORDER,
+                      command=self._edit_script).pack(side='left', padx=(6, 0))
+        ctk.CTkButton(script_row, text="清除", width=52, height=28, font=self.UI_FONT,
+                      fg_color="transparent", border_width=1, corner_radius=8,
+                      text_color=CHAPTER_TEXT_SOFT, hover_color=CHAPTER_HOVER,
+                      border_color=CHAPTER_BORDER,
+                      command=self._clear_script).pack(side='left', padx=(6, 0))
+
+        self.fixed_status_label = ctk.CTkLabel(
+            script_frame, text="", anchor='w', justify='left', wraplength=520,
+            font=self.UI_FONT_SMALL, text_color=CHAPTER_HINT)
+        self.fixed_status_label.pack(fill='x', pady=(4, 0))
+        self.fixed_path_var.trace_add("write", lambda *_a: self._refresh_script_status())
+        self._refresh_script_status()
 
         # ---------- 特定背景 ----------
         ctk.CTkLabel(main, text="特定背景（进入本章节时切换）", **section_label).pack(fill='x', pady=(4, 4))
@@ -251,13 +302,6 @@ class ChapterEditDialog(BaseDialog):
                  "进入没有配置音乐的章节时会停掉上一章的曲目。",
             justify='left', anchor='w', wraplength=520, font=self.UI_FONT_SMALL,
             text_color=CHAPTER_HINT).pack(fill='x', padx=6, pady=(10, 0))
-
-        buttons = ctk.CTkFrame(main, fg_color="transparent")
-        buttons.pack(pady=(12, 0))
-        ctk.CTkButton(buttons, text="确定", width=88, height=28, font=self.UI_FONT,
-                      command=self._ok).pack(side='left', padx=5)
-        ctk.CTkButton(buttons, text="取消", width=88, height=28, font=self.UI_FONT,
-                      command=self._cancel).pack(side='left', padx=5)
 
         self.bind("<Escape>", lambda _e: self._cancel())
         self.bind("<Control-s>", lambda _e: self._ok())
@@ -571,6 +615,63 @@ class ChapterEditDialog(BaseDialog):
         if rel:
             self.ending_icon_var.set(rel)
 
+    # ---------- 固定文本 ----------
+    def _script_rel_path(self) -> str:
+        return self.fixed_path_var.get().strip().replace("\\", "/")
+
+    def _refresh_script_status(self):
+        """解析预览：段落数 / 会演化的段数 / 首条警告（读不到文件就说清原因）。"""
+        label = getattr(self, "fixed_status_label", None)
+        if label is None:
+            return
+        rel = self._script_rel_path()
+        if not rel:
+            label.configure(text="未配置：本章照常由 AI 生成。", text_color=CHAPTER_HINT)
+            return
+        text, error = read_script_text(self._scenario_repo, self.scenario_id, rel)
+        if text is None:
+            label.configure(text=f"⚠ 无法读取「{rel}」：{error}", text_color=CHAPTER_ERR)
+            return
+        script = parse_script(text)
+        evolving = sum(1 for p in script.paragraphs if p.directive.complete)
+        summary = f"{len(script.paragraphs)} 个逻辑段落（每段一次步进）"
+        if evolving:
+            summary += f"，其中 {evolving} 段会演化"
+        if script.warnings:
+            summary += f"\n⚠ {script.warnings[0]}"
+            if len(script.warnings) > 1:
+                summary += f"（共 {len(script.warnings)} 条）"
+        label.configure(text=summary, text_color=CHAPTER_HINT)
+
+    def _import_script(self):
+        rel = import_script_text(self, self._scenario_repo, self.scenario_id)
+        if rel:
+            self.fixed_path_var.set(rel)
+            self._refresh_script_status()
+
+    def _edit_script(self):
+        rel = self._script_rel_path()
+        if not rel:
+            # 还没有文本：给一个不冲突的默认路径，直接进编辑器写第一版
+            rel = suggest_script_path(self._scenario_repo, self.scenario_id,
+                                      self.name_var.get().strip() or "chapter")
+            self.fixed_path_var.set(rel)
+        text, error = read_script_text(self._scenario_repo, self.scenario_id, rel)
+        if text is None:
+            if error != "文件不存在":
+                ui.ctk.dialogs.showerror("错误", f"无法读取「{rel}」：{error}")
+                return
+            text = ""  # 新建：从空文本起步
+        result = ScriptTextDialog(self, text=text, rel_path=rel,
+                                  scenario_repo=self._scenario_repo,
+                                  scenario_id=self.scenario_id).result
+        if result is not None:
+            self._refresh_script_status()
+
+    def _clear_script(self):
+        self.fixed_path_var.set("")
+        self._refresh_script_status()
+
     # ---------- 确定 ----------
     def _ok(self):
         name = self.name_var.get().strip()
@@ -650,6 +751,17 @@ class ChapterEditDialog(BaseDialog):
             "" if self.overflow_var.get() == OVERFLOW_LEAVE_LABEL
             else self.overflow_var.get())
 
+        fixed_text = {}
+        script_rel = self._script_rel_path()
+        if script_rel:
+            # 存盘前先确认读得到：读不到就当场改，别留到「启动前校验」才拦
+            existing, error = read_script_text(self._scenario_repo, self.scenario_id,
+                                               script_rel)
+            if existing is None:
+                ui.ctk.dialogs.showerror("错误", f"固定文本「{script_rel}」不可读：{error}")
+                return
+            fixed_text = {"path": script_rel}
+
         result = {
             "name": name,
             "color": color,
@@ -660,6 +772,7 @@ class ChapterEditDialog(BaseDialog):
             "background": background,
             "bgm": bgm,
             "voice_fx": self._voice_fx_from_ui(),
+            "fixed_text": fixed_text,
             "sensitivity": sensitivity,
             "note": self.note_var.get().strip(),
         }

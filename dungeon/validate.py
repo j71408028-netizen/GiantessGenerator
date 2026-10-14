@@ -19,11 +19,12 @@ import os
 from dataclasses import dataclass
 
 from dungeon import schema
+from dungeon import script_text
 from dungeon.actions import (VISUAL_FILTER_KEYS, WINDOW_FX_KEYS,
                              normalize_action_type)
 from dungeon.audio import buses
 from dungeon.audio.chapters import (BGM_SUPPORTED_EXTS, CHAPTER_NONE,
-                              normalize_chapters)
+                              DEFAULT_MAX_PARAGRAPHS, normalize_chapters)
 from dungeon.coupling import (BULLA, COUPLING_LEVEL_LABELS, COUPLING_LEVELS,
                               SOLEA, VELUM, normalize_coupling_level)
 from dungeon.overrides import OVERRIDE_KEYS, OVERRIDE_LABELS
@@ -194,15 +195,20 @@ def validate_scenario_config(config, *, scenario_dir: str = None) -> list:
     chapters = normalize_chapters(config.get("chapters"))
     chapter_names = {c["name"] for c in chapters if c.get("name")}
     terminating = {c["name"] for c in chapters if c.get("ending")}
+    # 固定文本章节：这些章节里「插入文本」触发器与文本流冲突，运行时被跳过
+    fixed_chapters = {c["name"] for c in chapters
+                      if (c.get("fixed_text") or {}).get("path")}
     trigger_names, custom_attrs = _collect_names(
         config.get("triggers"), config.get("evolution_attrs"))
 
     _validate_chapters(config.get("chapters"), chapters, chapter_names,
                        terminating, scenario_dir, add,
-                       coupling_level=config.get("coupling_level"))
+                       coupling_level=config.get("coupling_level"),
+                       custom_attrs=custom_attrs)
     _validate_triggers(config.get("triggers"), chapter_names, terminating,
                        trigger_names, custom_attrs, scenario_dir, add,
-                       coupling_level=config.get("coupling_level"))
+                       coupling_level=config.get("coupling_level"),
+                       fixed_chapters=fixed_chapters)
 
     # 起始章节：进入副本后唯一的自动进入点（window/triggers.py::_enter_start_chapter）
     starts = [c["name"] for c in chapters if c.get("start") and c.get("name")]
@@ -475,6 +481,88 @@ def _validate_bgm(raw_bgm, bgm, path: str, scenario_dir: str, add) -> None:
             "淡入淡出秒数必须是非负数字，加载时回退默认值")
 
 
+#: 固定文本/指令行的批量诊断最多逐条列出的条数（其余折叠成「另有 N 处」）
+_MAX_LISTED = 5
+
+
+def _summarize(items, render) -> str:
+    """把一批同类问题渲染成一句话（超过 ``_MAX_LISTED`` 条折叠）。"""
+    listed = "；".join(render(item) for item in items[:_MAX_LISTED])
+    if len(items) > _MAX_LISTED:
+        listed += f"；……另有 {len(items) - _MAX_LISTED} 处"
+    return listed
+
+
+def _validate_fixed_text(chapter, path: str, scenario_dir: str, custom_attrs, add) -> None:
+    """固定文本章节：文件可用性 + 指令行体检 + 段落数与上限的关系。
+
+    指令行的问题**按类折叠**成一条诊断（逐段报会在长文本里刷屏）：
+    解析器给的警告（未识别记号 / 方向越界）、只写了一半的指令、指向未定义属性的方向。
+    """
+    fixed = chapter.get("fixed_text")
+    fixed = fixed if isinstance(fixed, dict) else {}
+    rel = str(fixed.get("path") or "").strip()
+    if not rel:
+        return
+    field_path = f"{path}.fixed_text.path"
+    if not scenario_dir:
+        return  # 没有方案目录（未落盘的方案）无从核对文件，跳过
+    absolute = rel if os.path.isabs(rel) else os.path.join(scenario_dir, rel)
+    if not os.path.isfile(absolute):
+        add("error", field_path,
+            f"固定文本文件不存在：{rel}（本章不会播放任何文本）")
+        return
+    script, error = script_text.load_script_file(absolute)
+    if script is None:
+        add("error", field_path, f"固定文本读取失败：{error}")
+        return
+    if not script.paragraphs:
+        add("error", field_path,
+            "固定文本里没有可用的逻辑段落（空行分段后没有任何正文）")
+        return
+    if script.warnings:
+        add("warning", field_path,
+            "指令行有无法识别的内容：" + _summarize(
+                script.warnings, lambda w: str(w)))
+
+    builtins = set(script_text.BUILTIN_DIRECTION_NAMES)
+    declared = set(custom_attrs or ())
+    unknown_attrs = []
+    half_written = []
+    for paragraph in script.paragraphs:
+        directive = paragraph.directive
+        for name in directive.attr_directions:
+            if name not in builtins and name not in declared:
+                unknown_attrs.append((paragraph.line, name))
+        # 只有类型没有方向 / 只有方向没有类型：该段不演化，大概率是漏写
+        if directive.text_type is None and directive.has_direction:
+            half_written.append(paragraph.line)
+        elif directive.text_type is not None and not directive.has_direction:
+            half_written.append(paragraph.line)
+    if unknown_attrs:
+        add("warning", field_path,
+            "指令行引用了未定义的演化属性（运行时不生效，请先在演化属性里定义）："
+            + _summarize(unknown_attrs, lambda item: f"第 {item[0]} 行「{item[1]}」"))
+    if half_written:
+        add("warning", field_path,
+            "指令行缺少段落类型或演化方向（该段只推进步数、不演化）："
+            + _summarize(half_written, lambda line: f"第 {line} 行"))
+
+    try:
+        limit = int(chapter.get("max_paragraphs", DEFAULT_MAX_PARAGRAPHS)
+                    or DEFAULT_MAX_PARAGRAPHS)
+    except (TypeError, ValueError):
+        limit = DEFAULT_MAX_PARAGRAPHS
+    if limit < len(script.paragraphs):
+        add("warning", f"{path}.max_paragraphs",
+            f"最大段落数（{limit}）小于固定文本的逻辑段落数（{len(script.paragraphs)}），"
+            f"第 {limit} 段之后永远不会播放")
+    if not chapter.get("ending") and not str(chapter.get("overflow_target") or "").strip():
+        add("info", field_path,
+            "固定文本播完后本章不是结束章节、也没配「超限跳转」："
+            "播完即离开章节（回到无章节状态）")
+
+
 def _validate_voice_fx(raw_fx, path: str, add, coupling_level=None) -> None:
     """章节对话语音效果（她 / 其他人两档）：只报作者能看懂的错。
 
@@ -545,7 +633,7 @@ def _validate_voice_fx(raw_fx, path: str, add, coupling_level=None) -> None:
 
 
 def _validate_chapters(chapters_raw, effective, chapter_names, terminating,
-                       scenario_dir, add, coupling_level=None) -> None:
+                       scenario_dir, add, coupling_level=None, custom_attrs=None) -> None:
     """``chapters_raw`` 用于未知键检查；``effective`` 是 normalize 后的运行时视图。"""
     if not isinstance(chapters_raw, list):
         return  # 已在顶层报过
@@ -585,6 +673,7 @@ def _validate_chapters(chapters_raw, effective, chapter_names, terminating,
                       scenario_dir, add)
         _validate_voice_fx(raw_chapter.get("voice_fx"), path, add,
                            coupling_level=coupling_level)
+        _validate_fixed_text(chapter, path, scenario_dir, custom_attrs, add)
         icon = str(chapter.get("icon_path") or "").strip()
         if icon and scenario_dir and not _asset_exists(scenario_dir, icon):
             add("warning", f"{path}.icon_path", f"结局图标不存在：{icon}")
@@ -603,9 +692,11 @@ def _validate_chapters(chapters_raw, effective, chapter_names, terminating,
 
 
 def _validate_triggers(triggers, chapter_names, terminating, trigger_names,
-                       custom_attrs, scenario_dir, add, coupling_level=None) -> None:
+                       custom_attrs, scenario_dir, add, coupling_level=None,
+                       fixed_chapters=None) -> None:
     if not isinstance(triggers, list):
         return  # 已在顶层报过
+    fixed_chapters = fixed_chapters or set()
     seen = set()
     for index, trigger in enumerate(triggers):
         path = f"triggers[{index}]"
@@ -705,6 +796,11 @@ def _validate_triggers(triggers, chapter_names, terminating, trigger_names,
             if in_terminating:
                 add("warning", label, "触发器位于结束章节作用域，运行时会跳过 option")
         elif action_type == "insert":
+            if scope in fixed_chapters:
+                # 固定文本章节按脚本推进，插入段依赖 AI 对话历史与预生成，两套模型冲突
+                add("warning", action_path,
+                    f"所在章节「{scope}」是固定文本章节：插入文本与文本流冲突，"
+                    f"运行时会被跳过，请改用脚本里的逻辑段落")
             if not str(action_data.get("text") or "").strip():
                 add("error", path + ".action_data.text", "插入触发器缺少插入文本，运行时会跳过")
             text_type = action_data.get("text_type") or "background"

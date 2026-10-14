@@ -136,7 +136,15 @@ CHAPTER_FIELDS = (
     FieldSpec("voice_fx", "dict", "章节对话语音效果", None,
               note="按「她 / 其他人」两档配置的物理声学效果（低频轰鸣/回声/空气缓抖）；"
                    "本章未配置则不加效果"),
+    FieldSpec("fixed_text", "dict", "固定文本", None,
+              note="指向方案目录下的 .txt：本章不走 AI 生成，按逻辑段落逐段推进；"
+                   "空配置 = 本章照常由 AI 生成"),
     FieldSpec("sensitivity", "list", "章节持续敏感效果"),
+)
+
+# 固定文本：只有 ``path``；逻辑段落与指令行的语义见 ``dungeon/script_text``
+FIXED_TEXT_FIELDS = (
+    FieldSpec("path", "str", "文本文件（相对方案目录）", ""),
 )
 
 BACKGROUND_FIELDS = (

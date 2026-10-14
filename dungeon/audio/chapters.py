@@ -7,6 +7,8 @@
 - ``bgm``：本章节的背景音乐（曲目、音量、循环、淡入淡出）；
 - ``voice_fx``：本章节的对话语音物理效果（她 / 其他人两档）；
 - ``sensitivity``：本章节持续生效的敏感效果；
+- ``fixed_text``：本章节是否播放**现成文本**（不走 AI 生成，见
+  ``dungeon.script_text``）；
 - ``color``：编辑器里该章节的自定义颜色。
 
 触发器通过 ``chapter`` 字段声明所在章节，与 ``precondition_names`` /
@@ -140,6 +142,25 @@ def chapter_voice_fx(chapter) -> dict:
     return normalize_voice_fx((chapter or {}).get("voice_fx"))
 
 
+def normalize_fixed_text(raw) -> dict:
+    """把配置里的固定文本补全为 ``{path}``；没配文本时返回**空字典**。
+
+    与 ``bgm`` / ``voice_fx`` 同一套约定：没配就不往每个章节摊一份空配置，
+    运行时按「本章节不是固定文本章节」处理（见 ``chapter_fixed_text``）。
+    ``path`` 是相对方案目录的路径，统一用正斜杠存。
+    """
+    raw = raw if isinstance(raw, dict) else {}
+    path = str(raw.get("path") or "").strip().replace("\\", "/")
+    if not path:
+        return {}
+    return {"path": path}
+
+
+def chapter_fixed_text(chapter) -> dict:
+    """取章节的固定文本配置（缺项返回空字典 = 本章节走 AI 生成）。"""
+    return normalize_fixed_text((chapter or {}).get("fixed_text"))
+
+
 def normalize_chapter(raw, index: int = 0) -> dict:
     """补全章节结构；保留未知字段以便向后兼容。"""
     chapter = dict(raw) if isinstance(raw, dict) else {}
@@ -180,6 +201,9 @@ def normalize_chapter(raw, index: int = 0) -> dict:
 
     # 对话语音效果：两档（她 / 其他人），没配就不摊一份空配置
     chapter["voice_fx"] = normalize_voice_fx(chapter.get("voice_fx"))
+
+    # 固定文本：现成文本的 .txt 相对路径；没配就不摊空配置（本章走 AI 生成）
+    chapter["fixed_text"] = normalize_fixed_text(chapter.get("fixed_text"))
 
     sensitivity = chapter.get("sensitivity")
     if not isinstance(sensitivity, list):

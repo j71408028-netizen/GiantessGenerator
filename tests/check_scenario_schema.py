@@ -439,6 +439,96 @@ check("干净配置带效果：零 warning",
 # 编辑器 UI 里出现过某个方法名或字符串），外加一整套假合成器 + 替身后端链。前者守
 # 的是当时的写法，后者属于音频行为而非 schema——所以接线断言删掉，行为链搬走。
 
+# ---------------- 4d. 固定文本章节（不走 AI 生成） ----------------
+# 「怎么解析」归 tests/check_script_text.py；这里只盯 schema ↔ normalize ↔ 校验器。
+from dungeon.audio.chapters import (chapter_fixed_text,  # noqa: E402
+                                    normalize_fixed_text)
+
+check("fixed_text 字段已在章节 schema 声明", "fixed_text" in declared
+      and "fixed_text" in normalized, set(normalized) - declared)
+check("未配固定文本归一为空 dict（运行时按 AI 生成处理）",
+      normalize_fixed_text(None) == {} and normalize_fixed_text({}) == {}
+      and normalize_fixed_text({"path": "  "}) == {})
+check("fixed_text 路径归一（去空白、反斜杠转正斜杠）",
+      normalize_fixed_text({"path": " texts\\a.txt "}) == {"path": "texts/a.txt"})
+check("fixed_text 键与 schema 声明一致",
+      set(normalize_fixed_text({"path": "x.txt"}))
+      == set(schema.field_map(schema.FIXED_TEXT_FIELDS)),
+      set(normalize_fixed_text({"path": "x.txt"})))
+check("chapter_fixed_text 读章节的固定文本",
+      chapter_fixed_text({"fixed_text": {"path": "p.txt"}}) == {"path": "p.txt"}
+      and chapter_fixed_text({}) == {} and chapter_fixed_text(None) == {})
+
+_ft_tmp = tempfile.mkdtemp(prefix="scenario_fixed_")
+os.makedirs(os.path.join(_ft_tmp, "texts"), exist_ok=True)
+with open(os.path.join(_ft_tmp, "texts", "good.txt"), "w", encoding="utf-8") as _fh:
+    _fh.write("\n".join([
+        "[对话 +1]", "她低下头。",
+        "", "[互动 破坏性-1]", "她的手掌轻轻落下。",
+        "", "[环境]", "远处有雾。",              # 只有类型：不演化
+        "", "[+1]", "什么都没写。",               # 只有方向：不演化
+        "", "[对话 幽灵+1]", "引用了未定义属性。",  # 未知属性
+        "", "[对话 乱写]", "无法识别的记号。",      # 无法识别
+    ]))
+with open(os.path.join(_ft_tmp, "texts", "solo.txt"), "w", encoding="utf-8") as _fh:
+    _fh.write("[对话 +1]\n她开口了。")
+
+_ft_config = schema.empty_scenario_config()
+_ft_config["chapters"] = [
+    {"name": "开场", "start": True, "overflow_target": "终幕",
+     "fixed_text": {"path": "texts/good.txt"}, "max_paragraphs": 3},
+    {"name": "终幕", "ending": True,
+     "fixed_text": {"path": "texts/missing.txt"}},
+]
+_ft_config["triggers"] = [
+    {"name": "t_insert", "chapter": "开场", "action": "insert",
+     "action_data": {"text": "插入一段"}},
+]
+_ft_diags = validate_scenario_config(_ft_config, scenario_dir=_ft_tmp)
+
+
+def _expect_ft(level, path_part, label):
+    hits = [d for d in _ft_diags if d.level == level and path_part in d.path]
+    check(f"诊断：{label}", bool(hits),
+          format_diagnostics([d for d in _ft_diags if "fixed_text" in d.path
+                              or "max_paragraphs" in d.path], include_info=True))
+
+
+_expect_ft("error", "chapters[1].fixed_text.path", "固定文本文件不存在")
+_expect_ft("warning", "chapters[0].fixed_text.path", "指令行有无法识别的记号")
+_expect_ft("warning", "chapters[0].max_paragraphs", "最大段落数小于逻辑段落数")
+check("诊断：指令行引用未定义属性",
+      any(d.level == "warning" and "未定义的演化属性" in d.message
+          and "幽灵" in d.message for d in _ft_diags),
+      format_diagnostics([d for d in _ft_diags if "fixed_text" in d.path],
+                         include_info=True))
+check("诊断：半写指令（缺类型 / 缺方向）",
+      any(d.level == "warning" and "缺少段落类型或演化方向" in d.message
+          for d in _ft_diags),
+      format_diagnostics([d for d in _ft_diags if "fixed_text" in d.path],
+                         include_info=True))
+check("诊断：固定文本章节内 insert 被提示会跳过",
+      any(d.level == "warning" and d.path == "triggers[0].action"
+          and "固定文本章节" in d.message for d in _ft_diags),
+      format_diagnostics([d for d in _ft_diags if "triggers" in d.path]))
+
+# 播完没有去向（非结束章节、也没配超限跳转）→ info 提示「播完即离开章节」
+_ft_info = schema.empty_scenario_config()
+_ft_info["chapters"] = [{"name": "独幕", "start": True,
+                         "fixed_text": {"path": "texts/solo.txt"}}]
+_ft_info_diags = validate_scenario_config(_ft_info, scenario_dir=_ft_tmp)
+check("诊断：固定文本播完无去向 → info",
+      any(d.level == "info" and "播完即离开章节" in d.message
+          for d in _ft_info_diags),
+      format_diagnostics(_ft_info_diags, include_info=True))
+check("干净的固定文本章节没有 error/warning",
+      not has_errors(_ft_info_diags)
+      and not any(d.level == "warning" for d in _ft_info_diags),
+      format_diagnostics(_ft_info_diags, include_info=True))
+check("无 scenario_dir 时不核对文件存在性（未落盘的方案）",
+      not [d for d in validate_scenario_config(_ft_config)
+           if "fixed_text.path" in d.path and "不存在" in d.message])
+
 # ---------------- 5. ScenarioRepo.save_config 诊断接入 ----------------
 from persistence.scenario_repo import ScenarioRepo  # noqa: E402
 

@@ -94,7 +94,8 @@ class ChapterTriggerManager(TreeviewManager):
         bar.pack(fill='x', padx=9, pady=(0, 5))
         ctk.CTkLabel(
             bar,
-            text="章节行下方的缩进行是其触发器；「任意章节 / 无章节」的触发器排在最后。",
+            text="章节行下方的缩进行是其触发器；「任意章节 / 无章节」的触发器排在最后。"
+                 "「固定文本」章节按脚本推进，其内的插入文本触发器会被跳过。",
             font=ui_fonts.ui_font(12),
             text_color=SCRIPT_TEXT_SOFT).pack(side='left', padx=(4, 12))
         self.dep_status_label = ctk.CTkLabel(
@@ -214,6 +215,9 @@ class ChapterTriggerManager(TreeviewManager):
                 condition_text += "，耗尽即终止"
             elif item.get("overflow_target"):
                 condition_text += f"→{item.get('overflow_target')}"
+            fixed = item.get("fixed_text") or {}
+            if fixed.get("path"):
+                condition_text += f"，固定文本:{os.path.basename(str(fixed['path']))}"
             return (
                 f"▌ {name}" + ("  ★" if item.get("start") else "")
                 + ("  ✦" if item.get("ending") else ""),

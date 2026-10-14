@@ -1,10 +1,11 @@
-"""副本推进核心逻辑：AI 生成、伤亡结算、回放步进与关闭处理。"""
+"""副本推进核心逻辑：AI 生成、固定文本推进、伤亡结算、回放步进与关闭处理。"""
 
 import os
 import threading
 import time
 
 from dungeon import process_log
+from dungeon import script_text
 from dungeon.audio.chapters import find_chapter, is_terminating_chapter, overflow_jump_target
 from dungeon.details import build_detail_query_prompt, parse_detail_queries
 from dungeon.models import DungeonTextType
@@ -52,6 +53,9 @@ class DungeonStoryEngine:
         pending = self._peek_pending_insertion()
         if pending and not pending["delayed"]:
             self._consume_pending_insertion()
+        elif self._in_fixed_text_chapter():
+            # 固定文本章节：一次点击推进一个逻辑段落，全程不碰 AI
+            self._advance_script()
         else:
             self._generate_next_text()
 
@@ -217,6 +221,175 @@ class DungeonStoryEngine:
 
         threading.Thread(target=task, daemon=True).start()
 
+    # ---------- 固定文本章节（章节字段 fixed_text） ----------
+    def _advance_script(self):
+        """推进一个逻辑段落；文本已播完则按章节收口（超限跳转 / 终止）。"""
+        script = self._ensure_script()
+        if script is None or self._script_index >= len(script.paragraphs):
+            self._finish_script_chapter()
+            return
+        paragraph = script.paragraphs[self._script_index]
+        self._script_index += 1
+        self._present_script_paragraph(paragraph)
+
+    def _ensure_script(self):
+        """按当前章节的 fixed_text 取脚本（按「章节 + 路径」缓存，换章即失效）。
+
+        文件缺失 / 读不动时降级为空脚本（没有任何段落）——下一次点击直接走
+        :meth:`_finish_script_chapter` 收口，不会把会话卡死；作者那边由校验器
+        （``validate._validate_fixed_text``）在保存与启动前报 error 拦住。
+        """
+        config = self._current_fixed_text()
+        rel = str(config.get("path") or "")
+        if not rel:
+            self._script = None
+            self._script_key = None
+            return None
+        key = (self.current_chapter or "", rel)
+        if self._script is not None and self._script_key == key:
+            return self._script
+        absolute = self._resolve_scenario_file(rel)
+        if absolute is None:
+            process_log.log(f"[Script] 固定文本文件不存在：{rel}")
+            script = script_text.parse_script("")
+        else:
+            loaded, error = script_text.load_script_file(absolute)
+            if loaded is None:
+                process_log.log(f"[Script] 固定文本读取失败（{rel}）：{error}")
+                script = script_text.parse_script("")
+            else:
+                script = loaded
+        for warning in script.warnings:
+            process_log.log(f"[Script] {rel} {warning}")
+        self._script = script
+        self._script_key = key
+        self._script_index = 0
+        self._script_exhausted = False
+        process_log.log(f"[Script] 已载入固定文本「{rel}」："
+                        f"{len(script.paragraphs)} 个逻辑段落")
+        return script
+
+    def _resolve_scenario_file(self, rel_path):
+        """把方案内的相对路径解析成绝对路径；找不到返回 None。"""
+        rel = str(rel_path or "").strip()
+        if not rel:
+            return None
+        if os.path.isabs(rel):
+            return rel if os.path.isfile(rel) else None
+        candidates = []
+        repo = getattr(self, "scenario_repo", None)
+        scenario_id = getattr(self, "scenario_id", None)
+        if repo is not None and scenario_id:
+            try:
+                # scenario_dir 同时看世界包根与自由根，比只拼 root 更全
+                candidates.append(os.path.join(repo.scenario_dir(scenario_id), rel))
+            except Exception:
+                pass
+        resolved = self._background.resolve_path(rel)
+        if resolved:
+            candidates.append(resolved)
+        for path in candidates:
+            if path and os.path.isfile(path):
+                return path
+        return None
+
+    def _present_script_paragraph(self, paragraph):
+        """上屏一个逻辑段落，并按它的指令演化属性。
+
+        与 AI 段落同构：首句立即上屏、其余排队等点击揭示；段落本身（净文本）
+        进对话历史、进剧情压缩、进回放，结算链走同一个 :meth:`_finish_step`。
+        """
+        directive = paragraph.directive
+        in_ending = self._in_terminating_chapter()
+        # 没有声明类型的段落按「环境」推进（步进值最小）；结束章节一律覆盖为结局
+        text_type = directive.text_type or DungeonTextType.BACKGROUND
+        display_type = DungeonTextType.BACKGROUND if in_ending else text_type
+
+        # 没写段落类型的段落不显示类型前缀（纯叙述），有类型的照常显示
+        prefix = (self._display_type_prefix(display_type)
+                  if directive.text_type is not None else "")
+        units = split_full_text(paragraph.text)
+        self._pending_units = list(units[1:])
+        first = units[0] if units else None
+        item = {
+            "type_str": prefix,
+            "text": first.text if first is not None else paragraph.text,
+            "speaker": first.speaker if first is not None else None,
+        }
+        self.story_history.append(item)
+        self._update_text_display()
+        if item["text"]:
+            self._reveal_start(item, item["text"])
+        self._speak_item(item)
+
+        custom_directions = directive.custom_directions
+        # 固定文本段与 AI 段落一样进对话历史，后续 AI 章节才接得上上下文；
+        # 一律用规范 JSON 形状（见 response.canonical_history_entry）
+        self.messages.append({"role": "assistant", "content": canonical_history_entry(
+            paragraph.text, directive.direction,
+            {**directive.builtin_directions, **custom_directions})})
+        window = self._message_window_size()
+        if len(self.messages) > window + 1:
+            self.messages = [self.messages[0]] + self.messages[-window:]
+
+        # 只有「类型 + 方向」都写全的段落参与演化；否则冻结（仅累计计数）。
+        # 结束章节的段落一律冻结（步进为 0，与 AI 段落同一条规则）。
+        step_override = 0.0 if (in_ending or not directive.complete) else None
+
+        before_state = self.dungeon_state
+        self.dungeon_state = self.dungeon_logic.evolve_attributes(
+            before_state, text_type, directive.direction, self.personality,
+            custom_attrs_def=self.evolution_attrs,
+            custom_directions=custom_directions,
+            builtin_directions=directive.builtin_directions,
+            sensitivity_mods=self._apply_sensitivity_mods(),
+            action_points=self._current_action_points(),
+            step_override=step_override,
+        )
+        self.step_num = self.dungeon_state.total_steps
+
+        step_info = {
+            "step": self.step_num,
+            "type": display_type.value,
+            "text": paragraph.text,
+            "intrusion_before": before_state.intrusion,
+            "destruction_before": before_state.destruction,
+            "step_intrusion_before": before_state.step_intrusion,
+            "step_destruction_before": before_state.step_destruction,
+            "custom_before": before_state.custom_attrs.copy(),
+            "direction": directive.direction,
+            "custom_directions": custom_directions,
+            "step_override": step_override,
+            "type_prefix": prefix,
+        }
+        if in_ending:
+            step_info["ending_chapter"] = True
+        self._finish_step(display_type, paragraph.text, step_info)
+
+    def _finish_script_chapter(self):
+        """固定文本播完：与「段落数超限」走同一个收口。
+
+        编辑器中作者配 ``overflow_target`` 决定去向（空串 = 离开章节）；结束章节
+        按章节结算字段生成结局并终止。只收口一次——重复点击不会再触发跳转。
+        """
+        if self._script_exhausted:
+            return
+        if self.dungeon_ended or self.pending_ending is not None:
+            return
+        self._script_exhausted = True
+        chapter = find_chapter(getattr(self, "chapters", None),
+                               getattr(self, "current_chapter", None))
+        if chapter is None:
+            return
+        target = overflow_jump_target(chapter, self.chapters)
+        if is_terminating_chapter(chapter):
+            process_log.log(f"[Script] 结束章节「{chapter.get('name')}」文本播完，终止副本")
+            self._terminate_from_ending_chapter(chapter)
+        else:
+            process_log.log(f"[Script] 章节「{chapter.get('name')}」文本播完，"
+                            f"跳转到「{target or '离开章节'}」")
+            self._enter_chapter(target, record=True)
+
     # ---------- 细节探究 ----------
     def _start_detail_query(self, paragraph_text):
         """流式输出完成后立即在后台询问 AI 想了解的细节。
@@ -224,6 +397,8 @@ class DungeonStoryEngine:
         结果存入 ``_detail_queries``，由 ``build_user_prompt`` 在下一次
         生成前检索回放缓存解答并消费。与正常生成互不阻塞。
         """
+        if self._in_fixed_text_chapter():
+            return  # 固定文本章节没有 AI 生成，细节探究无处消费
         if getattr(self, "_detail_querying", False):
             return
         client = getattr(self, "ai_client", None)
@@ -263,6 +438,8 @@ class DungeonStoryEngine:
         """
         if getattr(self, "is_replay", False) or self._closing:
             return
+        if self._in_fixed_text_chapter():
+            return  # 固定文本章节的下一次点击只推进脚本，不必预生成
         if self.dungeon_ended or self.pending_ending is not None:
             return
         if self.pending_option is not None or self.pending_insertions:
@@ -444,7 +621,8 @@ class DungeonStoryEngine:
     def _finish_step(self, text_type, text, step_info, check_unlock: bool = False):
         """步进收尾：结算章节效果覆盖与伤亡、写入回放，并检查解锁与触发器。"""
         self._apply_effect_overrides()
-        casualty_increase = self._record_casualties(text_type, text)
+        casualty_increase = self._record_casualties(
+            text_type, text, step_override=step_info.get("step_override"))
 
         step_info["intrusion_after"] = self.dungeon_state.intrusion
         step_info["destruction_after"] = self.dungeon_state.destruction
@@ -482,12 +660,14 @@ class DungeonStoryEngine:
         # 触发器判定后再检查章节段落数上限，避免同一步内先跳转又被覆盖
         self._check_chapter_overflow()
 
-    def _record_casualties(self, text_type: DungeonTextType, text: str) -> float:
+    def _record_casualties(self, text_type: DungeonTextType, text: str,
+                           step_override: float = None) -> float:
         """按探索模式的伤亡定义计算本段伤亡，追加到数组并累加总计。
 
-        结束章节内步进为 0，本段不产生伤亡。
+        结束章节内步进为 0，本段不产生伤亡；固定文本里没写全指令的段落同样
+        冻结（``step_override == 0``），只推进计数、不产生伤亡。
         """
-        frozen = False
+        frozen = step_override is not None and float(step_override) == 0.0
         if self._in_terminating_chapter() or frozen:
             self.dungeon_state.casualty_evolution.append(0.0)
             return 0.0
@@ -524,7 +704,8 @@ class DungeonStoryEngine:
         # 结束章节产生的段落在回放中同样以「结局」类型展示
         if step.get("ending_chapter"):
             text_type = DungeonTextType.BACKGROUND
-        self._display_text(text, text_type, highlight=step.get("highlight", False))
+        self._display_text(text, text_type, highlight=step.get("highlight", False),
+                           prefix=step.get("type_prefix"))
         self.dungeon_state.intrusion = step["intrusion_after"]
         self.dungeon_state.destruction = step["destruction_after"]
         if "step_intrusion_after" in step:

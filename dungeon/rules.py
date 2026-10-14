@@ -104,7 +104,8 @@ class EvolutionRules:
                           custom_directions: Optional[dict[str, int]] = None,
                           sensitivity_mods: Optional[dict[str, float]] = None,
                           action_points: Optional[float] = None,
-                          step_override: Optional[float] = None) -> DungeonState:
+                          step_override: Optional[float] = None,
+                          builtin_directions: Optional[dict[str, int]] = None) -> DungeonState:
         """按段落类型演化副本属性。
 
         交互对坐标的操作统一由绑定触发器跳转具有敏感效果的章节实现
@@ -112,12 +113,18 @@ class EvolutionRules:
 
         ``step_override``：覆盖本段步进值（结束章节为 0，即不产生坐标、
         自定义属性与步长变化，仅累计计数）。
+
+        ``builtin_directions``：**指名**介入度 / 破坏性两路的方向，形如
+        ``{"介入度": +1, "破坏性": -1}``；缺的一路回退到 ``direction``。
+        AI 协议只有一路 ``direction``，所以这里默认空表、行为与过去完全一致；
+        固定文本的指令行（``dungeon.script_text``）用它把两路拆开。
         """
         new_state = state.clone()
         step = self.step_overrides.get(text_type.value, text_type.step_value)
         if step_override is not None:
             step = float(step_override)
         sensitivity_mods = sensitivity_mods or {}
+        builtin_directions = builtin_directions or {}
         frozen = step_override is not None and float(step_override) == 0.0
 
         # 步长演化（演算坐标前）：步长向初始值恢复 0.2*个性强度 的比例差值；
@@ -133,8 +140,10 @@ class EvolutionRules:
 
         intrusion_rate = si
         destruction_rate = sd
-        intrusion_delta = (direction + sensitivity_mods.get("介入度", 0.0)) * intrusion_rate * step
-        destruction_delta = (direction + sensitivity_mods.get("破坏性", 0.0)) * destruction_rate * step
+        intrusion_direction = builtin_directions.get("介入度", direction)
+        destruction_direction = builtin_directions.get("破坏性", direction)
+        intrusion_delta = (intrusion_direction + sensitivity_mods.get("介入度", 0.0)) * intrusion_rate * step
+        destruction_delta = (destruction_direction + sensitivity_mods.get("破坏性", 0.0)) * destruction_rate * step
         # 坐标统一夹取 0.5~4.5（与角色坐标边界一致，副本写回不再越界）
         new_state.intrusion = max(0.5, min(4.5, new_state.intrusion + intrusion_delta))
         new_state.destruction = max(0.5, min(4.5, new_state.destruction + destruction_delta))
