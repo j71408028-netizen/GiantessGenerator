@@ -27,6 +27,7 @@
 
 import os
 import time
+import weakref as _weakref
 
 import dearpygui.dearpygui as dpg
 
@@ -51,6 +52,17 @@ _MAX_TEXTURE_EDGE = 2048
 _PLAY_MARGIN = 64
 _PLAY_FRAME_COLOR = (255, 255, 255, 30)
 _NO_FILL = (0, 0, 0, -255)     # DPG 的「不填充」哨兵色（fill 参数期望颜色元组）
+
+#: 离屏画布上传的分块边长与块边界出血（像素）。
+#: 整张画布重传一次 ≈ 14.6 ms（RGBA→float32 平铺 6 ms + ``set_value`` 10 ms，
+#: 实测 1088×768），已吃掉一整帧预算；而每帧真正变化的往往只有几格地块。
+#: 切成块后只重传「脏且可见」的块：单块 258² ≈ 1.2 ms，整张重传是 15 块。
+#: 出血 1 px + uv 内缩保证块边界处的双线性采样能取到邻块像素——少了它，
+#: 每个块的四个边会各有一条 1 px 的拉伸缝（DPG 不暴露纹理过滤开关，换不了 nearest）。
+_CANVAS_CHUNK = 256
+_CANVAS_BLEED = 1
+#: 一块画布一次累积的脏矩形上限：超过就直接标「整张脏」（再攒没有意义）
+_DIRTY_BOX_LIMIT = 64
 
 #: 键名 → DPG 键值（字母 / 数字按 VK 码 = ord）；在首次使用时惰性构建
 _KEY_MAP = None
@@ -104,10 +116,17 @@ def _resolve_key(key):
 
 
 def _image_to_texture_data(image):
-    """PIL RGBA 图 → DPG 纹理数据（float32 平铺 0~1；numpy 快路径 + 兜底）。"""
+    """PIL RGBA 图 → DPG 纹理数据（float32 平铺 0~1；numpy 快路径 + 兜底）。
+
+    走 ``np.asarray`` 直读 PIL 缓冲，省掉 ``tobytes()`` 的一次全图拷贝；
+    除法改成原地乘 ``1/255``（实测 1088×768 全图 6.1 ms，``tobytes`` 版 6.2 ms，
+    收益主要在分块路径的小图上）。``np.take`` + LUT 反而更慢（13.3 ms），别用。
+    """
     if _np is not None:
-        arr = _np.frombuffer(image.tobytes(), dtype=_np.uint8).astype(_np.float32)
-        arr /= 255.0
+        # ravel() 在连续数组上是零拷贝视图：DPG 的缓冲路径按 len() 取长度，
+        # 必须交出扁平数组（3 维的 (h, w, 4) 会让它只读走 h 个元素）
+        arr = _np.asarray(image, dtype=_np.uint8).astype(_np.float32).ravel()
+        arr *= (1.0 / 255.0)
         return arr
     return [value / 255.0 for value in image.tobytes()]
 
@@ -118,7 +137,9 @@ class _PILCanvas:
     半透明形状先画进包围盒临时层再 ``alpha_composite`` 回画布
     （ImageDraw 在 RGBA 画布上写半透明色会直接替换像素含 alpha，
     与 canvas 2D / DPG 的混合语义不一致，见 :meth:`_blend_shape`）。
-    每次绘制 ``_version`` 自增，供纹理上传按内容版本判定是否重传。
+    每次绘制 ``_version`` 自增，同时把包围盒记进 ``_dirty``：运行时据此
+    只重传内容变化的纹理块（见 :class:`_CanvasTextures`）；``_dirty_all``
+    表示「整张都脏」（脏矩形攒太多、或首帧），此时按整张处理。
     """
 
     _UID = 0
@@ -133,6 +154,33 @@ class _PILCanvas:
         self._root = root            # 相对路径基准（小游戏包目录）
         self._font_family = font_family or ""   # 与会话同源的字体家族（可空）
         self._version = 0
+        # 脏区域（画布坐标，半开区间）与「整张脏」标记；供运行时按块增量上传
+        self._dirty = []
+        self._dirty_all = False
+
+    def _bump(self, bbox):
+        """记录一次内容变化：``_version`` 自增 + 累积脏矩形（半开区间 ``bbox``）。
+
+        ``bbox`` 必须是**覆盖本次绘制像素的闭包**：宁可多报（多传一块）也不能
+        漏报，漏报就是画面残留旧像素。传 ``None`` 表示范围不可知 → 整张脏。
+        """
+        self._version += 1
+        if self._dirty_all or bbox is None:
+            self._dirty_all = True
+            return
+        w, h = self._size
+        # int() 对负数是向零截断；上下界都会夹到 [0, w] / [0, h]，仍是安全超集
+        x0 = max(0, min(w, int(bbox[0])))
+        y0 = max(0, min(h, int(bbox[1])))
+        x1 = max(0, min(w, int(bbox[2]) + 1))
+        y1 = max(0, min(h, int(bbox[3]) + 1))
+        if x1 <= x0 or y1 <= y0:
+            return                       # 完全落在画布外
+        self._dirty.append((x0, y0, x1, y1))
+        if len(self._dirty) >= _DIRTY_BOX_LIMIT:
+            # 攒够上限还没被消费（往往是一次关卡预渲染）：整张传一次更划算
+            self._dirty_all = True
+            self._dirty.clear()
 
     def _alpha(self, color):
         return color[3] if len(color) > 3 else 255
@@ -176,7 +224,8 @@ class _PILCanvas:
     def draw_rect(self, pmin, pmax, color, fill=True, thickness=1.0):
         x0, y0 = round(pmin[0]), round(pmin[1])
         x1, y1 = round(pmax[0]) - 1, round(pmax[1]) - 1
-        self._version += 1
+        pad = max(1, round(thickness))
+        self._bump((x0 - pad, y0 - pad, x1 + pad, y1 + pad))
         if self._alpha(color) < 255:
             def render(d, ox, oy):
                 if fill:
@@ -197,7 +246,8 @@ class _PILCanvas:
     def draw_round_rect(self, pmin, pmax, radius, color, fill=True, thickness=1.0):
         x0, y0 = round(pmin[0]), round(pmin[1])
         x1, y1 = round(pmax[0]) - 1, round(pmax[1]) - 1
-        self._version += 1
+        pad = max(1, round(thickness))
+        self._bump((x0 - pad, y0 - pad, x1 + pad, y1 + pad))
         if fill:
             self._draw.rounded_rectangle([x0, y0, x1, y1], radius=max(0, round(radius)),
                                          fill=tuple(color))
@@ -209,7 +259,8 @@ class _PILCanvas:
     def draw_circle(self, center, radius, color, fill=True, thickness=1.0):
         cx, cy, r = center[0], center[1], radius
         bbox = [round(cx - r), round(cy - r), round(cx + r) - 1, round(cy + r) - 1]
-        self._version += 1
+        pad = max(1, round(thickness))
+        self._bump((bbox[0] - pad, bbox[1] - pad, bbox[2] + pad, bbox[3] + pad))
         if self._alpha(color) < 255:
             def render(d, ox, oy):
                 box = [bbox[0] + ox, bbox[1] + oy, bbox[2] + ox, bbox[3] + oy]
@@ -227,10 +278,11 @@ class _PILCanvas:
                                width=max(1, round(thickness)))
 
     def draw_line(self, p1, p2, color, thickness=1.0):
-        self._version += 1
         x0, y0 = round(p1[0]), round(p1[1])
         x1, y1 = round(p2[0]), round(p2[1])
         width = max(1, round(thickness))
+        self._bump((min(x0, x1) - width, min(y0, y1) - width,
+                    max(x0, x1) + width, max(y0, y1) + width))
         if self._alpha(color) < 255:
             pad = width + 1
 
@@ -244,7 +296,11 @@ class _PILCanvas:
 
     def draw_text(self, text, pos, color, size=18):
         font = _pil_font(size, self._font_family)
-        self._version += 1
+        # 不量字形（要读字体度量，代价与调用频次成正比）：按「每字符一个字宽 +
+        # 上下各一个字高」给足上界。宁可多传一块，也不能漏掉笔画。
+        size = max(1, int(size))
+        self._bump((pos[0] - size, pos[1] - size,
+                    pos[0] + (len(str(text)) + 1) * size, pos[1] + size * 2))
         self._draw.text((pos[0], pos[1]), str(text), font=font, fill=tuple(color))
 
     def draw_image(self, source, pmin, pmax, uv=None):
@@ -260,8 +316,9 @@ class _PILCanvas:
         h = max(1, round(pmax[1] - pmin[1]))
         if (img.width, img.height) != (w, h):
             img = img.resize((w, h))
-        self._version += 1
-        self._img.paste(img, (round(pmin[0]), round(pmin[1])), img)
+        dx, dy = round(pmin[0]), round(pmin[1])
+        self._bump((dx, dy, dx + w, dy + h))
+        self._img.paste(img, (dx, dy), img)
 
 
 _PIL_FONTS = {}
@@ -376,6 +433,9 @@ class _StageGameAPI(GameAPI):
                       parent=_DRAW_TAG)
 
     def draw_image(self, source, pmin, pmax, uv=None):
+        if isinstance(source, _PILCanvas):
+            self._stage._draw_canvas(source, pmin, pmax, uv)
+            return
         tag = self._stage._ensure_texture(source)
         if tag is None:
             return
@@ -440,6 +500,167 @@ class _StageGameAPI(GameAPI):
         return values.get(key)
 
 
+class _CanvasTextures:
+    """一块离屏画布的**分块纹理集**：按需创建、只重传「脏且可见」的块。
+
+    为什么分块：整张 1088×768 画布重传一次 ≈ 14.6 ms（RGBA→float32 平铺 6 ms +
+    ``set_value`` 10 ms，实测），等于一整帧预算；而每帧真正变化的往往只有几格
+    地块。切成 :data:`_CANVAS_CHUNK` 见方的块后，单块（258²）≈ 1.2 ms。
+
+    无缝：块纹理四周多带 :data:`_CANVAS_BLEED` 像素邻块内容，绘制时把 uv 按
+    「块在纹理内的位置」内缩。这样块边界处的双线性采样取到的仍是邻块像素，
+    与「一整张纹理」的采样结果逐像素一致——直接用 ``[0,1]`` 会让每个块的四个边
+    各出现一条 1 px 拉伸缝（DPG 不暴露纹理过滤开关，换不成 nearest）。
+
+    可见性：只有真正被 ``draw_image`` 覆盖到的块才会上传。地图比视野大得多时
+    （escape_giantess：1088×768 画布 / 512×512 视野），整块地图里最多只有 9 块
+    同时可见，视野外的脏块留到镜头移过去再传。
+
+    生命周期：由 :class:`_MiniGameStage` 持有，舞台销毁时整批删掉纹理。
+    持有画布**弱引用**：小游戏换关常常整块换掉离屏画布（``self._terrain = ...``），
+    旧画布随即无人引用——弱引用一断，纹理集就能被识别为孤儿并回收，不必等整个
+    小游戏结束（否则一局 30 关会攒三十份纹理，几百 MB）。
+    """
+
+    def __init__(self, canvas):
+        self._canvas_ref = _weakref.ref(canvas)
+        self._size = (canvas.width, canvas.height)
+        self.cols = max(1, -(-canvas.width // _CANVAS_CHUNK))
+        self.rows = max(1, -(-canvas.height // _CANVAS_CHUNK))
+        self._tags = {}        # (cx, cy) → 纹理 tag
+        self._stale = set()    # 内容已变、尚未重传的块
+
+    @property
+    def canvas(self):
+        """当前画布；已被回收时返回 None（该纹理集随即由舞台清掉）。"""
+        return self._canvas_ref()
+
+    # ---------------- 内容 / 几何 ----------------
+    def _harvest_dirty(self):
+        """把画布累积的脏矩形折算成脏块（同帧多次绘制只折算一次）。"""
+        canvas = self.canvas
+        if canvas is None:
+            return
+        if canvas._dirty_all:
+            canvas._dirty_all = False
+            canvas._dirty.clear()
+            self._stale = {(cx, cy) for cy in range(self.rows)
+                           for cx in range(self.cols)}
+            return
+        if not canvas._dirty:
+            return
+        boxes = canvas._dirty
+        canvas._dirty = []
+        for x0, y0, x1, y1 in boxes:
+            cx0 = x0 // _CANVAS_CHUNK
+            cx1 = min(self.cols - 1, (x1 - 1) // _CANVAS_CHUNK)
+            cy0 = y0 // _CANVAS_CHUNK
+            cy1 = min(self.rows - 1, (y1 - 1) // _CANVAS_CHUNK)
+            for cy in range(cy0, cy1 + 1):
+                for cx in range(cx0, cx1 + 1):
+                    self._stale.add((cx, cy))
+
+    def _chunk_bounds(self, cx, cy):
+        """块在画布上的覆盖范围（含出血），半开区间 ``(bx0, by0, bx1, by1)``。"""
+        w, h = self._size
+        x0, y0 = cx * _CANVAS_CHUNK, cy * _CANVAS_CHUNK
+        return (max(0, x0 - _CANVAS_BLEED), max(0, y0 - _CANVAS_BLEED),
+                min(w, x0 + _CANVAS_CHUNK + _CANVAS_BLEED),
+                min(h, y0 + _CANVAS_CHUNK + _CANVAS_BLEED))
+
+    # ---------------- 上传 ----------------
+    def _ensure(self, cx, cy):
+        """取（必要时创建并上传）某块的纹理 tag；失败返回 None（调用方跳过）。"""
+        key = (cx, cy)
+        if key in self._tags and key not in self._stale:
+            return self._tags[key]
+        bx0, by0, bx1, by1 = self._chunk_bounds(cx, cy)
+        tw, th = bx1 - bx0, by1 - by0
+        try:
+            data = _image_to_texture_data(
+                self.canvas._img.crop((bx0, by0, bx1, by1)))
+        except Exception as exc:
+            process_log.log(f"[MiniGame] 离屏画布分块转换失败: {exc}")
+            return None
+        tag = self._tags.get(key)
+        try:
+            if tag is None:
+                tag = f"minigame_canvas_tex_{self.canvas._uid}_{cx}_{cy}"
+                dpg.add_dynamic_texture(tw, th, data, tag=tag,
+                                        parent="dungeon_texture_registry")
+                self._tags[key] = tag
+            else:
+                dpg.set_value(tag, data)
+        except Exception as exc:
+            process_log.log(f"[MiniGame] 离屏画布分块上传失败: {exc}")
+            return None
+        self._stale.discard(key)
+        return tag
+
+    # ---------------- 绘制 ----------------
+    def draw(self, pmin, pmax, uv):
+        """把画布（``uv`` 指定的子区域）画进当前 drawlist。
+
+        ``pmin`` / ``pmax`` 是**屏幕**坐标，与 ``uv``（画布归一化裁剪）是线性
+        对应关系；这里换算成「逐块的画布矩形 → 屏幕矩形」再逐块绘制。块的
+        「核心」区间彼此不重叠且刚好铺满画布，因此不会出现重复绘制。
+        """
+        canvas = self.canvas
+        if canvas is None:      # 画布已被回收（孤儿集，马上会被舞台清掉）
+            return
+        cw, ch = canvas.width, canvas.height
+        u0, v0, u1, v1 = uv if uv else (0.0, 0.0, 1.0, 1.0)
+        # uv → 画布像素（夹进画布：越界部分整张纹理同样画不出东西）
+        rx0 = min(max(float(u0) * cw, 0.0), cw)
+        rx1 = min(max(float(u1) * cw, 0.0), cw)
+        ry0 = min(max(float(v0) * ch, 0.0), ch)
+        ry1 = min(max(float(v1) * ch, 0.0), ch)
+        if rx1 <= rx0 or ry1 <= ry0:
+            return
+        self._harvest_dirty()
+        sx = (pmax[0] - pmin[0]) / (rx1 - rx0)
+        sy = (pmax[1] - pmin[1]) / (ry1 - ry0)
+        cx0 = min(self.cols - 1, int(rx0 // _CANVAS_CHUNK))
+        cx1 = min(self.cols - 1, int((rx1 - 1e-6) // _CANVAS_CHUNK))
+        cy0 = min(self.rows - 1, int(ry0 // _CANVAS_CHUNK))
+        cy1 = min(self.rows - 1, int((ry1 - 1e-6) // _CANVAS_CHUNK))
+        for cy in range(cy0, cy1 + 1):
+            core_y0 = cy * _CANVAS_CHUNK
+            core_y1 = min(ch, core_y0 + _CANVAS_CHUNK)
+            iy0, iy1 = max(core_y0, ry0), min(core_y1, ry1)
+            if iy1 <= iy0:
+                continue
+            for cx in range(cx0, cx1 + 1):
+                core_x0 = cx * _CANVAS_CHUNK
+                core_x1 = min(cw, core_x0 + _CANVAS_CHUNK)
+                ix0, ix1 = max(core_x0, rx0), min(core_x1, rx1)
+                if ix1 <= ix0:
+                    continue
+                tag = self._ensure(cx, cy)
+                if tag is None:
+                    continue
+                bx0, by0, bx1, by1 = self._chunk_bounds(cx, cy)
+                tw, th = bx1 - bx0, by1 - by0
+                dpg.draw_image(
+                    tag,
+                    (pmin[0] + (ix0 - rx0) * sx, pmin[1] + (iy0 - ry0) * sy),
+                    (pmin[0] + (ix1 - rx0) * sx, pmin[1] + (iy1 - ry0) * sy),
+                    uv_min=[(ix0 - bx0) / tw, (iy0 - by0) / th],
+                    uv_max=[(ix1 - bx0) / tw, (iy1 - by0) / th],
+                    parent=_DRAW_TAG)
+
+    def destroy(self):
+        """删掉本集创建的全部纹理（舞台销毁时调用）。"""
+        for tag in self._tags.values():
+            try:
+                if dpg.does_item_exist(tag):
+                    dpg.delete_item(tag)
+            except Exception:
+                pass
+        self._tags.clear()
+        self._stale.clear()
+
+
 class _MiniGameStage:
     """一次小游戏会话的舞台：控件、帧驱动、纹理缓存与结算。"""
 
@@ -455,7 +676,7 @@ class _MiniGameStage:
         self._last_t = 0.0
         self._size = [0, 0]
         self._textures = {}        # 绝对路径 → (tag, w, h)
-        self._canvas_texes = {}    # id(canvas) → [tag, 已上传的内容版本]
+        self._canvas_texes = {}    # 画布 _uid → _CanvasTextures（分块纹理集）
         self._keys_down = set()    # handler 维护的按下键码集合
         self._buttons_down = set()  # handler 维护的按下鼠标键集合
         self._mouse_pos = (0.0, 0.0)
@@ -667,12 +888,8 @@ class _MiniGameStage:
             except Exception:
                 pass
         self._textures.clear()
-        for entry in self._canvas_texes.values():
-            try:
-                if dpg.does_item_exist(entry[0]):
-                    dpg.delete_item(entry[0])
-            except Exception:
-                pass
+        for textures in self._canvas_texes.values():
+            textures.destroy()
         self._canvas_texes.clear()
         for tag in (_OVERLAY_TAG, _DRAW_TAG, _CANVAS_TAG, _STAGE_TAG):
             if dpg.does_item_exist(tag):
@@ -706,14 +923,11 @@ class _MiniGameStage:
 
     # ---------------- 资源 ----------------
     def _ensure_texture(self, source):
-        """draw_image 的源 → DPG 纹理 tag。
+        """文件路径源 → 静态 DPG 纹理 tag（按绝对路径缓存）。
 
-        - 文件路径：静态纹理，按绝对路径缓存；
-        - 离屏画布：动态纹理，按内容版本判定是否重传（numpy 快路径）。
-        失败返回 None（调用方静默跳过，不拖垮帧）。
+        离屏画布不走这里（见 :meth:`_draw_canvas`）：它要按块增量重传，
+        单一纹理装不下。失败返回 None（调用方静默跳过，不拖垮帧）。
         """
-        if isinstance(source, _PILCanvas):
-            return self._canvas_texture(source)
         if not source:
             return None
         path = str(source)
@@ -744,30 +958,20 @@ class _MiniGameStage:
         self._textures[path] = (tag, tw, th)
         return tag
 
-    def _canvas_texture(self, canvas):
-        key = canvas._uid
-        entry = self._canvas_texes.get(key)
-        if entry is None:
-            try:
-                data = _image_to_texture_data(canvas._img)
-                tag = f"minigame_canvas_tex_{len(self._canvas_texes)}"
-                dpg.add_dynamic_texture(canvas.width, canvas.height, data,
-                                        tag=tag, parent="dungeon_texture_registry")
-            except Exception as exc:
-                process_log.log(f"[MiniGame] 离屏画布上传失败: {exc}")
-                return None
-            entry = [tag, canvas._version]
-            self._canvas_texes[key] = entry
-            return tag
-        tag, uploaded_version = entry
-        if uploaded_version != canvas._version:
-            try:
-                dpg.set_value(tag, _image_to_texture_data(canvas._img))
-            except Exception as exc:
-                process_log.log(f"[MiniGame] 离屏画布重传失败: {exc}")
-                return tag
-            entry[1] = canvas._version
-        return tag
+    def _draw_canvas(self, canvas, pmin, pmax, uv=None):
+        """把离屏画布 ``uv`` 指定的子区域画进 drawlist（分块增量上传）。
+
+        每块画布的纹理集按需建立、跟着舞台一起销毁；详见 :class:`_CanvasTextures`。
+        顺手回收孤儿纹理集：小游戏换关常整块换掉离屏画布，旧画布连同纹理集一起
+        作废（弱引用已断），不回收的话一局多关会一直往上叠纹理。
+        """
+        for uid in [u for u, t in self._canvas_texes.items() if t.canvas is None]:
+            self._canvas_texes.pop(uid).destroy()
+        textures = self._canvas_texes.get(canvas._uid)
+        if textures is None:
+            textures = _CanvasTextures(canvas)
+            self._canvas_texes[canvas._uid] = textures
+        textures.draw(pmin, pmax, uv)
 
 
 class MiniGameStageHandler:
