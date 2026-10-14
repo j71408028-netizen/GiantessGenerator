@@ -65,8 +65,16 @@ class DungeonWindowBase:
     调用方不再读窗口的私有属性。
     """
 
-    #: 手动渲染的帧间隔（秒）。渲染本身不阻塞，间隔决定上限帧率。
+    #: 手动渲染的帧节拍（秒）。**不是**「渲染本身不阻塞」——DPG 的
+    #: ``render_dearpygui_frame()`` 走 ``glfwSwapBuffers``，默认开 vsync，
+    #: 本身就阻塞约一个刷新周期（1080p@60Hz 实测 16.9 ms）。因此这个值表示
+    #: **vsync 之外的额外让位上限**：每帧按帧起点补偿，只有 render 明显没吃满
+    #: 一个节拍时（vsync 被驱动关掉、或高刷屏）才补睡，详见 :meth:`_run_frame_loop`。
     FRAME_INTERVAL = 1.0 / 60.0
+    #: 补睡死区：预算小于 ``FRAME_INTERVAL * 该比例`` 时索性不睡。
+    #: vsync 已吃掉一帧时机器的抖动会算出几毫秒的正预算，补睡反而把帧率压到
+    #: 60 以下（掉到 45 FPS 一档），留出死区可避开这种反噬。
+    _SLEEP_DEAD_ZONE = 1.0 / 3.0
     #: 帧循环期间是否泵宿主事件（Tk 的 ``update()``）：开启后主窗口在副本
     #: 运行期间仍可响应/重绘，不再"假死"。宿主不提供 ``update()`` 时自动跳过。
     PUMP_HOST_EVENTS = True
@@ -372,8 +380,18 @@ class DungeonWindowBase:
 
         ``self._frame.tick()`` 是整层的**唯一时间源**（L3）：轮播、图标翻页、Ken
         Burns、仿流式动画、背景防抖都挂在它上面，因此不再有并行的时间线。
+
+        帧节拍（2026-10-14 修）：末段**按帧起点补偿**让位，不再无条件
+        ``time.sleep(FRAME_INTERVAL)``。DPG 的 render 走 ``glfwSwapBuffers``，
+        默认开 vsync、本身已阻塞约一个刷新周期；再无条件补睡一刀等于
+        ``帧周期 = 16.7(vsync) + 16.7(sleep) + CPU``，把**整个窗口（含小游戏）**
+        的帧率上限压到 ~34 FPS，且每 1 ms CPU 开销要付双倍。改为补偿后：
+        vsync 已吃满节拍时预算 ≈ 0（落在死区内不睡）→ 回到 ~60 FPS；
+        vsync 被驱动关掉时仍会补满到 60 Hz 上限，不空转跑满一核。
         """
+        interval = self.FRAME_INTERVAL
         while True:
+            frame_start = time.perf_counter()
             self._pump_host_events()
             self._frame.tick()
             # DPG 手动回调管理（见 ui._build_ui）：渲染前在**本线程**执行
@@ -400,7 +418,10 @@ class DungeonWindowBase:
                 self._closing = True
                 self._on_close()
                 break
-            time.sleep(self.FRAME_INTERVAL)
+            # 让位：按帧起点补偿（见 docstring 的帧节拍说明）
+            budget = interval - (time.perf_counter() - frame_start)
+            if budget > interval * self._SLEEP_DEAD_ZONE:
+                time.sleep(budget)
 
     def _pump_host_events(self):
         """让宿主处理一次挂起事件，避免主窗口在副本运行期间"假死"。

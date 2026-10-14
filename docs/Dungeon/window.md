@@ -108,8 +108,15 @@ run() → SessionResult
 
 ### 2.2 帧循环
 
-每帧顺序固定：`_pump_host_events()` → `self._frame.tick()` → `dpg.run_callbacks(dpg.get_callback_queue())` → **落实关闭请求**（`_stop_requested` 置位时在帧边界 `stop_dearpygui()`）→ 判 `dpg.is_dearpygui_running()` → `render_dearpygui_frame()`（+ `time.sleep(FRAME_INTERVAL)`，默认 1/60s）。
+每帧顺序固定：`_pump_host_events()` → `self._frame.tick()` → `dpg.run_callbacks(dpg.get_callback_queue())` → **落实关闭请求**（`_stop_requested` 置位时在帧边界 `stop_dearpygui()`）→ 判 `dpg.is_dearpygui_running()` → `render_dearpygui_frame()` → **按帧起点补偿让位**（见下）。
 
+- **让位按帧起点补偿，不无条件 `sleep(FRAME_INTERVAL)`**（2026-10-14）。`render_dearpygui_frame()`
+  走 `glfwSwapBuffers`，默认开 vsync，本身就阻塞约一个刷新周期（1080p@60Hz 实测 16.9 ms）；
+  再无条件补睡 1/60 s 等于 `帧周期 = 16.7(vsync) + 16.7(sleep) + CPU`，把**整个窗口
+  （含小游戏）**的帧率上限压到 ~34 FPS，且每 1 ms CPU 开销要付双倍。现在的写法是
+  `budget = FRAME_INTERVAL - (本帧已用时间)`，只有 `budget > FRAME_INTERVAL/3`（死区，
+  躲开 vsync 抖动）才 `sleep(budget)`：vsync 已吃满时预算≈0 → 回到 ~60 FPS；
+  vsync 被驱动关掉时仍补满到 60 Hz 上限，不空转跑满一核。
 - 先 tick 后判关闭：保证「关闭前最后一次 UI 更新」不丢
 - 回调队列必须在渲染前于**本线程**执行完（DPG 默认把回调派发到工作线程，见 §4）；
   回调与渲染同线程，上面的约定才真正成立
