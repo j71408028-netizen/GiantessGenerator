@@ -140,10 +140,11 @@ class ComponentHandler:
     def session_waiting_for_input(self):
         """当前是否在等玩家输入（继续指示与自动播放共用同一判定）。
 
-        生成中 / 仿流式动画中 / 结局已达成 / 有待选选项或待触发结局都不算等待。
+        生成中 / 上屏游标进行中 / 结局已达成 / 有待选选项或待触发结局都不算等待。
         """
         return (not getattr(self, "_generating", False)
-                and getattr(self, "_text_anim_state", None) is None
+                and not self._reveal_active()
+                and not getattr(self, "_pending_units", None)
                 and not getattr(self, "dungeon_ended", False)
                 and getattr(self, "pending_option", None) is None
                 and getattr(self, "pending_ending", None) is None)

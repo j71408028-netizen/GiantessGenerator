@@ -34,7 +34,7 @@
 | `dungeon/window/base.py` | 构造（`__init__` 只存参数 + 会话初始化）与运行（`run()` 建 UI、帧循环 `_run_frame_loop`、收尾 `_finish_session`）、入口 / 会话阶段切换、关闭路径、视口尺寸（取自宿主端口） |
 | `dungeon/window/host.py` | **宿主端口** `HostPort`（含无宿主缺省实现）：尺寸/DPI、宿主显隐、事件泵、收尾弹框、活动窗口登记、缺省字体、回放文件选择 |
 | `ui/hosting/tk_host.py` | 宿主端口的 Tk/CTk 适配器 `TkHost`——**window 层唯一的 Tk 细节所在地** |
-| `dungeon/window/ui.py` | DPG 上下文 / 视口 / 主窗口构建、**副本字体对接**（经 `dungeon/window/fonts.py` 解析家族名→字体文件，按两档字号建 `dungeon_text_font` 与粗体 `dungeon_bold_font` 供文本组件使用——DPG 无字重 API，粗度靠选字体文件）、文本显示、布局自适应（`_relayout`）、输入事件、**F12 过程日志开关**、**A 自动播放 / F2 截图**（`toggle_autoplay` / `take_screenshot`，与文本组件工具条按钮共用入口）与 **顶部轻通知窗**（`_notify`，窗口级常驻） |
+| `dungeon/window/ui.py` | DPG 上下文 / 视口 / 主窗口构建、**副本字体对接**（经 `dungeon/window/fonts.py` 解析家族名→字体文件，按两档字号建 `dungeon_text_font` 与粗体 `dungeon_bold_font` 供文本组件使用——DPG 无字重 API，粗度靠选字体文件）、文本显示、**上屏游标**（`_reveal_*` 一族，30 字/秒限速真相源，仿流式与真流式共用）、布局自适应（`_relayout`）、输入事件、**F12 过程日志开关**、**A 自动播放 / F2 截图**（`toggle_autoplay` / `take_screenshot`，与文本组件工具条按钮共用入口）与 **顶部轻通知窗**（`_notify`，窗口级常驻） |
 | `dungeon/window/engine.py` | 推进核心：AI 流式生成、JSON 解析、伤亡结算、回放步进、关闭回调 `_on_close` |
 | `dungeon/window/triggers.py` | 触发器判定（所在章节 / 前置 / 条件）、章节进入、章节效果短暂覆盖、插入段落 |
 | `dungeon/window/options.py` | 选项触发器：后台生成选项文字并弹出选择弹窗 |
@@ -176,14 +176,17 @@ run() → SessionResult
 ```
 点击 / 空格（_on_mouse_click → _on_next_step）
 ├─ pending_option / pending_ending 存在 → 打断
-├─ 仿流式输出进行中 → 立即补完本次动画，不推进内容
-├─ 逻辑段落切出的显示段落未揭示完 → 揭示下一句（_reveal_pending_unit）
+├─ 上屏游标三态判定（_try_advance_paragraph）
+│  ├─ 已上屏 < 5 字 → 吞掉本次点击（防误触 / 防抢在游标起步前切段）
+│  ├─ 当前段未补满 100% → 补满并停住，不切段（再点一次才切段）
+│  └─ 已补满 → 有排队显示段落就揭示下一句（_reveal_pending_unit）
 ├─ 有非延迟插入段 → 直接消费显示
 └─ _generate_next_text()：后台线程
    ├─ _take_pregen_for_next：有预生成结果（或在途则等待）→ 直接采用，
    │     否则 prompt_builder.build_user_prompt → messages 追加
    ├─ ai_client.generate_stream → 逐块 extract_stream_text → split_stream_units
-   │     首句流式上屏、完整即定格；后续完成句排队到 _pending_units
+   │     真流式 chunk 只经 _reveal_extend 延长 target（不直写文本）；
+   │     游标按 30 字/秒追赶；后续完成句排队到 _pending_units
    ├─ 完整响应 parse_final_json → 正文 / 方向 / 自定义方向；split_full_text 定格最终切分
    ├─ dungeon_logic.evolve_attributes（含敏感倍率）→ 伤亡结算
    ├─ replay_data.append(step_info)          # 回放记录
@@ -197,6 +200,8 @@ run() → SessionResult
 | 概念 | 说明 |
 |---|---|
 | **逻辑段落 vs 显示段落** | 一次 AI 输出（约 100 字）是一个逻辑段落，属性演化、回放、剧情压缩、对话历史都以它为单位；内置分句器（`dungeon/splitter.py`）把它切成若干显示段落（换行、对话引号闭合、句末标点、分号、破折号为断点），逐句展示只为阅读节奏。队列耗尽后下一次点击才触发新的 AI 调用；插入触发器的段落走同一条仿流式管线 |
+| **上屏游标（唯一速度真相源）** | `ui.py` 的 `_reveal_*` 一族：仿流式（预生成 / 固定文本 / 插入段）与真流式共用**同一条限速**，恒定 `_REVEAL_CHARS_PER_SECOND = 30 字/秒`（帧任务 `_REVEAL_TICK_SECONDS = 0.05` 即 20 Hz，每 tick 约 1.5 字；`frac` 小数累加器消除 1/1/2 的抖动）。状态字典 `self._reveal = {item, target, pos, frac}`，`pos` 是唯一进度真相源。**真流式与仿流式的区别只在 target 何时给定**：仿流式一次给全（`_reveal_start`），真流式的 chunk 到达只 `_reveal_extend` 延长 target、**不直写 item 文本**，游标按固定速率追赶——因此 AI 吐字再快，玩家看到的上屏节奏恒定，分句器也始终有一份领先缓冲，不需要为上屏等待。游标走到 target 末尾时**自我注销**（`self._reveal = None`）并调 `_on_reveal_finished` 登记自动播放的到期时刻 |
+| **点击三态机** | `_try_advance_paragraph`：① 已上屏不足 `_REVEAL_MIN_CHARS = 5` 字（≈0.17 秒）→ 吞掉点击，游标与队列都不动；② 未补满 → `_reveal_snap` 补满到 100% 并停住，**不切段**；③ 已补满（自然播完或上次点击补满）→ 才揭示队列里的下一显示段落。这个顺序保证「狂点」最多推进一个单元，不会掀翻分句器队列（`check_reveal_cursor.py` 守此契约） |
 | **说话人标记** | Solea/Bulla 耦合等级的对话分支（`dialog`/`branch`，方案可配 `protagonist_title` 指定主角称呼）要求 AI 在对话句句首写 `@说话人@`（规则见 `dungeon/coupling.SPEAKER_MARKER_RULE`）；分句器解析进显示单元（`DisplayUnit.speaker`），`story_history` 条目带 `speaker` 键，UI 组件据此渲染名牌。落盘正文（回放/报告/概要）经 `strip_speaker_markers` 剥离标记，回放文件格式不变；Velum 等级正文无标记，行为不变。**带说话人的显示单元定稿时还会交给语音导演朗读**（`ui.py::_speak_item` → `speech.SpeechDirector`），只有对话句出声，叙述句不念；音色与开关见 script.md §10 |
 | **文本显示所有权** | 文本主组件由方案配置 `text_component` 字段**三选一**（`dungeon.schema.TEXT_COMPONENT_IDS`）：`text` **底部渐变式**（视口底部向上淡出的深色衬底上显示最近 N 句）、`text_card` **底部卡片式**（居中圆角半透明卡片）、`text_nvl` **全屏 NVL**（半透明覆盖层堆叠全部历史，可选衬线字体、可滚轮回看）；`components` 列表只放其余组件，主组件先建、z 序在底。行首标签只显示说话人（类型前缀是内部属性不上屏，过程日志面板可见），继续点击用闪烁 ▼ 提示。接管期间（`owns_text_display = True`）`_update_text_display` 跳过内置 `text_container` 管线、转调组件刷新链；`text`/`text_card` 屏幕只呈现当下几句，完整历史由回放/报告承接 |
 | **覆盖层服务面** | 窗口向文本主组件提供受控调用：`ctx.toggle_overlay("log")` 调出**对话记录**（全量 `story_history` 快照、可滚动，居中半透明面板），`ctx.component(cid)` 只读访问兄弟组件实例；写操作与组件生命周期仍由窗口集中管理，主组件只拿到调度权而非所有权。覆盖层打开时为阅读模态：点击只关闭覆盖层（`ui.py::_on_mouse_click`），空格/回车推进在 `_on_next_step` 入口挂起 |
@@ -209,7 +214,7 @@ run() → SessionResult
 | **剧情压缩** | `StorySummarizer` 按块（默认 20 段）与换章时机压缩；`build_user_prompt` 注入「全部压缩概要 + 关键事实 + 关键事件」。近期原文不再注入——对话历史（窗口大小即 `story_recent_count` 设置，`_message_window_size`）已逐字携带最近剧情，重复注入只会推高 prefill 与首字延迟。AI 额外输出 `facts`（跨块去重成事实卡）；确定性关键事件（章节进出、选项选择、介入度 / 破坏性跨整数阈值）由代码直接登记 |
 | **回放模式** | 不建 AI 客户端，`_replay_next_step` 逐条重放 `loaded_replay`（`kind == "trigger"` → `_replay_trigger`，`kind == "chapter"` → `_replay_chapter`） |
 | **过程日志（proc_log 组件）** | 右上角日志面板是官方组件包里的 `proc_log` 组件：方案在 `components` 里声明才构建（`_default` 已声明），默认收起，**F12** 切换展开 / 收起。数据源是 `dungeon/process_log.py`：组件 build 时订阅并取走缓冲积压（构造 / 会话初始化阶段的报错也会补显），此后任意线程的 `log()` 经订阅回调 → `ctx._frame.call()` 进主线程追加（上限 300 行，自动滚底）；组件 destroy 时退订。方案未配置该组件时按 F12 弹通知「日志查看已禁用」 |
-| **文本组件功能工具条** | 三种文本组件（text / text_card / text_nvl）各自在合适位置挂一条悬浮工具条（基类 `_build_toolbar` 统一创建，圆角低透明度容器 + 三个图标按钮——图标为程序化生成的小纹理，无底色仅悬停色，常驻不可关）：播放（自动播放，A）/ 相机（截图，F2）/ 列表（过程日志面板，F12），悬停有文字提示。渐变文本栏放渐变区右下角（继续指示 ▼ 左移让位），卡片文本栏骑在卡片右上角，NVL 顶部居中。按钮只转调窗口同名服务，与快捷键等效；自动播放由帧时钟任务按 1.2s 节奏调 `_on_next_step`，与继续指示同源的等待条件决定是否推进（选项 / 结局 / 生成 / 动画期间自动停），自动播放中播放图标转金色。窗口 `_on_mouse_click` 用 `toolbar_hovered()` 区分点按钮与点屏幕推进剧情。截图经 `dpg.output_frame_buffer` 存到 `data/user/screenshots/`（通知延后弹出，避免通知条被截进画面）。正文颜色为固定常量（`_DEFAULT_TEXT_COLOR`），可配置的是标签 / 高亮 / 渐变底色（见组件包 `param_specs`） |
+| **文本组件功能工具条** | 三种文本组件（text / text_card / text_nvl）各自在合适位置挂一条悬浮工具条（基类 `_build_toolbar` 统一创建，圆角低透明度容器 + 三个图标按钮——图标为程序化生成的小纹理，无底色仅悬停色，常驻不可关）：播放（自动播放，A）/ 相机（截图，F2）/ 列表（过程日志面板，F12），悬停有文字提示。渐变文本栏放渐变区右下角（继续指示 ▼ 左移让位），卡片文本栏骑在卡片右上角，NVL 顶部居中。按钮只转调窗口同名服务，与快捷键等效；自动播放由帧时钟任务采样（`toggle_autoplay` 挂 `every(_AUTOPLAY_INTERVAL = 0.2)`，只是采样频率），真正的推进节奏由**事件驱动**：上屏游标自然走完时 `_on_reveal_finished` 登记 `_advance_due = now + _AUTOPLAY_DWELL(0.5s) + _AUTOPLAY_DWELL_PER_CHAR(0.012) × 句长`，`_autoplay_tick` 三重检查（等待条件同源 → 游标已收尾 → 停留期已过）后才 `_on_next_step`，长句多停一点、不再固定 1.2 秒。等待条件与继续指示同源（选项 / 结局 / 生成 / 上屏未结束期间自动停），自动播放中播放图标转金色。窗口 `_on_mouse_click` 用 `toolbar_hovered()` 区分点按钮与点屏幕推进剧情。截图经 `dpg.output_frame_buffer` 存到 `data/user/screenshots/`（通知延后弹出，避免通知条被截进画面）。正文颜色为固定常量（`_DEFAULT_TEXT_COLOR`），可配置的是标签 / 高亮 / 渐变底色（见组件包 `param_specs`） |
 | **轻通知窗** | 主窗口顶部居中的通知条（`ui.py::_notify`），窗口级常驻、**不受组件配置影响**；显示约 3 秒自动隐藏（`after` 同 key 任务互斥，连续通知覆盖前一条并重置计时）。副本内需要「提示但不必确认」的场景都可用它 |
 
 ## 4. 线程与帧时钟

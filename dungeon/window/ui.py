@@ -22,14 +22,21 @@ _NOTIFY_MARGIN = 8
 _NOTIFY_DURATION = 3.0
 _NOTIFY_COLOR = (245, 240, 225, 255)
 
-# 仿流式输出：每次推进的字符数与间隔（约 65 字/秒）
-_ANIM_CHARS_PER_TICK = 2
-_ANIM_TICK_SECONDS = 0.03
-#: 仿流式动画的帧任务 key（同一时刻只有一条动画，新的顶掉旧的）
-_TEXT_ANIM_TASK = "text:anim"
+# 上屏游标（仿流式输出）：唯一的速度真相源，真流式与仿流式共用一条限速。
+# 30 字/秒——真流式下 chunk 到达即扩充目标文本，游标按此速率追赶，因此
+# 无论 AI 吐字多快，玩家看到的上屏节奏恒定（分句器也因此始终领先于上屏）。
+_REVEAL_CHARS_PER_SECOND = 30.0
+_REVEAL_TICK_SECONDS = 0.05      # 帧任务周期（20 Hz，每 tick 1.5 字）
+#: 点击推进的最小已上屏字数：不足则本次点击吞掉（防误触把整句瞬间吞掉）
+_REVEAL_MIN_CHARS = 5
+#: 上屏游标的帧任务 key（同一时刻只有一条，新的顶掉旧的）
+_REVEAL_TASK = "text:reveal"
 
-# 自动播放：等待输入时的推进节奏（秒）；帧任务 key 与播放开关配套
-_AUTOPLAY_INTERVAL = 1.2
+# 自动播放：等待输入时的推进节奏。_AUTOPLAY_INTERVAL 只是采样频率，真正的
+# 节奏由 _advance_due（上屏收尾时刻 + 停留）决定；停留时长随句长微增。
+_AUTOPLAY_INTERVAL = 0.2
+_AUTOPLAY_DWELL = 0.5            # 上屏结束后额外停留（秒）
+_AUTOPLAY_DWELL_PER_CHAR = 0.012  # 每个字符追加的停留（长句多停一点）
 _AUTOPLAY_TASK = "autoplay:tick"
 
 
@@ -282,14 +289,17 @@ class DungeonWindowUI:
 
     # ---------- 工具功能：自动播放 / 截图（文本组件工具条与快捷键共用） ----------
     def toggle_autoplay(self):
-        """切换自动播放：等待输入时按固定节奏自动推进（会话与回放均适用）。
+        """切换自动播放：上屏结束并停留一段时间后自动推进（会话与回放均适用）。
 
-        选项弹窗 / 结局 / 生成 / 动画期间自动暂停，无需人工干预；再次切换关闭。
+        选项弹窗 / 结局 / 生成 / 上屏期间自动暂停，无需人工干预；再次切换关闭。
         """
         if getattr(self, "_is_entry_phase", False):
             return
         self._autoplay = not getattr(self, "_autoplay", False)
         if self._autoplay:
+            # 开启即刻给一个到期时刻，避免开启瞬间把还没上完的段落推过去
+            self._advance_due = max(getattr(self, "_advance_due", 0.0),
+                                    time.monotonic() + _AUTOPLAY_DWELL)
             self._frame.every(_AUTOPLAY_INTERVAL, self._autoplay_tick,
                               key=_AUTOPLAY_TASK)
         else:
@@ -298,13 +308,27 @@ class DungeonWindowUI:
         self._refresh_components()   # 工具条按钮同步「自动中」状态标签
 
     def _autoplay_tick(self):
+        """自动播放采样：真正的节奏由 _advance_due（上屏收尾 + 停留）决定。
+
+        本 tick 只是廉价采样，三重复查后才推进：
+        1. 会话 / 覆盖层 / 等待条件（与继续指示同源，含生成中、结局、选项）；
+        2. 上屏游标必须已收尾——游标还在推进说明本段没上完屏，等它自己走完
+           （比读一个可能尚未同步的标志位更可靠，LingChat 同样做了这次复查）；
+        3. 上屏收尾后的停留期已过——长句多停一点，避免刚上完屏就翻页。
+        """
         if self._closing or not getattr(self, "_autoplay", False):
             return
         if self.overlay_open():
             return
         # 与继续指示的等待条件同源（组件服务面 session_waiting_for_input）
-        if self.session_waiting_for_input():
-            self._on_next_step()
+        if not self.session_waiting_for_input():
+            return
+        state = getattr(self, "_reveal", None)
+        if state is not None and state["pos"] < len(state["target"]):
+            return   # 上屏未结束：等游标走完
+        if time.monotonic() < getattr(self, "_advance_due", 0.0):
+            return   # 停留期内：再等等
+        self._on_next_step()
 
     def _on_autoplay_hotkey(self, sender=None, app_data=None):
         self.toggle_autoplay()
@@ -398,6 +422,28 @@ class DungeonWindowUI:
                                    "highlight": highlight, "speaker": speaker})
         self._update_text_display()
 
+    def _try_advance_paragraph(self) -> bool:
+        """点击驱动的显示段落推进：三态判定，返回 True 表示本次点击已消化。
+
+        1. 已上屏不足 ``_REVEAL_MIN_CHARS`` 字 → 吞掉本次点击（防误触瞬间吞掉整句，
+           也防抢在游标起步前切段）；
+        2. 当前段未补满 100% → 补满并停住，**不切段**（「再点一次才切段」）；
+        3. 已补满（自然播完或上次点击补满）→ 切到队列里的下一段。
+
+        无游标时（固定文本收尾、插入段、队列已空）直接放行，交给原有生成链。
+        """
+        state = getattr(self, "_reveal", None)
+        if state is not None:
+            if state["pos"] < _REVEAL_MIN_CHARS:
+                return True                       # ① 吞掉
+            if state["pos"] < len(state["target"]):
+                self._reveal_snap(state["item"])  # ② 补满，不切段
+                return True
+        if not self._pending_units:
+            return False                          # ③ 无货：放行给生成链
+        self._reveal_pending_unit()
+        return True
+
     def _reveal_pending_unit(self):
         """揭示当前逻辑段落的下一个显示段落（内置分句器切出的后续句）。"""
         if not self._pending_units:
@@ -408,7 +454,7 @@ class DungeonWindowUI:
         item = {"type_str": "", "text": unit.text, "speaker": unit.speaker}
         self.story_history.append(item)
         self._update_text_display()
-        self._animate_reveal(item, unit.text)
+        self._reveal_start(item, unit.text)
         self._speak_item(item)
 
     def _speak_item(self, item: dict):
@@ -422,46 +468,87 @@ class DungeonWindowUI:
             return
         director.speak(item.get("speaker"), item.get("text"))
 
-    # ---------- 仿流式输出 ----------
-    def _animate_reveal(self, item, text: str):
-        """让新上屏的显示段落逐字增长，模拟 AI 流式输出的节奏。
+    # ---------- 上屏游标（仿流式输出） ----------
+    #
+    # 一个游标同时服务两条路径，因此节奏恒定在 _REVEAL_CHARS_PER_SECOND：
+    # - 仿流式（预生成 / 固定文本 / 插入段）：目标文本一次给定，游标追上即完。
+    # - 真流式：chunk 到达只延长目标文本（_reveal_extend），游标按固定速率追赶，
+    #   上屏速度与 AI 吐字速度彻底解耦；分句器因此始终有一份领先的缓冲可用，
+    #   不需要为上屏等待——这也是「限制真流式速度」的全部含义。
+    #
+    # 状态字典（self._reveal）：
+    #   item   —— story_history 里的条目，其 text 被原地改写为已上屏前缀
+    #   target —— 目标全文，真流式下会随 chunk 增长
+    #   pos    —— 已上屏字数（唯一进度真相源，点击判定读它）
+    #   frac   —— 本 tick 的字符小数累加器，避免 1/1/2 的抖动感
+    def _reveal_active(self) -> bool:
+        """是否有进行中的上屏游标。"""
+        return getattr(self, "_reveal", None) is not None
 
-        动画由帧时钟驱动（L3）：一条 repeating 帧任务每 ``_ANIM_TICK_SECONDS``
-        推进两个字，取代过去"每句话新起一条线程 + ``sleep`` 轮询 ``_closing``"。
-        动画期间再点击一次由 ``_finish_text_animation`` 立即补完。
-        """
-        self._finish_text_animation()
+    def _reveal_start(self, item, text: str):
+        """新起一段上屏：接管游标，从头逐字揭开 text。"""
+        self._reveal_snap()          # 旧游标若有，先封口（它已不再是当前段）
         if not text:
             return
-        state = {"item": item, "text": text, "pos": 0}
-        self._text_anim_state = state
+        state = {"item": item, "target": text, "pos": 0, "frac": 0.0}
+        self._reveal = state
 
         def step():
-            # 会话关闭 / 已被后续动画或跳过接管：收摊
-            if self._closing or self._text_anim_state is not state:
-                self._frame.cancel(_TEXT_ANIM_TASK)
+            if self._closing or self._reveal is not state:
+                self._frame.cancel(_REVEAL_TASK)
                 return
-            state["pos"] = min(len(text), state["pos"] + _ANIM_CHARS_PER_TICK)
-            item["text"] = text[:state["pos"]]
-            if state["pos"] >= len(text):
-                self._text_anim_state = None
-                self._frame.cancel(_TEXT_ANIM_TASK)
+            state["frac"] += _REVEAL_CHARS_PER_SECOND * _REVEAL_TICK_SECONDS
+            advance = int(state["frac"])
+            state["frac"] -= advance
+            if advance <= 0:
+                return
+            state["pos"] = min(len(state["target"]), state["pos"] + advance)
+            item["text"] = state["target"][:state["pos"]]
+            if state["pos"] >= len(state["target"]):
+                # 自然走完：游标必须注销（否则 _reveal_active 永远为真，
+                # 继续指示与自动播放都会被这条已走完的游标挡住）
+                self._reveal = None
+                self._frame.cancel(_REVEAL_TASK)
+                self._on_reveal_finished(state["target"])
             # _schedule_text_update 经帧队列投递，本帧末尾就会上屏
             self._schedule_text_update()
 
-        self._frame.every(_ANIM_TICK_SECONDS, step, key=_TEXT_ANIM_TASK)
+        self._frame.every(_REVEAL_TICK_SECONDS, step, key=_REVEAL_TASK)
 
-    def _finish_text_animation(self):
-        """立即补完进行中的仿流式动画（点击跳过逐字过程）。"""
-        state = getattr(self, "_text_anim_state", None)
+    def _reveal_extend(self, item, text: str):
+        """真流式的目标文本增长：只延长 target，游标位置不动。
+
+        新增字符由运行中的 step 循环自然打出；item 与当前段不一致
+        （分句器已切走或动画被接管）时忽略，避免续写错误的对象。
+        """
+        state = getattr(self, "_reveal", None)
+        if state is None or state["item"] is not item:
+            return
+        if len(text) > len(state["target"]):
+            state["target"] = text
+
+    def _reveal_snap(self, item=None):
+        """把当前段立即补满到 100%（点击加速 / 段落收尾）。
+
+        传入 item 时只在该游标属于该段落时生效；不传则无条件补满。
+        """
+        state = getattr(self, "_reveal", None)
         if not state:
             return
-        state["item"]["text"] = state["text"]
-        self._text_anim_state = None
+        if item is not None and state["item"] is not item:
+            return
+        state["item"]["text"] = state["target"]
+        state["pos"] = len(state["target"])
+        self._reveal = None
         frame = getattr(self, "_frame", None)
         if frame is not None:
-            frame.cancel(_TEXT_ANIM_TASK)
+            frame.cancel(_REVEAL_TASK)
         self._schedule_text_update()
+
+    def _on_reveal_finished(self, text: str):
+        """上屏收尾钩子：为自动播放登记「本段停留到何时」。"""
+        self._advance_due = (time.monotonic() + _AUTOPLAY_DWELL
+                             + _AUTOPLAY_DWELL_PER_CHAR * len(text))
 
     # ---------- 布局自适应 ----------
     def _update_dpi_scale(self):

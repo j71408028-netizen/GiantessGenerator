@@ -106,6 +106,8 @@ class TriggerHandler:
         # 换章清除上一章遗留的短暂覆盖，并让各维度回到本章节默认值
         self.effect_overrides = []
         self._applied_visual_filter = None
+        # 预生成的段落是按上一章的环境写的：换章即作废，免得带着旧章节的提示词上屏
+        self._pregen = None
 
         bg = background if background is not None else (chapter or {}).get("background")
         # 回放记录里同样带上音乐配置：回放时照当时的曲目复现，不依赖当前方案
@@ -677,7 +679,7 @@ class TriggerHandler:
             text_type = DungeonTextType.BACKGROUND
         highlight = bool(item.get("highlight"))
 
-        # 插入段同样仿流式输出：先空文本上屏，再逐字增长
+        # 插入段同样走限速上屏：先空文本上屏，再由游标逐字揭开
         inserted_text = item["text"]
         anim_item = {
             "type_str": self._display_type_prefix(text_type),
@@ -687,7 +689,7 @@ class TriggerHandler:
         }
         self.story_history.append(anim_item)
         self._update_text_display()
-        self._animate_reveal(anim_item, inserted_text)
+        self._reveal_start(anim_item, inserted_text)
 
         # 与一般段落一样进入对话历史，后续 AI 生成时可见。
         # 用规范 JSON 形状（dungeon.response.canonical_history_entry）：

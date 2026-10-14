@@ -198,8 +198,10 @@ class DungeonWindowBase:
         self.pending_insertions = deque()
         # 当前逻辑段落（一次 AI 输出）内待揭示的显示段落（内置分句器切分）
         self._pending_units = []
-        # 进行中的仿流式输出动画状态（揭示句/插入段的逐字上屏）
-        self._text_anim_state = None
+        # 上屏游标（限速 30 字/秒的仿流式输出）：当前显示段落的逐字状态，
+        # 真流式下目标文本随 chunk 增长；同时为自动播放记录停留到期时刻。
+        self._reveal = None
+        self._advance_due = 0.0
         # 细节探究：AI 在后台提出的想了解细节，下次生成前检索解答并消费
         self._detail_queries = []
         self._detail_querying = False

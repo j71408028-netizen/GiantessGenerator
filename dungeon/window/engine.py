@@ -1,5 +1,6 @@
 """副本推进核心逻辑：AI 生成、伤亡结算、回放步进与关闭处理。"""
 
+import os
 import threading
 import time
 
@@ -32,11 +33,6 @@ class DungeonStoryEngine:
             return
         self._last_click_time = current_time
 
-        # 仿流式输出进行中：本次点击立即补完，不推进内容
-        if getattr(self, "_text_anim_state", None):
-            self._finish_text_animation()
-            return
-
         if self.pending_option is not None:
             return  # 选项弹窗进行中，打断正常的生成过程
 
@@ -46,9 +42,11 @@ class DungeonStoryEngine:
         if self.dungeon_ended or self.pending_ending is not None:
             return  # 结局已生成或正在生成，故事结束
 
-        # 逻辑段落（一次 AI 输出）切出的显示段落未揭示完：先逐句展示，不触发生成
-        if getattr(self, "_pending_units", None):
-            self._reveal_pending_unit()
+        # 显示段落推进：上屏不足最小字数则吞掉、未补满则补满、已补满才切段。
+        # 三种情况都由 _try_advance_paragraph 消化；本逻辑段落没有待揭示的
+        # 显示段落（队列空且无游标）时它返回 False，落到下面的生成链——
+        # 本次点击转为一个新的逻辑段落。
+        if self._try_advance_paragraph():
             return
 
         pending = self._peek_pending_insertion()
@@ -108,12 +106,18 @@ class DungeonStoryEngine:
 
                             partial_text = extract_stream_text(full_response_buffer)
                             if partial_text is not None:
-                                # 内置分句器：首句流式显示，完整即定格；后续完成句排队待点击
+                                # 内置分句器：首句进游标限速上屏，完整即定格；
+                                # 后续完成句排队待点击
                                 self._update_stream_units(current_item, partial_text)
                             else:
+                                # 正文还没从响应里抽出（JSON 前导等）：整块当作
+                                # 目标文本送进游标，不走直写（否则会绕过限速）
                                 cleaned_buf = full_response_buffer.replace("```json", "").replace("```", "").strip()
                                 if not cleaned_buf.startswith("{"):
-                                    current_item["text"] = cleaned_buf
+                                    if self._reveal_active():
+                                        self._reveal_extend(current_item, cleaned_buf)
+                                    else:
+                                        self._reveal_start(current_item, cleaned_buf)
 
                             self._schedule_text_update()
                         if full_response_buffer.strip():
@@ -124,19 +128,27 @@ class DungeonStoryEngine:
 
                 ai_text, direction, custom_directions = self._parse_final_json(full_response_buffer)
 
-                # 最终切分：整段正文按内置分句器定格，首句已显示，其余排队。
-                # 说话人标记（@X@）在切分时解析进显示单元，落盘与下游一律用净文本
+                # 最终切分：整段正文按内置分句器定格，首句已由游标展示（或由此起
+                # 始），其余排队。说话人标记（@X@）在切分时解析进显示单元，
+                # 落盘与下游一律用净文本
                 final_units = split_full_text(ai_text)
                 self._pending_units = final_units[1:]
+                first_text = strip_speaker_markers(ai_text)
                 if final_units:
                     current_item["speaker"] = final_units[0].speaker
                     current_item["text"] = final_units[0].text
+                    first_text = final_units[0].text
                 else:
-                    current_item["text"] = strip_speaker_markers(ai_text)
+                    current_item["text"] = first_text
                 self._schedule_text_update()
-                if pregen is not None and current_item["text"]:
-                    # 预生成整段就绪：首句仿流式揭示，与实时流式的节奏一致
-                    self._animate_reveal(current_item, current_item["text"])
+                # 首句进游标：预生成整段就绪 / 实时流式都走同一条限速上屏。
+                # 真流式下游标通常已在跑（_update_stream_units 已 start），
+                # 此处只做目标对齐（把游标目标钉到最终定稿的首句）。
+                if first_text:
+                    if self._reveal_active():
+                        self._reveal_extend(current_item, first_text)
+                    else:
+                        self._reveal_start(current_item, first_text)
                 # 首句定稿：带说话人（Solea/Bulla 对话分支）就该念出来
                 self._speak_item(current_item)
 
@@ -180,6 +192,10 @@ class DungeonStoryEngine:
 
                 self._apply_prompted_unlocks(clean_text)
                 self._finish_step(next_type, clean_text, step_info, check_unlock=True)
+                # 本逻辑段落定稿：游标目标已不再增长，直接把首句补满。
+                # 否则真流式下若首句比队列长，游标会继续按 30 字/秒慢慢爬，
+                # 玩家点「生成下一段」时被 _try_advance_paragraph 拦在 ②。
+                self._reveal_snap(current_item)
                 # 细节探究：立即在后台询问 AI 想了解的细节，下次生成前解答
                 self._start_detail_query(clean_text)
                 success = True
@@ -318,17 +334,26 @@ class DungeonStoryEngine:
         """流式中用内置分句器更新显示：首句（未完句尾）流式展示，完整即定格。
 
         后续已完成的句不直接上屏，排队到 ``_pending_units``，等用户点击后
-        由 ``_reveal_pending_unit`` 逐句揭示。同一文本整体重算，天然幂等。
+        由 ``_try_advance_paragraph`` 逐句揭示。同一文本整体重算，天然幂等。
         显示单元携带说话人（``@说话人@`` 标记解析，见 dungeon/splitter.py）。
+
+        **上屏速度与 chunk 到达解耦**：这里只更新游标目标（``_reveal_extend``），
+        实际出字由帧时钟按 30 字/秒推进，因此 AI 吐字再快也不会加速上屏。
+        分句器读的是 ``partial_text``（已收全文），不受限速影响、始终领先。
         """
         units, tail = split_stream_units(partial_text)
         if units:
             current_item["speaker"] = units[0].speaker
-            current_item["text"] = units[0].text
+            head = units[0].text
         else:
             current_item["speaker"] = None
-            current_item["text"] = tail
+            head = tail
         self._pending_units = list(units[1:])
+        # 只延长目标，不直写 current_item["text"]——游标位置由限速循环掌握。
+        # current_item["text"] 仍是落盘/回放用的净文本（见 _finish_step），
+        # 游标收尾后会由 _reveal_snap 对齐到全文。
+        if head:
+            self._reveal_extend(current_item, head)
 
     def _apply_prompted_unlocks(self, text: str):
         """把 AI 针对被注意到部位返回的段落写入该部位解锁信息（写入规则与报告正文一致）。
@@ -462,7 +487,8 @@ class DungeonStoryEngine:
 
         结束章节内步进为 0，本段不产生伤亡。
         """
-        if self._in_terminating_chapter():
+        frozen = False
+        if self._in_terminating_chapter() or frozen:
             self.dungeon_state.casualty_evolution.append(0.0)
             return 0.0
         step = text_type.step_value
