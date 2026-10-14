@@ -326,7 +326,11 @@ class AutopilotWindow(DungeonSessionWindow):
     """
 
     def __init__(self, *args, script=None, **kwargs):
-        self._script = list(script or [])
+        # 名字带 _scripted_ 前缀是必须的：``DungeonWindowBase.__init__``（在下面的
+        # super().__init__ 里跑到）会把 ``self._script`` 置为 None——那是「固定文本
+        # 章节」的脚本游标，与本驾驶脚本撞名，撞上之后本线程就再也拿不到动作列表
+        # （2026-10-14 修：7409330 引入 _script 后所有脚本化场景都静默失败）。
+        self._scripted_actions = list(script or [])
         #: 每个脚本动作执行后的状态快照，供场景断言"那一刻"的情形
         self._snapshots = {}
         #: ("check", fn) 动作的断言结果 [("ok"|"fail", 说明), ...]
@@ -363,7 +367,7 @@ class AutopilotWindow(DungeonSessionWindow):
     def _run_script(self):
         try:
             time.sleep(1.0)   # 等首帧与入口/会话初始化稳定
-            for action, value in self._script:
+            for action, value in self._scripted_actions:
                 if action == "sleep":
                     time.sleep(value)
                 elif action == "click":
@@ -1553,7 +1557,25 @@ def _check_escape_running(win):
     assert stage is not None, "跑帧 2s 后舞台应仍在（帧异常会自动中止）"
     game = stage._game
     assert game._banner is None, "无操作 2s 不应结算"
-    assert game._terrain._version > 0 and game._fabric_layer._version > 0,         "地形/织物画布应已绘制"
+    assert game._terrain._version > 0, "地形画布应已绘制"
+    # 织物不是每张地图都有：`_fabric_generate` 的摆放可能一个都放不下（随机地图下
+    # 并不罕见），此时 `_fabric_build` 一次都不画，画布版本自然停在 0。原来无条件
+    # 断言两个画布都画过，会随地图随机失败（2026-10-14 实测约 1/3 概率挂），
+    # 改成「有织物才要求画过」——覆盖面不变，去掉的是随机性。
+    assert game._fabric_layer._version > 0 or not _escape_fabric_props(game), \
+        "该关卡有织物时织物画布应已绘制"
+
+
+def _escape_fabric_props(game):
+    """escape_giantess 当前关卡生成的织物条目（取不到时按「有」处理，保持严格）。
+
+    小游戏模块是运行时用 ``spec_from_file_location`` 动态加载的，不进
+    ``sys.modules``，因此从类方法的 ``__globals__`` 里取模块全局 ``_S``。
+    """
+    func = getattr(type(game), "update", None) or getattr(type(game), "__init__", None)
+    module_globals = getattr(func, "__globals__", None) or {}
+    props = getattr(module_globals.get("_S"), "fabric_props", None)
+    return True if props is None else bool(props)
 
 
 def _check_escape_esc(win):
