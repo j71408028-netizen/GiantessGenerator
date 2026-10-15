@@ -2,6 +2,11 @@
 # platform-specific packaging scripts so normal development installs stay lean.
 customtkinter==6.0.0
 dearpygui==2.3.1
+# 副本窗口正在从 dearpygui 迁到 imgui-bundle（分支 refactor/dungeon-imgui）：
+# 过渡期两者并存，P8 清场时才移除上面那行 dearpygui。
+# 注意实际版本下限是 3.11 —— 该版本只发 cp311/cp312/cp313/cp314 wheel，
+# 没有 cp310（PyPI 上的 requires-python>=3.10 只是名义值）；macOS 只有 arm64 wheel。
+imgui-bundle==1.92.900
 Pillow>=10.0
 networkx>=3.0,<4.0
 graphviz>=0.20,<1.0
