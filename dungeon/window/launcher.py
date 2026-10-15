@@ -1,4 +1,4 @@
-"""副本入口阶段（DearPyGui 混入）：与正式副本会话窗口共享同一个 DPG 生命周期。
+"""副本入口阶段（imgui 立即模式混入）：与正式副本会话窗口共享同一个窗口。
 
 - 动态背景：从副本资源目录随机抽取图片，轻微旋转/高斯模糊后循环交叉淡入淡出；
 - 右下角：副本方案选择 + 开始副本 / 加载回放 / 返回；
@@ -7,6 +7,14 @@
   会话初始背景沿用冻结的入口背景，之后由背景触发器按需重设；
   选择“加载回放”后：同样冻结背景，并立即进入回放阶段；
   选择“返回”后：直接关闭窗口，不生成任何内容。
+
+## 迁移状态（P1）
+
+P1 只保证"能选、能开始、能返回"+ 动态背景接线；入口面板改由
+``ui._draw_entry_panel`` 立即模式每帧绘制（不再建 DPG 控件树）。因此
+``_build_entry_ui`` / ``_destroy_entry_ui`` / ``_update_ending_display`` /
+``_on_dungeon_changed`` 目前都是 **P3 占位**（保留调用点与状态，不绘制）。
+动态背景轮播、Ken Burns、结局图标轮播的**帧任务连线**原样保留，P3 只补"怎么画"。
 """
 
 import math
@@ -14,7 +22,6 @@ import os
 import random
 import re
 
-import dearpygui.dearpygui as dpg
 from PIL import Image
 
 from dungeon import process_log
@@ -105,9 +112,6 @@ def collect_dungeon_images(scenario_repo) -> list:
     return list(dict.fromkeys(os.path.normpath(p) for p in found))
 
 
-_BYTE_TO_FLOAT = [value / 255.0 for value in range(256)]
-
-
 # ---------------------------------------------------------------------------
 # 入口阶段混入：附着在 DungeonSessionWindow 上，与正式会话共享同一窗口
 # ---------------------------------------------------------------------------
@@ -126,7 +130,7 @@ class DungeonLaunchStages:
 
     # ------------------ 入口阶段 ------------------
     def _enter_entry_phase(self):
-        """进入副本选择入口：初始化素材、构建面板、启动动态背景与结尾轮播。"""
+        """进入副本选择入口：初始化素材、准备面板状态、启动动态背景与结尾轮播。"""
         self._is_entry_phase = True
         self._entry_started = False   # 已完成一次进入选择
         self._launch_choice = None
@@ -141,10 +145,8 @@ class DungeonLaunchStages:
         self._collect_bg_images()
         self._collect_ending_icons()
 
+        # 入口面板由 ui._draw_entry_panel 立即模式绘制（P3 补全）；这里只做 P3 占位
         self._build_entry_ui()
-        dpg.hide_item("text_container")
-        if dpg.does_item_exist("bg_overlay_child"):
-            dpg.hide_item("bg_overlay_child")
 
         self._prime_background()
         self._start_background_cycle()
@@ -182,181 +184,26 @@ class DungeonLaunchStages:
                 "scenario_id": scenario_id_of(rec),
             })
 
-    # ------------------ 入口阶段 UI（挂载在同一 viewport） ------------------
+    # ------------------ 入口阶段 UI（P3 占位） ------------------
     def _build_entry_ui(self):
-        s = self._dpi_scale
-        w = self._layout_w
-        h = self._layout_h
-        margin = round(20 * s)
-        cw = round(380 * s)
-        ch = round(270 * s)
+        """P3 占位：入口面板改由 ``ui._draw_entry_panel`` 立即模式每帧绘制。
 
-        # 入口控件全部显式挂到 main_window（入口阶段在 _build_ui 的容器块结束后
-        # 创建控件，DPG 无法从容器栈推断父级，必须显式指定 parent）
-        dpg.add_child_window(
-            tag="panel_controls", parent="main_window",
-            pos=[w - cw - margin, h - ch - margin],
-            width=cw, height=ch,
-            no_scrollbar=True, no_scroll_with_mouse=True, border=False)
-        dpg.add_text("进入副本", tag="ctl_title", parent="panel_controls",
-                     color=(255, 255, 255, 255))
-        dpg.add_text("选择副本方案", tag="ctl_hint", parent="panel_controls",
-                     color=(255, 220, 180, 255))
-        dpg.add_combo(
-            items=self.scenario_ids,
-            default_value=self.scenario_ids[0] if self.scenario_ids else "",
-            width=cw - 24, tag="ctl_dungeon", parent="panel_controls",
-            callback=self._on_dungeon_changed)
-        info_text = "行动点消耗 0 AP"
-        if self.scenario_ids and self.character is not None:
-            info_text = (f"行动点消耗 0 AP　|　剩余 "
-                         f"{getattr(self.character, 'action_points', 0)} AP")
-        dpg.add_text(info_text, tag="ctl_info", parent="panel_controls",
-                     color=(200, 210, 220, 255), wrap=cw - 24)
-        dpg.add_spacer(height=6, parent="panel_controls")
-        dpg.add_group(horizontal=True, tag="ctl_btn_start_row",
-                      parent="panel_controls")
-        dpg.add_button(label="开始副本", tag="btn_start", parent="ctl_btn_start_row",
-                       width=cw - 24, height=round(40 * s),
-                       callback=self._on_entry_start)
-        dpg.add_group(horizontal=True, tag="ctl_btn_bottom_row",
-                      parent="panel_controls")
-        dpg.add_button(label="加载回放", tag="btn_replay",
-                       parent="ctl_btn_bottom_row",
-                       width=round((cw - 24) / 2 - 5), height=round(34 * s),
-                       callback=self._on_entry_replay)
-        dpg.add_button(label="返回", tag="btn_cancel",
-                       parent="ctl_btn_bottom_row",
-                       width=round((cw - 24) / 2 - 5), height=round(34 * s),
-                       callback=self._on_entry_cancel)
-        self._panel_controls_size = (cw, ch)
-
-        if self._ending_items:
-            self._build_endings_panel(w, h)
-
-        self._apply_panel_themes()
-
-        if not self.scenario_ids:
-            dpg.configure_item("ctl_dungeon", items=["（无可用副本方案）"])
-            dpg.configure_item("ctl_info", default_value="请先到“副本编辑”创建副本方案")
-            dpg.configure_item("btn_start", label="无可用副本方案", enabled=False)
-
-        # 面板构造完成后统一置为可见
-        dpg.show_item("panel_controls")
-        if dpg.does_item_exist("panel_endings"):
-            dpg.show_item("panel_endings")
-
-        # 初始化 AP 消耗显示（默认选中第一个副本方案）
-        self._on_dungeon_changed()
-
-    def _apply_panel_themes(self):
-        """半透明深色面板：让文字/控件浮在动态背景之上且保持可读。"""
-        s = self._dpi_scale
-        with dpg.theme() as panel_theme:
-            with dpg.theme_component(dpg.mvAll):
-                dpg.add_theme_color(dpg.mvThemeCol_ChildBg, (12, 10, 18, 200))
-                dpg.add_theme_color(dpg.mvThemeCol_Border, (255, 255, 255, 60))
-                dpg.add_theme_color(dpg.mvThemeCol_FrameBg, (30, 26, 44, 230))
-                dpg.add_theme_color(dpg.mvThemeCol_FrameBgHovered, (44, 38, 64, 240))
-                dpg.add_theme_color(dpg.mvThemeCol_FrameBgActive, (52, 44, 78, 245))
-                dpg.add_theme_color(dpg.mvThemeCol_PopupBg, (18, 15, 26, 245))
-                dpg.add_theme_color(dpg.mvThemeCol_Header, (58, 48, 86, 255))
-                dpg.add_theme_color(dpg.mvThemeCol_HeaderHovered, (80, 66, 118, 255))
-                dpg.add_theme_color(dpg.mvThemeCol_HeaderActive, (90, 74, 132, 255))
-                dpg.add_theme_color(dpg.mvThemeCol_Text, (238, 238, 244, 255))
-                dpg.add_theme_style(dpg.mvStyleVar_ChildRounding, 8)
-                dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, 12, 12)
-                dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 6, 7)
-        for tag in ("panel_controls", "panel_endings"):
-            if dpg.does_item_exist(tag):
-                dpg.bind_item_theme(tag, panel_theme)
-
-        with dpg.theme() as start_theme:
-            with dpg.theme_component(dpg.mvButton):
-                dpg.add_theme_color(dpg.mvThemeCol_Button, (90, 60, 150, 255))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (120, 82, 190, 255))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (70, 45, 120, 255))
-                dpg.add_theme_color(dpg.mvThemeCol_Text, (255, 255, 255, 255))
-        dpg.bind_item_theme("btn_start", start_theme)
-
-        with dpg.theme() as ghost_theme:
-            with dpg.theme_component(dpg.mvButton):
-                dpg.add_theme_color(dpg.mvThemeCol_Button, (0, 0, 0, 0))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (255, 255, 255, 28))
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (255, 255, 255, 40))
-                dpg.add_theme_color(dpg.mvThemeCol_Border, (255, 255, 255, 120))
-                dpg.add_theme_style(dpg.mvStyleVar_FrameBorderSize, 1)
-        for tag in ("btn_replay", "btn_cancel"):
-            dpg.bind_item_theme(tag, ghost_theme)
+        原实现以 ``panel_controls`` / ``panel_endings`` 两个 DPG 子窗建控件树；
+        imgui 立即模式下没有"建一次"这回事，几何与文本在 ``_draw_entry_panel``
+        里按客户区现算，因此这里不再需要做任何事。P3 会在这里补上入口专属的
+        资源预载（结局图标纹理等）。
+        """
 
     def _destroy_entry_ui(self):
-        # 删除父容器会级联删除子项；仅需删除顶层容器与独立纹理
-        for tag in ("panel_controls", "panel_endings"):
-            if dpg.does_item_exist(tag):
-                dpg.delete_item(tag)
-        for tex in getattr(self, "_ending_textures", []) or []:
-            if dpg.does_item_exist(tex):
-                dpg.delete_item(tex)
+        """P3 占位：立即模式没有常驻入口控件可删（纹理随 ``_bg_texture`` 换图释放）。"""
         self._ending_items = []
 
-    def _build_endings_panel(self, viewport_w, viewport_h):
-        s = self._dpi_scale
-        margin = round(20 * s)
-        self._preload_ending_textures()
-        pw = round(320 * s)
-        ph = round(200 * s)
-        dpg.add_child_window(
-            tag="panel_endings", parent="main_window",
-            pos=[margin, viewport_h - ph - margin],
-            width=pw, height=ph,
-            no_scrollbar=True, no_scroll_with_mouse=True, border=False)
-        dpg.add_text(f"已通关结局（{len(self._ending_items)}）", tag="end_head",
-                     parent="panel_endings", color=(255, 225, 150, 255))
-        dpg.add_group(horizontal=True, tag="end_body", parent="panel_endings")
-        dpg.add_image(texture_tag="end_tex_0", tag="end_icon_img",
-                      parent="end_body",
-                      width=round(96 * s), height=round(96 * s))
-        dpg.add_group(tag="end_info_group", parent="end_body")
-        dpg.add_text("", tag="end_name", parent="end_info_group",
-                     color=(255, 255, 255, 255),
-                     wrap=max(40, pw - round(130 * s)))
-        dpg.add_text("", tag="end_time", parent="end_info_group",
-                     color=(200, 205, 215, 255),
-                     wrap=max(40, pw - round(130 * s)))
-        dpg.add_spacer(height=2, parent="panel_endings")
-        dpg.add_text("点击“开始副本”进入新的冒险", tag="end_foot",
-                     parent="panel_endings", color=(160, 170, 185, 255))
-        self._panel_endings_rect = (pw, ph)
-        self._update_ending_display(0)
-
-    def _preload_ending_textures(self):
-        s = self._dpi_scale
-        box = round(96 * s)
-        self._ending_textures = []
-        for idx, item in enumerate(self._ending_items):
-            pil = item["pil"]
-            w, h = pil.size
-            ratio = min(box / w, box / h) if (w and h) else 0
-            tw, th = pil.size
-            if ratio and ratio < 1:
-                tw, th = max(1, round(w * ratio)), max(1, round(h * ratio))
-                pil = pil.resize((tw, th), Image.Resampling.LANCZOS)
-            canvas = Image.new("RGBA", (box, box), (0, 0, 0, 0))
-            canvas.paste(pil, ((box - tw) // 2, (box - th) // 2))
-            data = [_BYTE_TO_FLOAT[v] for v in canvas.tobytes()]
-            dpg.add_static_texture(width=box, height=box, default_value=data,
-                                   tag=f"end_tex_{idx}",
-                                   parent="dungeon_texture_registry")
-            self._ending_textures.append(f"end_tex_{idx}")
-        if not self._ending_textures:
-            dpg.add_static_texture(width=1, height=1,
-                                   default_value=[0.0, 0.0, 0.0, 1.0],
-                                   tag="end_tex_0",
-                                   parent="dungeon_texture_registry")
-            self._ending_textures.append("end_tex_0")
-
     def _start_ending_cycle(self):
-        """结局图标轮播：每 3.2s 翻一页（帧任务，取代原先的休眠线程）。"""
+        """结局图标轮播：每 3.2s 翻一页（帧任务，取代原先的休眠线程）。
+
+        P3 占位：轮播只推进 ``_ending_index``；"怎么画"由入口面板在 P3 补上
+        （当前 P1 的入口面板不展示结局图标）。
+        """
         if not self._ending_items:
             return
         self._ending_index = 0
@@ -367,30 +214,16 @@ class DungeonLaunchStages:
                 self._frame.cancel(_ENDING_CYCLE_TASK)
                 return
             self._ending_index = (self._ending_index + 1) % len(self._ending_items)
-            # 已在主线程（帧任务由帧循环调用），直接更新即可
-            self._update_ending_display(self._ending_index)
 
         self._frame.every(_ENDING_CYCLE_SECONDS, advance, key=_ENDING_CYCLE_TASK)
 
     def _update_ending_display(self, idx):
+        """P3 占位：记录当前该展示的结局下标（绘制由 P3 的入口面板负责）。"""
         if self._closing or not self._is_entry_phase or not self._ending_items:
             return
-        if not (0 <= idx < len(self._ending_items)):
-            return
-        item = self._ending_items[idx]
-        try:
-            if dpg.does_item_exist("end_icon_img"):
-                dpg.configure_item("end_icon_img", texture_tag=f"end_tex_{idx}")
-            if dpg.does_item_exist("end_name"):
-                dpg.configure_item("end_name", default_value=item["name"])
-            if dpg.does_item_exist("end_time"):
-                dungeon = item.get("scenario_id") or ""
-                dpg.configure_item(
-                    "end_time",
-                    default_value=(f"{item['achieved_at']}　{dungeon}"
-                                   if dungeon else item["achieved_at"]))
-        except Exception as e:
-            process_log.log(f"结局图标轮播更新失败: {e}")
+        if 0 <= idx < len(self._ending_items):
+            self._ending_index = idx
+
 
     # ------------------ 动态背景（随机轮播，进入会话后冻结） ------------------
     def _prime_background(self):
@@ -459,10 +292,10 @@ class DungeonLaunchStages:
             cw, chh = w * scale, h * scale
             dx = w * 0.02 * math.sin(self._kb_phase * 0.35)
             dy = h * 0.02 * math.cos(self._kb_phase * 0.23)
-            pmin = [(w - cw) / 2 + dx, (h - chh) / 2 + dy]
-            pmax = [pmin[0] + cw, pmin[1] + chh]
-            if dpg.does_item_exist("bg_image_item"):
-                dpg.configure_item("bg_image_item", pmin=pmin, pmax=pmax)
+            pmin = ((w - cw) / 2 + dx, (h - chh) / 2 + dy)
+            pmax = (pmin[0] + cw, pmin[1] + chh)
+            # 立即模式：不做"改控件属性"，只把本帧该用的矩形交给 ui._draw_background
+            self._kb_rect = (pmin, pmax)
         except Exception as e:
             if not isinstance(e, SystemError):
                 process_log.log(f"背景运动更新失败: {e}")
@@ -490,12 +323,12 @@ class DungeonLaunchStages:
             return []
 
     def _enter_replay_phase(self, replay_data):
-        """入口页直接切到回放：**同一个窗口、同一个 DPG 上下文**。
+        """入口页直接切到回放：**同一个窗口、同一次窗口生命周期**。
 
         L4 之前入口页选"加载回放"只能把窗口关掉，把 choice 交给调用方，再由调用
         方 ``new`` 第二个 ``DungeonSessionWindow(is_replay=True)``——一次完整的
-        create/destroy 生命周期。现在只需把 is_replay 切上、初始化回放会话，
-        然后走和"开始副本"完全相同的 :meth:`_enter_dungeon_phase`。
+        窗口拆建。现在只需把 is_replay 切上、初始化回放会话，然后走和"开始副本"
+        完全相同的 :meth:`_enter_dungeon_phase`。
         """
         self.is_replay = True
         self.loaded_replay = list(replay_data or [])
@@ -505,12 +338,9 @@ class DungeonLaunchStages:
         self.triggers = []
         self.chapters = normalize_chapters([])
         self._init_replay(self.loaded_replay)
-        # 标题随之改为回放模式并在原生窗口上生效（已在主线程内，可直接修正）
+        # 标题随之改为回放模式。hello_imgui 的窗口标题在建窗时给定，运行中改
+        # ``_real_title`` 只影响下次建窗（P1 不重建窗口，故此处仅记状态）。
         self._real_title = f"回放模式 - {self.name}"
-        try:
-            self._fix_windows_title()
-        except Exception:
-            pass
         self._enter_dungeon_phase()
 
     # ------------------ 阶段切换 ------------------
@@ -554,13 +384,9 @@ class DungeonLaunchStages:
             self._build_components()
             self._relayout()
 
-        # 显示正式会话界面（文本容器/衬底），背景沿用冻结的入口图；
-        # 组件接管文本显示时（owns_text_display）可见性由组件自管，不再强制显示
-        if not self._text_owned_by_component():
-            if dpg.does_item_exist("text_container"):
-                dpg.show_item("text_container")
-            if dpg.does_item_exist("bg_overlay_child"):
-                dpg.show_item("bg_overlay_child")
+        # 立即模式下没有"显示正式会话界面"这一步：``_is_entry_phase`` 已置假，
+        # ``ui._draw_frame`` 下一帧自然改画 ``_draw_story``（组件接管文本显示时，
+        # ``_draw_story`` 内部会跳过）。背景沿用冻结的入口图。
 
         if self.is_replay:
             self._init_components()
@@ -576,48 +402,28 @@ class DungeonLaunchStages:
 
     # ------------------ 入口交互回调 ------------------
     def _on_dungeon_changed(self, sender=None, app_data=None):
-        try:
-            if not self.scenario_ids:
-                return
-            if not dpg.does_item_exist("ctl_dungeon"):
-                return
-            sel = dpg.get_value("ctl_dungeon")
-            if not sel or sel == "（无可用副本方案）":
-                return
-            config = None
-            if self.scenario_repo is not None:
-                try:
-                    config = self.scenario_repo.load_config(sel)
-                except Exception:
-                    config = None
-            cost = 0
-            if config:
-                try:
-                    cost = max(0, int(config.get("entry_action_cost", 0) or 0))
-                except (TypeError, ValueError):
-                    cost = 0
-            text = f"行动点消耗 {cost} AP"
-            if self.character is not None:
-                text += f"　|　剩余 {getattr(self.character, 'action_points', 0)} AP"
-            dpg.configure_item("ctl_info", default_value=text)
-        except Exception as e:
-            process_log.log(f"副本信息刷新失败: {e}")
+        """选择副本方案变了。
+
+        P3 占位：P1 的入口面板由 ``ui._draw_entry_panel`` 每帧从
+        ``self._entry_selection`` 现算 AP 说明（见 ``ui._entry_info_text``），
+        因此这里不需要再刷新任何控件。P3 会在这里补上方案元数据缓存。
+        """
 
     def _on_entry_start(self, sender=None, app_data=None, user_data=None):
         if not self.scenario_ids:
             return
-        sel = dpg.get_value("ctl_dungeon")
-        if not sel or sel == "（无可用副本方案）":
+        index = getattr(self, "_entry_selection", 0)
+        if not 0 <= index < len(self.scenario_ids):
             # 无可用副本时“开始副本”按钮已禁用，此分支仅作保险
             return
-        self._launch_choice = sel
+        self._launch_choice = self.scenario_ids[index]
         self._enter_dungeon_phase()
 
     def _on_entry_replay(self, sender=None, app_data=None, user_data=None):
         """入口页"加载回放"：在同一窗口内切换到回放，不再让调用方重开窗口。
 
         用户取消选择时不关闭入口页——以前是把窗口关掉再让 UI 层判断，代价是整段
-        DPG 生命周期；现在只是"什么都没发生"。
+        窗口生命周期；现在只是"什么都没发生"。
         """
         self._launch_choice = REPLAY_MARK
         replay_data = self._pick_replay_file()

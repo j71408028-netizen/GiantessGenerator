@@ -1,8 +1,11 @@
-"""选项触发器：后台生成选项文字并弹出选择弹窗。"""
+"""选项触发器：后台生成选项文字并弹出选择弹窗。
+
+选择弹窗的**绘制**已迁到 ``ui._draw_option_dialog``（立即模式，每帧从
+``pending_option["labels"]`` 现画）；本模块只负责生成文字并把它们塞进
+``pending_option``，以及处理"选了第几个"。
+"""
 
 import threading
-
-import dearpygui.dearpygui as dpg
 
 from dungeon import process_log
 from dungeon.coupling import coupling_prompts, normalize_coupling_level
@@ -53,33 +56,19 @@ class OptionHandler:
                 self._frame.call(self._open_option_dialog, labels)
 
     def _open_option_dialog(self, labels):
-        """在主线程弹出选项弹窗（modal），点击任意选项后继续。"""
+        """把生成的选项文字挂到 ``pending_option``，由 ``ui`` 每帧绘制弹窗。
+
+        原实现这里建 DPG 模态窗（``option_dialog``）；imgui 立即模式下弹窗是
+        ``ui._draw_option_dialog`` 的绘制分支，因此这里只做状态赋值。
+        """
         if self._closing:
             return
         pending = self.pending_option
         if not pending:
             return
-        if dpg.does_item_exist("option_dialog"):
-            dpg.delete_item("option_dialog")
-
-        labels = list(labels) or [o.get("prompt") or f"选项 {i}" for i, o in enumerate(pending["options"])]
+        labels = list(labels) or [o.get("prompt") or f"选项 {i}"
+                                  for i, o in enumerate(pending["options"])]
         pending["labels"] = labels
-        scale = max(getattr(self, "_dpi_scale", 1.0), 0.5)
-        width = round(440 * scale)
-        row_h = round(46 * scale)
-        height = round(70 * scale) + row_h * len(labels)
-        vw, vh = dpg.get_viewport_client_width(), dpg.get_viewport_client_height()
-        pos = [round((vw - width) / 2), round((vh - height) / 2)]
-
-        with dpg.window(tag="option_dialog", modal=True, no_title_bar=True,
-                        no_move=True, no_resize=True, no_close=True,
-                        width=width, height=height, pos=pos):
-            dpg.add_text(coupling_prompts(normalize_coupling_level(
-                getattr(self, "coupling_level", None)))["option_dialog_title"],
-                wrap=width - 60)
-            for i, label in enumerate(labels):
-                dpg.add_button(label=label, width=width - 80,
-                               callback=self._on_option_chosen, user_data=i)
 
     def _on_option_chosen(self, sender, app_data, user_data):
         if self._closing or not self.pending_option:
@@ -116,8 +105,6 @@ class OptionHandler:
             self._last_option_record["step"] = self.dungeon_state.total_steps
             self._last_option_record = None
 
-        if dpg.does_item_exist("option_dialog"):
-            dpg.delete_item("option_dialog")
         self.pending_option = None
         self._option_generating = False
 

@@ -7,13 +7,18 @@
 - ``ctx.component(cid)``        只读访问兄弟组件实例（不接管其生命周期）
 
 覆盖层打开期间窗口进入「阅读模态」：点击只关闭覆盖层、不推进剧情，空格 /
-回车的推进也一并挂起（`_on_next_step` 入口判定；H / ESC 随时可用）。覆盖层
-在所有组件之后创建（z 序最上），随 ``_relayout`` 重排、随 ``_finish_session`` 销毁。
+回车的推进也一并挂起（`_on_next_step` 入口判定；H / ESC 随时可用）。
 
-线程约束：全部方法只在主线程调用（组件钩子与 DPG 回调均为主线程）。
+线程约束：全部方法只在帧线程调用。
+
+## 迁移状态（P1）
+
+渲染实现（``_build_log_overlay`` / ``_relayout_overlays``）是 **P4 占位**：
+imgui 立即模式下"覆盖层"就是 ``ui._draw_frame`` 里多画一个面板，不需要建控件树。
+P1 保留**状态与挂起语义**——``overlay_open()`` / ``toggle_overlay()`` /
+``close_overlay()`` 照常维护 ``_overlay_name``，因此阅读模态在 P1 就已生效；
+只是暂时还没有面板可见（P4 补 ``ui`` 侧的绘制）。
 """
-
-import dearpygui.dearpygui as dpg
 
 from dungeon import process_log
 
@@ -54,8 +59,6 @@ class OverlayHandler:
         if not name:
             return
         self._overlay_name = None
-        if dpg.does_item_exist("overlay_log"):
-            dpg.delete_item("overlay_log")
 
     def component(self, cid):
         """只读访问兄弟组件实例（未知或未启用时返回 None）。
@@ -84,60 +87,22 @@ class OverlayHandler:
             self.close_overlay()
 
     # ---- 覆盖层实现 ----
+    # ---- 覆盖层实现（P4 占位） ----
     def _build_log_overlay(self):
-        """对话记录（Backlog）：居中半透明面板，快照展示全部 story_history。"""
-        if dpg.does_item_exist("overlay_log"):
-            dpg.delete_item("overlay_log")
-        s = getattr(self, "_dpi_scale", 1.0) or 1.0
-        w = getattr(self, "_layout_w", 0) or dpg.get_viewport_client_width()
-        h = getattr(self, "_layout_h", 0) or dpg.get_viewport_client_height()
-        pad = round(20 * s)
-        panel_w, panel_h = max(round(400 * s), round(w * 0.8)), max(round(300 * s), round(h * 0.84))
-        pos = [max(round(8 * s), (w - panel_w) // 2), max(round(8 * s), (h - panel_h) // 2)]
-        header_h = round(34 * s)
-        scroll_h = panel_h - 2 * pad - header_h
-        wrap = max(1, panel_w - 2 * pad - round(14 * s))
+        """P4 占位：对话记录面板改由 ``ui._draw_frame`` 立即模式绘制。
 
-        dpg.add_child_window(tag="overlay_log", parent="main_window",
-                             pos=pos, width=panel_w, height=panel_h, border=True)
-        dpg.configure_item("overlay_log", no_scrollbar=True, no_scroll_with_mouse=True)
-        with dpg.theme() as panel_theme:
-            with dpg.theme_component(dpg.mvAll):
-                dpg.add_theme_color(dpg.mvThemeCol_ChildBg, (10, 12, 22, 235))
-                dpg.add_theme_color(dpg.mvThemeCol_Border, (255, 255, 255, 50))
-                dpg.add_theme_style(dpg.mvStyleVar_ChildRounding, round(12 * s))
-                dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, pad, pad)
-        dpg.bind_item_theme("overlay_log", panel_theme)
-
-        # C6 怪癖：容器块之后创建的控件推断不出父级，全部显式指定 parent
-        dpg.add_text("对话记录", color=_LABEL_COLOR, parent="overlay_log")
-        dpg.add_text("点击 / H / ESC 关闭", color=_DIM_COLOR, parent="overlay_log")
-
-        with dpg.child_window(tag="overlay_log_scroll", border=False,
-                              height=scroll_h, parent="overlay_log"):
-            for item in getattr(self, "story_history", []):
-                raw = (item.get("speaker") or item.get("type_str") or "").strip()
-                if raw:
-                    dpg.add_text(f"[ {raw} ]", color=_LABEL_COLOR, wrap=wrap,
-                                 parent="overlay_log_scroll")
-                body = _HIGHLIGHT_COLOR if item.get("highlight") else _TEXT_COLOR
-                dpg.add_text(item.get("text", ""), color=body, wrap=wrap,
-                             parent="overlay_log_scroll")
-        state = dpg.get_item_state("overlay_log_scroll") or {}
-        max_scroll = state.get("y_scroll_max")
-        if max_scroll:
-            dpg.set_y_scroll("overlay_log_scroll", max_scroll)
+        原实现以 ``overlay_log`` 子窗 + 主题建控件树并快照 ``story_history``；
+        imgui 立即模式下没有"建一次"这回事——P4 会在 ``ui`` 里按 ``_overlay_name``
+        多画一个居中面板，每帧从 ``story_history`` 现画。P1 只需维护状态标记。
+        """
 
     def _relayout_overlays(self):
-        """视口变化时重排覆盖层（重建最简单：内容快照无需迁移）。"""
-        if self.overlay_open() == "log":
-            self._build_log_overlay()
+        """P4 占位：立即模式覆盖层几何每帧现算，无需重排。"""
 
     def _destroy_overlays(self):
-        """会话收尾时清理覆盖层控件与模态标记。"""
+        """会话收尾时清理覆盖层模态标记（控件由立即模式自然消失）。"""
         self._overlay_name = None
-        if dpg.does_item_exist("overlay_log"):
-            dpg.delete_item("overlay_log")
         # 小游戏舞台同批清理（帧时钟已停，其中的结果回传自然失效）
         if getattr(self, "_mini_game_stage", None) is not None:
             self._destroy_mini_game_stage()
+
