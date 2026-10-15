@@ -226,30 +226,75 @@ _WM_CLOSE = 0x0010   #: 投给视口原生窗口 = 用户点关闭键
 _WM_QUIT = 0x0012    #: GLFW 销毁原生窗口后 Windows 记下的「退出进程」消息
 
 
-def _post_viewport_native_close() -> bool:
-    """向 DPG 原生视口窗口投一条 ``WM_CLOSE``（= 用户点关闭键），成功返回 True。
+def _viewport_hwnd(win=None) -> int:
+    """本会话那个原生窗口的句柄（找不到返回 0；非 Windows 恒为 0）。
 
-    这是唯一能触发「原生关闭」路径的手段，也只有它会往本线程队列里留一条
-    ``WM_QUIT``（见窗口文档 §5-C12）。按**窗口类名**找：DPG 用创建视口时的标题
-    （``DungeonSession``）注册窗口类，之后 ``_fix_windows_title`` 改标题不影响类名。
+    DPG 时代视口窗口用固定类名 ``DungeonSession`` 注册，本探针原先只认它；换到
+    imgui/GLFW 之后没有这个类名，只能按**标题**找——标题就是 ``base._real_title``
+    （``副本模式 - …`` / ``回放模式 - …``）。两条都试，谁在认谁，让本探针在后端
+    过渡期两侧都能用。
+    """
+    if not sys.platform.startswith("win"):
+        return 0
+    import ctypes
+    user32 = ctypes.windll.user32
+    hwnd = user32.FindWindowW("DungeonSession", None)
+    if hwnd:
+        return hwnd
+    title = getattr(win, "_real_title", "") or ""
+    if title:
+        hwnd = user32.FindWindowW(None, title)
+        if hwnd:
+            return hwnd
+    # 兜底：标题可能被系统/后端改写过，按「本进程 + 标题像副本窗口」再找一遍
+    return _first_own_viewport_hwnd()
+
+
+def _first_own_viewport_hwnd() -> int:
+    """本进程里第一个标题像副本会话窗口的顶层原生窗口（找不到返回 0）。"""
+    if not sys.platform.startswith("win"):
+        return 0
+    import ctypes
+    import os
+    from ctypes import wintypes
+    user32 = ctypes.windll.user32
+    pid = os.getpid()
+    prev = 0
+    for _ in range(128):
+        hwnd = user32.FindWindowExW(None, prev, None, None)
+        if not hwnd:
+            break
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if owner.value == pid and _is_dungeon_viewport(hwnd):
+            return hwnd
+        prev = hwnd
+    return 0
+
+
+def _post_viewport_native_close(win=None) -> bool:
+    """向副本视口原生窗口投一条 ``WM_CLOSE``（= 用户点关闭键），成功返回 True。
+
+    这是唯一能触发「原生关闭」路径的手段。``WM_QUIT`` 残留是 DPG 时代的症状
+    （见窗口文档 §5-C12）；imgui/GLFW 侧 P0 实测不再残留，本函数照投不误。
     """
     if not sys.platform.startswith("win"):
         return False
     import ctypes
-    hwnd = ctypes.windll.user32.FindWindowW("DungeonSession", None)
+    hwnd = _viewport_hwnd(win)
     if not hwnd:
         return False
     ctypes.windll.user32.PostMessageW(hwnd, _WM_CLOSE, 0, 0)
     return True
 
 
-def _post_viewport_key() -> bool:
+def _post_viewport_key(win=None) -> bool:
     """向自检视口投一次 K 键按下/抬起（SendMessage 直达窗口过程，不依赖焦点）。"""
     if not sys.platform.startswith("win"):
         return False
     import ctypes
     user32 = ctypes.windll.user32
-    hwnd = user32.FindWindowW("DungeonSession", None)
+    hwnd = _viewport_hwnd(win)
     if not hwnd:
         return False
     vk_k = 0x4B
@@ -276,8 +321,24 @@ def _pending_quit() -> int:
     return 1 if found else 0
 
 
-#: 会话视口在 Windows 上用的临时标题（``base._temp_title``），按它找残留窗口
+#: 会话视口在 Windows 上用的临时标题（DPG 时代 ``base._temp_title``）。
+#: imgui/GLFW 时代没有这个临时标题，窗口标题就是给用户看的真标题（见下）。
 _VP_TITLE = "DungeonSession"
+#: imgui/GLFW 时代的副本窗口标题前缀（``base._real_title`` 的两种形态）
+_VP_TITLE_PREFIXES = ("副本模式", "回放模式")
+
+
+def _window_title(hwnd) -> str:
+    import ctypes
+    buf = ctypes.create_unicode_buffer(256)
+    ctypes.windll.user32.GetWindowTextW(hwnd, buf, 256)
+    return buf.value
+
+
+def _is_dungeon_viewport(hwnd) -> bool:
+    """这个原生窗口是不是副本会话窗口（两代后端的命名都认）。"""
+    title = _window_title(hwnd)
+    return title == _VP_TITLE or title.startswith(_VP_TITLE_PREFIXES)
 
 
 def _leftover_viewport_windows() -> int:
@@ -287,6 +348,10 @@ def _leftover_viewport_windows() -> int:
     不销毁该窗口（见 ``dungeon.window.dpg_state.discard_viewport_windows``），
     而本程序收尾后仍继续跑 Tk——不显式销毁就会在屏幕上留下一个不再响应的副本
     窗口（使用者看到的就是「点了返回后卡死」），且每跑一局累加一个。
+
+    枚举方式：列出本进程的**全部顶层窗口**再按标题筛，而不是拿旧标题去
+    ``FindWindowExW`` 精确匹配——迁到 imgui/GLFW 后标题已改成真标题，继续用旧标题
+    精确匹配会恒返回 0，让这条守卫变成永远通过的假绿。
     """
     if not sys.platform.startswith("win"):
         return 0
@@ -297,13 +362,13 @@ def _leftover_viewport_windows() -> int:
     pid = os.getpid()
     count = 0
     prev = 0
-    for _ in range(32):
-        hwnd = user32.FindWindowExW(None, prev, None, _VP_TITLE)
+    for _ in range(128):
+        hwnd = user32.FindWindowExW(None, prev, None, None)
         if not hwnd:
             break
         owner = wintypes.DWORD()
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
-        if owner.value == pid:
+        if owner.value == pid and _is_dungeon_viewport(hwnd):
             count += 1
         prev = hwnd
     return count
@@ -408,11 +473,17 @@ class AutopilotWindow(DungeonSessionWindow):
                     self._frame.call(self._close_loop)
                     time.sleep(1.0)
                 elif action == "native-close":
-                    # 模拟用户点视口关闭键（X）：只有这条路径会在队列里留下 WM_QUIT
-                    self._native_close_posted = _post_viewport_native_close()
+                    # 模拟用户点视口关闭键（X）：DPG 时代只有这条路径会在队列里留下
+                    # WM_QUIT。拿不到原生窗口时必须兜底关掉——否则帧循环会一直等一个
+                    # 永远不来的关闭请求，场景以「超时未见结论」收场，看不出真因。
+                    self._native_close_posted = _post_viewport_native_close(self)
+                    if not self._native_close_posted:
+                        print("[autopilot] native-close：找不到副本视口原生窗口，"
+                              "退回程序侧关闭（该场景将以断言失败收场）")
+                        self._frame.call(self._close_loop)
                     time.sleep(1.0)
                 elif action == "native-key":
-                    self._native_key_posted = _post_viewport_key()
+                    self._native_key_posted = _post_viewport_key(self)
                     self._callback_received.wait(timeout=3.0)
                 # 每个动作之后留一张快照，场景可以断言"那一刻"的情形
                 self._snapshots[(action, str(value))] = {
