@@ -1,10 +1,10 @@
 """UI 绘制、文本显示、布局自适应与事件回调（imgui 立即模式）。
 
-本文件现覆盖 P1「窗口骨架」与 P2「阅读主循环」：**建主窗口 + 背景铺满 +
-视口尺寸/DPI + 字体两档 + 底部渐变式文本区 + 上屏游标 + 继续指示 ▼ +
-三图标工具条 + 轻通知 + 输入接线**；入口面板仍是最小版。后续阶段：
+本文件现覆盖 P1「窗口骨架」/ P2「阅读主循环」/ P3「入口阶段」：
+**建主窗口 + 背景铺满 + 视口尺寸/DPI + 字体两档 + 底部渐变式文本区 +
+上屏游标 + 继续指示 ▼ + 三图标工具条 + 轻通知 + 输入接线 + 入口方案面板 +
+结局图标轮播**。后续阶段：
 
-- P3 入口阶段：动态背景轮播、方案面板完整版、结局图标轮播、Ken Burns；
 - P4 组件包与覆盖层（``component_pack/*`` / ``overlay.py``）；
 - P5 视效与截图 / 全屏（``fx.py``）。
 
@@ -142,10 +142,43 @@ _TOOLBAR_ACTIONS = (
     ("log", "过程日志（F12）"),
 )
 
+# ---------- 入口阶段面板（P3：与旧 DPG panel_controls / panel_endings 同口径） ----------
+_ENTRY_PANEL_W = 380
+_ENTRY_PANEL_H = 270
+_ENTRY_ENDING_PANEL_W = 320
+_ENTRY_ENDING_PANEL_H = 200
+_ENTRY_ENDING_ICON = 96
+_ENTRY_PANEL_MARGIN = 20
+_ENTRY_PANEL_PAD = 12
+_ENTRY_PANEL_BG = (12, 10, 18, 200)
+_ENTRY_PANEL_BORDER = (255, 255, 255, 60)
+_ENTRY_FRAME_BG = (30, 26, 44, 230)
+_ENTRY_FRAME_BG_HOVERED = (44, 38, 64, 240)
+_ENTRY_FRAME_BG_ACTIVE = (52, 44, 78, 245)
+_ENTRY_POPUP_BG = (18, 15, 26, 245)
+_ENTRY_HEADER = (58, 48, 86, 255)
+_ENTRY_HEADER_HOVERED = (80, 66, 118, 255)
+_ENTRY_HEADER_ACTIVE = (90, 74, 132, 255)
+_ENTRY_TEXT = (238, 238, 244, 255)
+_ENTRY_TITLE = (255, 255, 255, 255)
+_ENTRY_HINT = (255, 220, 180, 255)
+_ENTRY_INFO = (200, 210, 220, 255)
+_ENTRY_START_BG = (90, 60, 150, 255)
+_ENTRY_START_BG_HOVERED = (120, 82, 190, 255)
+_ENTRY_START_BG_ACTIVE = (70, 45, 120, 255)
+_ENTRY_GHOST_BG = (0, 0, 0, 0)
+_ENTRY_GHOST_BG_HOVERED = (255, 255, 255, 28)
+_ENTRY_GHOST_BG_ACTIVE = (255, 255, 255, 40)
+_ENTRY_GHOST_BORDER = (255, 255, 255, 120)
+_ENTRY_ENDING_HEAD = (255, 225, 150, 255)
+_ENTRY_ENDING_TIME = (200, 205, 215, 255)
+_ENTRY_ENDING_FOOT = (160, 170, 185, 255)
+
 # ---------- imgui 窗口/子窗 ID（不进 ini，仅用于同层去重） ----------
 _ROOT_WINDOW = "##dungeon_root"
 _STORY_CHILD = "##dungeon_story"
 _ENTRY_PANEL = "##dungeon_entry"
+_ENDING_PANEL = "##dungeon_entry_endings"
 _OPTION_DIALOG = "##dungeon_option"
 _TOOLBAR = "##dungeon_toolbar"
 
@@ -216,8 +249,10 @@ class DungeonWindowUI:
         # 入口阶段 Ken Burns 运动给出的背景矩形（None = 铺满窗口）
         self._kb_rect = None
 
-        # 入口面板状态（P1 最小版：方案下拉 + 三个按钮）
+        # 入口面板状态（P3：方案下拉 + 结局图标轮播）
         self._entry_selection = 0
+        self._entry_panel_rect = None
+        self._ending_panel_rect = None
 
         # 字体句柄（load_additional_fonts 里填；post_init 时还是 None）
         self.dungeon_text_font = None
@@ -303,6 +338,13 @@ class DungeonWindowUI:
         self._apply_imgui_style()
         # 工具条图标是 GPU 资源，必须等到 GL 就绪（post_init）之后才能上传
         self._make_toolbar_textures()
+        # 结局图标同样是 GPU 资源；入口阶段在 run() 前收集 PIL，这里才上传
+        preload_endings = getattr(self, "_preload_ending_textures", None)
+        if callable(preload_endings):
+            try:
+                preload_endings()
+            except Exception as exc:
+                process_log.log(f"[Dungeon] 结局图标预载失败: {exc}")
         # 窗口视效层：P5 才实现（imgui 侧要为闪光/振动/反色/色差重画一遍），
         # 这里的 build 是保持调用链完整的 P5 占位（fx.py 里为空实现）。
         self._window_fx.build(self._layout_w, self._layout_h)
@@ -385,6 +427,7 @@ class DungeonWindowUI:
         # 顶层浮层：root end() 之后再 begin()（见方法文档）
         if getattr(self, "_is_entry_phase", False):
             self._draw_entry_panel(w, h)
+            self._draw_ending_panel(w, h)
         else:
             # 工具条随文本组件走：组件接管显示时由组件自己画（P4）
             if not self._text_owned_by_component():
@@ -737,17 +780,45 @@ class DungeonWindowUI:
         imgui.pop_text_wrap_pos()
         imgui.pop_font()
 
-    # ==================== 绘制：入口面板（P1 最小版） ====================
-    def _draw_entry_panel(self, w: float, h: float):
-        """右下角方案选择面板。
+    # ==================== 绘制：入口面板（P3 完整版） ====================
+    def _push_entry_panel_style(self):
+        """入口面板/结局面板共用的半透明深色主题（对齐旧 DPG panel theme）。"""
+        s = self._dpi_scale
+        pad = float(round(_ENTRY_PANEL_PAD * s))
+        imgui.push_style_var(imgui.StyleVar_.window_padding, iu.v2(pad, pad))
+        imgui.push_style_var(imgui.StyleVar_.item_spacing,
+                             iu.v2(float(round(6 * s)), float(round(7 * s))))
+        imgui.push_style_var(imgui.StyleVar_.window_rounding,
+                             float(round(8 * s)))
+        imgui.push_style_color(imgui.Col_.window_bg, iu.u32(*_ENTRY_PANEL_BG))
+        imgui.push_style_color(imgui.Col_.border, iu.u32(*_ENTRY_PANEL_BORDER))
+        imgui.push_style_color(imgui.Col_.text, iu.u32(*_ENTRY_TEXT))
+        imgui.push_style_color(imgui.Col_.frame_bg, iu.u32(*_ENTRY_FRAME_BG))
+        imgui.push_style_color(imgui.Col_.frame_bg_hovered,
+                               iu.u32(*_ENTRY_FRAME_BG_HOVERED))
+        imgui.push_style_color(imgui.Col_.frame_bg_active,
+                               iu.u32(*_ENTRY_FRAME_BG_ACTIVE))
+        imgui.push_style_color(imgui.Col_.popup_bg, iu.u32(*_ENTRY_POPUP_BG))
+        imgui.push_style_color(imgui.Col_.header, iu.u32(*_ENTRY_HEADER))
+        imgui.push_style_color(imgui.Col_.header_hovered,
+                               iu.u32(*_ENTRY_HEADER_HOVERED))
+        imgui.push_style_color(imgui.Col_.header_active,
+                               iu.u32(*_ENTRY_HEADER_ACTIVE))
 
-        P1 只做「能选、能开始、能返回」三件事；动态背景轮播 / 结局图标 /
-        更多装饰留给 P3（见 ``launcher.py`` 的模块说明）。
+    def _pop_entry_panel_style(self):
+        imgui.pop_style_color(10)
+        imgui.pop_style_var(3)
+
+    def _draw_entry_panel(self, w: float, h: float):
+        """右下角方案选择面板（P3：与旧 DPG ``panel_controls`` 同口径）。
+
+        立即模式每帧重建；尺寸/配色/按钮层级都对齐旧版。方案 AP 消耗走
+        ``launcher._entry_cost_cache``，不再逐帧读配置。
         """
         s = self._dpi_scale
-        margin = round(20 * s)
-        cw = float(round(380 * s))
-        ch = float(round(240 * s))
+        margin = round(_ENTRY_PANEL_MARGIN * s)
+        cw = float(round(_ENTRY_PANEL_W * s))
+        ch = float(round(_ENTRY_PANEL_H * s))
         x = max(0.0, w - cw - margin)
         y = max(0.0, h - ch - margin)
 
@@ -756,18 +827,19 @@ class DungeonWindowUI:
             self._entry_selection = 0
 
         self._entry_panel_rect = (x, y, cw, ch)
+        self._push_entry_panel_style()
         imgui.set_next_window_pos(iu.v2(x, y))
         imgui.set_next_window_size(iu.v2(cw, ch))
         imgui.begin(_ENTRY_PANEL, None,
                     _panel_flags()
                     | imgui.WindowFlags_.no_scrollbar.value
                     | imgui.WindowFlags_.no_scroll_with_mouse.value)
-        inner_w = cw - 2 * float(round(12 * s))
+        inner_w = max(1.0, cw - 2 * float(round(_ENTRY_PANEL_PAD * s)))
 
-        imgui.push_style_color(imgui.Col_.text, iu.u32(255, 255, 255, 255))
+        imgui.push_style_color(imgui.Col_.text, iu.u32(*_ENTRY_TITLE))
         imgui.text("进入副本")
         imgui.pop_style_color()
-        imgui.push_style_color(imgui.Col_.text, iu.u32(*_WARM_COLOR))
+        imgui.push_style_color(imgui.Col_.text, iu.u32(*_ENTRY_HINT))
         imgui.text("选择副本方案")
         imgui.pop_style_color()
 
@@ -777,7 +849,7 @@ class DungeonWindowUI:
             self._entry_selection = index
             self._on_dungeon_changed()
 
-        imgui.push_style_color(imgui.Col_.text, iu.u32(*_DIM_COLOR))
+        imgui.push_style_color(imgui.Col_.text, iu.u32(*_ENTRY_INFO))
         imgui.text_wrapped(self._entry_info_text())
         imgui.pop_style_color()
         imgui.spacing()
@@ -785,39 +857,130 @@ class DungeonWindowUI:
         enabled = bool(self.scenario_ids)
         if not enabled:
             imgui.begin_disabled()
+        imgui.push_style_color(imgui.Col_.button, iu.u32(*_ENTRY_START_BG))
+        imgui.push_style_color(imgui.Col_.button_hovered,
+                               iu.u32(*_ENTRY_START_BG_HOVERED))
+        imgui.push_style_color(imgui.Col_.button_active,
+                               iu.u32(*_ENTRY_START_BG_ACTIVE))
+        imgui.push_style_color(imgui.Col_.text, iu.u32(255, 255, 255, 255))
         if imgui.button("开始副本", iu.v2(inner_w, float(round(40 * s)))):
             self._on_entry_start()
+        imgui.pop_style_color(4)
         if not enabled:
             imgui.end_disabled()
 
         half = inner_w / 2.0 - 5.0
         row_h = float(round(34 * s))
+        imgui.push_style_color(imgui.Col_.button, iu.u32(*_ENTRY_GHOST_BG))
+        imgui.push_style_color(imgui.Col_.button_hovered,
+                               iu.u32(*_ENTRY_GHOST_BG_HOVERED))
+        imgui.push_style_color(imgui.Col_.button_active,
+                               iu.u32(*_ENTRY_GHOST_BG_ACTIVE))
+        imgui.push_style_color(imgui.Col_.border, iu.u32(*_ENTRY_GHOST_BORDER))
+        imgui.push_style_var(imgui.StyleVar_.frame_border_size, 1.0)
         if imgui.button("加载回放", iu.v2(half, row_h)):
             self._on_entry_replay()
         imgui.same_line()
         if imgui.button("返回", iu.v2(half, row_h)):
             self._on_entry_cancel()
+        imgui.pop_style_var()
+        imgui.pop_style_color(4)
 
         imgui.end()
+        self._pop_entry_panel_style()
 
     def _entry_info_text(self) -> str:
-        """面板里的行动点说明（等价于旧 ``ctl_info`` 的取值逻辑）。"""
+        """面板里的行动点说明（AP 消耗按方案缓存，避免逐帧读配置）。"""
         if not self.scenario_ids:
             return "请先到「副本编辑」创建副本方案"
         selection = (self.scenario_ids[self._entry_selection]
                      if 0 <= self._entry_selection < len(self.scenario_ids)
                      else "")
-        cost = 0
-        if self.scenario_repo is not None and selection:
-            try:
-                config = self.scenario_repo.load_config(selection)
-                cost = max(0, int((config or {}).get("entry_action_cost", 0) or 0))
-            except Exception:
-                cost = 0
-        text = f"行动点消耗 {cost} AP"
+        if not selection:
+            return "行动点消耗 0 AP"
+        cache = getattr(self, "_entry_cost_cache", None)
+        if cache is None:
+            cache = {}
+            self._entry_cost_cache = cache
+        if selection not in cache:
+            cost = 0
+            if self.scenario_repo is not None:
+                try:
+                    config = self.scenario_repo.load_config(selection)
+                    cost = max(0, int((config or {}).get("entry_action_cost", 0) or 0))
+                except (TypeError, ValueError):
+                    cost = 0
+                except Exception:
+                    cost = 0
+            cache[selection] = cost
+        text = f"行动点消耗 {cache[selection]} AP"
         if self.character is not None:
             text += f"　|　剩余 {getattr(self.character, 'action_points', 0)} AP"
         return text
+
+    # ==================== 绘制：已通关结局面板（P3） ====================
+    def _draw_ending_panel(self, w: float, h: float):
+        """左下角结局图标轮播：图标 + 名称 + 达成时间/副本。
+
+        没有结局记录时不绘制（与旧实现一致）；纹理由
+        ``launcher._preload_ending_textures`` 在 GL 就绪后预载，轮播下标由
+        ``launcher._start_ending_cycle`` 的帧任务推进。
+        """
+        items = getattr(self, "_ending_items", None) or []
+        textures = getattr(self, "_ending_textures", None) or []
+        if not items or not textures:
+            return
+        idx = getattr(self, "_ending_index", 0)
+        if not 0 <= idx < len(items):
+            idx = 0
+        item = items[idx]
+        texture = textures[idx] if 0 <= idx < len(textures) else None
+
+        s = self._dpi_scale
+        margin = round(_ENTRY_PANEL_MARGIN * s)
+        pw = float(round(_ENTRY_ENDING_PANEL_W * s))
+        ph = float(round(_ENTRY_ENDING_PANEL_H * s))
+        x = float(margin)
+        y = max(0.0, h - ph - margin)
+        self._ending_panel_rect = (x, y, pw, ph)
+
+        self._push_entry_panel_style()
+        imgui.set_next_window_pos(iu.v2(x, y))
+        imgui.set_next_window_size(iu.v2(pw, ph))
+        imgui.begin(_ENDING_PANEL, None,
+                    _panel_flags()
+                    | imgui.WindowFlags_.no_scrollbar.value
+                    | imgui.WindowFlags_.no_scroll_with_mouse.value)
+        inner_w = max(1.0, pw - 2 * float(round(_ENTRY_PANEL_PAD * s)))
+        imgui.push_style_color(imgui.Col_.text, iu.u32(*_ENTRY_ENDING_HEAD))
+        imgui.text(f"已通关结局（{len(items)}）")
+        imgui.pop_style_color()
+
+        icon = float(round(_ENTRY_ENDING_ICON * s))
+        if texture is not None:
+            ref = imgui.ImTextureRef(int(texture.texture_id()))
+            imgui.image(ref, iu.v2(icon, icon))
+        else:
+            imgui.dummy(iu.v2(icon, icon))
+        imgui.same_line()
+
+        available = max(40.0, inner_w - icon - float(round(12 * s)))
+        imgui.push_text_wrap_pos(imgui.get_cursor_pos_x() + available)
+        imgui.text_wrapped(str(item.get("name") or "未命名结局"))
+        imgui.push_style_color(imgui.Col_.text, iu.u32(*_ENTRY_ENDING_TIME))
+        achieved = str(item.get("achieved_at") or "")
+        scenario = str(item.get("scenario_id") or "")
+        meta = f"{achieved}　{scenario}" if scenario else achieved
+        imgui.text_wrapped(meta)
+        imgui.pop_style_color()
+        imgui.pop_text_wrap_pos()
+        imgui.spacing()
+        imgui.push_style_color(imgui.Col_.text, iu.u32(*_ENTRY_ENDING_FOOT))
+        imgui.text_wrapped("点击「开始副本」进入新的冒险")
+        imgui.pop_style_color()
+
+        imgui.end()
+        self._pop_entry_panel_style()
 
     # ==================== 绘制：选项弹窗 ====================
     def _draw_option_dialog(self, w: float, h: float):

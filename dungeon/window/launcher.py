@@ -8,13 +8,13 @@
   选择“加载回放”后：同样冻结背景，并立即进入回放阶段；
   选择“返回”后：直接关闭窗口，不生成任何内容。
 
-## 迁移状态（P1）
+## 迁移状态（P3）
 
-P1 只保证"能选、能开始、能返回"+ 动态背景接线；入口面板改由
-``ui._draw_entry_panel`` 立即模式每帧绘制（不再建 DPG 控件树）。因此
-``_build_entry_ui`` / ``_destroy_entry_ui`` / ``_update_ending_display`` /
-``_on_dungeon_changed`` 目前都是 **P3 占位**（保留调用点与状态，不绘制）。
-动态背景轮播、Ken Burns、结局图标轮播的**帧任务连线**原样保留，P3 只补"怎么画"。
+P3 已补齐入口阶段的绘制与纹理链路：方案面板由 ``ui._draw_entry_panel`` 每帧重建，
+结局图标由 ``_preload_ending_textures`` 在 post_init（GL 就绪）后上传为
+``TextureGpu``，并在 ``ui._draw_ending_panel`` 左下角轮播。动态背景轮播、Ken Burns、
+阶段切换与 ``_freeze_background`` 沿用帧任务接线；``_on_dungeon_changed`` 只维护
+AP 消耗缓存，不再操作 retained 控件。
 """
 
 import math
@@ -145,7 +145,7 @@ class DungeonLaunchStages:
         self._collect_bg_images()
         self._collect_ending_icons()
 
-        # 入口面板由 ui._draw_entry_panel 立即模式绘制（P3 补全）；这里只做 P3 占位
+        # 准备入口绘制状态；面板由 ui._draw_entry_panel 立即模式每帧绘制。
         self._build_entry_ui()
 
         self._prime_background()
@@ -184,25 +184,73 @@ class DungeonLaunchStages:
                 "scenario_id": scenario_id_of(rec),
             })
 
-    # ------------------ 入口阶段 UI（P3 占位） ------------------
+    # ------------------ 入口阶段 UI：状态与纹理预载（P3） ------------------
     def _build_entry_ui(self):
-        """P3 占位：入口面板改由 ``ui._draw_entry_panel`` 立即模式每帧绘制。
+        """准备入口绘制状态；纹理上传由 post_init 后的钩子负责。
 
-        原实现以 ``panel_controls`` / ``panel_endings`` 两个 DPG 子窗建控件树；
-        imgui 立即模式下没有"建一次"这回事，几何与文本在 ``_draw_entry_panel``
-        里按客户区现算，因此这里不再需要做任何事。P3 会在这里补上入口专属的
-        资源预载（结局图标纹理等）。
+        ``_enter_entry_phase`` 发生在 ``runner.run()`` 之前，此时还没有 GL
+        上下文，不能调用 ``create_texture_gpu_from_rgba_data``。因此这里只清零
+        状态，真正的图标纹理在 :meth:`_preload_ending_textures` 里、由
+        ``ui._setup_imgui``（post_init）在 GL 就绪后调用。
         """
+        self._ending_textures = []
+        # AP 消耗按方案缓存，避免立即模式下每帧读一次配置。
+        self._entry_cost_cache = {}
+
+    def _preload_ending_textures(self):
+        """把已收集的结局图标上传为 ``TextureGpu``（仅 GL 就绪后调用）。
+
+        与旧 DPG 版 ``_preload_ending_textures`` 相同的缩放/正方形留白口径；
+        区别只是 DPG 静态纹理换成了 hello_imgui 的 RAII 纹理句柄。句柄由
+        ``_ending_textures`` 列表持有，离开入口阶段时清空即可释放。
+        """
+        self._ending_textures = []
+        if not getattr(self, "_ending_items", None):
+            return
+
+        from imgui_bundle import hello_imgui
+        import numpy as np
+
+        s = getattr(self, "_dpi_scale", 1.0) or 1.0
+        box = max(1, round(96 * s))
+        textures = []
+        for item in self._ending_items:
+            try:
+                pil = item.get("pil")
+                if pil is None:
+                    textures.append(None)
+                    continue
+                w, h = pil.size
+                ratio = min(box / w, box / h) if (w and h) else 0.0
+                tw, th = w, h
+                if ratio and ratio < 1.0:
+                    tw, th = max(1, round(w * ratio)), max(1, round(h * ratio))
+                    pil = pil.resize((tw, th), Image.Resampling.LANCZOS)
+                canvas = Image.new("RGBA", (box, box), (0, 0, 0, 0))
+                canvas.paste(pil, ((box - tw) // 2, (box - th) // 2))
+                rgba = np.frombuffer(canvas.tobytes(), dtype=np.uint8).reshape(box, box, 4)
+                textures.append(
+                    hello_imgui.create_texture_gpu_from_rgba_data(rgba))
+            except Exception as exc:
+                process_log.log(f"结局图标纹理创建失败: {exc}")
+                textures.append(None)
+        self._ending_textures = textures
 
     def _destroy_entry_ui(self):
-        """P3 占位：立即模式没有常驻入口控件可删（纹理随 ``_bg_texture`` 换图释放）。"""
+        """离开入口阶段：释放图标纹理句柄并清掉入口专用状态。
+
+        立即模式没有常驻控件可删；``TextureGpu`` 是 RAII 句柄，丢掉最后一个
+        Python 引用就会释放 GPU 资源，因此清空列表即可。
+        """
         self._ending_items = []
+        self._ending_textures = []
+        self._ending_index = 0
 
     def _start_ending_cycle(self):
         """结局图标轮播：每 3.2s 翻一页（帧任务，取代原先的休眠线程）。
 
-        P3 占位：轮播只推进 ``_ending_index``；"怎么画"由入口面板在 P3 补上
-        （当前 P1 的入口面板不展示结局图标）。
+        只推进 ``_ending_index``；左下角绘制由 ``ui._draw_ending_panel`` 每帧
+        按 GL 就绪后预载的纹理完成。
         """
         if not self._ending_items:
             return
@@ -214,11 +262,12 @@ class DungeonLaunchStages:
                 self._frame.cancel(_ENDING_CYCLE_TASK)
                 return
             self._ending_index = (self._ending_index + 1) % len(self._ending_items)
+            self._update_ending_display(self._ending_index)
 
         self._frame.every(_ENDING_CYCLE_SECONDS, advance, key=_ENDING_CYCLE_TASK)
 
     def _update_ending_display(self, idx):
-        """P3 占位：记录当前该展示的结局下标（绘制由 P3 的入口面板负责）。"""
+        """记录当前轮播到第几页；绘制由 ``ui._draw_ending_panel`` 每帧负责。"""
         if self._closing or not self._is_entry_phase or not self._ending_items:
             return
         if 0 <= idx < len(self._ending_items):
@@ -402,12 +451,18 @@ class DungeonLaunchStages:
 
     # ------------------ 入口交互回调 ------------------
     def _on_dungeon_changed(self, sender=None, app_data=None):
-        """选择副本方案变了。
+        """选择副本方案变了：清空 AP 消耗缓存，下一帧按新选择重算。
 
-        P3 占位：P1 的入口面板由 ``ui._draw_entry_panel`` 每帧从
-        ``self._entry_selection`` 现算 AP 说明（见 ``ui._entry_info_text``），
-        因此这里不需要再刷新任何控件。P3 会在这里补上方案元数据缓存。
+        立即模式没有 retained 控件要刷新；``ui._draw_entry_panel`` 每帧从
+        ``_entry_selection`` 与 ``_entry_info_text()`` 现算显示。
         """
+        self._entry_cost_cache = {}
+        refresh = getattr(self, "_entry_info_text", None)
+        if callable(refresh):
+            try:
+                refresh()
+            except Exception as e:
+                process_log.log(f"副本信息刷新失败: {e}")
 
     def _on_entry_start(self, sender=None, app_data=None, user_data=None):
         if not self.scenario_ids:
