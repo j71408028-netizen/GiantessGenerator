@@ -214,8 +214,8 @@ python build/release/package.py --tag v1.0.0 --backend nuitka \
   小游戏窗口依赖系统自带的 **WebView2**（Win10/11 默认有）。
 - **macOS**：`.app` 目录由 `--windowed` 产出。本仓暂无 `assets/icon.icns`，暂用
   PyInstaller 默认图标；补上后打包器会自动带上（候选表见脚本内 `ICON_CANDIDATES`）。
-- **Linux**：`--icon` 被 PyInstaller 忽略（脚本只在 Windows 传图标）。依赖图功能需要
-  系统另装 `graphviz` 的 `dot` 二进制，**不进包**。
+- **Linux**：`--icon` 被 PyInstaller 忽略（脚本只在 Windows 传图标）。无外部可选依赖
+  （编辑器关系图已改为自绘画布，不再需要 Graphviz 的 `dot`）。
 - **数据目录**：打包版把可写数据放在系统用户目录（Windows `%LOCALAPPDATA%\GiantessGenerator\data`，
   macOS `~/Library/Application Support/...`，Linux `$XDG_DATA_HOME/GiantessGenerator/data`），
   首启从包内 `data/packs`、`data/static` 拷贝。**不要**把用户数据打进包。

@@ -9,6 +9,7 @@
 |-------------------------------|---|---|
 | [架构说明](architecture.md)       | `dungeon/` 怎么分层、一次步进怎么流、收尾与自检脚本在哪 | 了解全局 / 动领域层 |
 | [数据模型：章节与触发器](script.md)      | 方案配置能写哪些字段、条件键与动作有哪些 | 写方案 / 改编辑器 / 改校验器 |
+| [副本关系图与图校验](scenario_graph.md)  | 章节与触发器之间的四类关系怎么建模、图校验报什么、编辑器里怎么看 | 写方案 / 改校验器 / 改编辑器 |
 | [窗口逻辑与开发事项](window.md)        | DPG 会话窗口的生命周期、帧时钟、约束与坑 | 动 `dungeon/window/` |
 | [宿主边界与可移植性](window_host.md)   | window 层与宿主（Tk）的边界在哪、换 UI 框架能做到哪一步 | 评估可移植性 / 换宿主 |
 | [调试自动化](window_automation.md) | 怎么不手点电脑就回归窗口 | 改窗口后自检 |
@@ -21,6 +22,8 @@
 |---|---|---|
 | 方案配置字段 / 默认值 | `dungeon/schema.py`（单一真相源）+ [数据模型](script.md) §2、§4 | `check_scenario_schema.py` |
 | 校验规则（error / warning / info） | [数据模型](script.md) §9 | `check_scenario_schema.py`、`scripts/scenario_validate.py` |
+| 章节 / 触发器之间的依赖与可达性（图校验五条规则） | [关系图与图校验](scenario_graph.md) §3 | `check_scenario_graph.py` |
+| 关系图界面（章节总览 / 触发器依赖 / 清单） | [关系图与图校验](scenario_graph.md) §4 | `run_checks.py --smoke` |
 | 章节 / 触发器运行时行为 | [数据模型](script.md) §3、§5–§6 | `dungeon_autopilot.py` |
 | 演化、转移矩阵、段落步长 | [架构](architecture.md) §4 | `check_scenario_schema.py`（演化链路守卫） |
 | 窗口生命周期 / 关闭 / 收尾 | [窗口](window.md) §2、§3 | `dungeon_autopilot.py`、`check_dungeon_finalize.py` |
@@ -41,11 +44,13 @@
 | `dungeon/*.py`（包根） | 领域层 | 纯逻辑；禁 import GUI / 服务层（AST 强制） |
 | `dungeon/window/*.py` | UI 层 | 唯一允许 DPG 的地方；宿主能力一律经 `host.py` |
 | `dungeon/minigame_pack.py` | 领域层 | 小游戏数据包读取（manifest / 参数声明），validate 与 window/minigame 共用 |
+| `dungeon/scenario_graph.py` | 领域层 | 方案关系图模型：四类关系 + 归属的建图、两条可达性口径、强连通分量（零外部依赖，见 [关系图与图校验](scenario_graph.md)） |
+| `dungeon/graph_lint.py` | 领域层 | 图校验五条规则，产出 `(level, path, message)`；由 `validate.py` 包成诊断 |
 | `dungeon/window/component_pack/` | 组件包 | 官方显示组件（文本栏三选一 / 属性条 / 过程日志），常驻 Python 包，惰性导入 |
 | `dungeon/window/host.py` | 端口 | `HostPort`：window 层向宿主索取能力的唯一出口 |
 | `ui/hosting/tk_host.py` | 宿主适配 | `TkHost`——window 层之外唯一的 Tk 细节所在地 |
 | `persistence/scenario_repo.py` | 持久化 | 方案读写、旧目录迁移、保存即校验 |
-| `ui/scenario/*` | 编辑器 | 按 `dungeon/schema.py` 的声明渲染表单 |
+| `ui/scenario/*` | 编辑器 | 按 `dungeon/schema.py` 的声明渲染表单；`graph_view.py` 是只读的关系图对话框（见 [关系图与图校验](scenario_graph.md)） |
 | `tests/*` | 离线自检（`tests/run_checks.py` 统一入口）；需显示器的自动驾驶脚本仍在 `scripts/` | 见 §4 |
 
 ## 4. 自检脚本索引
@@ -62,6 +67,7 @@
 | `check_component_pack.py` | 显示组件包：加载链（常驻包来源 / 必需 id）、文本家族与 schema 一致、组件契约与服务面（替身 ctx 只实现服务面 + AST 扫 `ctx._x` 越界）、元数据 `label`/`description`、`param_specs` 结构与 `min/max` 夹取、tag 前缀冲突、组件包不 `print` 且类都登记进 `REGISTRY`、外部包覆盖、隐藏 DPG 上下文里的 `build/layout/refresh/destroy` 冒烟与控件无残留 | `python tests/check_component_pack.py` |
 | `check_dungeon_finalize.py` | 原子写 / `.bak` / 损坏回退 + `_finalize` 完成与未完成两条路径 | `python tests/check_dungeon_finalize.py` |
 | `check_scenario_naming.py` | 命名守卫（旧标识符残留）+ 兼容读与迁移行为 | `python tests/check_scenario_naming.py` |
+| `check_scenario_graph.py` | 方案关系图：节点与四类边构造、两条可达性口径、强连通分量与种子判定、五条图校验规则各命中一次、骨架方案不刷可达性诊断、同位置竞争只分组不报红、正常方案零诊断 | `python tests/check_scenario_graph.py` |
 
 > 另有三支**不判红**的人工/批量工具在 `scripts/`：`child_dpi_probe.py`（副本子进程
 > DPI 感知探针）、`platform_api_report.py`（Windows 专有 API 落点清单，发布 macOS

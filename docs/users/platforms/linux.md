@@ -27,14 +27,13 @@ python -m pip install -r requirements.txt     # 必须整份装，见下
 python main.py
 ```
 
-- **必须 `pip install -r requirements.txt`**：`networkx`（触发器依赖图）、`graphviz`
-  （依赖图渲染的 Python 侧）、`openai`（AI 功能）都在其中。Linux 试跑环境曾因为
-  只装了部分依赖，出现「点『检查依赖』直接 import 失败」；现在缺依赖会给出明确提示
-  （`ui/scenario/dependency_dlg.py`），但功能仍然用不了。
+- **必须 `pip install -r requirements.txt`**：`openai`（AI 功能）在其中。Linux 试跑环境曾
+  因为只装了部分依赖出现难查的报错，整份装最省事。
 - **`numpy` 现在也在 `requirements.txt` 里**（原先是漏声明，靠开发机恰好装过）。
   副本窗口背景合成、小游戏画布、挑战数值计算都直接 import 它。
-- 触发器依赖图还需要系统级 `dot`：`sudo apt install graphviz`（Python 包不自带二进制）。
-  程序会依次查 `PATH`、`/opt/homebrew/bin/dot`、`/usr/local/bin/dot`。
+- **不再需要 `networkx` / `graphviz`，也不需要系统级 `dot`**：编辑器「检查动态」已改为
+  自绘画布，不再出 PNG，依赖图那套外部重器连同它们的安装说明一并退场（见
+  [副本关系图与图校验](../../Dungeon/scenario_graph.md)）。
 - 可选依赖的降级表现与 `requirements.txt` 内注释一致：
   | 可选依赖 | 缺失时的表现 |
   |---|---|
@@ -164,9 +163,8 @@ PYTHON_BIN=python3.12 bash build/linux/build_linux.sh   # 指定解释器
   另打 `dist/GiantessGenerator-linux-<arch>.tar.gz` 目录包。AppImage / deb 与桌面集成
   （`.desktop`、PATH 安装）不在本期。
 - **依赖收集**：与 Windows / macOS 脚本同一套 `--collect-all`（customtkinter / dearpygui /
-  PIL / openai / networkx / numpy / webview），**不带** `zai`（项目没有该依赖，见
-  附录A §2.3）。`dot`（Graphviz 二进制）是外部可选
-  依赖，不进包：依赖图功能需要系统 `sudo apt install graphviz`。
+  PIL / openai / numpy / webview），**不带** `zai`（项目没有该依赖，见
+  附录A §2.3）。关系图不再需要 Graphviz 的 `dot` 二进制，打包无外部可选依赖。
 - **构建环境**：脚本自建 `.venv-buildlinux` 并 `pip install -r requirements.txt pyinstaller`，
   不污染开发 venv。Python 3.14 下 `pywebview` 会装到 6.2.1（更新的版本声明 `<3.14`），
   web 后端小游戏窗口照常可用。
