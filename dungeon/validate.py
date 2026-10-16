@@ -22,6 +22,8 @@ from dungeon import schema
 from dungeon import script_text
 from dungeon.actions import (VISUAL_FILTER_KEYS, WINDOW_FX_KEYS,
                              normalize_action_type)
+from dungeon.graph_lint import lint_graph
+from dungeon.scenario_graph import build_graph
 from dungeon.audio import buses
 from dungeon.audio.chapters import (BGM_SUPPORTED_EXTS, CHAPTER_NONE,
                               DEFAULT_MAX_PARAGRAPHS, normalize_chapters)
@@ -209,6 +211,13 @@ def validate_scenario_config(config, *, scenario_dir: str = None) -> list:
                        trigger_names, custom_attrs, scenario_dir, add,
                        coupling_level=config.get("coupling_level"),
                        fixed_chapters=fixed_chapters)
+
+    # 结构级检查：章节与触发器之间的关系（依赖、可达性、跳转闭合、同位置动作竞争、
+    # 循环依赖）。与上面那些字段级规则共用同一份诊断列表、同一个接入点——保存方案、
+    # 启动副本前、离线批量校验三处自动都覆盖到。判据见
+    # docs/Dungeon/scenario_graph.md §3（error 级只走「乐观」的章节可达性口径）。
+    for level, path, message in lint_graph(build_graph(config)):
+        add(level, path, message)
 
     # 起始章节：进入副本后唯一的自动进入点（window/triggers.py::_enter_start_chapter）
     starts = [c["name"] for c in chapters if c.get("start") and c.get("name")]
