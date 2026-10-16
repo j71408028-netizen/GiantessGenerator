@@ -127,8 +127,3 @@ def desc_font_default() -> str:
 def dungeon_font_default() -> str:
     """副本段落字体缺省（macOS 用苹方替代 Windows 的微软雅黑）。"""
     return cjk_family()
-
-
-def graphviz_font() -> str:
-    """Graphviz 渲染依赖图所用的字体名（需与当前平台可用字体一致）。"""
-    return cjk_family()

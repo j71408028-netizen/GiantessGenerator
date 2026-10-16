@@ -99,12 +99,12 @@ class ChapterTriggerManager(TreeviewManager):
             font=ui_fonts.ui_font(12),
             text_color=SCRIPT_TEXT_SOFT).pack(side='left', padx=(4, 12))
         self.dep_status_label = ctk.CTkLabel(
-            bar, text="点击 “检查依赖” 查看触发器前置依赖与循环依赖",
+            bar, text="点击 “检查动态” 打开关系图",
             font=ui_fonts.ui_font(12),
             text_color=SCRIPT_TEXT_SOFT)
         self.dep_status_label.pack(side='left', padx=(4, 5))
         ctk.CTkButton(
-            bar, text="检查依赖", width=100,
+            bar, text="检查动态", width=100,
             fg_color="transparent", border_width=1, corner_radius=8,
             font=ui_fonts.ui_font(13),
             text_color=SCRIPT_TEXT_SOFT,
@@ -113,30 +113,60 @@ class ChapterTriggerManager(TreeviewManager):
             command=self.check_dependencies).pack(side='right', padx=(8, 0))
 
     def check_dependencies(self):
-        triggers = self.get_trigger_items()
-        if not triggers:
-            ui.ctk.dialogs.showwarning("检查依赖", "当前没有触发器，无需检查依赖。")
+        """打开副本关系图对话框（章节总览 / 触发器依赖 / 清单）。
+
+        图上的结构问题与保存时的校验同一套判据（``dungeon/graph_lint.py`` 已并入
+        ``validate_scenario_config``），因此这里看到的就是保存/启动副本时会报的东西，
+        不需要另装 networkx / graphviz。
+        """
+        if not self._chapter_list() and not self._trigger_list():
+            ui.ctk.dialogs.showwarning("检查动态", "当前方案还没有章节与触发器，关系图为空。")
             return
-        from ui.scenario.dependency_dlg import (INSTALL_HINT,
-                                               missing_dependencies)
-        missing = missing_dependencies()
-        if missing:
-            # 缺依赖不再让 import 直接炸（Linux 试跑踩过），这里先说人话
-            ui.ctk.dialogs.showwarning(
-                "检查依赖",
-                "依赖关系检查需要以下组件，当前环境未安装：\n"
-                + "、".join(missing) + f"\n\n安装命令：{INSTALL_HINT}")
+        from ui.scenario.graph_view import ScenarioGraphDialog
+        dialog = ScenarioGraphDialog(self, self._scenario_config(),
+                                     scenario_dir=self._scenario_dir(),
+                                     title="副本关系图")
+        errors = sum(1 for item in dialog.diagnostics if item.level == "error")
+        warnings = sum(1 for item in dialog.diagnostics if item.level == "warning")
+        if errors:
             self.dep_status_label.configure(
-                text=f"缺少依赖：{'、'.join(missing)}", text_color=SCRIPT_ERR)
-            return
-        from ui.scenario.dependency_dlg import DependencyGraphDialog
-        dlg = DependencyGraphDialog(self, triggers)
-        if getattr(dlg, "cycle_nodes", set()):
+                text=f"{errors} 错误 · {warnings} 警告（点右侧诊断可定位）",
+                text_color=SCRIPT_ERR)
+        elif warnings:
             self.dep_status_label.configure(
-                text=f"发现循环依赖（{len(dlg.cycle_nodes)} 个触发器）", text_color=SCRIPT_ERR)
+                text=f"{warnings} 警告（点右侧诊断可定位）",
+                text_color=SCRIPT_TEXT_SOFT)
         else:
-            self.dep_status_label.configure(
-                text="依赖关系正常，无循环依赖", text_color=SCRIPT_OK)
+            self.dep_status_label.configure(text="关系正常，未发现问题", text_color=SCRIPT_OK)
+
+    def _scenario_config(self) -> dict:
+        """关系图 / 校验用的配置：磁盘上的完整配置 + 面板里的实时章节与触发器。
+
+        章节与触发器在这里是内存对象（改动即 ``_save()``），而磁盘配置还带着演化量、
+        组件、语音等字段——两侧合起来才是完整的方案，校验才不会漏看。
+        """
+        config = {}
+        scenario_id = self.scenario_editor.current_scenario_id
+        repo = self._scenario_repo()
+        loaded = repo.load_config(scenario_id) if (repo and scenario_id) else None
+        if isinstance(loaded, dict):
+            config = dict(loaded)
+        config["chapters"] = self._chapter_list()
+        config["triggers"] = self._trigger_list()
+        return config
+
+    def _scenario_dir(self):
+        repo = self._scenario_repo()
+        scenario_id = self.scenario_editor.current_scenario_id
+        if repo is None or not scenario_id:
+            return None
+        try:
+            return repo.scenario_dir(scenario_id)
+        except Exception:      # 目录算不出来不该挡着看图
+            return None
+
+    def _scenario_repo(self):
+        return getattr(self.scenario_editor, "_scenario_repo", None)
 
     # ---------- 行着色 ----------
     def update_theme(self, theme_mode: str):
