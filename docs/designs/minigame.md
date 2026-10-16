@@ -57,8 +57,8 @@ class MyGame(MiniGame):
 | 输入 | `key_down("a"…"z"/"space"/"up"/…)` / `mouse_pos()` / `mouse_down()`（游戏侧是轮询语义；底层是 imgui 的 `is_key_down` / `io.mouse_pos` / `is_mouse_down`，每帧状态新鲜，不需要自己维护状态表） |
 | 服务 | `finish(won, result)`（结算，重复调用无效） / `hud(text)` / `notify(msg)` / `read_state("章节"/"介入度"/…)`（只读副本状态快照） |
 
-**硬性约束**（`tests/check_minigame.py`，CI 门禁）：禁 import DPG / tkinter /
-threading / subprocess / PIL；禁 `print`；禁触碰私有面 `api._`。
+**硬性约束**（`tests/check_minigame.py`，CI 门禁）：禁 import 渲染后端（`imgui_bundle` /
+`dearpygui`）/ tkinter / threading / subprocess / PIL；禁 `print`；禁触碰私有面 `api._`。
 贴图加载是运行时职责（`api.draw_image("贴图.png", pmin, pmax)`，相对包目录）。
 
 ## 4. 运行时语义（stage.py）

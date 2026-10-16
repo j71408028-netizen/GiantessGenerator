@@ -6,12 +6,12 @@
 
 **A. ``dungeon/*.py``（领域层）** —— 命中以下任一即失败：
 
-- UI 框架：``dearpygui`` / ``customtkinter`` / ``tkinter``；
+- UI 框架：``imgui_bundle`` / ``dearpygui`` / ``customtkinter`` / ``tkinter``；
 - 服务层与界面层：``services.*`` / ``ui.*``；
 - 反向依赖自己的 UI 子包：``dungeon.window``（含 ``from .window import``）；
 - 逃逸出包的相对导入（``from .. import``）。
 
-**B. ``dungeon/window/**/*.py``（窗口层，含 ``component_pack/`` 子包）** —— 允许 ``dearpygui`` /
+**B. ``dungeon/window/**/*.py``（窗口层，含 ``component_pack/`` 子包）** —— 允许 ``imgui_bundle`` /
 ``services``，但**不允许** ``tkinter`` / ``customtkinter`` / ``ui.*``：宿主能力（尺寸/DPI、
 显隐、事件泵、弹框、字体、活动窗口登记）一律经 ``dungeon.window.host.HostPort``
 端口取得，Tk 相关实现只存在于 ``ui/hosting/tk_host.py``（L2，见
@@ -34,6 +34,7 @@ WINDOW_DIR = DOMAIN_DIR / "window"
 
 # 顶层包名 -> 它属于哪一层（命中即越界）
 FORBIDDEN_ROOTS = {
+    "imgui_bundle": "UI 框架",
     "dearpygui": "UI 框架",
     "customtkinter": "UI 框架",
     "tkinter": "UI 框架",
@@ -127,7 +128,7 @@ def main() -> int:
             print(f"  FAIL {item['file']}:{item['lineno']}  {item['module']} — {item['reason']}")
         print(f"[check_dungeon_layering] FAILED {len(violations)} 处越界依赖")
         return 1
-    print("[check_dungeon_layering] PASSED：领域层无 dearpygui / services / ui 依赖，"
+    print("[check_dungeon_layering] PASSED：领域层无 imgui_bundle / dearpygui / services / ui 依赖，"
           "窗口层无 tkinter / ui 依赖")
     return 0
 

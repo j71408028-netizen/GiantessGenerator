@@ -19,7 +19,7 @@
 
 约束（``tests/check_minigame.py`` 强制）：
 
-- **禁止 import dearpygui**：绘制一律走 :class:`GameAPI` 的薄包装，drawlist、
+- **禁止 import 渲染后端**（`imgui_bundle` / `dearpygui`）：绘制一律走 :class:`GameAPI` 的薄包装，drawlist、
   纹理生命周期、帧时钟都由运行时（``stage.py``）管；
 - **禁线程、禁 print**：``update`` 由帧时钟每帧调用，重活 / 输出都不该在这里；
 - **不许碰私有面**：``self.api._`` 一律不许出现——运行时随时可能重构。

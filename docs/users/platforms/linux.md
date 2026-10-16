@@ -44,22 +44,24 @@ python main.py
 - 中文字体（两条链路，都靠系统装中文字体，建议 `sudo apt install fonts-noto-cjk`）：
   - 主界面（Tk / CustomTkinter）走 `ui/ctk/fonts.py` 的家族候选链
     （Noto Sans CJK SC / 文泉驿微米黑），由 Tk 自己按家族名向 fontconfig 取字体；
-  - 副本窗口（Dear PyGui）**只认字体文件**，走 `dungeon/window/fonts.py`：Linux 上先问
+  - 副本窗口（imgui-bundle）**只认字体文件**，走 `dungeon/window/fonts.py`：Linux 上先问
     `fc-match`（只接受声明覆盖 `zh-cn` 的结果，避免不存在的家族名被替换成拉丁字体），
     查不到再按发行版常见路径回退（Noto CJK / 思源黑体 / 文泉驿 / Droid Sans Fallback）。
     系统里一个中文字体都没有时才会退到 DejaVu Sans——那没有中文字形，中文会是方框；
     窗口开起来后可在过程日志（F12）里看到实际选中的字体文件。
-  - 已知取舍：DPG 无法指定集合字体（`.ttc`）里的 face 序号，Noto CJK 只会取到第 0 个
+  - 已知取舍：副本窗口按文件建字体，不做集合字体（`.ttc`）内的 face 序号选择（迁移前的
+    Dear PyGui 亦然），Noto CJK 只会取到第 0 个
     face（JP）——码位覆盖完整、不会缺字，个别字的写法是日文变体；小游戏离屏画布用 PIL
     渲染，能按 fontconfig 给的序号取到简体 face（详见 `dungeon/window/fonts.py` 模块说明）。
 
 ## 3. XInitThreads：为什么要每个入口调一次
 
-Tk（专业模式 / ME模式）与 Dear PyGui/GLFW（副本窗口）在同一个进程里**各开一条 X
-display 连接**，libX11 默认按「单连接单线程」编译——两套工具包各带线程碰同一个 X
+Tk（专业模式 / ME模式）与副本窗口的 GL 栈（GLFW，迁移前是 Dear PyGui）在同一个进程里
+**各开一条 X display 连接**（产品路径里两者分别在父子进程，只有自检/自动驾驶会同进程
+共存），libX11 默认按「单连接单线程」编译——两套工具包各带线程碰同一个 X
 server 是 `BadWindow` 与 `ImGui_ImplGlfw_WindowFocusCallback` 段错误的经典成因。
 
-因此每个会建窗口的入口文件在**最顶部**（任何 `tkinter` / `dearpygui` 之前）都要：
+因此每个会建窗口的入口文件在**最顶部**（任何 `tkinter` / 副本窗口 GL 栈之前）都要：
 
 ```python
 from ui.hosting.x11_boot import boot_x11
@@ -112,7 +114,7 @@ Tk 的 `-topmost` 在 **GNOME Shell / XWayland 实测静默失效**：既不写
 
 ## 5. X11 错误兼容处理器
 
-`dungeon/window/dpg_state.install_x11_error_guard()`（仅 Linux）会安装一个 ctypes 的
+`ui/hosting/x11.install_x11_error_guard()`（仅 Linux）会安装一个 ctypes 的
 Xlib 同步错误处理器，用于对付「Tk 事件泵处理到其它已销毁顶层窗口的旧事件」——
 Xlib 默认处理器会直接 `exit(1)`，表现为冒烟里的 `X Error of failed request: BadWindow`。
 
@@ -127,7 +129,7 @@ Xlib 默认处理器会直接 `exit(1)`，表现为冒烟里的 `X Error of fail
 ## 6. 自动化与压测
 
 ```bash
-# 离线守卫（不需要显示器）：15 项
+# 离线守卫（不需要显示器）：28 项
 .venv/bin/python tests/run_checks.py
 .venv/bin/python scripts/scenario_validate.py    # 方案校验，0 error 才退 0
 
@@ -142,7 +144,7 @@ Xlib 默认处理器会直接 `exit(1)`，表现为冒烟里的 `X Error of fail
 `smoke_mini` 在 Linux 只断言「置顶调用不抛异常」，置顶有效性由
 `ui/mini/topmost.py` 的 EWMH 回读路径覆盖。
 
-长压测（抓 DPG/GLFW 反复拆建上下文的偶发原生崩溃）的标准姿势是 **`--isolate` +
+长压测（抓副本窗口 GL 栈——迁移前是 DPG/GLFW——反复拆建上下文的偶发原生崩溃）的标准姿势是 **`--isolate` +
 外层 watchdog 逐轮起子进程、按退出码统计**，见
 [Dungeon/window_automation.md §4](../../Dungeon/window_automation.md) 与
 `developer_tools/_probe_stress.py`：
@@ -163,7 +165,7 @@ PYTHON_BIN=python3.12 bash build/linux/build_linux.sh   # 指定解释器
 - **形态**：PyInstaller **onedir**，产物 `dist/GiantessGenerator/`（可执行文件与目录同名），
   另打 `dist/GiantessGenerator-linux-<arch>.tar.gz` 目录包。AppImage / deb 与桌面集成
   （`.desktop`、PATH 安装）不在本期。
-- **依赖收集**：与 Windows / macOS 脚本同一套 `--collect-all`（customtkinter / dearpygui /
+- **依赖收集**：与 Windows / macOS 脚本同一套 `--collect-all`（customtkinter / imgui_bundle /
   PIL / openai / networkx / numpy / webview），**不带** `zai`（项目没有该依赖，见
   附录A §2.3）。`dot`（Graphviz 二进制）是外部可选
   依赖，不进包：依赖图功能需要系统 `sudo apt install graphviz`。

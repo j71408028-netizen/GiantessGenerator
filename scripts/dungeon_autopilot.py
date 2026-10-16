@@ -343,9 +343,9 @@ def _leftover_viewport_windows() -> int:
     """本进程里还活着的副本视口原生窗口数（仅 Windows；非 Windows 恒为 0）。
 
     守住「会话收尾必须把视口原生窗口带走」：DPG 时代 ``destroy_context()`` 不销毁
-    那个窗口（旧实现见 ``dungeon.window.dpg_state.discard_viewport_windows``）——本
-    程序收尾后仍继续跑 Tk，残留窗口在屏幕上就是一个不再响应的副本窗口（使用者看到
-    的就是「点了返回后卡死」），且每跑一局累加一个。imgui/GLFW 的运行器会自己销毁
+    那个窗口（当时的实现见 git 历史的 ``dungeon.window.dpg_state``）——本程序收尾
+    后仍继续跑 Tk，残留窗口在屏幕上就是一个不再响应的副本窗口（使用者看到的
+    就是「点了返回后卡死」），且每跑一局累加一个。imgui/GLFW 的运行器会自己销毁
     窗口，本守卫改成**回归断言**：无论后端怎么实现，收尾都不许留下这一代窗口。
 
     枚举方式：列出本进程的**全部顶层窗口**再按标题筛，而不是拿标题去 ``FindWindowW``

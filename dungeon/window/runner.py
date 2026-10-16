@@ -4,7 +4,8 @@
 ``run_callbacks`` → 落实关闭请求 → ``render_dearpygui_frame`` → 让位）。那套写法
 是为了绕开 DPG 的三个进程单例（上下文 / 视口 / 回调队列）：收尾要显式
 ``destroy_context()``，还得额外处理「视口原生窗口不被销毁」与「Tk 根窗口失去
-窗口级命令能力」两个怪癖（见 ``dpg_state.py`` 与 window.md §5）。
+窗口级命令能力」两个怪癖（当时的实现见 git 历史的 ``dungeon/window/dpg_state.py``
+与 window.md §5）。
 
 换到 imgui-bundle 之后这些全部消失：``hello_imgui.run(RunnerParams)`` 把 GL 后端、
 上下文、视口、帧循环一次收进库内部，返回时一并释放，不需要保活视口、不需要
@@ -53,6 +54,17 @@ from imgui_bundle import hello_imgui
 #: 帧率上限（Hz）。真实节拍仍由 vsync 决定（``vsync_to_monitor``）：这里只是
 #: 高刷屏上的封顶，避免把一整个核跑满——与旧帧循环让位逻辑的意图一致。
 DEFAULT_FPS_MAX = 60.0
+
+#: 本进程累计进入过多少次 :func:`hello_imgui.run`（起停一次算一次，只增不减）。
+#: 语义等价于迁移前的 ``dungeon.window.dpg_state.was_created()``：给「父进程是否
+#: 真的在本进程跑过副本窗口」这类进程隔离自检一个只增的判据（子进程入口见
+#: ``ui.hosting.dungeon_spawner``）。产品代码不读它。
+_times_started = 0
+
+
+def times_started() -> int:
+    """本进程启动过副本窗口的次数（只增不减）。"""
+    return _times_started
 
 
 class WindowRunner:
@@ -265,4 +277,6 @@ class WindowRunner:
 
     def run(self):
         """阻塞直到窗口关闭。调用方负责在前后做收尾（``base._start_session``）。"""
+        global _times_started
+        _times_started += 1
         hello_imgui.run(self.params)

@@ -52,8 +52,8 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: 导入自检（Tk / Dear PyGui 可用）
-        run: python -c "import tkinter, dearpygui.dearpygui, PIL; print('imports ok')"
+      - name: 导入自检（Tk / imgui-bundle 可用）
+        run: python -c "import tkinter, imgui_bundle, PIL; print('imports ok')"
 
       # 全部离线守卫（入口/资源、分层、schema/校验器、音频链、语音、触发时序、字体覆盖等）
       - name: 离线守卫

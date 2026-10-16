@@ -83,7 +83,7 @@ L2 之后注入点更干净：宿主能力（尺寸/DPI、显隐、事件泵、�
 | **L1 无宿主自动驾驶** | 构造 → 运行 → 步进 → 关闭 → 落盘的完整生命周期 | **已落地** | `scripts/dungeon_autopilot.py`，`parent=None` 直起运行器（无宿主 `HostPort`） |
 | **L2 Tk 宿主 + 自动驾驶** | 宿主在会话期间不被冻结 | **场景已落地**（`tk-host`） | 「进程是否退出」这一项**不能断言**，见 §5 |
 | **L3 真实输入事件** | 真实按键（`SendMessage(WM_KEYDOWN)` → GLFW → imgui 输入队列）、F11、resize | **部分落地** | `native-input` 场景已覆盖键盘直投；鼠标/重排仍靠 `--check` 钩子与快照 |
-| **L4 视觉回归** | 布局 / 背景 / 字体 | 可选、优先级低 | DPG 没有 headless 渲染，只能截屏比对或断言几何量 |
+| **L4 视觉回归** | 布局 / 背景 / 字体 | 可选、优先级低 | 没有 headless 渲染，只能截屏比对或断言几何量 |
 
 **L1 与 L0 的分工**：L0 保证逻辑对，L1 保证「真窗口跑起来也是对的」——只有真窗口才会走的
 运行器起停（`hello_imgui.run()` 的 GL 上下文/窗口生命周期）、调度队列、后台线程与关闭路径的交互。
@@ -181,9 +181,9 @@ Linux 侧配合 `GIANTESS_X11=0` 做 XInitThreads 有效/无效对比（见
 
 | 坑 | 现象 | 应对 |
 |---|---|---|
-| **退出阶段挂死（与 DPG 无关）** | 断言全部打印完毕、无残留非 daemon 线程，`sys.exit` 与 `os._exit` 都试过仍不退出（约 190MB 常驻）；卡点在 Python 之下，卡住后 `Stop-Process -Force` 也杀不掉 | 按 §4 的输出判定 + 父进程硬超时兜底；**不要**看退出码（复测退出路径用 `--require-clean-exit`）。根因与复测见 [退出挂死调查](history/exit_hang_investigation.md)——长时会话累积的环境现象，不建议为它做进程隔离 |
+| **退出阶段挂死（与渲染后端无关）** | 断言全部打印完毕、无残留非 daemon 线程，`sys.exit` 与 `os._exit` 都试过仍不退出（约 190MB 常驻）；卡点在 Python 之下，卡住后 `Stop-Process -Force` 也杀不掉 | 按 §4 的输出判定 + 父进程硬超时兜底；**不要**看退出码（复测退出路径用 `--require-clean-exit`）。根因与复测见 [退出挂死调查](history/exit_hang_investigation.md)——长时会话累积的环境现象，不建议为它做进程隔离 |
 | **Python 层看门狗无效** | 渲染循环期间 `threading.Timer` 可能拿不到 GIL，实测 40s 定时器根本没触发 | 超时只能由父进程兜底 |
-| **会话收尾别对旧宿主窗口动手** | DPG 时代 `destroy_context()` 之后对现场 Tk 根做窗口级命令（`destroy()` / `withdraw()`）会硬崩；imgui 侧 P0 已证 `run()` 之后销毁 Tk 根安全（见 `.workbuddy/imgui-migration/30-spike-lifecycle.md`） | 自检里 `scene_tk_host` 仍**不销毁**它创建的根窗口（留在 `_KEEP_ALIVE_ROOTS` 里）——不影响覆盖面，销毁时机等 P8 统一 |
+| **会话收尾别对旧宿主窗口动手** | DPG 时代 `destroy_context()` 之后对现场 Tk 根做窗口级命令（`destroy()` / `withdraw()`）会硬崩；imgui 侧 P0 已证 `run()` 之后销毁 Tk 根安全（见 imgui 迁移档案） | 自检里 `scene_tk_host` 仍**不销毁**它创建的根窗口（留在 `_KEEP_ALIVE_ROOTS` 里）——销毁与不销毁都安全，保留现状以免影响覆盖面 |
 | **自检里不要用真模态弹框** | L2 之后 `scene_tk_host` 用真 `TkHost`，收尾提示会弹真 CTk 模态框，没人点就一直等（实测 40s/90s 均超时） | 用 `RecordingTkHost(TkHost)`：尺寸/DPI/显隐/事件泵走真适配器，只把 `dialog()` 换成记录器 |
 | **需要显示器** | 没有 headless 渲染，窗口会真的出现 | 这是它属于 GUI 冒烟层、不进无 GUI CI 门禁的原因 |
 | **时序** | 固定 sleep 不稳 | 用轮询 / 条件等待；两次点击间隔 ≥ 0.4s（`_on_next_step` 节流）；窗口存活期间读状态要在 enqueue 的回调里读，构造返回后可以随便读 |

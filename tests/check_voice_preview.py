@@ -56,8 +56,8 @@ from dungeon.audio import voice_fx as vf  # noqa: E402
 # 也会因为换个 import 写法（from tkinter import x）漏报。check_dungeon_layering
 # 只扫 dungeon/ 根顶层模块，audio/ 子包不在它的范围里，所以这条留在这里补空档。
 
-_FORBIDDEN_IMPORT_ROOTS = {"tkinter", "_tkinter", "customtkinter", "dearpygui",
-                           "ui", "services"}
+_FORBIDDEN_IMPORT_ROOTS = {"tkinter", "_tkinter", "customtkinter", "imgui_bundle",
+                           "dearpygui", "ui", "services"}
 
 
 def _forbidden_imports(path: Path):

@@ -23,7 +23,7 @@ import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Linux/X11：必须在 tkinter / dearpygui 建立 X 连接**之前**调 XInitThreads。
+# Linux/X11：必须在 tkinter（以及副本窗口的 GL 栈）建立 X 连接**之前**调 XInitThreads。
 from ui.hosting.x11_boot import boot_x11  # noqa: E402
 
 boot_x11()
@@ -364,15 +364,13 @@ def main():
             code = 1
         # 收尾：数据已还原，这里直接退出，不再碰任何 Tk 调用。
         #
-        # 实测（2026-09-28 复核，DPG 2.3.1 + Py3.13）跑过真实副本会话后：
-        # 触发点是会话收尾里的 dpg.destroy_context()（把它换成空操作后同一路径正常），
-        # 受影响的是**那个已存在的 Tk 根窗口**——destroy() / withdraw() / Win32
-        # ShowWindow(hwnd) 一律 0xC0000005（无 traceback）；而 quit()、winfo_*()、
-        # state()、geometry()、protocol() 仍然可用，新建一个 Tk 根也完全正常，
-        # 所以「解释器活着、控件树完好」的观察是对的，但结论不能推广成「碰 Tk 就崩」。
-        # 产品侧已由「会话收尾补隐藏保活视口」修掉（见 dungeon/window/dpg_state.py），
-        # 自检这里仍走 os._exit（挂件主程序自己的退出路径就是它，沿用同一条），
-        # 只是退出码如实反映成败；退出前手动 flush，免得 os._exit 丢掉还在缓冲里的输出。
+        # 历史（2026-09-28 复核，DPG 2.3.1 + Py3.13）：当时副本会话还在本进程里跑，
+        # 会话收尾的 destroy_context() 会让**已存在的那个 Tk 根窗口**失去窗口级命令
+        # （destroy() / withdraw() / Win32 ShowWindow 一律 0xC0000005，无 traceback），
+        # 而 quit()、winfo_*()、state()、geometry()、protocol() 仍然可用。该问题随
+        # 进程隔离（会话搬进独立子进程）与 imgui 迁移整体消失，自检这里仍走 os._exit
+        # （挂件主程序自己的退出路径就是它，沿用同一条），只是退出码如实反映成败；
+        # 退出前手动 flush，免得 os._exit 丢掉还在缓冲里的输出。
         sys.stdout.flush()
         sys.stderr.flush()
         os._exit(code)

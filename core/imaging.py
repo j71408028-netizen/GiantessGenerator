@@ -7,7 +7,7 @@
 ``core/appearance.py`` 同理，别因为它「长得像工具」而挪回 ``services/``。
 
 **边界**：本模块只依赖 ``PIL`` 与标准库，**不得** import ``tkinter`` /
-``customtkinter`` / ``dearpygui``。把 PIL 图片包成 ``CTkImage``、或有副作用地清空某个
+``customtkinter`` / ``imgui_bundle``。把 PIL 图片包成 ``CTkImage``、或有副作用地清空某个
 控件的图片，都属于界面层的事，那些函数在 ``ui/ctk/ctk_image.py``。
 
 **由来**（2026-10-06 阶段 3.2.3）：本模块内容原先整体住在 ``services/image_service.py``，

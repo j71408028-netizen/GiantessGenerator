@@ -180,8 +180,8 @@ class MainWindowManager:
 
         # 副本会话在独立子进程里跑（见 ui.hosting.dungeon_spawner）：这里只需
         # 请它收尾；父进程退出后管道断开，子进程的看护线程会立即结束。
-        # 父进程不再创建 DPG 上下文——**不要**在这里 import dearpygui：
-        # 从未建上下文就调它的函数会直接段错误（见 dungeon.window.dpg_state）。
+        # 父进程从不创建渲染后端上下文（迁移前是 Dear PyGui）：这里**不要**
+        # import 副本窗口栈（imgui-bundle），它只该活在子进程里。
         if self._active_dungeon_window is not None:
             try:
                 self._active_dungeon_window.request_close()

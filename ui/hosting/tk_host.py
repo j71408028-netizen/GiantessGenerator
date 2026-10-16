@@ -160,16 +160,20 @@ class TkHost(HostPort):
     # ---------------- 事件泵 ----------------
     @staticmethod
     def _install_x11_error_guard():
-        """Linux/X11 兼容：Tk 事件循环可能处理到 DPG 已销毁窗口的旧事件。"""
+        """Linux/X11 兼容：Tk 事件循环可能处理到已销毁窗口的旧事件。
+
+        只在**本进程加载过副本窗口栈**（``dungeon.window.ui``）时才装：普通挂件 /
+        专业模式从不碰副本窗口，没必要为它们扩大 X 错误处理范围；副本窗口跑在
+        独立子进程里时父进程也不会加载它（见 [宿主边界](../../docs/Dungeon/window_host.md) §7）。
+        实现见 ``ui.hosting.x11.install_x11_error_guard``。
+        """
         if not sys.platform.startswith("linux"):
             return
+        if "dungeon.window.ui" not in sys.modules:
+            return
         try:
-            from dungeon.window import dpg_state
-            # 普通挂件早期还没有 DPG 时不要扩大处理范围；只在进程已经建过
-            # DPG 上下文后，才进入这套 X11 兼容保护。
-            if not dpg_state.was_created():
-                return
-            dpg_state.install_x11_error_guard()
+            from ui.hosting import x11
+            x11.install_x11_error_guard()
         except Exception:
             pass
 

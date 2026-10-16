@@ -107,7 +107,7 @@ Linux 侧的兼容细节、限制与实测记录见 [docs/users/platforms/linux.
 
 ### macOS 已知事项
 
-- 主界面采用 CustomTkinter，副本窗口采用 Dear PyGui；两者均提供 macOS 轮子。副本窗口必须在主线程启动，当前实现满足该限制。
+- 主界面采用 CustomTkinter，副本窗口采用 imgui-bundle（`hello_imgui` + GLFW/OpenGL，2026-10 前为 Dear PyGui）；两者均提供 macOS 轮子。副本窗口的 GL 栈必须在拥有窗口的那个进程的主线程里启动，当前实现把整个副本会话放进独立子进程，满足该限制。
 - Windows DWM 标题栏、`.ico` 图标及 DPI API 已由 `sys.platform` / `platform.system()` 条件保护；macOS 将使用系统标题栏。当前仓库未提供 `.icns`，打包包体会使用 PyInstaller 默认图标；发版前可补充 `assets/icon.icns` 并在 macOS 构建命令中加入 `--icon`。
 - macOS 默认中文字体为 `PingFang SC`。旧设置中保存的微软雅黑、仿宋、宋体和 Consolas 会在设置保存时回退到平台默认字体或 `Menlo`。
 - Graphviz Python 包不包含 `dot` 二进制文件。若要使用依赖图，请通过 `brew install graphviz` 安装；程序会依次检查 `PATH`、`/opt/homebrew/bin/dot` 与 `/usr/local/bin/dot`。
@@ -145,7 +145,7 @@ Linux 侧的兼容细节、限制与实测记录见 [docs/users/platforms/linux.
 - **触发器（Trigger）**：驱动剧情的规则——条件满足时执行动作（跳转章节、播放素材、小游戏等），支持前置条件链。
 - **结局（Ending）**：由结局触发器或结束章节收束；达成的结局会写入角色档案。
 - **回放（Replay）**：副本过程可存为回放（未触达结局时也会存「未完成」回放），可从回放创建角色。
-- **运行时**：副本在独立的 Dear PyGui 窗口中运行，与主界面同进程共存；副本进行中不允许界面热切换。
+- **运行时**：副本窗口是独立的顶层窗口，会话跑在独立子进程里（渲染后端 imgui-bundle），与主界面进程隔离；副本进行中不允许界面热切换。
 
 ### 拓展概念：角色 / 聊天 / 世界包
 

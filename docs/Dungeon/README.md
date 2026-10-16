@@ -9,7 +9,7 @@
 |-------------------------------|---|---|
 | [架构说明](architecture.md)       | `dungeon/` 怎么分层、一次步进怎么流、收尾与自检脚本在哪 | 了解全局 / 动领域层 |
 | [数据模型：章节与触发器](script.md)      | 方案配置能写哪些字段、条件键与动作有哪些 | 写方案 / 改编辑器 / 改校验器 |
-| [窗口逻辑与开发事项](window.md)        | DPG 会话窗口的生命周期、帧时钟、约束与坑 | 动 `dungeon/window/` |
+| [窗口逻辑与开发事项](window.md)        | imgui-bundle 会话窗口的生命周期、帧时钟、约束与坑 | 动 `dungeon/window/` |
 | [宿主边界与可移植性](window_host.md)   | window 层与宿主（Tk）的边界在哪、换 UI 框架能做到哪一步 | 评估可移植性 / 换宿主 |
 | [调试自动化](window_automation.md) | 怎么不手点电脑就回归窗口 | 改窗口后自检 |
 | [领域术语表](domain_terms.md)      | 方案（Scenario）与一局（Run）怎么区分、怎么命名 | 所有人（命名前必读） |
@@ -39,7 +39,7 @@
 | 路径 | 层 | 说明 |
 |---|---|---|
 | `dungeon/*.py`（包根） | 领域层 | 纯逻辑；禁 import GUI / 服务层（AST 强制） |
-| `dungeon/window/*.py` | UI 层 | 唯一允许 DPG 的地方；宿主能力一律经 `host.py` |
+| `dungeon/window/*.py` | UI 层 | 唯一允许 `imgui_bundle` 的地方；宿主能力一律经 `host.py` |
 | `dungeon/minigame_pack.py` | 领域层 | 小游戏数据包读取（manifest / 参数声明），validate 与 window/minigame 共用 |
 | `dungeon/window/component_pack/` | 组件包 | 官方显示组件（文本栏三选一 / 属性条 / 过程日志），常驻 Python 包，惰性导入 |
 | `dungeon/window/host.py` | 端口 | `HostPort`：window 层向宿主索取能力的唯一出口 |
@@ -55,7 +55,7 @@
 | 脚本 | 覆盖 | 命令 |
 |---|---|---|
 | `check_dungeon_layering.py` | 分层守卫：领域层禁 import GUI/服务层/反向依赖 window；`window/` 禁 import `tkinter`/`customtkinter`/`ui` | `python tests/check_dungeon_layering.py` |
-| `check_dungeon_window_contract.py` | 窗口契约守卫：`window/` 内禁 `threading.Timer`、禁无超时 `join`；`dpg.stop_dearpygui` / `create_context` / `destroy_context` 只在生命周期属主文件（base / ui / dpg_state）允许；禁 `start_dearpygui` / `set_exit_callback` / `minimize_viewport` | `python tests/check_dungeon_window_contract.py` |
+| `check_dungeon_window_contract.py` | 窗口契约守卫：`window/` 内禁 `threading.Timer`、禁无超时 `join`；禁 `dearpygui` 回归（import / `dpg.*`）；`hello_imgui.run` 与给 `app_shall_exit` 赋值只允许出现在 `runner.py`；禁 `sys.exit` / `os._exit` | `python tests/check_dungeon_window_contract.py` |
 | `check_scenario_schema.py` | schema 单一真相源（空模板键集合、字段漂移）+ 校验器规则 + 演化配置链路 | `python tests/check_scenario_schema.py` |
 | `check_audio_chain.py` | 方案音频端到端链：说话人分音色 / 队列 / 两档效果 / 三条引擎路径 / 降级 / BGM 缺坏文件收尾（假合成器 + 替身后端，不出声不联网） | `python tests/check_audio_chain.py` |
 | `check_splitter.py` | 内置分句器：断点切分、流式幂等、`@说话人@` 标记解析与落盘净化 | `python tests/check_splitter.py` |
@@ -73,9 +73,9 @@
 
 | 脚本 | 覆盖 | 命令 |
 |---|---|---|
-| `dungeon_autopilot.py` | 真窗口生命周期：构造 → `run()` → 步进 → 关闭 → 落盘（14 场景，含回调线程、章节背景音乐、章节对话语音物理效果、小游戏触发器（py 覆盖层舞台与 web 子进程两条链路的胜负分支与中断、escape 移植版真渲染冒烟）、对话语音与文本组件接管冒烟） | `python scripts/dungeon_autopilot.py` |
+| `dungeon_autopilot.py` | 真窗口生命周期：构造 → `run()` → 步进 → 关闭 → 落盘（15 场景，含原生输入线程、章节背景音乐、章节对话语音物理效果、小游戏触发器（py 覆盖层舞台与 web 子进程两条链路的胜负分支与中断、escape 移植版真渲染冒烟）、对话语音与文本组件接管冒烟） | `python scripts/dungeon_autopilot.py` |
 | `smoke_mini_game.py` | 小游戏子进程链路（需显示器 + pywebview）：子进程自动结算回传 / 中断按无结果处理 | `python tests/smoke_mini_game.py` |
-| `check_minigame.py` | 小游戏包契约：manifest（backend/entry/params）+ py 游戏代码（恰一个 MiniGame 子类、禁 DPG/线程/print、禁私有面 `api._`） | `python tests/check_minigame.py` |
+| `check_minigame.py` | 小游戏包契约：manifest（backend/entry/params）+ py 游戏代码（恰一个 MiniGame 子类、禁渲染后端/线程/print、禁私有面 `api._`） | `python tests/check_minigame.py` |
 | `escape_sim.py` | escape_giantess 无头模拟：地图生成 / 出生点连通性 / bot 实跑与自然结算（无显示器可跑） | `python scripts/escape_sim.py` |
 
 判定方式详见 [调试自动化](window_automation.md) §4：**看结论行，不看退出码**（默认如此；
@@ -87,6 +87,7 @@
 
 | 档案 | 内容 | 对应现状文档 |
 |---|---|---|
+| [imgui_migration.md](history/imgui_migration.md) | Dear PyGui → imgui-bundle 的整体迁移（P0–P8）、逐阶段验收与守卫改写 | [窗口](window.md)、[宿主边界](window_host.md)、[架构说明](architecture.md) |
 | [host_refactor.md](history/host_refactor.md) | L0–L5 宿主改造全过程、改造前形状、验收记录 | [宿主边界](window_host.md)、[窗口](window.md) |
 | [exit_hang_investigation.md](history/exit_hang_investigation.md) | 进程退出挂死的复现矩阵、修正结论、重启复测 | [窗口 §5-C2 / §6](window.md)、[自检 §4](window_automation.md) |
 | [model_evolution.md](history/model_evolution.md) | 章节/触发器模型拆分、动作退场、scenario/dungeon 命名与目录迁移 | [数据模型](script.md)、[术语表](domain_terms.md) |

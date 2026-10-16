@@ -93,6 +93,8 @@ DIST_TO_IMPORT = {
 UNDECLARED_ALLOWED = {
     "soundfile": "miniaudio 的可选解码后端",
     "game": "scripts/escape_sim.py 先把内置小游戏目录塞进 sys.path 再 import",
+    "dearpygui": "scripts/dpg_probe/ 是 DPG 时代的原生崩溃探针存档；依赖已随 "
+                 "imgui 迁移（P8）从 requirements 移除，档案留档不再运行",
 }
 
 #: 跨平台标准库补充：本机是 Windows，跑在 macOS/Linux 上时这些名字不在

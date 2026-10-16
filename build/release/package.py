@@ -58,7 +58,7 @@ ENTRY_CANDIDATES = ("main.py",)
 #: 需要 ``--collect-all`` 的第三方包（按 **import 名** 写）。实际只对**该版本装得上**
 #: 的生效，所以同一份清单能同时适配 v1.0.0（无 numpy/webview）与更新版本。
 COLLECT_ALL_IMPORTS = (
-    "customtkinter", "dearpygui", "PIL", "openai",
+    "customtkinter", "imgui_bundle", "PIL", "openai",
     "networkx", "graphviz", "numpy", "webview",
 )
 

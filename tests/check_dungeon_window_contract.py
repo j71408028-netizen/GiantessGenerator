@@ -1,4 +1,4 @@
-"""副本窗口契约守卫：``dungeon/window/`` 里的高危 DPG 生命周期与线程调用。
+"""副本窗口契约守卫：``dungeon/window/`` 里的高危后端调用与线程纪律。
 
 用法：``python tests/check_dungeon_window_contract.py``
 
@@ -11,26 +11,20 @@
   Timer 收尾要逐个 join，退出路径因此复杂化）。
 - 禁零参数 ``.join()``（§4：``join`` 只允许带超时；无超时 join 会把帧循环吊死）。
 
-**B. DPG 生命周期调用（按「生命周期属主」文件白名单）**
+**B. 后端调用（imgui-bundle）**
 
-- ``dpg.stop_dearpygui`` 仅 ``base.py``（帧循环边界）与 ``dpg_state.py``
-  （保活视口拆装）允许——业务代码一律走 ``base._request_close()``（C1）。
-  且在 ``base.py`` 内还有位置约束：``_request_close`` **只允许置位**
-  ``_stop_requested``，真正的 ``stop_dearpygui()`` 只能出现在
-  ``_run_frame_loop`` 的回调批结束之后（在 DPG 回调执行中途 stop 会让上下文
-  收尾不干净：关闭后延迟崩溃 / 视口僵尸残留，2026-10-07 实测）。
-- ``dpg.start_dearpygui`` 全层禁用（L0：手动渲染帧循环，``start_dearpygui``
-  会把宿主主循环堵死）。
-- ``dpg.set_exit_callback`` 全层禁用（C6：手动渲染下它只在 ``destroy_context()``
-  内部才触发，对清理太晚；关闭统一由帧循环 ``is_dearpygui_running()`` 判定）。
-- ``dpg.create_context`` / ``dpg.destroy_context`` 仅 ``base.py`` / ``ui.py`` /
-  ``dpg_state.py`` 允许（上下文是进程单例，建/毁收在生命周期属主手里）。
-- ``dpg.minimize_viewport`` 全层禁用（最小化后不再有新帧，帧时钟上排队的任务
-  含关闭永远执行不到，窗口卡死——见 window_automation.md §5 坑清单）。
+- ``dearpygui`` 全层禁用：它已随 imgui 迁移（P8）彻底移除，此后任何回归都是把
+  一个没有依赖声明的后端又请回来。
+- ``hello_imgui.run(...)`` 只允许 ``runner.py``：窗口起停收在 ``WindowRunner``
+  一处（``run()`` 内部建 GL 后端 / ImGui 上下文 / 视口与帧循环）。
+- 给 ``app_shall_exit`` 赋值的语句只允许出现在 ``runner.py``：关闭只置位、由
+  runner 在**帧边界**落实成 ``app_shall_exit``（C1）；别处直接退出会让
+  hello_imgui 在帧中途把上下文拆掉。
+- ``sys.exit`` / ``os._exit`` 全层禁用：窗口生命周期不由解释器退出驱动。
 
-说明：检查按 ``dpg.`` 别名匹配（窗口层统一 ``import dearpygui.dearpygui as dpg``）；
-``scripts/`` 与 ``ui/`` 不在扫描范围。与 ``check_dungeon_layering.py`` 的分工：
-那个脚本管「能不能 import」，本脚本管「import 之后不许怎么调」。
+说明：检查只认 AST（代码本身）——注释 / docstring 里对 DPG 时代的历史表述不算
+违约。``scripts/`` 与 ``ui/`` 不在扫描范围。与 ``check_dungeon_layering.py`` 的
+分工：那个脚本管「能不能 import」，本脚本管「import 之后不许怎么调」。
 
 退出码：0 = 通过；1 = 存在违约调用。
 """
@@ -42,29 +36,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WINDOW_DIR = ROOT / "dungeon" / "window"
 
-#: dpg 生命周期调用 -> 允许出现的文件（相对 dungeon/window/）
-DPG_ALLOWED = {
-    "stop_dearpygui": {"base.py", "dpg_state.py"},
-    "create_context": {"base.py", "ui.py", "dpg_state.py"},
-    "destroy_context": {"base.py", "ui.py", "dpg_state.py"},
-}
-#: dpg 全层禁用的调用 -> 原因
-DPG_BANNED = {
-    "start_dearpygui": "L0 手动渲染：start_dearpygui 会堵死宿主主循环，"
-                       "帧由 base._run_frame_loop 驱动",
-    "set_exit_callback": "手动渲染下它只在 destroy_context() 内部触发，对清理太晚；"
-                         "关闭由帧循环 is_dearpygui_running() 判定（C6）",
-    "minimize_viewport": "最小化后不再有新帧，帧时钟上的任务（含关闭）永远执行不到，"
-                         "窗口卡死",
-}
+_DEARPYGUI_WHY = "dearpygui 已随 imgui 迁移移除（P8）；窗口层不得再引用它"
+_RUNNER_ONLY_WHY = ("窗口起停 / 关闭只在 runner.py 落实：run() 建上下文与帧循环，"
+                    "关闭由帧回调在帧边界写 app_shall_exit（C1）")
+_EXIT_WHY = "窗口生命周期不由解释器退出驱动；关窗走 _request_close()（C1）"
+_TIMER_WHY = "计时类逻辑用帧时钟 every/after（C5）"
+_JOIN_WHY = "join 只允许带 timeout（window.md §4）"
 
 
-def _dpg_call_name(node: ast.Call):
-    """``dpg.xxx(...)`` 的方法名；非该形状返回 None。"""
-    func = node.func
-    return func.attr if (isinstance(func, ast.Attribute)
-                         and isinstance(func.value, ast.Name)
-                         and func.value.id == "dpg") else None
+def _is_dearpygui(target: str) -> bool:
+    return target.split(".")[0] == "dearpygui"
 
 
 def check_module(path: Path):
@@ -73,75 +54,49 @@ def check_module(path: Path):
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     violations = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
         # --- A. 线程纪律 ---
-        func = node.func
-        if isinstance(func, ast.Attribute) and func.attr == "Timer" \
-                and isinstance(func.value, ast.Name) and func.value.id == "threading":
-            violations.append((node.lineno, "threading.Timer",
-                               "计时类逻辑用帧时钟 every/after（C5）"))
-        elif isinstance(func, ast.Name) and func.id == "Timer" \
-                and isinstance(node.func, ast.Name):
-            # from threading import Timer 的裸名形式一并拦下
-            violations.append((node.lineno, "Timer(...)",
-                               "计时类逻辑用帧时钟 every/after（C5）"))
-        if isinstance(func, ast.Attribute) and func.attr == "join" \
-                and not node.args and "timeout" not in {k.arg for k in node.keywords}:
-            violations.append((node.lineno, ".join() 无超时",
-                               "join 只允许带 timeout（window.md §4）"))
-        # --- B. dpg 生命周期 ---
-        name = _dpg_call_name(node)
-        if name is None:
-            continue
-        if name in DPG_BANNED:
-            violations.append((node.lineno, f"dpg.{name}", DPG_BANNED[name]))
-        elif name in DPG_ALLOWED and rel not in DPG_ALLOWED[name]:
-            owners = ", ".join(sorted(DPG_ALLOWED[name]))
-            violations.append((node.lineno, f"dpg.{name}",
-                               f"只在 {owners} 允许；业务关闭一律走 base._request_close()（C1）"
-                               if name == "stop_dearpygui"
-                               else f"上下文建/毁收在生命周期属主：{owners}"))
+        if isinstance(node, ast.Call):
+            func = node.func
+            if (isinstance(func, ast.Attribute) and func.attr == "Timer"
+                    and isinstance(func.value, ast.Name)
+                    and func.value.id == "threading"):
+                violations.append((node.lineno, "threading.Timer", _TIMER_WHY))
+            elif isinstance(func, ast.Name) and func.id == "Timer":
+                # from threading import Timer 的裸名形式一并拦下
+                violations.append((node.lineno, "Timer(...)", _TIMER_WHY))
+            if (isinstance(func, ast.Attribute) and func.attr == "join"
+                    and not node.args
+                    and "timeout" not in {k.arg for k in node.keywords}):
+                violations.append((node.lineno, ".join() 无超时", _JOIN_WHY))
+        # --- B. 后端调用 ---
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if _is_dearpygui(alias.name):
+                    violations.append((node.lineno, f"import {alias.name}", _DEARPYGUI_WHY))
+        elif isinstance(node, ast.ImportFrom):
+            if node.level == 0 and _is_dearpygui(node.module or ""):
+                violations.append((node.lineno, f"from {node.module} import ...",
+                                   _DEARPYGUI_WHY))
+        elif isinstance(node, ast.Call):
+            func = node.func
+            name = (f"{func.value.id}.{func.attr}"
+                    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
+                    else None)
+            if name in ("sys.exit", "os._exit"):
+                violations.append((node.lineno, f"{name}(...)", _EXIT_WHY))
+            elif name == "hello_imgui.run" and rel != "runner.py":
+                violations.append((node.lineno, "hello_imgui.run(...)", _RUNNER_ONLY_WHY))
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Attribute) and target.attr == "app_shall_exit" \
+                        and rel != "runner.py":
+                    violations.append((node.lineno, "app_shall_exit = ...",
+                                       _RUNNER_ONLY_WHY))
+        elif isinstance(node, ast.Attribute):
+            # dpg.xxx（含 dpg.foo(...) 调用）——迁移后窗口层不该再出现这个别名
+            if isinstance(node.value, ast.Name) and node.value.id == "dpg":
+                violations.append((node.lineno, f"dpg.{node.attr}", _DEARPYGUI_WHY))
     return violations
-
-
-def _function_stop_call_lines(tree: ast.Module):
-    """base.py 内 ``dpg.stop_dearpygui(...)`` 调用所在的函数名集合。"""
-    found = {}
-
-    class _Visitor(ast.NodeVisitor):
-        def __init__(self):
-            self.stack = []
-
-        def visit_FunctionDef(self, node):
-            self.stack.append(node.name)
-            self.generic_visit(node)
-            self.stack.pop()
-
-        visit_AsyncFunctionDef = visit_FunctionDef
-
-        def visit_Call(self, node):
-            name = _dpg_call_name(node)
-            if name == "stop_dearpygui" and self.stack:
-                fn = self.stack[-1]
-                found.setdefault(fn, node.lineno)
-            self.generic_visit(node)
-
-    _Visitor().visit(tree)
-    return found
-
-
-def check_base_stop_placement():
-    """C1 位置约束：``dpg.stop_dearpygui`` 只能出现在 ``_run_frame_loop`` 内。
-
-    ``_request_close`` 必须只置位 ``_stop_requested``，由帧循环在回调批结束后的
-    帧边界统一停止；在 DPG 回调执行中途 stop 会让上下文收尾不干净。
-    """
-    path = WINDOW_DIR / "base.py"
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    found = _function_stop_call_lines(tree)
-    bad = {fn: ln for fn, ln in found.items() if fn != "_run_frame_loop"}
-    return bad
 
 
 def main() -> int:
@@ -153,23 +108,13 @@ def main() -> int:
             violations.append((path.relative_to(ROOT).as_posix(), lineno, what, why))
 
     print(f"[check_dungeon_window_contract] 已检查 dungeon/window/（含子包）{total} 个模块")
-    failures = 0
-    bad_stop = check_base_stop_placement()
-    if bad_stop:
-        failures += 1
-        for fn, ln in sorted(bad_stop.items(), key=lambda kv: kv[1]):
-            print(f"  FAIL dungeon/window/base.py:{ln}  dpg.stop_dearpygui 于 {fn}()"
-                  " — 停止只能落在 _run_frame_loop 的帧边界；_request_close 只置位"
-                  " _stop_requested（C1，2026-10-07）")
     if violations:
-        failures += 1
         for file, lineno, what, why in violations:
             print(f"  FAIL {file}:{lineno}  {what} — {why}")
-    if failures:
-        print(f"[check_dungeon_window_contract] FAILED：{failures} 类违约")
+        print(f"[check_dungeon_window_contract] FAILED：{len(violations)} 处违约调用")
         return 1
     print("[check_dungeon_window_contract] PASSED：无 threading.Timer / 无超时 join，"
-          "DPG 生命周期调用均在属主文件内，stop_dearpygui 落在帧循环边界")
+          "dearpygui 已清干净，hello_imgui.run 与关闭置位只落在 runner.py")
     return 0
 
 

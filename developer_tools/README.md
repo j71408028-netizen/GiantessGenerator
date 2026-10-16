@@ -46,7 +46,7 @@
 | 工具 | 领域 | 输出 | 用途 |
 |---|---|---|---|
 | `archive_preview.py` | 角色档案导出 | 打开预览 | 改 `services/character/archive_export.py` 后起个小服务，F5 即用最新代码重渲染角色档案 |
-| `minigame_preview.py` | 小游戏舞台 | 打开预览 | 不进副本，直接在独立 DPG 窗口跑一个小游戏；帧时钟 / 输入层 / 纹理上传与副本同一套 |
+| `minigame_preview.py` | 小游戏舞台 | 打开预览 | 不进副本，直接在独立 imgui 窗口跑一个小游戏；帧时钟 / 输入层 / 纹理上传与副本同一套 |
 | `quip_report.py` | quip 语料 | 简略报告 | 检查 `data/packs/quips/` 的类型 meta、标记格式，以及类型替换的**组合级语法风险**并双向溯源。**一次只查一个风格的一个尺寸档** |
 | `evolution_dump.py` | 演化模型 | 详细产物 | 演化模型二阶退化模拟（**角点 + 默认性格表**，可 `--pack` / `--world` 加载行为包），出 PNG 与 `report.md`；需要 matplotlib |
 
@@ -81,7 +81,7 @@ stdout，都不产生需要排除的文件。
 5. **只读用户数据**：`data/` 是用户数据区（见 `docs/dev/architecture.md` §2.2），这里的工具
    不写它——要落文件就写 `_out/` 或系统临时目录。清理产物用
    `shutil.move(..., tempfile.mkdtemp())`，**不要 `rm`**。
-6. **不加运行期依赖**：只用 `requirements.txt` 里已有的（`dearpygui` / `Pillow` / …）。
+6. **不加运行期依赖**：只用 `requirements.txt` 里已有的（`imgui_bundle` / `Pillow` / …）。
    确实需要私有依赖（如 `evolution_dump.py` 的 matplotlib）就在 docstring 里写明，并在
    import 处给一句可读的安装提示，而不是抛原始 `ImportError`。
 7. **命名**：顶层工具叫 `<领域>_<输出>.py`（`quip_report.py`，不要 `check2.py`；后缀只准
@@ -120,4 +120,6 @@ PY
 `dpg_probe/`（DPG 原生崩溃的一次性调查留档，17 个文件——15 个 `_probe_*` 探针外加 `_outdir.py` / `_veh_filter.py`）2026-10-08 起搬到
 [`scripts/dpg_probe/`](../scripts/dpg_probe)——它自述「只存档不复用」，既不是资源 / 行为改动
 的入口、也不会反复拿来"看"，不符合本目录的判据。其产物随之落 `scripts/_out/dpg_probe/`，
-说明见 [`scripts/README.md`](../scripts/README.md)。
+说明见 [`scripts/README.md`](../scripts/README.md)。2026-10 的 imgui 迁移（P8）把
+`dearpygui` 从 `requirements.txt` 移除后，这些探针**不再能直接运行**——需要时先临时
+`pip install dearpygui` 再跑。

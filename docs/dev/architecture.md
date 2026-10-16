@@ -89,7 +89,7 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 ### 2.3 下层禁 UI 框架的口径（PIL 只禁两个桥）
 
 `infra` / `core` / `persistence` / `services` 不得引入 `tkinter` / `_tkinter` /
-`customtkinter` / `dearpygui`；**`PIL` 不在整包禁列**，只禁 `PIL.ImageTk` / `PIL.ImageGrab`
+`customtkinter` / `imgui_bundle` / `dearpygui`；**`PIL` 不在整包禁列**，只禁 `PIL.ImageTk` / `PIL.ImageGrab`
 这两个直通 Tk 的桥。
 
 纯图像处理（裁剪 / 缩放 / 缩略图 / base64）没有窗口依赖——`persistence` 做头像缩略图、
@@ -163,20 +163,22 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 
 | 命令 | 用途 | 注意 |
 |---|---|---|
-| `python tests/run_checks.py` | **离线 15 项，提交前必跑** | 纯静态，不需要显示器 |
+| `python tests/run_checks.py` | **离线 28 项，提交前必跑** | 纯静态，不需要显示器 |
 | `python tests/run_checks.py --smoke` | 追加 GUI 冒烟（3 个） | **两个 GUI 自检不可并发** |
 | `python tests/smoke_mini.py` | 挂件全链路（75 项）+ 真实副本窗口 | 需显示器 |
 | `python tests/smoke_switch.py` | 界面热切换 5 轮 | 改切换 / 收尾逻辑后必跑；当前 50/50 |
-| `python scripts/dungeon_autopilot.py --in-process` | 11 场景 **100 项**，最强回归 | stdout 在报告文件里，别只看终端 |
+| `python scripts/dungeon_autopilot.py --in-process` | 15 场景 **109 项**，最强回归 | stdout 在报告文件里，别只看终端 |
 
 `run_checks` 按前缀自动发现：`check_*.py` 离线、`smoke_*.py` 需显示器。新增脚本放进对应
 类别即可，无需登记清单。
 
 ### 5.3 界面热切换与副本窗口
 
-改 `app/shell.py` 或副本收尾逻辑前，**先读`docs/Dungeon/window.md` §5-C2**，以避免「会让进程直接死」
-的陷阱：DPG 未建 context 时调 `is_dearpygui_running()` 段错误、跑完一局副本后 Tk 根不能再
-`destroy()`、保活视口 `park_context` / `unpark_context` 的顺序等等。
+改 `app/shell.py` 或副本收尾逻辑前，**先读 `docs/Dungeon/window.md` §5-C1 / §5-C2**
+（两节都已改写成 imgui 版）：进程内主动关窗一律走 `_request_close()` → 帧边界落实
+（C1）；窗口的 GL / 上下文 / 视口生命周期全交给 `hello_imgui.run()`，进程内不手动
+建 / 毁上下文、不需要保活视口（C2）。子进程形态下的隔离面由 `tests/run_checks.py`
+里的 `check_dungeon_window_contract.py` 机械守住。
 
 改完必须跑 `python tests/smoke_switch.py`，日志里 `invalid command name` 条数应为 0。
 

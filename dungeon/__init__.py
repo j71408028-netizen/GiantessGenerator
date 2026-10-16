@@ -4,8 +4,8 @@
 
 - ``dungeon/`` **根下的模块**（models / rules / chapters / actions / coupling /
   prompts / response / splitter / summary / details / schema / validate …）是纯领域，
-  禁止 import ``dearpygui`` / ``tkinter`` / ``customtkinter`` / ``services`` / ``ui``，
-  也禁止反向依赖 ``dungeon.window``；
+  禁止 import ``imgui_bundle`` / ``dearpygui`` / ``tkinter`` / ``customtkinter`` /
+  ``services`` / ``ui``，也禁止反向依赖 ``dungeon.window``；
 - 需要外部行为时走**依赖注入**：例如 ``EvolutionRules(step_decay=...)`` 由 UI 层
   （``window/base.py``）显式传入 ``StateService.decay_step_rates``；
 - 需要 UI 的代码一律放 ``dungeon/window/``（含 background / dispatcher /

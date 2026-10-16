@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""小游戏调试启动器：不进副本，直接在独立 DPG 窗口里跑一个小游戏。
+"""小游戏调试启动器：不进副本，直接在独立 imgui 窗口里跑一个小游戏。
 
 用法（仓库根目录）::
 
@@ -8,37 +8,64 @@
     python developer_tools/minigame_preview.py reaction --target 2
 
 窗口内：ESC 退出。结算（api.finish）后窗口打印结果并自动关闭。
-实现上复用副本的小游戏舞台（``dungeon.window.minigame.stage``），
-因此调试所见即副本内所得——帧时钟、输入层、纹理上传全部同一套。
+实现上复用副本的小游戏舞台（``dungeon.window.minigame.stage``）与会话窗口的宿主
+运行器（``dungeon.window.runner.WindowRunner``），因此调试所见即副本内所得——
+帧时钟、输入层、纹理上传、字体全部同一套。
+
+（迁移前这里是 Dear PyGui 手写帧循环；2026-10 imgui 迁移后改跑同一个
+``WindowRunner``，不再有独立的后端代码。）
 """
 
 import argparse
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import dearpygui.dearpygui as dpg  # noqa: E402
+from imgui_bundle import hello_imgui, imgui  # noqa: E402
 
-from dungeon import process_log  # noqa: E402
+from dungeon.window.fonts import (  # noqa: E402
+    BOLD_FONT_SIZE, TEXT_FONT_SIZE, UI_FONT_SIZE, resolve_font_files)
 from dungeon.window.frame import FrameScheduler  # noqa: E402
-from dungeon.window.fonts import first_existing, FONT_FALLBACK_PATHS  # noqa: E402
 from dungeon.window.minigame import list_mini_games, resolve_mini_game  # noqa: E402
 from dungeon.window.minigame.stage import MiniGameStageHandler  # noqa: E402
+from dungeon.window.runner import WindowRunner  # noqa: E402
 
-_FRAME_INTERVAL = 1.0 / 60.0
+#: 建窗尺寸（96-PPI 逻辑点，与副本会话同一口径）。
+_VIEWPORT_W = 1188
+_VIEWPORT_H = 868
+_MIN_W = 800
+_MIN_H = 500
 
 
 class DevMiniGameWindow(MiniGameStageHandler):
-    """独立 DPG 宿主：只实现舞台依赖的最小窗口面。"""
+    """独立 imgui 宿主：只实现舞台依赖的最小窗口面。"""
 
-    def __init__(self):
+    def __init__(self, game_id):
+        self._game_id = game_id
         self._frame = FrameScheduler()
         self._closing = False
         self._dpi_scale = 1.0
         self._mini_game_stage = None
         self._result = None
+        self._layout_w = float(_VIEWPORT_W)
+        self._layout_h = float(_VIEWPORT_H)
+        # 字体：家族名留空 → fonts.resolve_font_files 走平台兜底（与会话窗口一致）
+        self.dungeon_font = ""
+        self.dungeon_text_font = None
+        self.dungeon_bold_font = None
+        self._font_ui = None
+        self._runner = WindowRunner(
+            title=f"小游戏调试 · {game_id}",
+            width=_VIEWPORT_W, height=_VIEWPORT_H,
+            min_width=_MIN_W, min_height=_MIN_H,
+            dpi_scale=self._dpi_scale,
+            on_post_init=self._setup_imgui,
+            on_load_fonts=self._load_fonts,
+            on_frame_start=self._on_frame_start,
+            on_draw=self._on_draw,
+            on_before_exit=self._on_before_exit,
+        )
 
     # ---- 舞台依赖的窗口面 ----
     def _notify(self, message):
@@ -46,130 +73,91 @@ class DevMiniGameWindow(MiniGameStageHandler):
 
     def request_close(self):
         self._closing = True
-        try:
-            dpg.stop_dearpygui()
-        except Exception:
-            pass
+        self._runner.request_exit()
+
+    # ---- imgui 回调 ----
+    def _load_fonts(self):
+        """``load_additional_fonts``：唯一能加载字体的时机（见 runner.ui 文档）。"""
+        font_path, bold_path = resolve_font_files(
+            getattr(self, "dungeon_font", "") or "")
+        if not font_path:
+            hello_imgui.imgui_default_settings.load_default_font_with_font_awesome_icons()
+            return
+        self._font_ui = hello_imgui.load_font(font_path, UI_FONT_SIZE)
+        self.dungeon_text_font = hello_imgui.load_font(font_path, TEXT_FONT_SIZE)
+        self.dungeon_bold_font = (hello_imgui.load_font(bold_path, BOLD_FONT_SIZE)
+                                  if bold_path else None)
+
+    def _setup_imgui(self):
+        """``post_init``：GL 后端与上下文就绪、首帧之前。"""
+        self._gl_ready = True
+
+    def _on_frame_start(self):
+        self._frame.tick()
+
+    def _on_draw(self):
+        self._sync_layout_size()
+        if self._mini_game_stage is None:
+            return
+        if imgui.is_key_pressed(imgui.Key.escape):
+            if self._minigame_escape():
+                self.request_close()
+            return
+        # 帧末顶层窗口：与副本会话里同一条绘制路径（ui._draw_frame → 舞台）
+        self._draw_mini_game_stage(self._layout_w, self._layout_h)
+
+    def _on_before_exit(self):
+        """收尾：GL 上下文此刻仍当前（``run()`` 尚未返回）。
+
+        顺序与 :meth:`_MiniGameStage._gl_ops_ok` 的判据一致——先在帧时钟仍跑时
+        释放舞台的 GPU 纹理，再停帧时钟。
+        """
+        self._destroy_mini_game_stage()
+        self._frame.stop()
+
+    def _sync_layout_size(self):
+        """每帧比对 ``io.display_size``（等价会话窗口里的 resize 回调）。"""
+        io = imgui.get_io()
+        if io.display_size.x > 0 and io.display_size.y > 0:
+            self._layout_w = float(io.display_size.x)
+            self._layout_h = float(io.display_size.y)
 
     # ---- 生命周期 ----
     def run(self, game_id, config):
         resolved = resolve_mini_game(game_id)
         if resolved is None:
             print(f"找不到小游戏「{game_id}」，可用：")
-            for gid, label, backend in list_mini_games():
-                print(f"  {gid:20s} {label:10s} ({backend})")
+            _print_games()
             return 1
-
-        dpg.create_context()
-        # DPG 2.3.1 的 Windows wheel 是 ANSI(MBCS) 构建：标题字节会原样进
-        # RegisterClassExA/CreateWindowExA，非 ASCII 标题（如「小游戏调试 · …」）
-        # 的 UTF-8 字节按系统 ANSI 码页解码后建窗会**静默失败**——没有原生
-        # 窗口，图形后端随之不初始化，首帧 render_dearpygui_frame 必现
-        # 0xC0000005。因此先以 ASCII 标题建窗，首帧后再改回真名（与会话
-        # 窗口同一做法，见 DungeonWindowUI._build_ui / base._fix_windows_title）。
-        viewport_title = f"MiniGame Dev - {game_id}"
-        real_title = f"小游戏调试 · {resolved.label}"
-        viewport_w = 1188
-        viewport_h = 868
-        dpg.create_viewport(title=viewport_title,
-                            width=viewport_w, height=viewport_h, resizable=True)
-        with dpg.texture_registry(tag="dungeon_texture_registry"):
-            pass
-        # 与副本会话同款的主窗口：视口大小、无标题栏、primary 停靠铺满——
-        # 舞台的子窗口（视口客户区尺寸）塞进普通浮动窗口会被裁剪到不可见
-        with dpg.window(tag="main_window", width=viewport_w, height=viewport_h,
-                        no_title_bar=True, no_move=True, no_resize=True,
-                        no_scrollbar=True, no_background=True):
-            pass
-        dpg.set_primary_window("main_window", True)
-        # DPG 2.3.1 怪癖：创建时传 no_scrollbar 不生效，创建后再 configure
-        dpg.configure_item("main_window", no_scrollbar=True,
-                           no_scroll_with_mouse=True, horizontal_scrollbar=False)
-
-        def _on_resize(sender, app_data):
-            try:
-                dpg.configure_item("main_window",
-                                   width=dpg.get_viewport_client_width(),
-                                   height=dpg.get_viewport_client_height())
-            except Exception:
-                pass
-
-        dpg.set_viewport_resize_callback(_on_resize)
-        # 中文字体（draw_text / HUD 的 CJK 字形）
-        font_path = first_existing(FONT_FALLBACK_PATHS)
-        if font_path:
-            try:
-                with dpg.font_registry():
-                    font = dpg.add_font(font_path, 18)
-                dpg.bind_font(font)
-            except Exception as exc:
-                print(f"[font] 字体加载失败（退回默认）: {exc}")
-        dpg.setup_dearpygui()
-        dpg.show_viewport()
-        dpg.maximize_viewport()
-
-        with dpg.handler_registry():
-            dpg.add_key_press_handler(key=dpg.mvKey_Escape, callback=self._on_escape)
-
-        if not self._open_mini_game_stage(resolved, config,
-                                          on_result=self._on_result):
+        # 舞台在 run() 之前构建：build() 不碰 GPU / draw list，只用 _layout_*（已备好）。
+        if not self._open_mini_game_stage(resolved, config, on_result=self._on_result):
             print("小游戏初始化失败，详见上方过程日志")
-            dpg.destroy_context()
             return 1
-
-        exit_code = 0
-        title_fixed = False
         try:
-            while not self._closing:
-                self._frame.tick()
-                dpg.run_callbacks(dpg.get_callback_queue())
-                if not dpg.is_dearpygui_running():
-                    break
-                dpg.render_dearpygui_frame()
-                if not title_fixed:
-                    title_fixed = True
-                    self._fix_viewport_title(viewport_title, real_title)
-                time.sleep(_FRAME_INTERVAL)
+            self._runner.run()
         except KeyboardInterrupt:
             pass
         finally:
+            # 兜底：before_exit 未必走到（例如异常），保证舞台与帧时钟收尾
             self._destroy_mini_game_stage()
             self._frame.stop()
-            try:
-                dpg.destroy_context()
-            except Exception:
-                pass
         if self._result is not None:
             print(f"结算结果：{self._result}")
-        return exit_code
-
-    # ---- 回调 ----
-    @staticmethod
-    def _fix_viewport_title(temp_title, real_title):
-        """原生窗口建好后把标题改回中文（create_viewport 只能安全用 ASCII）。"""
-        try:
-            import ctypes
-            hwnd = ctypes.windll.user32.FindWindowW(None, temp_title)
-            if hwnd:
-                ctypes.windll.user32.SetWindowTextW(hwnd, real_title)
-        except Exception:
-            pass
-
-    def _on_escape(self, sender=None, app_data=None):
-        if self._mini_game_stage is not None:
-            process_log.log("[MiniGame] ESC 中止小游戏（无结果）")
-            self._mini_game_stage._abort()
-            self._destroy_mini_game_stage()
-        self.request_close()
+        return 0
 
     def _on_result(self, result):
-        """游戏结算：记下结果并关窗（结果可能来自帧线程，这里就在帧线程）。"""
+        """游戏结算：记下结果并关窗（立即模式下就在帧线程调用）。"""
         self._result = result if result is not None else {"won": None, "note": "中止"}
         self.request_close()
 
 
+def _print_games():
+    for gid, label, backend in list_mini_games():
+        print(f"  {gid:20s} {label:10s} ({backend})")
+
+
 def main():
-    parser = argparse.ArgumentParser(description="小游戏调试启动器（独立 DPG 窗口）")
+    parser = argparse.ArgumentParser(description="小游戏调试启动器（独立 imgui 窗口）")
     parser.add_argument("game", nargs="?", default="",
                         help="小游戏 id（缺省时列出全部可用）")
     parser.add_argument("--target", type=int, default=None,
@@ -178,15 +166,14 @@ def main():
 
     if not args.game:
         print("可用小游戏：")
-        for gid, label, backend in list_mini_games():
-            print(f"  {gid:20s} {label:10s} ({backend})")
+        _print_games()
         print("\n用法：python developer_tools/minigame_preview.py <game_id> [--target N]")
         return 0
 
     config = {}
     if args.target is not None:
         config["target_level"] = max(1, args.target)
-    return DevMiniGameWindow().run(args.game, config)
+    return DevMiniGameWindow(args.game).run(args.game, config)
 
 
 if __name__ == "__main__":

@@ -6,9 +6,8 @@
 上屏游标 + 继续指示 ▼ + 三图标工具条 + 轻通知 + 输入接线 + 入口方案面板 +
 结局图标轮播 + 窗口视效（闪光/振动/反色/色差）+ F2 截图 + F11 全屏 +
 小游戏覆盖层舞台（帧末顶层窗口）**。
-剩余阶段：
-
-- P7 autopilot 去 DPG 内省；P8 清场（删 dearpygui / dpg_state）。
+迁移的最后两阶段 P7（autopilot 改读值快照）与 P8（清场：删 dearpygui /
+``dpg_state``）均已完成。
 
 因此本文件里凡标 ``P<n> 占位`` 的地方都是**故意留空**的，不是遗漏。
 
@@ -242,8 +241,9 @@ class DungeonWindowUI:
         (_vp_w, _vp_h, self._dpi_scale,
          self._main_client_w, self._main_client_h) = self._get_initial_viewport_size()
 
-        # 建窗尺寸 = 宿主客户区。**不乘 _dpi_scale**，也不加边框余量：
-        # hello_imgui 的 window_geometry.size 就是客户区（R7 定标见模块文档）。
+        # 布局尺寸 = 宿主客户区（**物理像素**，与 io.display_size 同口径）：
+        # 边距 / 内缩都按 _dpi_scale 放大过，落在这个像素空间里。
+        # 建窗尺寸另算：96-PPI 逻辑点 = 物理客户区 ÷ _dpi_scale，见 _window_create_size()。
         self._layout_w = float(self._main_client_w)
         self._layout_h = float(self._main_client_h)
         self._text_wrap_width = 0.0

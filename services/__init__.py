@@ -2,7 +2,7 @@
 
 依赖只能向下（core / dungeon / persistence / infra），由
 ``tests/check_import_graph.py`` 强制；ui 可直接引用本层，本层禁止
-import tkinter / customtkinter / dearpygui。
+import tkinter / customtkinter / imgui_bundle（迁移前是 dearpygui）。
 
 **本包 ``__init__`` 不再充当中转门面**（§4.2 步骤 7）：调用点一律按
 子域直连，别再 ``from services import X``。域分布——

@@ -960,7 +960,7 @@ class MiniApp:
         except Exception as e:
             print(f"[Warning] 退出前保存失败: {e}")
         # 副本视口是独立顶层窗口：还开着就先让它停下，否则进程退不干净。
-        # 走窗口自己的公开入口，挂件层因此不必 import dearpygui。
+        # 走窗口自己的公开入口，挂件层因此不必 import 副本窗口栈。
         if self._active_dungeon_window is not None:
             try:
                 self._active_dungeon_window.request_close()

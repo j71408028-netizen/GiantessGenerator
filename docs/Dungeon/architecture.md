@@ -34,8 +34,8 @@
 
 | 层 | 位置 | 职责 | 禁令 |
 |---|---|---|---|
-| 领域层 | `dungeon/` 包根 | 纯玩法逻辑 | 禁 import `dearpygui` / `tkinter` / `customtkinter` / `services` / `ui` / `dungeon.window` |
-| UI 层 | `dungeon/window/` | 窗口、DPG、宿主接线 | 禁 import `tkinter` / `customtkinter` / `ui`（宿主细节留在 `ui/hosting/tk_host.py`） |
+| 领域层 | `dungeon/` 包根 | 纯玩法逻辑 | 禁 import `imgui_bundle` / `dearpygui` / `tkinter` / `customtkinter` / `services` / `ui` / `dungeon.window` |
+| UI 层 | `dungeon/window/` | 窗口、imgui 绘制、宿主接线 | 禁 import `tkinter` / `customtkinter` / `ui`（宿主细节留在 `ui/hosting/tk_host.py`） |
 | 编辑器 / 持久化 | `ui/scenario/`、`persistence/` | 方案编辑与落盘 | — |
 
 纪律：**领域层不认识 GUI、不认识服务层；UI 层负责接线与注入；外部行为一律注入，不反向 import。**
@@ -56,14 +56,14 @@
 
 ### 3.1 领域层（`dungeon/` 包根）
 
-- 禁止 import：`dearpygui` / `customtkinter` / `tkinter` / `services.*` / `ui.*`
+- 禁止 import：`imgui_bundle` / `dearpygui` / `customtkinter` / `tkinter` / `services.*` / `ui.*`
 - 禁止反向依赖自己的 UI 子包：`dungeon.window`（含 `from .window import`）
 - 禁止逃逸出包的相对导入：`from .. import`
 - 需要外部行为时**依赖注入**（唯一现状：`EvolutionRules(step_decay=StateService.decay_step_rates)`，由 `window/base.py::_init_session` 传入）
 
 ### 3.2 窗口层（`dungeon/window/`）
 
-- 所有需要 DPG / 服务层的代码在此；`background` `dispatcher` `launcher` `component_registry` `components` 均已从包根迁回 `window/`
+- 所有需要 imgui_bundle / 服务层的代码在此；`background` `dispatcher` `launcher` `component_registry` `components` 均已从包根迁回 `window/`
 - 宿主能力（尺寸/DPI、显隐、事件泵、收尾弹框、活动窗口登记、字体）一律经 `dungeon/window/host.py::HostPort` 取得，Tk 实现是 `ui/hosting/tk_host.py::TkHost`，构造时注入（`DungeonSessionWindow(..., host=TkHost(self))`）
 - 端口方法表见 [窗口文档](window.md) §5-C8
 
@@ -110,7 +110,7 @@ TriggerHandler, OptionHandler, EndingHandler, DungeonPersistence, ComponentHandl
 |---|---|---|
 | `DungeonWindowBase` | `base.py` | 窗口生命周期、方案配置加载与启动前校验、会话初始化、关闭请求 |
 | `DungeonLaunchStages` | `launcher.py` | 入口阶段：动态背景轮播、方案选择、已达成结局图标循环、开始 / 回放 / 返回 |
-| `DungeonWindowUI` | `ui.py` | UI 构建、流式文本揭示动画、布局自适应、鼠标 / 键盘 / 视口回调 |
+| `DungeonWindowUI` | `ui.py` | UI 构建、逐帧自绘、流式文本揭示动画、布局自适应、鼠标 / 键盘输入接线 |
 | `DungeonStoryEngine` | `engine.py` | 步进核心：AI 生成、流式分句、属性演化、伤亡结算、收尾回调 |
 | `TriggerHandler` | `triggers.py` | 触发器判定、章节进出、章节效果短暂覆盖、窗口视效、插入段落 |
 | `OptionHandler` | `options.py` | 选项触发器：后台生成选项文字 → 弹窗 → 记录选择 |
@@ -267,7 +267,7 @@ _finish_step()
 
 ## 6. 生命周期与统一收尾
 
-入口阶段与会话阶段共享同一个 DPG 上下文（`base.py` + `launcher.py`），详见
+入口阶段与会话阶段共享同一次窗口生命周期（同一个 ImGui 上下文 / 视口 / 根窗口，`base.py` + `launcher.py`），详见
 [窗口文档](window.md) §2。收尾只走一个入口：
 
 ```python
@@ -333,9 +333,9 @@ data/
 |---|---|---|
 | 数据类一律按关键字构造 | `DungeonState` 字段曾按位置传参导致伤亡数组被写成浮点数 | `models.py::clone` 注释 |
 | 构造参数必须保存到 `self` | mixin 方法可能被其他 mixin 调用，`__init__` 里的局部变量会 AttributeError | [窗口文档](window.md) §5-C3 |
-| 关闭一律走 `_request_close()` | 业务代码不直接 `dpg.stop_dearpygui()` | [窗口文档](window.md) §5-C1 |
+| 关闭一律走 `_request_close()` | 业务代码不直接退（不写 `app_shall_exit`、不调库的退出函数）；由 `before_imgui_render` 帧边界落实 | [窗口文档](window.md) §5-C1 |
 | 跨线程 UI 更新走 `self._frame.call()` | 帧时钟是**窗口实例成员**；计时类逻辑用 `every/after` 帧任务而不是开线程 | [窗口文档](window.md) §5-C4、`window/frame.py` |
-| GLFW 终止**之后**，当时的 Tk 根窗口不得 `destroy()` / `withdraw()`；收尾后必须补隐藏保活视口 | 终止**前** Tk 照常可用——收尾顺序刻意把 Tk 交互（恢复主窗口、弹框）放在 `destroy_context()` 之前；终止后那个根的窗口级命令会 0xC0000005 硬崩。保活视口把进程留在「Tk 根健康」状态。`_finish_session()` / `_start_session()` 的顺序就是为此固定的。**2026-10 起会话在独立子进程里跑**（[宿主边界](window_host.md) §7）：本条只约束子进程内部；父进程不再创建 DPG 上下文，热切换与 GLFW 不再相关 | [窗口文档](window.md) §5-C2 |
+| 窗口的 GL / 上下文 / 视口生命周期全交给 `hello_imgui.run()` | 进程内不手动建/毁上下文、不需要保活视口；收尾在 `run()` 返回之后做。**2026-10 起会话在独立子进程里跑**（[宿主边界](window_host.md) §7）：父进程从不加载副本窗口栈，热切换与 GL 生命周期不再相关 | [窗口文档](window.md) §5-C2 |
 | 写盘必走原子写 | 半截文件不可恢复 | 本文 §8 |
 | 剧本 / 运营术语不混用 | `scenario_*` = 方案，`dungeon_*` = 一局 | [术语表](domain_terms.md) |
 | 组件只读窗口状态 | 组件 ctx 即窗口实例，不反向写状态；**访问只经组件服务面**（`component_viewport` / `schedule*` / `session_waiting_for_input` / `component_top_inset` 等，C13），不读窗口私有属性 | `component_registry.py::DungeonComponent` 契约文档、`components.py::ComponentHandler`、`tests/check_component_pack.py` |

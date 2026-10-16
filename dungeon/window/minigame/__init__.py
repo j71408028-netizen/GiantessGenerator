@@ -12,8 +12,8 @@
 
 无 manifest 但存在 ``session.html`` 的目录按 web 兼容（历史包）。
 
-本模块**不 import DPG**（解析发生在触发器线程，渲染只在 stage）；游戏文件
-里禁止出现 dearpygui / tkinter / threading 等，一律由契约脚本扫出来。
+本模块**不 import 渲染后端**（解析发生在触发器线程，渲染只在 stage）；游戏文件
+里禁止出现 imgui_bundle / dearpygui / tkinter / threading 等，一律由契约脚本扫出来。
 """
 
 import importlib.util

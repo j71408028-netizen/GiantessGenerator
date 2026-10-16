@@ -1,19 +1,25 @@
-"""Linux/X11 原生支持：XInitThreads 引导 + EWMH 窗口置顶。
+"""Linux/X11 原生支持：XInitThreads 引导 + EWMH 窗口置顶 + 宽松错误处理器。
 
-Tk（专业模式 / 挂件模式）与 Dear PyGui/GLFW（副本视口）在同一个进程里共用同一个
-X server，这在 X11 上是**两个独立的 display 连接**。libX11 默认按「单连接单线程」
-编译，两套工具包各带自己的线程去碰 X，是 BadWindow / BadDrawable 与
-``ImGui_ImplGlfw_WindowFocusCallback`` 段错误的经典成因。
+Tk（专业模式 / 挂件模式）与副本窗口的 GL 栈（imgui-bundle 前是 Dear PyGui/GLFW）
+在同一进程里跑时共用同一个 X server，这在 X11 上是**独立的 display 连接**。
+libX11 默认按「单连接单线程」编译，两套工具包各带自己的线程去碰 X，是
+BadWindow / BadDrawable 与 ``ImGui_ImplGlfw_WindowFocusCallback`` 段错误的经典成因。
+（产品路径现已把副本会话拆进独立子进程，这里的两套连接只在自检 / 自动驾驶的
+同进程场景下同时存在。）
 
-本模块提供两件事：
+本模块提供三件事：
 
 1. :func:`init_x_threads`——尽早（**任何** display 连接建立之前）调用
    ``XInitThreads()``，让 libX11 全程加锁。这是全进程一次性生效的开关，调用点
    必须是入口文件的最前面（``main.py`` 顶部、GUI 冒烟脚本顶部），晚于
-   ``tkinter`` / ``dearpygui`` 的首次连接就只能返回 False 了；
+   ``tkinter`` 的首次连接就只能返回 False 了；
 2. :func:`set_above` / :func:`supports_above`——直接写 EWMH 的
    ``_NET_WM_STATE_ABOVE``。Tk 的 ``-topmost`` 在部分桌面环境（实测 GNOME/X11）
-   写不进去也不报错，而 EWMH 的 ClientMessage 是这套协议的正路，能回读确认。
+   写不进去也不报错，而 EWMH 的 ClientMessage 是这套协议的正路，能回读确认；
+3. :func:`install_x11_error_guard`——安装一个宽松的 X11 同步错误处理器，用于
+   抑制「Tk 事件泵处理到别家已销毁窗口的旧事件」这类预期内的陈旧窗口错误
+   （Xlib 默认处理器会直接 ``exit(1)``）。原先住在 ``dungeon/window/dpg_state.py``，
+   随 imgui 迁移（P8）搬到这里——它是 X11 兼容层的事，与渲染后端无关。
 
 设计约束：**纯 stdlib ctypes**，不引入 python-xlib / pywinctl；所有失败都静默
 降级（返回 False），调用方据此走 UI 降级提示，绝不因为置顶失败而影响启动。
@@ -107,7 +113,7 @@ def _lib():
 def init_x_threads() -> bool:
     """在任何 X display 连接建立之前调用 ``XInitThreads()``。
 
-    必须在 ``tkinter`` / ``customtkinter`` / ``dearpygui`` 首次建立连接之前执行。
+    必须在 ``tkinter`` / ``customtkinter`` / 副本窗口 GL 栈首次建立连接之前执行。
     调用点放晚了 libX11 不会报错，但那时它已经按单线程模式跑起来，加锁不再生效——
     本函数**无法**检测"已经开过连接"，只能靠调用点自律（各入口文件顶部都写了注释，
     见 docs/users/platforms/linux.md §3）。
@@ -490,3 +496,108 @@ def error_text(code: int) -> str:
         return ""
     finally:
         close_display(display)
+
+
+# ---------------- 3. 宽松 X11 错误处理器 ----------------
+
+#: 强引用：X server 会长期持有这个回调指针，Python 侧必须留住 handler 对象
+#: （``(handler, state)``），否则下次 GC 之后 X 调到的是已释放的 thunk。
+_X11_ERROR_GUARD = None
+
+#: X11 错误码 → 人类可读文本。``XErrorEvent.error_code`` 在结构体首几个字段里，
+#: ctypes 只需声明到它即可安全读取。
+_X11_ERROR_CODES = {3: "BadWindow", 4: "BadPixmap", 8: "BadMatch",
+                    9: "BadDrawable", 10: "BadAccess", 11: "BadAlloc"}
+
+#: 预期内的陈旧窗口错误：只有这两个码走「忽略 + 记日志」。
+#: ``BadMatch(8)`` 也曾出现在反复 destroy/create 的路径上，但它同样可能意味着
+#: 真实配置错误，因此**故意不列入**预期集合——收窄的意义就在这里：不掩盖真实问题。
+_EXPECTED_X11_ERRORS = (3, 9)  # BadWindow / BadDrawable
+
+
+def _x11_code_label(code: int) -> str:
+    """错误码 → ``BadWindow(3)`` 这样的标签。"""
+    return f"{_X11_ERROR_CODES.get(code, 'XError')}({code})"
+
+
+def _x11_log(message: str, error: bool = False) -> None:
+    """把 X11 兼容层的事件记入过程日志（不可用则退回 print）。"""
+    try:
+        from dungeon import process_log
+        process_log.log("[X11] " + message)
+    except Exception:
+        if error:
+            print("[X11] " + message)
+
+
+def install_x11_error_guard() -> bool:
+    """安装一个 X11 同步错误处理器（仅 Linux/X11）。
+
+    宿主 Tk 的事件泵会收到并处理其它顶层窗口的旧事件；当这些窗口已经销毁，Tk
+    内部查询会触发 BadWindow，而 Xlib 默认处理器会直接 ``exit(1)``——表现为冒烟
+    测试里的 X Error 硬崩。本处理器把这类错误接住，不再让进程退出。
+
+    处理策略（2026-10-06 收窄）：
+    - ``BadWindow`` / ``BadDrawable``：预期内的陈旧窗口错误，忽略并记入
+      ``process_log``（前 3 次完整记录，之后只累加计数）；
+    - 其它错误码：**照样返回 0（不退出进程），但每次大声记录**。这里不转发给
+      Xlib 默认处理器——那个处理器是 ``_XError``，转发等于让进程退出，而段错误
+      压测的价值恰在于「跑完并留下证据」。要恢复默认行为就删掉本函数的所有
+      调用点（风险登记见 docs/users/platforms/linux.md 附录A §5）。
+
+    重复调用会重新覆盖当前处理器，防止后续 GL/窗口生命周期把它换掉。
+    """
+    global _X11_ERROR_GUARD
+    if not sys.platform.startswith("linux"):
+        return False
+    lib = _lib()
+    if lib is None:
+        return False
+    try:
+        if _X11_ERROR_GUARD is None:
+            class XErrorEvent(ctypes.Structure):
+                """Xlib ``XErrorEvent``：只需读到 ``error_code`` / ``request_code``。"""
+
+                _fields_ = [
+                    ("type", ctypes.c_int),
+                    ("display", ctypes.c_void_p),
+                    ("resourceid", ctypes.c_ulong),
+                    ("serial", ctypes.c_ulong),
+                    ("error_code", ctypes.c_ubyte),
+                    ("request_code", ctypes.c_ubyte),
+                    ("minor_code", ctypes.c_ubyte),
+                ]
+
+            handler_type = ctypes.CFUNCTYPE(
+                ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(XErrorEvent))
+            state = {"count": 0, "unexpected": 0}
+
+            def _handle(display, event):
+                code = int(event.contents.error_code) if event else 0
+                request = int(event.contents.request_code) if event else 0
+                if code in _EXPECTED_X11_ERRORS:
+                    state["count"] += 1
+                    if state["count"] <= 3:
+                        _x11_log(f"已忽略预期的陈旧窗口错误（{_x11_code_label(code)}，"
+                                 f"request={request}，第 {state['count']} 次）")
+                    return 0
+                state["unexpected"] += 1
+                if state["unexpected"] <= 3:
+                    _x11_log(f"未预期的 X11 错误：{_x11_code_label(code)}"
+                             f"（request={request}）——若在冒烟中反复出现请上报",
+                             error=True)
+                else:
+                    _x11_log(f"未预期的 X11 错误累计 {state['unexpected']} 次"
+                             f"（最近：{_x11_code_label(code)}）", error=True)
+                return 0
+
+            _X11_ERROR_GUARD = (handler_type(_handle), state)
+
+        handler = _X11_ERROR_GUARD[0]
+        lib.XSetErrorHandler.argtypes = [ctypes.c_void_p]
+        lib.XSetErrorHandler.restype = ctypes.c_void_p
+        lib.XSetErrorHandler(ctypes.cast(handler, ctypes.c_void_p))
+        return True
+    except Exception as e:
+        print(f"[Warning] 安装 X11 错误兼容处理器失败: {e}")
+        return False

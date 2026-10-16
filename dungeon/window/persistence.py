@@ -404,7 +404,7 @@ class DungeonPersistence:
         return replay_path, report_path
 
     def _handle_exit(self):
-        """用户关闭副本窗口后的退出处理（在主线程、DPG 停止后调用）。
+        """用户关闭副本窗口后的退出处理（在主线程、``hello_imgui.run()`` 返回后调用）。
 
         未触发结局：走 ``_finalize(completed=False)``——不结算、不记结局索引，
         但把已生成的内容保存为「未完成」回放与报告（此前直接丢弃）；

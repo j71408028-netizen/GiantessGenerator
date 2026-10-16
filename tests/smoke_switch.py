@@ -14,9 +14,10 @@
   5. 挂件模式 → **再真实跑一局副本** → 再切回专业。
 
 副本会话自 2026-10 起运行在独立子进程里（``ui.hosting.dungeon_spawner``），
-父进程不再创建 DPG 上下文——曾让热切换静默杀进程的「``destroy_context()``
+父进程不再创建渲染后端上下文——曾让热切换静默杀进程的「``destroy_context()``
 终止 GLFW 后 Tk 根失去销毁能力」随之成为历史，第 2/5 轮改为守护这条隔离面：
-父进程全程 ``dpg_state.was_created()`` 为假。第 4 轮保护的是挂件层的字体度量
+父进程全程没在本进程启动过副本窗口（``dungeon.window.runner.times_started()``）。
+第 4 轮保护的是挂件层的字体度量
 缓存（``tkinter.font.Font``）跨解释器清理——切回挂件时界面要建得起来。
 
 每轮检查：
@@ -201,7 +202,7 @@ def _run_real_dungeon(app, root):
     可重复调用（第 2、5 轮各一次）：桩只要装一次，重复装会把真函数也替换成桩。
     """
     import smoke_mini as mini_smoke
-    from dungeon.window import dpg_state
+    from dungeon.window.runner import times_started
 
     if not mini_smoke._REAL_WINDOW.get("cls"):
         mini_smoke._install_dungeon_stub()
@@ -219,9 +220,9 @@ def _run_real_dungeon(app, root):
                os.path.join(data_dir(), "user", "replays"),
                os.path.join(data_dir(), "user", "reports")]
     outcome = mini_smoke._real_dungeon_run(app, root, cleanup)
-    # 进程隔离的隔离面：父进程全程不建 DPG 上下文（会话在子进程里），
+    # 进程隔离的隔离面：父进程全程没在本进程跑过副本窗口（会话在子进程里），
     # 热切换因此不再依赖副本侧的保活视口与兜底修复
-    outcome["park"] = not dpg_state.was_created()
+    outcome["park"] = times_started() == 0
     outcome["repair_needed"] = False
     return outcome
 
@@ -460,18 +461,18 @@ def main():
             except Exception as e:
                 check("挂件二次可用", False, f"{type(e).__name__}: {e}")
 
-            # ---------- 第 5 轮：再跑一局副本（隔离面：父进程始终不碰 DPG） ----------
+            # ---------- 第 5 轮：再跑一局副本（隔离面：父进程始终不跑副本窗口） ----------
             print("\n[5] 挂件模式再跑一局副本后切回专业（进程隔离面）")
-            from dungeon.window import dpg_state
-            check("上一局之后父进程仍未建 DPG 上下文", not dpg_state.was_created(),
-                  str(dpg_state.was_created()))
+            from dungeon.window.runner import times_started
+            check("上一局之后父进程仍未启动副本窗口", times_started() == 0,
+                  str(times_started()))
 
             outcome = _run_real_dungeon(app3, root3)
             check("第二局副本真实跑通", bool(outcome["ran"]))
             check("第二局未被入口校验拦下", not outcome["failed"], outcome["error"])
             check("第二局后挂件恢复显示", outcome["restored"] == "normal",
                   str(outcome["restored"]))
-            check("第二局后父进程仍未创建 DPG 上下文", bool(outcome["park"]))
+            check("第二局后父进程仍未启动副本窗口", bool(outcome["park"]))
             check("第二局后切换不再依赖副本侧修复", not outcome["repair_needed"])
 
             root3.after(300, app3.switch_to_professional)

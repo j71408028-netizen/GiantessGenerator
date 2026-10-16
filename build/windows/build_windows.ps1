@@ -25,7 +25,7 @@ $Name = "GiantessGenerator"
     --add-data "data\packs;data\packs" `
     --add-data "data\static;data\static" `
     --collect-all customtkinter `
-    --collect-all dearpygui `
+    --collect-all imgui_bundle `
     --collect-all PIL `
     --collect-all openai `
     --collect-all networkx `

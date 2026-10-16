@@ -1,10 +1,10 @@
 """X11 引导：必须在任何 X display 连接建立之前 import 本模块。
 
 单独成一个模块是为了让"尽早"这件事在入口文件里只有**一行**、且 import 顺序一眼
-可查——``init_x_threads()`` 晚于 ``tkinter`` / ``dearpygui`` 的首次连接就没有意义
-了（libX11 已经按单线程模式跑起来）。
+可查——``init_x_threads()`` 晚于 ``tkinter`` 的首次连接就没有意义了
+（libX11 已经按单线程模式跑起来）。
 
-纯 stdlib（ctypes/os/sys），不 import tkinter / dearpygui，因此可以在入口文件的
+纯 stdlib（ctypes/os/sys），不 import tkinter / imgui_bundle，因此可以在入口文件的
 最顶部安全使用。
 
 用法（入口文件顶部，仍在 tkinter 之前）::
