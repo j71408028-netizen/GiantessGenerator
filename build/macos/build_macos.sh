@@ -17,7 +17,7 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt pyinstaller
 
 # 单一打包形态：入口跟随设置里的「启动界面模式」，两套界面共用一个进程模型，
-# 因此全部依赖（含 networkx 依赖图）一并收集。
+# 因此全部依赖一并收集（编辑器关系图是自绘画布，不需要 networkx / graphviz）。
 pyinstaller \
   --noconfirm \
   --clean \
@@ -30,11 +30,9 @@ pyinstaller \
   --collect-all dearpygui \
   --collect-all PIL \
   --collect-all openai \
-  --collect-all networkx \
   --collect-all numpy \
   --collect-all webview \
   "$ENTRY"
 
 echo "Created: $ROOT/dist/$NAME.app"
 echo "The bundle includes only built-in content packs. User settings and archives are created under ~/Library/Application Support/GiantessGenerator/."
-echo "Graphviz remains an external optional dependency. Install it with: brew install graphviz"

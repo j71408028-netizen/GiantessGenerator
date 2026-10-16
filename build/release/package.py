@@ -57,9 +57,10 @@ ENTRY_CANDIDATES = ("main.py",)
 
 #: 需要 ``--collect-all`` 的第三方包（按 **import 名** 写）。实际只对**该版本装得上**
 #: 的生效，所以同一份清单能同时适配 v1.0.0（无 numpy/webview）与更新版本。
+#: 不再有 networkx / graphviz：编辑器关系图已改为自绘画布（见
+#: docs/Dungeon/scenario_graph.md §5）。
 COLLECT_ALL_IMPORTS = (
-    "customtkinter", "dearpygui", "PIL", "openai",
-    "networkx", "graphviz", "numpy", "webview",
+    "customtkinter", "dearpygui", "PIL", "openai", "numpy", "webview",
 )
 
 #: 随包发布的只读资源目录（存在才收）。用户数据（data/user、data/archives）**不进包**：

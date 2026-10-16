@@ -17,7 +17,8 @@
 # - 打包版数据目录走 XDG：$XDG_DATA_HOME/GiantessGenerator/data（默认
 #   ~/.local/share/GiantessGenerator/data），首启从包内 data/packs、data/static 拷贝；
 #   源码运行仍用仓库内 data/（见 paths.py）。
-# - graphviz 的 dot 是外部可选依赖，不进包：依赖图功能需要系统装 graphviz。
+# - graphviz 的 dot 不再是依赖：编辑器关系图改为自绘画布（见
+#   docs/Dungeon/scenario_graph.md §5），打包无外部可选依赖。
 # - --self-check 会把 scripts/dungeon_autopilot.py 也打成一个包（同一套依赖），用它
 #   在**打包态**里真开副本窗口跑几个场景（进副本、文本组件、小游戏触发器），
 #   并顺带验证发布包能启动、能引导 XDG 数据目录。
@@ -51,7 +52,8 @@ fi
 "$VENV/bin/python" -m pip install -r requirements.txt pyinstaller
 
 # 单一打包形态：入口跟随设置里的「启动界面模式」，两套界面共用一个进程模型，
-# 因此全部依赖（含 networkx 依赖图）一并收集。Linux 的 --add-data 分隔符是 `:`。
+# 因此全部依赖一并收集（关系图是自绘画布，不需要 networkx / graphviz）。
+# Linux 的 --add-data 分隔符是 `:`。
 PYINSTALLER_ARGS=(
     --noconfirm
     --clean
@@ -67,7 +69,6 @@ PYINSTALLER_ARGS=(
     --collect-all dearpygui
     --collect-all PIL
     --collect-all openai
-    --collect-all networkx
     --collect-all numpy
     --collect-all webview
 )
@@ -83,7 +84,6 @@ echo
 echo "Created: $BUNDLE/$NAME"
 echo "Created: $TARBALL"
 echo "The bundle includes only built-in content packs. User settings and archives are created under \$XDG_DATA_HOME/$NAME/data (default ~/.local/share/$NAME/data)."
-echo "Graphviz remains an external optional dependency. Install it with: sudo apt install graphviz"
 
 if [ "$SELF_CHECK" != 1 ]; then
     echo

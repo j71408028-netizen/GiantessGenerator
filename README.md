@@ -23,7 +23,6 @@
 - Python 3.10 及以上（开发环境为 Python 3.13；Linux 上 Python 3.12 / 3.14 均已实测）
 - macOS 需要可用的 Tcl/Tk 图形组件。使用 python.org 安装包或 Homebrew Python 均可
 - 若使用 AI 生成功能，需自行准备对应服务商的 API Key（可选功能）
-- 触发器依赖关系图为可选功能，需要额外安装 Graphviz 的 `dot` 命令
 
 ### 支持平台矩阵
 
@@ -56,7 +55,6 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-brew install graphviz               # 可选：仅用于触发器依赖图
 python main.py
 ```
 
@@ -69,8 +67,7 @@ sudo apt install python3-tk fontconfig fonts-noto-cjk   # Tk 图形组件、字�
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt     # 必装：networkx / graphviz / openai / numpy 都在这里
-sudo apt install graphviz                     # 可选：仅用于触发器依赖图（Python 包不含 dot）
+python -m pip install -r requirements.txt     # 必装：openai / numpy / customtkinter 等都在这里
 python main.py
 ```
 
@@ -110,7 +107,6 @@ Linux 侧的兼容细节、限制与实测记录见 [docs/users/platforms/linux.
 - 主界面采用 CustomTkinter，副本窗口采用 Dear PyGui；两者均提供 macOS 轮子。副本窗口必须在主线程启动，当前实现满足该限制。
 - Windows DWM 标题栏、`.ico` 图标及 DPI API 已由 `sys.platform` / `platform.system()` 条件保护；macOS 将使用系统标题栏。当前仓库未提供 `.icns`，打包包体会使用 PyInstaller 默认图标；发版前可补充 `assets/icon.icns` 并在 macOS 构建命令中加入 `--icon`。
 - macOS 默认中文字体为 `PingFang SC`。旧设置中保存的微软雅黑、仿宋、宋体和 Consolas 会在设置保存时回退到平台默认字体或 `Menlo`。
-- Graphviz Python 包不包含 `dot` 二进制文件。若要使用依赖图，请通过 `brew install graphviz` 安装；程序会依次检查 `PATH`、`/opt/homebrew/bin/dot` 与 `/usr/local/bin/dot`。
 
 
 ## 玩家指南

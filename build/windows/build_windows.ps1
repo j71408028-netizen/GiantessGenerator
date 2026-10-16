@@ -14,7 +14,7 @@ $Name = "GiantessGenerator"
 & .\.venv-build\Scripts\python.exe -m pip install -r requirements.txt pyinstaller
 
 # 单一打包形态：入口跟随设置里的「启动界面模式」，两套界面共用一个进程模型，
-# 因此全部依赖（含 networkx 依赖图）一并收集。
+# 因此全部依赖一并收集（编辑器关系图是自绘画布，不需要 networkx / graphviz）。
 & .\.venv-build\Scripts\pyinstaller.exe `
     --noconfirm `
     --clean `
@@ -28,7 +28,6 @@ $Name = "GiantessGenerator"
     --collect-all dearpygui `
     --collect-all PIL `
     --collect-all openai `
-    --collect-all networkx `
     --collect-all numpy `
     --collect-all webview `
     $Entry
