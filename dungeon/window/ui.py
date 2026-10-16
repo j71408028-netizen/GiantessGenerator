@@ -1,13 +1,13 @@
 """UI 绘制、文本显示、布局自适应与事件回调（imgui 立即模式）。
 
 本文件现覆盖 P1「窗口骨架」/ P2「阅读主循环」/ P3「入口阶段」/ P4「组件包与
-覆盖层」/ P5「视效与平台能力」：
+覆盖层」/ P5「视效与平台能力」/ P6「小游戏舞台接线」：
 **建主窗口 + 背景铺满 + 视口尺寸/DPI + 字体两档 + 底部渐变式文本区 +
 上屏游标 + 继续指示 ▼ + 三图标工具条 + 轻通知 + 输入接线 + 入口方案面板 +
-结局图标轮播 + 窗口视效（闪光/振动/反色/色差）+ F2 截图 + F11 全屏**。
+结局图标轮播 + 窗口视效（闪光/振动/反色/色差）+ F2 截图 + F11 全屏 +
+小游戏覆盖层舞台（帧末顶层窗口）**。
 剩余阶段：
 
-- P6 小游戏舞台（``minigame/stage.py``）；
 - P7 autopilot 去 DPG 内省；P8 清场（删 dearpygui / dpg_state）。
 
 因此本文件里凡标 ``P<n> 占位`` 的地方都是**故意留空**的，不是遗漏。
@@ -449,6 +449,8 @@ class DungeonWindowUI:
           ``no_bring_to_front_on_focus`` 的面板会被铺满客户区的根窗口整个盖住，
           屏幕上完全不可见——P1 的入口面板就这样一直没显示出来，P2 截图取证时
           才发现；根窗口保留该标志，点背景时不会抢到最前。
+        - 小游戏舞台（P6，``minigame/stage.py``）：同样在根窗口 ``end()`` 之后
+          绘制，但是**最后**一个顶层窗口，铺满客户区、压在工具条与选项弹窗之上。
         """
         io = imgui.get_io()
         w, h = float(io.display_size.x), float(io.display_size.y)
@@ -513,6 +515,12 @@ class DungeonWindowUI:
             if not self._text_owned_by_component():
                 self._draw_toolbar(w, h)
             self._draw_option_dialog(w, h)
+
+        # 小游戏舞台（P6）：帧末最后绘制的顶层窗口，铺满客户区，因而压在工具条与
+        # 选项弹窗之上（与浮层同一条 z 序规矩，见 50-analysis §4）。无舞台时是空判。
+        draw_stage = getattr(self, "_draw_mini_game_stage", None)
+        if callable(draw_stage):
+            draw_stage(w, h)
 
         # 输入放在所有控件绘制之后：``is_any_item_hovered`` 才是本帧的悬停真值
         self._handle_input()

@@ -1575,7 +1575,7 @@ def scene_mini_game_escape():
     """py 后端移植版 escape_giantess：真实覆盖层舞台跑帧渲染 + ESC 中止。
 
     前置无头模拟（脚本 escape_sim.py）已验证胜负/危险源/地图生成；
-    本场景验证真 DPG 链路：离屏画布纹理上传、每帧绘制指令、帧任务驱动。
+    本场景验证真渲染链路：离屏画布 GL 纹理上传、每帧绘制指令、帧末舞台驱动。
     """
     host = ScriptedHost()
     _AI.paragraphs = ["街道在脚下震颤。", "人群开始骚动。", "她低头笑了。"]

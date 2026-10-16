@@ -1,26 +1,39 @@
-"""小游戏运行时：会话窗口内的全屏覆盖层舞台（本框架唯一允许 DPG 的地方）。
+"""小游戏运行时：会话窗口内的全屏覆盖层舞台（imgui 立即模式）。
 
 进入方式：``mini_game`` 触发器按 manifest 后端分派——``py`` 后端走这里，
-把游戏渲染成**叠在背景上的覆盖层**（不再是弹独立窗口）；``web`` 后端仍走
-宿主端口 ``launch_mini_game()`` 的子进程 pywebview（兼容通道）。
+把游戏渲染成**叠在副本界面上的覆盖层**；``web`` 后端仍走宿主端口
+``launch_mini_game()`` 的子进程 pywebview（兼容通道）。
 
-画布结构：全窗 stage child（压暗底）内嵌一个位于画面区域的 canvas child，
-游戏 drawlist 与覆盖层（边框/HUD）都在其中——child window 会把 drawlist
-内容裁剪进自己的矩形（帧缓冲实测），游戏内容因此不会溢出到副本界面；
-游戏坐标即画布局部坐标，``_pt`` 恒等映射。
+画布结构（P6 起）：舞台是 ``_draw_frame`` **最后**绘制的一个顶层窗口，铺满客户区
+（半透明压暗底），窗口内用 ``imgui.get_window_draw_list()`` 逐帧画游戏画面——
+游戏坐标 = 画面区域（play rect）局部坐标，绘制前把 draw list 的裁剪矩形压到画面
+区域上，越界绘制因此不会溢出到副本界面（与 DPG 版「canvas child 会裁剪自身
+drawlist」等价，见 ``.workbuddy/imgui-migration/50-analysis-canvas-as-component.md``
+§4：画布画在根窗口里会被工具条盖住，所以舞台必须是**帧末的顶层窗口**）。
 
-驱动：挂窗口帧时钟（``FrameScheduler.every(EVERY_FRAME)``，key 唯一），
-每帧 清屏 → ``game.update(dt)`` → HUD →（已结算则）收尾。输入是**轮询式**
-（``dpg.is_key_down`` / 鼠标状态），不注册任何新 handler——与会话按键
-（空格 / 回车 / H / ESC / A / F2）零冲突：
+驱动：不再挂帧时钟——舞台由窗口在帧末直接调用 :meth:`_MiniGameStage.render`
+（``ui._draw_frame`` → ``_draw_mini_game_stage``），每帧 压暗底 → ``game.update(dt)``
+→ 边框/HUD →（已结算则）收尾。输入是**轮询式**（``imgui.is_key_down`` /
+``io.mouse_pos`` / ``imgui.is_mouse_down``，imgui 下这些状态每帧都新鲜，不像 DPG
+手动渲染那样恒 False，因此不再需要 handler 维护状态表），与会话按键（空格 /
+回车 / H / ESC / A / F2）零冲突：
 
 - 步进挂起：舞台存续期间 :meth:`OverlayHandler.overlay_open` 返回
   ``"minigame"``（阅读模态），``_on_next_step`` 与自动播放自动停摆；
+- 模态遮蔽：舞台窗口铺满客户区且没有 ``no_bring_to_front_on_focus``，帧末最后
+  ``begin`` 因而压在工具条之上，鼠标也落在舞台上（工具条不会被误点）；
 - ESC：会话级 ESC 回调转交 :meth:`MiniGameStageHandler._minigame_escape`
   → 中止（无结果，副本照常继续）；
 - 游戏自身 ``api.finish()``：结算 → 销毁舞台 → 结果经与 web 后端同一条
   ``_on_mini_game_result`` 管线记入返回值与回放（小游戏不区分胜负，
   分支由其他触发器按返回值判定）。
+
+离屏画布（:class:`_CanvasTexture`）：**宿主自持的一张 GL 纹理** + 按脏矩形
+``glTexSubImage2D`` 增量上传（见 ``dungeon/window/gl_texture.py`` 与
+``.workbuddy/imgui-migration/52-analysis-gpu-texture-native.md`` §6）。DPG 时代
+的「切块 + 1 px 出血」整个删掉了：那是为绕开 ``set_value`` 的 10 ms/次开销，
+而整张 1088×768 的 ``glTexSubImage2D`` 实测只要 0.294 ms，一张纹理既没有块
+边界的采样缝，也不再需要逐块的重传策略。
 
 线程约束：全部方法只在帧循环线程调用（触发器侧经 ``_frame.call`` 并入）。
 """
@@ -29,21 +42,21 @@ import os
 import time
 import weakref as _weakref
 
-import dearpygui.dearpygui as dpg
+from imgui_bundle import hello_imgui, imgui
 
 from dungeon import process_log
+from dungeon.window import gl_texture as _gl
+from dungeon.window import imgui_util as _iu
+from dungeon.window.ui import _panel_flags
 from .base import GameAPI, clamp_dt
 
 try:
     import numpy as _np
-except ImportError:          # 无 numpy 时退回纯 Python 转换（慢，仅兜底）
+except ImportError:          # 无 numpy 时离屏画布上传退化为「不上传」（见 _ensure）
     _np = None
 
-_STAGE_TAG = "minigame_stage"
-_CANVAS_TAG = "minigame_canvas"
-_DRAW_TAG = "minigame_stage_draw"
-_OVERLAY_TAG = "minigame_stage_overlay"
-_TICK_KEY = "minigame:tick"
+#: 舞台顶层窗口 id（``##`` 前缀不进 ini / 不与标题冲突）
+_STAGE_WINDOW = "##dungeon_minigame"
 _BACKDROP_COLOR = (8, 10, 18, 225)
 _HUD_COLOR = (240, 240, 245, 255)
 _HUD_SIZE = 20
@@ -51,84 +64,80 @@ _MAX_TEXTURE_EDGE = 2048
 #: 游戏画面相对窗口边缘的留白（仅声明了 aspect 的游戏生效，随 DPI 缩放）
 _PLAY_MARGIN = 64
 _PLAY_FRAME_COLOR = (255, 255, 255, 30)
-_NO_FILL = (0, 0, 0, -255)     # DPG 的「不填充」哨兵色（fill 参数期望颜色元组）
-
-#: 离屏画布上传的分块边长与块边界出血（像素）。
-#: 整张画布重传一次 ≈ 14.6 ms（RGBA→float32 平铺 6 ms + ``set_value`` 10 ms，
-#: 实测 1088×768），已吃掉一整帧预算；而每帧真正变化的往往只有几格地块。
-#: 切成块后只重传「脏且可见」的块：单块 258² ≈ 1.2 ms，整张重传是 15 块。
-#: 出血 1 px + uv 内缩保证块边界处的双线性采样能取到邻块像素——少了它，
-#: 每个块的四个边会各有一条 1 px 的拉伸缝（DPG 不暴露纹理过滤开关，换不了 nearest）。
-_CANVAS_CHUNK = 256
-_CANVAS_BLEED = 1
 #: 一块画布一次累积的脏矩形上限：超过就直接标「整张脏」（再攒没有意义）
 _DIRTY_BOX_LIMIT = 64
 
-#: 键名 → DPG 键值（字母 / 数字按 VK 码 = ord）；在首次使用时惰性构建
+#: 键名 → imgui 键码；在首次使用时惰性构建
 _KEY_MAP = None
+
+
+def _stage_flags():
+    """舞台窗口的标志：``ui._panel_flags()`` + 关掉滚动条。
+
+    与浮层同一条规矩——**不带** ``no_bring_to_front_on_focus``，否则会被铺满
+    客户区的根窗口盖住（P1 的入口面板就是这么"自检全绿、屏幕上看不见"的）。
+    舞台在帧末最后 ``begin``，于是压在工具条 / 选项弹窗之上。
+    """
+    return (_panel_flags()
+            | imgui.WindowFlags_.no_scrollbar.value
+            | imgui.WindowFlags_.no_scroll_with_mouse.value)
 
 
 def _key_map():
     global _KEY_MAP
     if _KEY_MAP is None:
-        # DPG 2.3.1 的键常量名：Spacebar / Return，Shift/Control 分左右键
-        mapping = {}
-        for name, const in (("spacebar", "mvKey_Spacebar"), ("return", "mvKey_Return"),
-                            ("escape", "mvKey_Escape"), ("up", "mvKey_Up"),
-                            ("down", "mvKey_Down"), ("left", "mvKey_Left"),
-                            ("right", "mvKey_Right"), ("lshift", "mvKey_LShift"),
-                            ("lcontrol", "mvKey_LControl"), ("tab", "mvKey_Tab")):
-            mapping[name] = getattr(dpg, const, None)
-        mapping["space"] = mapping.get("spacebar")
-        mapping["enter"] = mapping.get("return")
-        mapping["shift"] = mapping.get("lshift")
-        mapping["ctrl"] = mapping.get("lcontrol")
-        _KEY_MAP = mapping
+        key = imgui.Key
+        # imgui 的键常量名：字母 / 数字是小写单字符，命名键用 *_arrow / *_shift…
+        _KEY_MAP = {
+            "space": key.space, "spacebar": key.space,
+            "enter": key.enter, "return": key.enter,
+            "keypad_enter": key.keypad_enter, "escape": key.escape,
+            "up": key.up_arrow, "down": key.down_arrow,
+            "left": key.left_arrow, "right": key.right_arrow,
+            "lshift": key.left_shift, "rshift": key.right_shift,
+            "lcontrol": key.left_ctrl, "rcontrol": key.right_ctrl,
+            "shift": key.left_shift, "ctrl": key.left_ctrl,
+            "tab": key.tab,
+        }
     return _KEY_MAP
 
 
-def _game_key_codes():
-    """小游戏可用的全部键位码：命名键 + 字母 + 数字（handler 逐码注册）。
-
-    注意：DPG 的字母 / 数字键常量**不是 ASCII 码**（mvKey_A=546 而非 65），
-    必须经 mvKey_* 常量取值——用 ord() 注册会错位到别的键（实测按一个键
-    触发一串无关 handler，状态表错乱）。
-    """
-    codes = [code for code in _key_map().values() if code is not None]
-    for ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789":
-        code = getattr(dpg, f"mvKey_{ch}", None)
-        if code is not None:
-            codes.append(code)
-    return codes
-
-
 def _resolve_key(key):
-    """键名 → DPG 键值；未知键返回 None（调用方视为未按下）。"""
+    """键名 → imgui 键码；未知键返回 None（调用方视为未按下）。"""
     key = str(key or "").lower()
     named = _key_map().get(key)
     if named is not None:
         return named
     if len(key) == 1:
-        upper = key.upper()
-        if upper.isalpha() or upper.isdigit():
-            return getattr(dpg, f"mvKey_{upper}", None)
+        if key.isalpha():
+            return getattr(imgui.Key, key, None)
+        if key.isdigit():
+            return getattr(imgui.Key, "_" + key, None)
     return None
 
 
-def _image_to_texture_data(image):
-    """PIL RGBA 图 → DPG 纹理数据（float32 平铺 0~1；numpy 快路径 + 兜底）。
+def _pack(color):
+    """``(r, g, b[, a])``（0~255）→ imgui 打包色。"""
+    r, g, b = color[0], color[1], color[2]
+    a = color[3] if len(color) > 3 else 255
+    return _iu.u32(r, g, b, a)
 
-    走 ``np.asarray`` 直读 PIL 缓冲，省掉 ``tobytes()`` 的一次全图拷贝；
-    除法改成原地乘 ``1/255``（实测 1088×768 全图 6.1 ms，``tobytes`` 版 6.2 ms，
-    收益主要在分块路径的小图上）。``np.take`` + LUT 反而更慢（13.3 ms），别用。
+
+def _draw_text_run(dl, text, pos, color, size, font, dpi):
+    """往 draw list 画一行文本（字号 ``size`` 按 imgui 单位 / 物理像素）。
+
+    ``push_font(font, base)`` 实际得到 ``base × dpi``（见 ``ui`` 模块文档），
+    因此要渲染到 ``size`` 物理像素就得传 ``size / dpi``。字体缺失时退回当前字体。
     """
-    if _np is not None:
-        # ravel() 在连续数组上是零拷贝视图：DPG 的缓冲路径按 len() 取长度，
-        # 必须交出扁平数组（3 维的 (h, w, 4) 会让它只读走 h 个元素）
-        arr = _np.asarray(image, dtype=_np.uint8).astype(_np.float32).ravel()
-        arr *= (1.0 / 255.0)
-        return arr
-    return [value / 255.0 for value in image.tobytes()]
+    pushed = False
+    if font is not None:
+        imgui.push_font(font, max(1.0, float(size) / max(0.5, float(dpi))))
+        pushed = True
+    try:
+        dl.add_text(_iu.v2(pos[0], pos[1]), _pack(color), str(text))
+    finally:
+        if pushed:
+            imgui.pop_font()
 
 
 class _PILCanvas:
@@ -136,9 +145,9 @@ class _PILCanvas:
 
     半透明形状先画进包围盒临时层再 ``alpha_composite`` 回画布
     （ImageDraw 在 RGBA 画布上写半透明色会直接替换像素含 alpha，
-    与 canvas 2D / DPG 的混合语义不一致，见 :meth:`_blend_shape`）。
+    与 canvas 2D / imgui 的混合语义不一致，见 :meth:`_blend_shape`）。
     每次绘制 ``_version`` 自增，同时把包围盒记进 ``_dirty``：运行时据此
-    只重传内容变化的纹理块（见 :class:`_CanvasTextures`）；``_dirty_all``
+    只重传内容变化的纹理矩形（见 :class:`_CanvasTexture`）；``_dirty_all``
     表示「整张都脏」（脏矩形攒太多、或首帧），此时按整张处理。
     """
 
@@ -154,7 +163,7 @@ class _PILCanvas:
         self._root = root            # 相对路径基准（小游戏包目录）
         self._font_family = font_family or ""   # 与会话同源的字体家族（可空）
         self._version = 0
-        # 脏区域（画布坐标，半开区间）与「整张脏」标记；供运行时按块增量上传
+        # 脏区域（画布坐标，半开区间）与「整张脏」标记；供运行时增量上传
         self._dirty = []
         self._dirty_all = False
 
@@ -328,7 +337,7 @@ def _pil_font(size, family=""):
     """按 (字号, 家族) 缓存 PIL 字体：与会话字体走同一条候选链。
 
     PIL 能指定集合（.ttc）内的 face 序号，所以用 :func:`resolve_font` 拿到的
-    序号就用（Noto CJK 因此是简中 face，而不是 DPG 只能取到的第 0 个 JP face）；
+    序号就用（Noto CJK 因此是简中 face，而不是只能取到的第 0 个 JP face）；
     链上一个文件都没有时回退内置位图字体（没有中文字形）。
     """
     key = (max(6, round(size)), str(family or ""))
@@ -360,9 +369,9 @@ class _StageGameAPI(GameAPI):
     契约脚本（check_minigame.py）禁止游戏触碰 ``api._``——私有面随时重构。
 
     游戏坐标系 = 画面区域（play rect）局部坐标：``width`` / ``height`` 返回
-    画面区域尺寸，绘制指令进入位于该区域的 canvas child（声明了 ``aspect``
-    的游戏区域不铺满窗口，其余部分露出压暗的副本界面；内容由 child window
-    裁剪在区域内，越界绘制不外溢）。
+    画面区域尺寸，绘制指令平移进位于该区域的屏幕矩形并压在 play rect 裁剪矩形
+    之内（声明了 ``aspect`` 的游戏区域不铺满窗口，其余部分露出压暗的副本界面；
+    越界绘制不外溢）。
     """
 
     def __init__(self, stage):
@@ -375,9 +384,8 @@ class _StageGameAPI(GameAPI):
         return rect[0], rect[1]
 
     def _pt(self, x, y):
-        # 游戏坐标即画布局部坐标：画布位于画面区域的 canvas child 内，
-        # 裁剪与定位由 child window 的剪裁矩形承担（实测，见探针）
-        return (x, y)
+        # 游戏坐标 → 客户区坐标（舞台窗口在 (0,0)，窗口局部即客户区）
+        return self._stage._to_screen(x, y)
 
     @property
     def width(self):
@@ -387,90 +395,113 @@ class _StageGameAPI(GameAPI):
     def height(self):
         return self._stage._play_rect[3]
 
-    # ---- 绘制（全部 parent 到舞台 drawlist，帧初清屏） ----
-    # 注意 DPG 的 fill 语义：fill 是**颜色元组**（(0,0,0,-255) = 不填充），
-    # color 是描边色——与 canvas 的 fill=True 布尔完全不同，必须转换。
-
+    # ---- 绘制（全部画进舞台窗口的 draw list；裁剪在 play rect 内） ----
+    # 注意与 PIL 画布的 fill 语义差别：这里 fill 是布尔，颜色是 (r,g,b,a)。
     def draw_rect(self, pmin, pmax, color, fill=True, thickness=1.0):
+        dl = self._stage._draw_list
+        if dl is None:
+            return
+        a, b = _iu.v2(*self._pt(*pmin)), _iu.v2(*self._pt(*pmax))
+        col = _pack(color)
         if fill:
-            dpg.draw_rectangle(self._pt(*pmin), self._pt(*pmax), fill=color,
-                               color=(0, 0, 0, 0), parent=_DRAW_TAG)
+            dl.add_rect_filled(a, b, col)
         if (not fill) or thickness > 1:
-            dpg.draw_rectangle(self._pt(*pmin), self._pt(*pmax), color=color,
-                               fill=_NO_FILL,
-                               thickness=max(1.0, float(thickness)), parent=_DRAW_TAG)
+            dl.add_rect(a, b, col, 0.0, max(1.0, float(thickness)))
 
     def draw_round_rect(self, pmin, pmax, radius, color, fill=True, thickness=1.0):
+        dl = self._stage._draw_list
+        if dl is None:
+            return
+        a, b = _iu.v2(*self._pt(*pmin)), _iu.v2(*self._pt(*pmax))
+        col = _pack(color)
+        rounding = max(0.0, float(radius))
         if fill:
-            dpg.draw_rectangle(self._pt(*pmin), self._pt(*pmax), rounding=float(radius),
-                               fill=color, color=(0, 0, 0, 0), parent=_DRAW_TAG)
+            dl.add_rect_filled(a, b, col, rounding)
         if (not fill) or thickness > 1:
-            dpg.draw_rectangle(self._pt(*pmin), self._pt(*pmax), rounding=float(radius),
-                               color=color, fill=_NO_FILL,
-                               thickness=max(1.0, float(thickness)), parent=_DRAW_TAG)
+            dl.add_rect(a, b, col, rounding, max(1.0, float(thickness)))
 
     def draw_circle(self, center, radius, color, fill=True, segments=0,
                     thickness=1.0):
-        seg = int(segments) if segments else -1
+        dl = self._stage._draw_list
+        if dl is None:
+            return
+        cen = _iu.v2(*self._pt(*center))
+        col = _pack(color)
+        seg = max(0, int(segments))
         if fill:
-            dpg.draw_circle(self._pt(*center), radius, fill=color,
-                            color=(0, 0, 0, 0), segments=seg, parent=_DRAW_TAG)
+            dl.add_circle_filled(cen, float(radius), col, seg)
         if (not fill) or thickness > 1:
-            dpg.draw_circle(self._pt(*center), radius, color=color, fill=_NO_FILL,
-                            segments=seg,
-                            thickness=max(1.0, float(thickness)), parent=_DRAW_TAG)
+            dl.add_circle(cen, float(radius), col, seg,
+                          max(1.0, float(thickness)))
 
     def draw_line(self, p1, p2, color, thickness=1.0):
-        dpg.draw_line(self._pt(*p1), self._pt(*p2), color=color,
-                      thickness=max(1.0, float(thickness)), parent=_DRAW_TAG)
+        dl = self._stage._draw_list
+        if dl is None:
+            return
+        dl.add_line(_iu.v2(*self._pt(*p1)), _iu.v2(*self._pt(*p2)),
+                    _pack(color), max(1.0, float(thickness)))
 
     def draw_polygon(self, points, color):
-        dpg.draw_polygon([self._pt(*point) for point in points],
-                         fill=color, color=(0, 0, 0, 0), parent=_DRAW_TAG)
+        dl = self._stage._draw_list
+        if dl is None or not points:
+            return
+        pts = [_iu.v2(*self._pt(*point)) for point in points]
+        dl.add_concave_poly_filled(pts, _pack(color))
 
     def draw_text(self, text, pos, color, size=18):
-        dpg.draw_text(self._pt(*pos), str(text), color=color, size=float(size),
-                      parent=_DRAW_TAG)
+        dl = self._stage._draw_list
+        if dl is None:
+            return
+        _draw_text_run(dl, text, self._pt(*pos), color, size,
+                       self._stage._text_font(), self._stage._dpi)
 
     def draw_image(self, source, pmin, pmax, uv=None):
+        dl = self._stage._draw_list
+        if dl is None:
+            return
         if isinstance(source, _PILCanvas):
             self._stage._draw_canvas(source, pmin, pmax, uv)
             return
-        tag = self._stage._ensure_texture(source)
-        if tag is None:
+        texture = self._stage._ensure_texture(source)
+        if texture is None:
             return
-        kwargs = {}
-        if uv:
-            kwargs["uv_min"] = [uv[0], uv[1]]
-            kwargs["uv_max"] = [uv[2], uv[3]]
-        dpg.draw_image(tag, self._pt(*pmin), self._pt(*pmax), parent=_DRAW_TAG,
-                       **kwargs)
+        ref = imgui.ImTextureRef(int(texture.texture_id()))
+        uv_min = _iu.v2(uv[0], uv[1]) if uv else None
+        uv_max = _iu.v2(uv[2], uv[3]) if uv else None
+        dl.add_image(ref, _iu.v2(*self._pt(*pmin)), _iu.v2(*self._pt(*pmax)),
+                     uv_min, uv_max)
 
     def offscreen(self, width, height, bg=None):
         return _PILCanvas(width, height, bg=bg, root=self._stage._root,
                           font_family=self._stage.font_family)
 
-    # ---- 输入（handler 维护的状态表；DPG 的 is_key_down /
-    #      is_mouse_button_down 在手动渲染下不更新，实测不可用） ----
+    # ---- 输入（轮询式：imgui 的键鼠状态每帧新鲜，不需要状态表） ----
     def key_down(self, key):
         code = _resolve_key(key)
-        return code is not None and code in self._stage._keys_down
+        if code is None:
+            return False
+        try:
+            return bool(imgui.is_key_down(code))
+        except Exception:
+            return False
 
     def mouse_pos(self):
         try:
-            gx, gy = self._stage._mouse_pos
-            ox, oy = dpg.get_item_rect_min(_DRAW_TAG)
-            px, py = self._origin
-            return (gx - ox - px, gy - oy - py)
+            io = imgui.get_io()
+            ox, oy = self._origin
+            return (float(io.mouse_pos.x) - ox, float(io.mouse_pos.y) - oy)
         except Exception:
             return (0.0, 0.0)
 
     def mouse_down(self, button=0):
-        buttons = (dpg.mvMouseButton_Left, dpg.mvMouseButton_Right,
-                   dpg.mvMouseButton_Middle)
+        buttons = (imgui.MouseButton_.left, imgui.MouseButton_.right,
+                   imgui.MouseButton_.middle)
         if not 0 <= int(button) < len(buttons):
             return False
-        return buttons[int(button)] in self._stage._buttons_down
+        try:
+            return bool(imgui.is_mouse_down(buttons[int(button)]))
+        except Exception:
+            return False
 
     # ---- 服务 ----
     def finish(self, result=None):
@@ -500,169 +531,125 @@ class _StageGameAPI(GameAPI):
         return values.get(key)
 
 
-class _CanvasTextures:
-    """一块离屏画布的**分块纹理集**：按需创建、只重传「脏且可见」的块。
+class _CanvasTexture:
+    """一块离屏画布的**单张宿主 GL 纹理**：按需创建、只重传脏矩形。
 
-    为什么分块：整张 1088×768 画布重传一次 ≈ 14.6 ms（RGBA→float32 平铺 6 ms +
-    ``set_value`` 10 ms，实测），等于一整帧预算；而每帧真正变化的往往只有几格
-    地块。切成 :data:`_CANVAS_CHUNK` 见方的块后，单块（258²）≈ 1.2 ms。
+    为什么是「一张」而不是 DPG 时代的分块纹理集：``glTexSubImage2D`` 更新整张
+    1088×768 实测只要 0.294 ms（``.workbuddy/p6_probe/probe_gltex.py``），而
+    分块原本是为了绕开 ``set_value`` 的 10 ms 开销。一张纹理既没有块边界采样缝，
+    也不必维护「脏块 + 出血 + uv 内缩」那套几何，代码量与出错面都小一个量级。
 
-    无缝：块纹理四周多带 :data:`_CANVAS_BLEED` 像素邻块内容，绘制时把 uv 按
-    「块在纹理内的位置」内缩。这样块边界处的双线性采样取到的仍是邻块像素，
-    与「一整张纹理」的采样结果逐像素一致——直接用 ``[0,1]`` 会让每个块的四个边
-    各出现一条 1 px 拉伸缝（DPG 不暴露纹理过滤开关，换不成 nearest）。
-
-    可见性：只有真正被 ``draw_image`` 覆盖到的块才会上传。地图比视野大得多时
-    （escape_giantess：1088×768 画布 / 512×512 视野），整块地图里最多只有 9 块
-    同时可见，视野外的脏块留到镜头移过去再传。
-
-    生命周期：由 :class:`_MiniGameStage` 持有，舞台销毁时整批删掉纹理。
-    持有画布**弱引用**：小游戏换关常常整块换掉离屏画布（``self._terrain = ...``），
-    旧画布随即无人引用——弱引用一断，纹理集就能被识别为孤儿并回收，不必等整个
-    小游戏结束（否则一局 30 关会攒三十份纹理，几百 MB）。
+    生命周期：由 :class:`_MiniGameStage` 持有，舞台销毁时删纹理。持有画布
+    **弱引用**：小游戏换关常常整块换掉离屏画布（``self._terrain = ...``），
+    旧画布随即无人引用——弱引用一断，纹理就能被识别为孤儿并回收，不必等整个
+    小游戏结束（否则一局 30 关会攒三十份大纹理）。
     """
 
     def __init__(self, canvas):
         self._canvas_ref = _weakref.ref(canvas)
         self._size = (canvas.width, canvas.height)
-        self.cols = max(1, -(-canvas.width // _CANVAS_CHUNK))
-        self.rows = max(1, -(-canvas.height // _CANVAS_CHUNK))
-        self._tags = {}        # (cx, cy) → 纹理 tag
-        self._stale = set()    # 内容已变、尚未重传的块
+        self._tex = None            # GL 纹理名；None = 尚未创建
+        self._stale = []            # 内容已变、尚未重传的矩形（半开区间）
+        self._stale_all = True      # 首帧 / 攒够脏矩形 → 整张重传一次
 
     @property
     def canvas(self):
-        """当前画布；已被回收时返回 None（该纹理集随即由舞台清掉）。"""
+        """当前画布；已被回收时返回 None（该纹理随即由舞台清掉）。"""
         return self._canvas_ref()
 
-    # ---------------- 内容 / 几何 ----------------
-    def _harvest_dirty(self):
-        """把画布累积的脏矩形折算成脏块（同帧多次绘制只折算一次）。"""
+    @property
+    def texture(self):
+        """GL 纹理名（未创建 / 不可用时为 None）。"""
+        return self._tex
+
+    def _harvest(self):
+        """把画布累积的脏矩形收进待传队列（同帧多次绘制只折算一次）。"""
         canvas = self.canvas
         if canvas is None:
             return
         if canvas._dirty_all:
             canvas._dirty_all = False
             canvas._dirty.clear()
-            self._stale = {(cx, cy) for cy in range(self.rows)
-                           for cx in range(self.cols)}
+            self._stale_all = True
+            self._stale = []
             return
         if not canvas._dirty:
             return
-        boxes = canvas._dirty
+        self._stale.extend(canvas._dirty)
         canvas._dirty = []
-        for x0, y0, x1, y1 in boxes:
-            cx0 = x0 // _CANVAS_CHUNK
-            cx1 = min(self.cols - 1, (x1 - 1) // _CANVAS_CHUNK)
-            cy0 = y0 // _CANVAS_CHUNK
-            cy1 = min(self.rows - 1, (y1 - 1) // _CANVAS_CHUNK)
-            for cy in range(cy0, cy1 + 1):
-                for cx in range(cx0, cx1 + 1):
-                    self._stale.add((cx, cy))
 
-    def _chunk_bounds(self, cx, cy):
-        """块在画布上的覆盖范围（含出血），半开区间 ``(bx0, by0, bx1, by1)``。"""
-        w, h = self._size
-        x0, y0 = cx * _CANVAS_CHUNK, cy * _CANVAS_CHUNK
-        return (max(0, x0 - _CANVAS_BLEED), max(0, y0 - _CANVAS_BLEED),
-                min(w, x0 + _CANVAS_CHUNK + _CANVAS_BLEED),
-                min(h, y0 + _CANVAS_CHUNK + _CANVAS_BLEED))
-
-    # ---------------- 上传 ----------------
-    def _ensure(self, cx, cy):
-        """取（必要时创建并上传）某块的纹理 tag；失败返回 None（调用方跳过）。"""
-        key = (cx, cy)
-        if key in self._tags and key not in self._stale:
-            return self._tags[key]
-        bx0, by0, bx1, by1 = self._chunk_bounds(cx, cy)
-        tw, th = bx1 - bx0, by1 - by0
-        try:
-            data = _image_to_texture_data(
-                self.canvas._img.crop((bx0, by0, bx1, by1)))
-        except Exception as exc:
-            process_log.log(f"[MiniGame] 离屏画布分块转换失败: {exc}")
+    def _ensure(self):
+        """取纹理（首次创建并整张上传，之后按脏矩形增量上传）；失败返回 None。"""
+        if _np is None or not _gl.available():
             return None
-        tag = self._tags.get(key)
-        try:
-            if tag is None:
-                tag = f"minigame_canvas_tex_{self.canvas._uid}_{cx}_{cy}"
-                dpg.add_dynamic_texture(tw, th, data, tag=tag,
-                                        parent="dungeon_texture_registry")
-                self._tags[key] = tag
-            else:
-                dpg.set_value(tag, data)
-        except Exception as exc:
-            process_log.log(f"[MiniGame] 离屏画布分块上传失败: {exc}")
-            return None
-        self._stale.discard(key)
-        return tag
-
-    # ---------------- 绘制 ----------------
-    def draw(self, pmin, pmax, uv):
-        """把画布（``uv`` 指定的子区域）画进当前 drawlist。
-
-        ``pmin`` / ``pmax`` 是**屏幕**坐标，与 ``uv``（画布归一化裁剪）是线性
-        对应关系；这里换算成「逐块的画布矩形 → 屏幕矩形」再逐块绘制。块的
-        「核心」区间彼此不重叠且刚好铺满画布，因此不会出现重复绘制。
-        """
         canvas = self.canvas
-        if canvas is None:      # 画布已被回收（孤儿集，马上会被舞台清掉）
-            return
-        cw, ch = canvas.width, canvas.height
-        u0, v0, u1, v1 = uv if uv else (0.0, 0.0, 1.0, 1.0)
-        # uv → 画布像素（夹进画布：越界部分整张纹理同样画不出东西）
-        rx0 = min(max(float(u0) * cw, 0.0), cw)
-        rx1 = min(max(float(u1) * cw, 0.0), cw)
-        ry0 = min(max(float(v0) * ch, 0.0), ch)
-        ry1 = min(max(float(v1) * ch, 0.0), ch)
-        if rx1 <= rx0 or ry1 <= ry0:
-            return
-        self._harvest_dirty()
-        sx = (pmax[0] - pmin[0]) / (rx1 - rx0)
-        sy = (pmax[1] - pmin[1]) / (ry1 - ry0)
-        cx0 = min(self.cols - 1, int(rx0 // _CANVAS_CHUNK))
-        cx1 = min(self.cols - 1, int((rx1 - 1e-6) // _CANVAS_CHUNK))
-        cy0 = min(self.rows - 1, int(ry0 // _CANVAS_CHUNK))
-        cy1 = min(self.rows - 1, int((ry1 - 1e-6) // _CANVAS_CHUNK))
-        for cy in range(cy0, cy1 + 1):
-            core_y0 = cy * _CANVAS_CHUNK
-            core_y1 = min(ch, core_y0 + _CANVAS_CHUNK)
-            iy0, iy1 = max(core_y0, ry0), min(core_y1, ry1)
-            if iy1 <= iy0:
-                continue
-            for cx in range(cx0, cx1 + 1):
-                core_x0 = cx * _CANVAS_CHUNK
-                core_x1 = min(cw, core_x0 + _CANVAS_CHUNK)
-                ix0, ix1 = max(core_x0, rx0), min(core_x1, rx1)
-                if ix1 <= ix0:
-                    continue
-                tag = self._ensure(cx, cy)
-                if tag is None:
-                    continue
-                bx0, by0, bx1, by1 = self._chunk_bounds(cx, cy)
-                tw, th = bx1 - bx0, by1 - by0
-                dpg.draw_image(
-                    tag,
-                    (pmin[0] + (ix0 - rx0) * sx, pmin[1] + (iy0 - ry0) * sy),
-                    (pmin[0] + (ix1 - rx0) * sx, pmin[1] + (iy1 - ry0) * sy),
-                    uv_min=[(ix0 - bx0) / tw, (iy0 - by0) / th],
-                    uv_max=[(ix1 - bx0) / tw, (iy1 - by0) / th],
-                    parent=_DRAW_TAG)
-
-    def destroy(self):
-        """删掉本集创建的全部纹理（舞台销毁时调用）。"""
-        for tag in self._tags.values():
+        if canvas is None:
+            return None
+        w, h = self._size
+        if self._tex is None:
             try:
-                if dpg.does_item_exist(tag):
-                    dpg.delete_item(tag)
-            except Exception:
-                pass
-        self._tags.clear()
-        self._stale.clear()
+                # ravel 不需要：PIL 的 RGBA 缓冲是 (h, w, 4) 连续的 uint8，
+                # 行 0 = 图像上边 = 纹理 v=0 = 绘制矩形上边（imgui uv (0,0) 在 p_min）
+                arr = _np.asarray(canvas._img, dtype=_np.uint8)
+            except Exception as exc:
+                process_log.log(f"[MiniGame] 离屏画布读取失败: {exc}")
+                return None
+            self._tex = _gl.create_texture(w, h, arr)
+            if self._tex is None:
+                return None
+            self._stale = []
+            self._stale_all = False
+            return self._tex
+        try:
+            arr = _np.asarray(canvas._img, dtype=_np.uint8)
+        except Exception as exc:
+            process_log.log(f"[MiniGame] 离屏画布读取失败: {exc}")
+            return None
+        if self._stale_all:
+            if _gl.upload(self._tex, 0, 0, w, h, arr):
+                self._stale_all = False
+                self._stale = []
+            return self._tex
+        if not self._stale:
+            return self._tex
+        pending, self._stale = self._stale, []
+        for x0, y0, x1, y1 in pending:
+            x0 = max(0, min(w, int(x0)))
+            y0 = max(0, min(h, int(y0)))
+            x1 = max(0, min(w, int(x1)))
+            y1 = max(0, min(h, int(y1)))
+            if x1 <= x0 or y1 <= y0:
+                continue
+            # glTexSubImage2D 要求连续数据：PIL 缓冲切片必须 ascontiguousarray
+            sub = _np.ascontiguousarray(arr[y0:y1, x0:x1])
+            if not _gl.upload(self._tex, x0, y0, x1 - x0, y1 - y0, sub):
+                self._stale.append((x0, y0, x1, y1))    # 失败留待下帧
+        return self._tex
+
+    def draw(self, dl, pmin, pmax, uv=None):
+        """把画布（``uv`` 指定的归一化子区域）画进 ``dl``；``pmin``/``pmax`` 是屏幕坐标。"""
+        if dl is None:
+            return
+        self._harvest()
+        texture = self._ensure()
+        if texture is None:         # 画布已被回收 / 无 GL：静默跳过
+            return
+        u0, v0, u1, v1 = uv if uv else (0.0, 0.0, 1.0, 1.0)
+        dl.add_image(imgui.ImTextureRef(int(texture)),
+                     _iu.v2(pmin[0], pmin[1]), _iu.v2(pmax[0], pmax[1]),
+                     _iu.v2(u0, v0), _iu.v2(u1, v1))
+
+    def destroy(self, delete_gl=True):
+        """删掉 GL 纹理（``delete_gl`` 为假时只丢句柄——GL 上下文已随窗口消失）。"""
+        if delete_gl and self._tex is not None:
+            _gl.delete_texture(self._tex)
+        self._tex = None
+        self._stale = []
+        self._stale_all = False
 
 
 class _MiniGameStage:
-    """一次小游戏会话的舞台：控件、帧驱动、纹理缓存与结算。"""
+    """一次小游戏会话的舞台：帧内绘制、纹理缓存与结算。"""
 
     def __init__(self, window, game_cls, config, on_result, root=None):
         self._win = window
@@ -675,26 +662,44 @@ class _MiniGameStage:
         self._result = None        # None = 未结算 / 中止
         self._last_t = 0.0
         self._size = [0, 0]
-        self._textures = {}        # 绝对路径 → (tag, w, h)
-        self._canvas_texes = {}    # 画布 _uid → _CanvasTextures（分块纹理集）
-        self._keys_down = set()    # handler 维护的按下键码集合
-        self._buttons_down = set()  # handler 维护的按下鼠标键集合
-        self._mouse_pos = (0.0, 0.0)
-        self._input_tags = []      # 本舞台注册进全局 handler registry 的项
-        self._game = None
+        self._textures = {}        # 绝对路径 → hello_imgui.TextureGpu
+        self._canvas_texes = {}    # 画布 _uid → _CanvasTexture（单张 GL 纹理）
         self._play_rect = [0, 0, 0, 0]   # 游戏画面区域（窗口内居中）
+        self._draw_list = None     # 本帧的 draw list（游戏绘制入口；帧外为 None）
+        self._game = None
         self._api = _StageGameAPI(self)
 
     @property
     def font_family(self):
-        """会话窗口的字体家族名（离屏画布与 DPG 文本用同一份设置，可空）。"""
+        """会话窗口的字体家族名（离屏画布与文本用同一份设置，可空）。"""
         return getattr(self._win, "dungeon_font", "") or ""
+
+    @property
+    def _dpi(self) -> float:
+        return max(0.5, float(getattr(self._win, "_dpi_scale", 1.0) or 1.0))
+
+    def _text_font(self):
+        """draw list 文本用的字体（会话正文档字体，可能是 None）。"""
+        return getattr(self._win, "dungeon_text_font", None)
+
+    def _to_screen(self, x, y):
+        """游戏坐标（play rect 局部）→ 客户区坐标。"""
+        rect = self._play_rect
+        return (float(rect[0]) + float(x), float(rect[1]) + float(y))
+
+    def _gl_ops_ok(self) -> bool:
+        """收尾期是否还能碰 GL：帧时钟仍在跑 = 仍在帧线程且上下文当前。
+
+        ``_finish_session`` 在 ``_frame.stop()`` 之后才 ``_destroy_overlays()``
+        （此时 ``hello_imgui.run()`` 已返回、上下文已释放），因此那里不能删纹理。
+        """
+        return bool(getattr(getattr(self._win, "_frame", None), "running", False))
 
     # ---------------- 生命周期 ----------------
     def _compute_play_rect(self, win_w, win_h):
         """按游戏声明的长宽比计算画面区域：等比缩放进「窗口 - 边缘留白」
         内并居中；未声明 aspect 的游戏沿用旧行为（铺满窗口）。游戏绘制统一
-        裁剪进该区域（见 ``tick`` 的 push/pop_clip_rect）。"""
+        裁剪进该区域（见 :meth:`render` 的 push_clip_rect）。"""
         game = self._game
         aspect = getattr(game, "aspect", None) if game is not None else None
         try:
@@ -713,8 +718,9 @@ class _MiniGameStage:
             w = avail_w
             h = round(w / aspect)
         return [(win_w - w) // 2, (win_h - h) // 2, w, h]
+
     def build(self) -> bool:
-        """构建覆盖层控件并进入游戏。失败（游戏 setup 抛错等）返回 False。"""
+        """进入游戏（不建任何 GPU 资源 / draw list）。失败返回 False。"""
         try:
             game = self._game_cls()
             game.api = self._api
@@ -724,176 +730,91 @@ class _MiniGameStage:
                             f"初始化失败: {exc}")
             return False
         self._game = game
-
-        s = getattr(self._win, "_dpi_scale", 1.0) or 1.0
-        w = dpg.get_viewport_client_width()
-        h = dpg.get_viewport_client_height()
+        # 客户区尺寸取窗口每帧维护的布局尺寸（build 总发生在帧内，值是最新的）。
+        # 不在 build 里碰 imgui：触发器可能与 draw list 无关的时机构建舞台。
+        w = int(getattr(self._win, "_layout_w", 0) or 0)
+        h = int(getattr(self._win, "_layout_h", 0) or 0)
         self._size = [w, h]
         self._play_rect = self._compute_play_rect(w, h)
-        x0, y0, pw, ph = self._play_rect
-        if dpg.does_item_exist(_STAGE_TAG):
-            dpg.delete_item(_STAGE_TAG)
-        dpg.add_child_window(tag=_STAGE_TAG, parent="main_window",
-                             pos=[0, 0], width=w, height=h, border=False)
-        with dpg.theme() as theme:
-            with dpg.theme_component(dpg.mvAll):
-                dpg.add_theme_color(dpg.mvThemeCol_ChildBg, _BACKDROP_COLOR)
-                dpg.add_theme_color(dpg.mvThemeCol_Border, (0, 0, 0, 0))
-                dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, 0, 0)
-        dpg.bind_item_theme(_STAGE_TAG, theme)
-        # 画面区域 child：DPG 的 child window 会把其 drawlist 内容裁剪进
-        # 自己的矩形（帧缓冲实测），游戏内容因此不会溢出到副本界面——
-        # 这才是「画布」与坐标平移的真正分界，游戏坐标即画布局部坐标。
-        dpg.add_child_window(tag=_CANVAS_TAG, parent=_STAGE_TAG,
-                             pos=[x0, y0], width=pw, height=ph, border=False,
-                             no_scrollbar=True)
-        with dpg.theme() as canvas_theme:
-            with dpg.theme_component(dpg.mvAll):
-                dpg.add_theme_color(dpg.mvThemeCol_ChildBg, (0, 0, 0, 0))
-                dpg.add_theme_color(dpg.mvThemeCol_Border, (0, 0, 0, 0))
-                dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, 0, 0)
-        dpg.bind_item_theme(_CANVAS_TAG, canvas_theme)
-        # C6 怪癖：容器块之后创建的控件推断不出父级，drawlist 显式 parent。
-        # 覆盖层（边框/HUD）建在游戏画布之后，渲染在后才能盖在游戏内容上。
-        dpg.add_drawlist(tag=_DRAW_TAG, width=pw, height=ph, parent=_CANVAS_TAG)
-        dpg.add_drawlist(tag=_OVERLAY_TAG, width=pw, height=ph, parent=_CANVAS_TAG)
         self._last_t = time.monotonic()
-        self._install_input()
-        self._win._frame.every(self._win._frame.EVERY_FRAME,
-                               self._win._minigame_tick, key=_TICK_KEY)
-        process_log.log(f"[MiniGame] 小游戏「{game.id}」开始（覆盖层舞台）")
+        process_log.log(f"[MiniGame] 小游戏「{game.id}」开始（imgui 覆盖层舞台）")
         return True
 
-    # ---------------- 输入（handler 维护状态，见 _StageGameAPI） ----------------
-    def _install_input(self):
-        """把键鼠状态 handler 注册进**全局** handler registry。
+    def render(self, w: float, h: float):
+        """帧末绘制（``ui._draw_frame`` → ``_draw_mini_game_stage``）。
 
-        DPG 的 ``is_key_down`` / ``is_mouse_button_down`` 在本应用的手动渲染
-        配置下不更新（实测恒 False），但 handler 回调可靠（会话按键同机制），
-        因此这里用 down/up 回调维护状态表；teardown 时逐项删除。
+        顺序：压暗底（窗口背景）→ 裁剪到 play rect → ``game.update(dt)`` →
+        边框（画面区域不满窗时）/ HUD → 已结算则收尾。异常按「无结果」收场，
+        不拖垮副本会话。
         """
-        self._input_tags = []
-        with dpg.handler_registry():
-            for code in _game_key_codes():
-                self._input_tags.append(dpg.add_key_down_handler(
-                    key=code, callback=self._key_event, user_data=(code, True)))
-                self._input_tags.append(dpg.add_key_release_handler(
-                    key=code, callback=self._key_event, user_data=(code, False)))
-            for button in (dpg.mvMouseButton_Left, dpg.mvMouseButton_Right,
-                           dpg.mvMouseButton_Middle):
-                self._input_tags.append(dpg.add_mouse_down_handler(
-                    button=button, callback=self._button_event,
-                    user_data=(button, True)))
-                self._input_tags.append(dpg.add_mouse_release_handler(
-                    button=button, callback=self._button_event,
-                    user_data=(button, False)))
-            self._input_tags.append(dpg.add_mouse_move_handler(
-                callback=self._mouse_move_event))
-
-    def _uninstall_input(self):
-        for tag in self._input_tags:
-            try:
-                if dpg.does_item_exist(tag):
-                    dpg.delete_item(tag)
-            except Exception:
-                pass
-        self._input_tags = []
-        self._keys_down.clear()
-        self._buttons_down.clear()
-
-    def _key_event(self, sender, app_data, user_data):
-        code, down = user_data
-        if down:
-            self._keys_down.add(code)
-        else:
-            self._keys_down.discard(code)
-
-    def _button_event(self, sender, app_data, user_data):
-        button, down = user_data
-        if down:
-            self._buttons_down.add(button)
-        else:
-            self._buttons_down.discard(button)
-
-    def _mouse_move_event(self, sender, app_data):
-        try:
-            self._mouse_pos = (float(app_data[0]), float(app_data[1]))
-        except Exception:
-            pass
-
-    def tick(self):
-        """帧驱动：清屏 → 游戏逻辑 → HUD →（已结算）收尾。只由帧任务调用。"""
         if self._finished:
-            # 结算可能发生在两次 tick 之间（api.finish 在帧任务外的帧线程调用），
-            # 这里兜底销毁——正常路径（update 内 finish）也会再次走到这
+            # 结算沿帧任务到达（``api.finish`` 可在 update 之外调用），这里兜底销毁
             self._win._destroy_mini_game_stage()
             return
-        if self._win._closing:
+        if getattr(self._win, "_closing", False):
             return
-        w, h = dpg.get_viewport_client_width(), dpg.get_viewport_client_height()
-        if (w, h) != tuple(self._size):
+        if abs(w - self._size[0]) > 0.5 or abs(h - self._size[1]) > 0.5:
             self._size = [w, h]
             self._play_rect = self._compute_play_rect(w, h)
-            x0, y0, pw, ph = self._play_rect
-            if dpg.does_item_exist(_STAGE_TAG):
-                dpg.configure_item(_STAGE_TAG, width=w, height=h)
-            if dpg.does_item_exist(_CANVAS_TAG):
-                dpg.configure_item(_CANVAS_TAG, pos=[x0, y0], width=pw, height=ph)
-            for tag in (_DRAW_TAG, _OVERLAY_TAG):
-                if dpg.does_item_exist(tag):
-                    dpg.configure_item(tag, width=pw, height=ph)
+        x0, y0, pw, ph = self._play_rect
+
+        imgui.set_next_window_pos(_iu.v2(0.0, 0.0))
+        imgui.set_next_window_size(_iu.v2(float(w), float(h)))
+        imgui.push_style_var(imgui.StyleVar_.window_padding, _iu.v2(0.0, 0.0))
+        imgui.push_style_var(imgui.StyleVar_.window_border_size, 0.0)
+        imgui.push_style_var(imgui.StyleVar_.window_rounding, 0.0)
+        imgui.push_style_color(imgui.Col_.window_bg, _iu.u32(*_BACKDROP_COLOR))
+        imgui.begin(_STAGE_WINDOW, None, _stage_flags())
+
+        dl = imgui.get_window_draw_list()
+        self._draw_list = dl
+        dl.push_clip_rect(_iu.v2(float(x0), float(y0)),
+                          _iu.v2(float(x0 + pw), float(y0 + ph)), True)
         now = time.monotonic()
         dt = clamp_dt(now - self._last_t)
         self._last_t = now
-        if dpg.does_item_exist(_DRAW_TAG):
-            dpg.delete_item(_DRAW_TAG, children_only=True)
         try:
             self._game.update(dt)
         except Exception as exc:
-            process_log.log(f"[MiniGame] 游戏「{self._game.id}」帧异常，按无结果收场: {exc}")
+            process_log.log(f"[MiniGame] 游戏「{self._game.id}」帧异常，"
+                            f"按无结果收场: {exc}")
             self._abort()
-            self._win._destroy_mini_game_stage()
-            return
-        # 覆盖层（画布局部坐标，盖在游戏内容上）：画面区域不满窗时画一圈
-        # 细边框与压暗的副本界面分开；HUD 固定在画面区域左上角
-        if dpg.does_item_exist(_OVERLAY_TAG):
-            dpg.delete_item(_OVERLAY_TAG, children_only=True)
-            pw, ph = self._play_rect[2], self._play_rect[3]
-            if self._play_rect[2:] != [w, h]:
-                dpg.draw_rectangle([0, 0], [pw, ph],
-                                   color=_PLAY_FRAME_COLOR, thickness=2.0,
-                                   parent=_OVERLAY_TAG)
-            if self._hud:
-                dpi = getattr(self._win, "_dpi_scale", 1.0) or 1.0
-                dpg.draw_text([round(16 * dpi), round(12 * dpi)],
-                              self._hud, color=_HUD_COLOR, size=_HUD_SIZE,
-                              parent=_OVERLAY_TAG)
+        self._draw_overlay(dl, w, h)
+        dl.pop_clip_rect()
+        self._draw_list = None
+        imgui.end()
+        imgui.pop_style_color()
+        imgui.pop_style_var(3)
         if self._finished:
             self._win._destroy_mini_game_stage()
 
+    def _draw_overlay(self, dl, w, h):
+        """覆盖层（画布局部坐标，盖在游戏内容上）：画面区域不满窗时画一圈细边框
+        与压暗的副本界面分开；HUD 固定在画面区域左上角。"""
+        pw, ph = self._play_rect[2], self._play_rect[3]
+        if [pw, ph] != [w, h]:
+            dl.add_rect(_iu.v2(0.0, 0.0), _iu.v2(float(pw), float(ph)),
+                        _pack(_PLAY_FRAME_COLOR), 0.0, 2.0)
+        if self._hud:
+            dpi = self._dpi
+            pos = (round(16 * dpi), round(12 * dpi))
+            _draw_text_run(dl, self._hud, pos, _HUD_COLOR, _HUD_SIZE,
+                           self._text_font(), dpi)
+
     def destroy(self):
-        """销毁控件与资源并回传结果（会话收尾路径帧时钟已停，回传自然失效）。"""
-        self._win._frame.cancel(_TICK_KEY)
-        self._uninstall_input()
+        """销毁 GPU 资源并回传结果（会话收尾路径帧时钟已停，回传自然失效）。"""
+        gl_ok = self._gl_ops_ok()
         if self._game is not None:
             try:
                 self._game.teardown()
             except Exception as exc:
                 process_log.log(f"[MiniGame] 游戏「{self._game.id}」收尾异常: {exc}")
             self._game = None
-        for tag, _w, _h in self._textures.values():
-            try:
-                if dpg.does_item_exist(tag):
-                    dpg.delete_item(tag)
-            except Exception:
-                pass
+        # 静态贴图是 hello_imgui.TextureGpu（RAII）：丢引用即释放
         self._textures.clear()
-        for textures in self._canvas_texes.values():
-            textures.destroy()
+        for texture in self._canvas_texes.values():
+            texture.destroy(gl_ok)
         self._canvas_texes.clear()
-        for tag in (_OVERLAY_TAG, _DRAW_TAG, _CANVAS_TAG, _STAGE_TAG):
-            if dpg.does_item_exist(tag):
-                dpg.delete_item(tag)
         on_result = self._on_result
         self._on_result = None
         if on_result is not None:
@@ -905,7 +826,7 @@ class _MiniGameStage:
     def _finish(self, result):
         """游戏侧结算（api.finish）：记录结果，帧末统一销毁。
 
-        小游戏不再区分胜负：``result`` 为 dict 时原样回传（返回值取
+        小游戏不区分胜负：``result`` 为 dict 时原样回传（返回值取
         ``level`` / ``value`` 键），标量包装成 ``{"value": ...}``。"""
         if self._finished:
             return
@@ -923,10 +844,10 @@ class _MiniGameStage:
 
     # ---------------- 资源 ----------------
     def _ensure_texture(self, source):
-        """文件路径源 → 静态 DPG 纹理 tag（按绝对路径缓存）。
+        """文件路径源 → 静态 ``TextureGpu``（按绝对路径缓存）。
 
-        离屏画布不走这里（见 :meth:`_draw_canvas`）：它要按块增量重传，
-        单一纹理装不下。失败返回 None（调用方静默跳过，不拖垮帧）。
+        离屏画布不走这里（见 :meth:`_draw_canvas`）：它要按脏矩形增量重传，
+        必须由宿主自持 GL 纹理。失败返回 None（调用方静默跳过，不拖垮帧）。
         """
         if not source:
             return None
@@ -935,7 +856,7 @@ class _MiniGameStage:
             path = os.path.join(self._root, path)
         cached = self._textures.get(path)
         if cached is not None:
-            return cached[0]
+            return cached
         if not os.path.isfile(path):
             return None
         try:
@@ -947,35 +868,36 @@ class _MiniGameStage:
                     scale = _MAX_TEXTURE_EDGE / edge
                     img = img.resize((max(1, round(img.width * scale)),
                                       max(1, round(img.height * scale))))
-                tw, th = img.width, img.height
-                data = _image_to_texture_data(img)
-            tag = f"minigame_tex_{len(self._textures)}"
-            dpg.add_static_texture(tw, th, data, tag=tag,
-                                   parent="dungeon_texture_registry")
+                rgba = _np.asarray(img, dtype=_np.uint8) if _np is not None else None
+                if rgba is None:
+                    return None
+            texture = hello_imgui.create_texture_gpu_from_rgba_data(rgba)
         except Exception as exc:
             process_log.log(f"[MiniGame] 贴图加载失败 {path}: {exc}")
             return None
-        self._textures[path] = (tag, tw, th)
-        return tag
+        self._textures[path] = texture
+        return texture
 
     def _draw_canvas(self, canvas, pmin, pmax, uv=None):
-        """把离屏画布 ``uv`` 指定的子区域画进 drawlist（分块增量上传）。
+        """把离屏画布 ``uv`` 指定的子区域画进 draw list（单张纹理增量上传）。
 
-        每块画布的纹理集按需建立、跟着舞台一起销毁；详见 :class:`_CanvasTextures`。
-        顺手回收孤儿纹理集：小游戏换关常整块换掉离屏画布，旧画布连同纹理集一起
-        作废（弱引用已断），不回收的话一局多关会一直往上叠纹理。
+        顺手回收孤儿纹理：小游戏换关常整块换掉离屏画布，旧画布连同纹理一起作废
+        （弱引用已断），不回收的话一局多关会一直往上叠纹理。
         """
+        dl = self._draw_list
+        if dl is None:
+            return
         for uid in [u for u, t in self._canvas_texes.items() if t.canvas is None]:
-            self._canvas_texes.pop(uid).destroy()
-        textures = self._canvas_texes.get(canvas._uid)
-        if textures is None:
-            textures = _CanvasTextures(canvas)
-            self._canvas_texes[canvas._uid] = textures
-        textures.draw(pmin, pmax, uv)
+            self._canvas_texes.pop(uid).destroy(self._gl_ops_ok())
+        texture = self._canvas_texes.get(canvas._uid)
+        if texture is None:
+            texture = _CanvasTexture(canvas)
+            self._canvas_texes[canvas._uid] = texture
+        texture.draw(dl, self._to_screen(*pmin), self._to_screen(*pmax), uv)
 
 
 class MiniGameStageHandler:
-    """会话窗口 mixin：py 后端小游戏的打开 / 帧驱动代理 / ESC 中止 / 销毁。"""
+    """会话窗口 mixin：py 后端小游戏的打开 / 帧末绘制 / ESC 中止 / 销毁。"""
 
     #: 当前舞台（无小游戏时为 None；类属性默认值免去 init 次序问题）
     _mini_game_stage = None
@@ -997,11 +919,14 @@ class MiniGameStageHandler:
         self._mini_game_stage = stage
         return True
 
-    def _minigame_tick(self):
-        """帧任务代理（帧任务挂在窗口的调度器上，key 归属统一为 _TICK_KEY）。"""
+    def _draw_mini_game_stage(self, w: float, h: float):
+        """帧末绘制 py 后端小游戏舞台（顶层窗口，压在工具条之上）。
+
+        由 ``ui._draw_frame`` 在所有顶层浮层之后调用；无舞台时是空判。
+        """
         stage = self._mini_game_stage
         if stage is not None:
-            stage.tick()
+            stage.render(w, h)
 
     def _minigame_active(self) -> bool:
         return self._mini_game_stage is not None
