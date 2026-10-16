@@ -116,7 +116,7 @@ TriggerHandler, OptionHandler, EndingHandler, DungeonPersistence, ComponentHandl
 | `OptionHandler` | `options.py` | 选项触发器：后台生成选项文字 → 弹窗 → 记录选择 |
 | `EndingHandler` | `ending.py` | 章节敏感效果汇总、结局生成与结局文本构建 |
 | `DungeonPersistence` | `persistence.py` | 结局结算、回放 / 报告落盘、统一收尾 `_finalize(completed)` |
-| `ComponentHandler` | `components.py` | 显示组件实例的构建 / 重排 / 刷新 / 销毁接入 |
+| `ComponentHandler` | `components.py` | 显示组件实例的构建 / 布局 / 每帧绘制 / 销毁接入 |
 
 mixin 之间只通过 `self` 上的约定属性通信；新增方法时注意排在前面的 mixin 会覆盖同名方法。
 
@@ -347,17 +347,17 @@ data/
 `text_gradient.py` / `text_card.py` / `text_nvl.py` / `attr_bar.py` / `proc_log.py`），
 由 `component_registry` 惰性导入。文本主组件由方案配置的 `text_component` 字段**三选一**声明（text / text_card /
 text_nvl），`components` 列表只放其余组件（如属性条、过程日志），参数统一记在
-`components_params`。组件类只需实现 `build / layout / refresh / destroy` 四个钩子，
+`components_params`。组件类需实现 `build / layout / draw / destroy` 四个钩子（`refresh` 保留为 `layout` 的兼容别名），
 由 `ComponentHandler` 接入窗口的更新链（主组件先建、z 序在底）；
 可用性与参数声明来自 `component_registry`，编辑器侧由 `ui/scenario/component_mgr.py`
 三选一控件 + 卡片化管理。
 `ComponentRegistry(pack_dir=...)` 可显式指定**外部组件包目录**（入口文件名 `components.py`）
 整体替换常驻包，`registry.source` 记录实际生效来源；加载链与组件契约由无 GUI 守卫
-`tests/check_component_pack.py` 断言（含隐藏 DPG 上下文里的四钩子冒烟）。
+`tests/check_component_pack.py` 断言（无 GUI 替身 ctx 的 build/layout/refresh/destroy 冒烟）。
 配套约定：组件的展示名 / 说明写在**组件类**的 `label` / `description` 上（编辑器经
 `available_component_descriptions()` 取，`_COMPONENT_META` 只是兜底）；参数用
 `param_specs` 声明，`min` / `max` 在 `merge_params` 统一夹取；字号与字体候选链只在
-`dungeon/window/fonts.py`；组件的显式 tag 一律以各自的 `TAG_PREFIX` 开头（守卫查冲突）。
+`dungeon/window/fonts.py`；组件的 ImGui 窗口/状态 ID 一律以各自的 `TAG_PREFIX` 开头（守卫查冲突）。
 
 ---
 

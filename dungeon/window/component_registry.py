@@ -7,7 +7,7 @@
   固定为 ``components.py``；命中时覆盖常驻包，用于整体替换组件实现；
 - 文本主组件由方案配置的 ``text_component`` 字段三选一声明（text / text_card /
   text_nvl，见 dungeon.schema），``components`` 列表只放其余组件；
-- 组件类通过约定的 ``build/layout/refresh/destroy`` 生命周期钩子与窗口交互，
+- 组件类通过约定的 ``build/layout/draw/destroy`` 生命周期钩子与窗口交互，
   根对象（ctx）即会话窗口实例，只读窗口现有状态（dungeon_state / story_history 等）。
 - 文本组件的数据源是 ``ctx.story_history``：条目为
   ``{"type_str": 类型前缀, "text": 正文, "highlight": 高亮, "speaker": 说话人|None}``。
@@ -82,7 +82,7 @@ def _load_pack_directory(pack_dir):
 class DungeonComponent:
     """组件基类：默认空实现，官方组件覆盖所需钩子。
 
-    必选钩子（窗口在对应时机调用）：``build / layout / refresh / destroy``。
+    必选钩子（窗口在对应时机调用）：``build / layout / draw / destroy``。
     可选钩子（未覆盖即视为不支持）：
 
     - ``top_inset(ctx)``：自报在窗口顶部占用的高度，全屏类组件据此让位；
@@ -136,16 +136,20 @@ class DungeonComponent:
 
     # ---- 必选钩子 ----
     def build(self, ctx):
-        """主线程：创建 DPG 控件。ctx 为会话窗口实例。"""
+        """主线程：准备非 GPU 状态（订阅、缓存、帧任务）。"""
 
     def layout(self, ctx):
-        """主线程：窗口/视口尺寸或 DPI 变化时重排。"""
+        """主线程：计算几何/缓存，不调用 imgui。"""
+
+    def draw(self, ctx):
+        """主线程：每帧在根窗口内立即绘制（组件的渲染入口）。"""
 
     def refresh(self, ctx):
-        """主线程：状态变化后更新显示（由文本更新链调用）。"""
+        """兼容别名：默认转调 :meth:`layout`。"""
+        self.layout(ctx)
 
     def destroy(self, ctx):
-        """主线程：会话退出前清理 DPG 控件。"""
+        """主线程：释放组件资源（纹理句柄、订阅、帧任务）。"""
 
     # ---- 可选钩子（默认不支持） ----
     def top_inset(self, ctx):

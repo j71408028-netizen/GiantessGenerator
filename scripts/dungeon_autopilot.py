@@ -1214,34 +1214,23 @@ def scene_native_close():
 
 
 def _check_owned_display(cid):
-    """会话中途（主线程）验证组件接管文本显示的可见状态。
+    """会话中途验证组件接管文本显示的状态。
 
-    DPG 上下文在 run() 返回后销毁，接管/隐藏这类「那一帧」的状态只能在这里断言。
-    child_window 的 item state 不含 ``visible``，用 configuration 的 ``show`` 判断。
+    imgui 立即模式没有 DPG 控件树；这里读组件自己的状态快照：接管声明 +
+    最近一帧实际画出的行数。真正的可见性由 P4 截图探针覆盖。
     """
-    _OWN_TAG = {"text": "text_gradient_back", "text_card": "text_card_box",
-                "text_nvl": "text_nvl_overlay"}
-
-    def _shown(tag):
-        import dearpygui.dearpygui as dpg
-        return dpg.get_item_configuration(tag).get("show", True)
-
     def _probe(win):
-        import dearpygui.dearpygui as dpg
         comps = {c.id: c for c in win._components}
         assert cid in comps, f"组件未构建: {list(comps)}"
-        assert getattr(comps[cid], "owns_text_display", False), "应声明接管文本显示"
-        assert not _shown("text_container"), "内置文本容器应被接管隐藏"
-        tag = _OWN_TAG[cid]
-        assert dpg.does_item_exist(tag) and _shown(tag), \
-            f"接管容器 {tag} 应存在且可见"
         comp = comps[cid]
+        assert getattr(comp, "owns_text_display", False), "应声明接管文本显示"
+        assert win._text_owned_by_component(), "窗口应识别组件接管文本显示"
+        assert int(getattr(comp, "_drawn_line_count", 0)) > 0, "最近一帧未画出文本行"
+        rect = getattr(comp, "_panel_rect", None)
+        assert rect and rect[2] > 0 and rect[3] > 0, f"组件面板几何无效: {rect}"
         if cid == "text_nvl":
-            # 全屏 NVL 全历史堆叠：行对池应与历史条目一一对应
-            assert len(comp._line_tags) == len(win.story_history), \
-                (len(comp._line_tags), len(win.story_history))
-        else:
-            assert len(comp._line_tags) >= 1, "行对池未创建"
+            assert int(comp._drawn_line_count) == len(win.story_history), \
+                (comp._drawn_line_count, len(win.story_history))
 
     _probe.__name__ = f"owned-display:{cid}"
     return _probe
@@ -1258,25 +1247,20 @@ def _check_text_component(cid, extra_ids=()):
 
 
 def _check_overlay_service(win):
-    """服务面探针：覆盖层调出 → 阅读模态挂起推进 → 关闭恢复 → 兄弟组件只读。"""
-    import dearpygui.dearpygui as dpg
+    """服务面探针：覆盖层调出 -> 阅读模态挂起推进 -> 关闭恢复 -> 兄弟组件只读。"""
     from dungeon.splitter import DisplayUnit
-
-    def _shown(tag):
-        return dpg.get_item_configuration(tag).get("show", True)
 
     assert win.overlay_open() is None, "初始不应有覆盖层"
     win.toggle_overlay("log")
     assert win.overlay_open() == "log", win.overlay_open()
-    assert dpg.does_item_exist("overlay_log") and _shown("overlay_log"), \
-        "对话记录覆盖层应存在且可见"
+    assert getattr(win, "_overlay_name", None) == "log", "覆盖层状态应已置位"
     # 阅读模态：未揭示句在覆盖层打开时不被消费（点击/空格都挂起）
     win._pending_units = [DisplayUnit(speaker=None, text="覆盖层挂起验证。")]
     win._on_next_step()
     assert len(win._pending_units) == 1, "覆盖层打开时推进应被挂起"
-    # 关闭后恢复推进，覆盖层控件删除
+    # 关闭后恢复推进
     win.close_overlay()
-    assert win.overlay_open() is None and not dpg.does_item_exist("overlay_log")
+    assert win.overlay_open() is None, win.overlay_open()
     win._on_next_step()
     assert len(win._pending_units) == 0, "覆盖层关闭后应恢复逐句揭示"
     # 兄弟组件只读访问（服务面 component(cid)）

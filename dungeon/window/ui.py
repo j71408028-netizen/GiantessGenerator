@@ -416,10 +416,20 @@ class DungeonWindowUI:
             pending, self._pending_bg = self._pending_bg, None
             self._apply_bg_data(*pending)
         self._draw_background(w, h)
-        # 组件接管文本显示（P4 起）时内置文本区整体跳过，显示由组件 refresh 完成
-        if (not getattr(self, "_is_entry_phase", False)
-                and not self._text_owned_by_component()):
-            self._draw_story(w, h)
+        draw_components = getattr(self, "_draw_components", None)
+        if not getattr(self, "_is_entry_phase", False):
+            # 文本主组件接管显示时，内置 story / 工具条整体跳过；
+            # 其余组件（attr_bar / proc_log）仍每帧绘制在正文之上。
+            if self._text_owned_by_component():
+                if callable(draw_components):
+                    draw_components()
+            else:
+                self._draw_story(w, h)
+                if callable(draw_components):
+                    draw_components()
+            draw_overlay = getattr(self, "_draw_log_overlay", None)
+            if callable(draw_overlay):
+                draw_overlay(w, h)
         self._draw_notification(w, h)
         imgui.end()
         imgui.pop_style_var(3)
@@ -1402,6 +1412,10 @@ class DungeonWindowUI:
         _x, _grad_h, cw, pad = self._story_geometry(w, h)
         self._text_wrap_width = max(1.0, cw - 2 * pad)
 
+        if getattr(self, "_components_built", False):
+            relayout_components = getattr(self, "_relayout_components", None)
+            if callable(relayout_components):
+                relayout_components()
         self._window_fx.relayout(w, h)
         self._refresh_background()
 

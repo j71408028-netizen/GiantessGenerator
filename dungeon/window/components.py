@@ -3,9 +3,10 @@
 组件包由 dungeon.window.component_registry 提供注册表；本 mixin 负责按副本配置
 （``text_component`` 三选一 + ``components`` 列表）在会话阶段构建组件实例，并把
 这些实例接入窗口现有的更新链：
-- _relayout() → 各组件 layout(ctx)
-- _update_text_display() → 有组件声明 ``owns_text_display`` 时转调各组件
-  refresh(ctx)（如底部渐变式文本栏接管显示），否则走内置 story 管线
+- _relayout() → 各组件 layout(ctx)（只算几何，不碰 imgui）
+- _draw_frame() → 各组件 draw(ctx) 每帧立即绘制
+- _update_text_display() → 有组件声明 ``owns_text_display`` 时由组件接管显示，
+  否则走内置 story 管线
 - 会话退出 _handle_exit() 前 → 各组件 destroy(ctx) + 注册表丢弃
 
 组件的根对象 ctx 即窗口实例；组件**只允许**经本 mixin 提供的组件服务面访问窗口
@@ -16,14 +17,15 @@ cancel_task / component`，另有覆盖层与工具服务的 `toggle_overlay` �
 契约由 ``tests/check_component_pack.py`` 的替身 ctx 强制——替身只实现服务面，
 组件一旦伸手摸私有一律在守卫里报错。
 
-## 迁移状态（P1）
+## 迁移状态（P4）
 
-``component_pack/*`` 仍是 DPG 实现（P4 迁移）。P1 的 ``_build_components`` 因此
-是 **P4 占位**：不构建任何组件、``_components`` 保持空表，文本显示一律走
-``ui._draw_story`` 内置管线。服务面方法（``component_viewport`` /
-``text_font_tag`` / ``session_waiting_for_input`` …）已改为不碰 DPG，P4 接入
-imgui 组件时它们仍是组件的唯一入口。
+``component_pack/*`` 已改为 imgui 立即模式：``build`` 准备状态，``layout`` 只算
+几何，``draw(ctx)`` 每帧绘制；``refresh`` 保留为 ``layout`` 的兼容别名。
+组件服务面（``component_viewport`` / ``text_font_tag`` /
+``session_waiting_for_input`` …）保持不变，仍是组件访问窗口的唯一入口。
 """
+
+import traceback
 
 from dungeon import process_log
 from dungeon.window import component_registry as _components_module
@@ -64,23 +66,46 @@ class ComponentHandler:
         return [text_cid or DEFAULT_TEXT_COMPONENT] + others
 
     def _build_components(self):
-        """按配置构建组件实例（主线程，会话阶段进入时调用）。
-
-        **P4 占位**：``component_pack/*`` 还是 DPG 实现，P1 不构建任何组件——
-        ``_components`` 保持空表，``_components_built`` 保持假，文本显示因此走
-        ``ui._draw_story`` 内置管线。P4 会把 ``build_components`` 接回来。
-        """
+        """按配置构建组件实例并调用 build（主线程，会话阶段进入时调用）。"""
         self._components = []
-        self._components_built = False
-        process_log.log("[Components] P1：显示组件待 P4 迁移，本次会话走内置文本区")
+        if getattr(self, "_closing", False):
+            return
+        try:
+            self._components = _components_module.build_components(
+                self, self._configured_component_ids(), self.scenario_config)
+        except Exception as exc:
+            process_log.log(f"[Components] 构建组件失败: {exc}\n{traceback.format_exc()}")
+            self._components = []
+        for comp in self._components:
+            try:
+                comp.build(self)
+            except Exception as exc:
+                process_log.log(f"[Components] 组件 build 失败 "
+                                f"({getattr(comp, 'id', '?')}): {exc}")
+        self._components_built = bool(self._components)
+        if not self._components:
+            process_log.log("[Components] 本次会话未构建任何显示组件，回退内置文本容器")
 
     def _relayout_components(self):
-        """窗口重排后调用各组件 layout（主线程）。"""
+        """窗口重排后调用各组件 layout（主线程，只算几何，不碰 imgui）。"""
         for comp in self._components:
             try:
                 comp.layout(self)
             except Exception as exc:
-                process_log.log(f"[Components] 组件 layout 失败 ({getattr(comp, 'id', '?')}): {exc}")
+                process_log.log(f"[Components] 组件 layout 失败 "
+                                f"({getattr(comp, 'id', '?')}): {exc}")
+
+    def _draw_components(self):
+        """每帧调用各组件 draw（主线程，在根窗口内绘制）。"""
+        for comp in self._components:
+            hook = getattr(comp, "draw", None)
+            if not callable(hook):
+                continue
+            try:
+                hook(self)
+            except Exception as exc:
+                process_log.log(f"[Components] 组件 draw 失败 "
+                                f"({getattr(comp, 'id', '?')}): {exc}")
 
     def _refresh_components(self):
         """状态更新后调用各组件 refresh（主线程，经调度器）。"""

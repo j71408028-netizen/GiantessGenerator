@@ -40,7 +40,7 @@
 | `dungeon/window/options.py` | 选项触发器：后台生成选项文字并弹出选择弹窗 |
 | `dungeon/window/ending.py` | 敏感效果结算与结局生成 |
 | `dungeon/window/persistence.py` | 统一收尾 `_finalize`、退出处理 `_handle_exit`、回放 / 报告保存（原子写）、结局索引 `data/user/endings.json`；弹框一律经宿主端口 |
-| `dungeon/window/components.py` | 显示组件生命周期接入（构建 / 布局 / 刷新 / 销毁） |
+| `dungeon/window/components.py` | 显示组件生命周期接入（构建 / 布局 / 每帧绘制 / 销毁） |
 | `dungeon/window/launcher.py` | 入口阶段混入 `DungeonLaunchStages`：动态背景轮播、方案选择面板、结局图标轮播、阶段切换 |
 | `dungeon/window/background.py` | 背景图加载 / 旋转 / 模糊 / 淡入淡出 / 纹理更新（含单工作者 `PixelWorker`） |
 | `dungeon/window/fx.py` | 窗口视效（闪光 / 振动 / 反色 / 色差分离）：顶层绘制列表 + 视效纹理，帧时钟计时、绝对时间消退，不阻塞其他动作 |
@@ -334,7 +334,7 @@ DungeonSessionWindow(...).run()                      # 不传 = HostPort()，无
 | 启动载荷序列化 / 结果往返（进程隔离线格式） | `python tests/check_dungeon_launch_payload.py`（无 GUI，73 项断言） |
 | 会话子进程端到端（spawn、协议代答、登记/注销、限帧钩子） | `python tests/smoke_mini.py`（副本链路实测一节；`GIANTESS_DUNGEON_TEST_FRAMES` 限帧子进程） |
 | `_finalize` / `json_store` / `scenario_repo` | `python tests/check_dungeon_finalize.py`（无 GUI，32 项断言） |
-| 显示组件包 / 文本组件 / 组件参数 | `python tests/check_component_pack.py`（无 GUI，102 项断言：加载链、契约与服务面（替身 ctx + AST 越界扫描）、元数据与参数夹取、外部包覆盖、隐藏 DPG 上下文里的四钩子冒烟与控件无残留） |
+| 显示组件包 / 文本组件 / 组件参数 | `python tests/check_component_pack.py`（无 GUI，93 项断言：加载链、契约与服务面（替身 ctx + AST 越界扫描）、元数据与参数夹取、外部包覆盖、build/layout/refresh/destroy 冒烟与帧任务成对清理） |
 | 分句器 / 说话人标记 | `python tests/check_splitter.py` |
 | 新增 import / 分层 | `python tests/check_dungeon_layering.py`（窗口层含 `component_pack/` 子包） |
 | 新增 dpg 生命周期 / 线程调用（stop/create/destroy、Timer、join） | `python tests/check_dungeon_window_contract.py`（C1 / C4 / C5 的机械可查部分） |

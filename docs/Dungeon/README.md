@@ -59,7 +59,7 @@
 | `check_scenario_schema.py` | schema 单一真相源（空模板键集合、字段漂移）+ 校验器规则 + 演化配置链路 | `python tests/check_scenario_schema.py` |
 | `check_audio_chain.py` | 方案音频端到端链：说话人分音色 / 队列 / 两档效果 / 三条引擎路径 / 降级 / BGM 缺坏文件收尾（假合成器 + 替身后端，不出声不联网） | `python tests/check_audio_chain.py` |
 | `check_splitter.py` | 内置分句器：断点切分、流式幂等、`@说话人@` 标记解析与落盘净化 | `python tests/check_splitter.py` |
-| `check_component_pack.py` | 显示组件包：加载链（常驻包来源 / 必需 id）、文本家族与 schema 一致、组件契约与服务面（替身 ctx 只实现服务面 + AST 扫 `ctx._x` 越界）、元数据 `label`/`description`、`param_specs` 结构与 `min/max` 夹取、tag 前缀冲突、组件包不 `print` 且类都登记进 `REGISTRY`、外部包覆盖、隐藏 DPG 上下文里的 `build/layout/refresh/destroy` 冒烟与控件无残留 | `python tests/check_component_pack.py` |
+| `check_component_pack.py` | 显示组件包：加载链（常驻包来源 / 必需 id）、文本家族与 schema 一致、组件契约与服务面（替身 ctx 只实现服务面 + AST 扫 `ctx._x` 越界）、元数据 `label`/`description`、`param_specs` 结构与 `min/max` 夹取、tag 前缀冲突、组件包不 `print` 且类都登记进 `REGISTRY`、外部包覆盖、无 GUI 替身 ctx 的 `build/layout/refresh/destroy` 冒烟与帧任务成对清理 | `python tests/check_component_pack.py` |
 | `check_dungeon_finalize.py` | 原子写 / `.bak` / 损坏回退 + `_finalize` 完成与未完成两条路径 | `python tests/check_dungeon_finalize.py` |
 | `check_scenario_naming.py` | 命名守卫（旧标识符残留）+ 兼容读与迁移行为 | `python tests/check_scenario_naming.py` |
 
