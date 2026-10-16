@@ -414,8 +414,12 @@ class DungeonWindowBase:
         self._destroy_overlays()
         # 背景像素工作者：会话内的全部重采样/混合任务都在这里排队，收工时一并结束
         self._background.shutdown()
-        # 窗口视效：帧任务已随 stop() 清空，这里收掉像素线程、清振动基线与临时快照
+        # 窗口视效：帧任务已随 stop() 清空，这里收掉像素线程、丢掉覆盖层纹理句柄
         self._window_fx.shutdown()
+        # 截图落盘线程（P5）：可能正在写 PNG，给它 join 的机会再往下走
+        shutdown_shots = getattr(self, "_shutdown_screenshot_worker", None)
+        if callable(shutdown_shots):
+            shutdown_shots()
         # 章节背景音乐：会话一结束就该静音（帧循环已停，渐变任务不会再被调用方刷新）
         self._bgm.shutdown()
         # 对话语音：同样必须立刻收声，顺手清掉合成的临时音频

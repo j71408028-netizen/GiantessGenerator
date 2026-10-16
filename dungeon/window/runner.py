@@ -74,6 +74,10 @@ class WindowRunner:
         构建画面（立即模式，每帧重画一次）。
     ``on_frame_end()``
         换缓冲之后（计帧、自检限帧）。
+    ``on_capture()``
+        同样在换缓冲之后、``on_frame_end`` **之前**：此时本帧的 GL 上下文仍然
+        当前，可以 ``glReadPixels`` 抓整帧（F2 截图与反色/色差视效都依赖它）。
+        实现要自己在帧线程做，且必须便宜——它是每帧都会跑的空判。缺省不接。
     ``on_before_exit()``
         即将退出（库已决定收尾，但窗口与上下文仍在）。等价于旧帧循环跳出后的
         ``_on_close()``——无论关闭来自本程序还是用户点 X，都会走到这里。
@@ -87,7 +91,7 @@ class WindowRunner:
     def __init__(self, title, width, height, min_width=800, min_height=500,
                  dpi_scale=1.0, on_post_init=None, on_load_fonts=None,
                  on_frame_start=None, on_draw=None, on_frame_end=None,
-                 on_before_exit=None, fps_max=DEFAULT_FPS_MAX):
+                 on_capture=None, on_before_exit=None, fps_max=DEFAULT_FPS_MAX):
         self.title = str(title or "")
         #: 建窗尺寸按 **96-PPI 逻辑点**给出（库内部乘 ``dpi_window_size_factor()``）。
         #: 与 ``io.display_size`` 的口径差异见模块文档与 ``ui`` 的布局换算。
@@ -103,6 +107,7 @@ class WindowRunner:
         self._on_frame_start = on_frame_start
         self._on_draw = on_draw
         self._on_frame_end = on_frame_end
+        self._on_capture = on_capture
         self._on_before_exit = on_before_exit
 
         #: 关闭请求位：与 ``base._stop_requested`` 同义，由帧回调落实
@@ -197,6 +202,20 @@ class WindowRunner:
 
     def _run_frame_end(self):
         self.frames += 1
+        if self._on_capture is not None:
+            # 抓帧钩子：本程序的 F2 截图与反色/色差视效都在这里读后备缓冲。
+            # 时机是**换缓冲之后、本帧的 GL 上下文仍然当前**——探针实测
+            # （``.workbuddy/p5_probe/probe_grab.py``）此时 ``glReadPixels`` 拿到的
+            # 就是刚画完的整帧；而库自带的 ``final_app_window_screenshot()`` 在
+            # 帧内返回空数组，只有退出前那个钩子里才有内容。
+            # 放 ``after_swap`` 而不是 ``show_gui`` 里，是因为绘制中间读会把
+            # 半成品画面上屏（反色/色差覆盖层要的是"完整的一帧"）。
+            # 异常吞掉但留痕：抓帧失败不该让会话挂掉（F2 会自己给失败提示）。
+            try:
+                self._on_capture()
+            except Exception as exc:
+                from dungeon import process_log
+                process_log.log(f"[Dungeon] 抓帧钩子异常: {exc}")
         if self._on_frame_end is not None:
             self._on_frame_end()
 
@@ -220,11 +239,15 @@ class WindowRunner:
         return self._exit_requested
 
     def set_fullscreen(self, enabled: bool) -> bool:
-        """切换整屏（F11）。
+        """（**已废弃，P5 起不再使用**）按 ``window_geometry.full_screen_mode`` 切换整屏。
 
-        走 ``window_geometry.full_screen_mode``——1.92.900 上**有**这个官方入口，
-        不需要评估里写的 ``glfw_utils.GlfwHelpers``（那个类在本版本根本不存在，
-        见风险 R10 的更正）。只在库的帧循环内调用（帧回调路径）。
+        P5 实测这条路在 1.92.900 上是坏的：请求 ``full_monitor_work_area`` 会把窗口
+        变成 420×34，请求还原也回不到原尺寸（``.workbuddy/p5_probe/probe_dpi2.py``，
+        ``Case fs_geometry``）。真正的 F11 走 ``glfw_fullscreen.FULLSCREEN``（对
+        GLFW 窗口调 ``glfwSetWindowMonitor``）。
+
+        方法本身保留：它没有副作用（只写参数结构体），留着不占用运行期成本，
+        也便于将来在别的 imgui-bundle 版本上复测这条官方路径。
         """
         try:
             # ``window_geometry`` 是嵌套结构体，nanobind 取出来是副本：改完必须

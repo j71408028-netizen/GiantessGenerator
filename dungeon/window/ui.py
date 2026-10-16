@@ -1,12 +1,14 @@
 """UI 绘制、文本显示、布局自适应与事件回调（imgui 立即模式）。
 
-本文件现覆盖 P1「窗口骨架」/ P2「阅读主循环」/ P3「入口阶段」：
+本文件现覆盖 P1「窗口骨架」/ P2「阅读主循环」/ P3「入口阶段」/ P4「组件包与
+覆盖层」/ P5「视效与平台能力」：
 **建主窗口 + 背景铺满 + 视口尺寸/DPI + 字体两档 + 底部渐变式文本区 +
 上屏游标 + 继续指示 ▼ + 三图标工具条 + 轻通知 + 输入接线 + 入口方案面板 +
-结局图标轮播**。后续阶段：
+结局图标轮播 + 窗口视效（闪光/振动/反色/色差）+ F2 截图 + F11 全屏**。
+剩余阶段：
 
-- P4 组件包与覆盖层（``component_pack/*`` / ``overlay.py``）；
-- P5 视效与截图 / 全屏（``fx.py``）。
+- P6 小游戏舞台（``minigame/stage.py``）；
+- P7 autopilot 去 DPG 内省；P8 清场（删 dearpygui / dpg_state）。
 
 因此本文件里凡标 ``P<n> 占位`` 的地方都是**故意留空**的，不是遗漏。
 
@@ -47,19 +49,30 @@ DPG 时代                 立即模式
 ``no_bring_to_front_on_focus``）——否则会被铺满客户区的根窗口整个盖住。详见
 :meth:`DungeonWindowUI._draw_frame`。
 
-## 尺寸与 DPI 的口径（P1 实测：Windows @200%，imgui-bundle 1.92.900）
+## 尺寸与 DPI 的口径（P1 初测、P5 修正：Windows @175%，imgui-bundle 1.92.900）
 
 | 项 | 规则 |
 |---|---|
-| 建窗尺寸 | 直接给宿主客户区 ``main_cw × main_ch``，**不要**乘 ``_dpi_scale`` |
-| 客户区 | == 请求值；不需要为标题栏/边框加余量（DPG 时代要 +16/+39） |
-| ``io.display_size`` | == 客户区；1 imgui 单位 = 1 像素 |
+| 建窗尺寸 | **宿主客户区（物理像素）÷ ``_dpi_scale``** —— 库内部会乘 ``dpi_window_size_factor()`` |
+| 客户区 | == 请求的物理尺寸；不需要为标题栏/边框加余量（DPG 时代要 +16/+39） |
+| ``io.display_size`` | == 客户区（物理像素）；1 imgui 单位 = 1 像素 |
 | 字体 | ``push_font(font, base)`` 实际得到 ``base × dpi_factor``；**传基础字号** |
 | 边距 / 内缩 | ``round(常量 × _dpi_scale)``，与 DPG 时代同一像素空间，原样沿用 |
 
-一句话：**只有建窗尺寸不乘 ``_dpi_scale``**，其余照旧。定标数据见
-``.workbuddy/p1_probe/r0d_aware.py``（两个 DPI 感知档位 × 两种建窗模式各量一遍，
-结果一致）。
+**P5 修正的是第一行**。P1 写的是"直接给宿主客户区、不乘 ``_dpi_scale``"——那是
+在**缩放 100%** 的机器上得到的结论（那时两个口径恰好相等）。在 175% 的机器上
+实测（``.workbuddy/p5_probe/probe_dpi2.py``，显示器 2560×1600）：
+
+| 建窗请求 | ``io.display_size`` | 判断 |
+|---|---|---|
+| ``(2240, 1260)`` = 宿主客户区物理值 | ``2476×1564`` | 超屏，被窗口系统夹到工作区 ❌ |
+| ``(1280, 720)`` = 物理 ÷ 1.75 | ``2240×1260`` | 正好等于宿主客户区 ✅ |
+
+换算所需的缩放系数取宿主报的那个（``viewport_metrics()`` 的第三项，即
+``GetDpiForWindow / 96``）：它与 ``dpi_window_size_factor()`` 是同一个数，但
+**建窗之前**库的那个函数恒返回 1.0（还没有窗口可问），所以只能用宿主这一份。
+见 :meth:`DungeonWindowUI._window_create_size`。P1 的定标数据见
+``.workbuddy/p1_probe/r0d_aware.py``。
 
 ## 线程约定
 
@@ -68,15 +81,19 @@ imgui 没有 DPG 那个"回调派发到工作线程"的坑：所有绘制与输�
 本文件的方法默认都在帧线程调用。
 """
 
+import os
 import time
 
 from imgui_bundle import hello_imgui, imgui
 
 from dungeon import process_log
 from dungeon.models import DungeonTextType
+from dungeon.window import gl_util
 from dungeon.window import imgui_util as iu
+from dungeon.window.background import PixelWorker
 from dungeon.window.fonts import (BOLD_FONT_SIZE, TEXT_FONT_SIZE, UI_FONT_SIZE,
                                   resolve_font_files)
+from dungeon.window.glfw_fullscreen import FULLSCREEN
 from dungeon.window.runner import WindowRunner
 
 # ---------- 颜色（沿用 DPG 时代的 0~255 四元组字面值，经 iu.u32 打包） ----------
@@ -267,10 +284,16 @@ class DungeonWindowUI:
         # 闪烁相位走帧任务：跟随帧循环生灭，收尾时随 _frame.stop() 一并清掉
         self._frame.every(_BLINK_SECONDS, self._toggle_indicator, key=_BLINK_TASK)
 
+        # 截图落盘用的像素工作者（PNG 编码 + 磁盘 IO 不占帧线程）；
+        # 会话收尾时 shutdown（见 `_finish_session` 之外的 `_shutdown_screenshot_worker`）
+        self._shot_worker = PixelWorker(name="dungeon-shot-worker")
+        #: 截图意图位（F2 置位，下一帧 after_swap 抓帧）
+        self._screenshot_pending = False
+
         self._runner = WindowRunner(
             title=self._real_title,
-            width=self._main_client_w,
-            height=self._main_client_h,
+            width=self._window_create_width(),
+            height=self._window_create_height(),
             min_width=round(800 * self._dpi_scale),
             min_height=round(500 * self._dpi_scale),
             dpi_scale=self._dpi_scale,
@@ -279,9 +302,46 @@ class DungeonWindowUI:
             on_frame_start=self._on_frame_start,
             on_draw=self._draw_frame,
             on_frame_end=self._on_frame_end,
+            on_capture=self._capture_frame,
             on_before_exit=self._on_before_exit,
         )
         self._relayout()
+
+    # ---------- 建窗口径（R7：物理像素 vs 96-PPI 逻辑点） ----------
+    def _window_create_width(self):
+        """建窗宽度（见 :meth:`_window_create_size`）。"""
+        return self._window_create_size()[0]
+
+    def _window_create_height(self):
+        return self._window_create_size()[1]
+
+    def _window_create_size(self):
+        """把宿主客户区（物理像素）换算成 hello_imgui 的建窗尺寸（96-PPI 逻辑点）。
+
+        R7 的两个口径：``window_geometry.size`` 是 **96-PPI 逻辑点**（库内部乘
+        ``dpi_window_size_factor()``），而 ``HostPort.viewport_metrics()`` 给的是
+        **物理像素**（Tk 用 ``GetClientRect`` 量）。直接拿物理像素当逻辑点传，
+        窗口就会是想要的两倍——P5 实测（``.workbuddy/p5_probe/probe_dpi2.py``，
+        175% 缩放，显示器 2560×1600）：
+
+        ===================  ==================  ==========================
+        建窗请求              ``io.display_size``  判断
+        ===================  ==================  ==========================
+        ``(2240, 1260)`` 物理  ``2476x1564``        超屏，被窗口系统夹到工作区
+        ``(1280, 720)`` 逻辑   ``2240x1260``        正好等于宿主客户区 ✅
+        ``(1600, 900)`` 半吊子 ``2476x1564``        同样被夹
+        ===================  ==================  ==========================
+
+        缩放系数取宿主报的那个（``viewport_metrics()`` 的第三项，即
+        ``GetDpiForWindow / 96``）：它与 ``dpi_window_size_factor()`` 是同一个数，
+        但**建窗之前**库的那个函数恒返回 1.0（还没有窗口可问），所以只能用宿主这
+        一份。``scale <= 1`` 或宿主没报尺寸时退回原值，行为与 P1 一致。
+        """
+        cw, ch = int(self._main_client_w), int(self._main_client_h)
+        scale = float(getattr(self, "_dpi_scale", 1.0) or 1.0)
+        if cw <= 0 or ch <= 0 or scale <= 1.0:
+            return cw, ch
+        return max(1, round(cw / scale)), max(1, round(ch / scale))
 
     def _load_fonts(self):
         """``load_additional_fonts``：**唯一**能加载字体的时机。
@@ -403,8 +463,14 @@ class DungeonWindowUI:
         imgui.push_style_var(imgui.StyleVar_.window_padding, iu.v2(0.0, 0.0))
         imgui.push_style_var(imgui.StyleVar_.window_border_size, 0.0)
         imgui.push_style_var(imgui.StyleVar_.window_rounding, 0.0)
-        imgui.set_next_window_pos(iu.v2(0.0, 0.0))
-        imgui.set_next_window_size(iu.v2(w, h))
+        # 振动（fx）：整窗内容一起偏移 = 把**根窗口原点**挪到 -offset、尺寸各加
+        # 2×振幅；窗口内部的绘制坐标完全不动（`_draw_background` 收到反向补偿画
+        # 满整个可见区，因此屏幕边缘不会露出底色）。实测见
+        # `.workbuddy/p5_probe/probe_shake.py`：负坐标不会被 imgui 夹回去。
+        shake_x, shake_y = self._window_fx.shake_offset()
+        bleed_x, bleed_y = abs(shake_x), abs(shake_y)
+        imgui.set_next_window_pos(iu.v2(-shake_x, -shake_y))
+        imgui.set_next_window_size(iu.v2(w + 2 * bleed_x, h + 2 * bleed_y))
         imgui.begin(_ROOT_WINDOW, None,
                     _no_decoration_flags()
                     | imgui.WindowFlags_.no_scrollbar.value
@@ -415,7 +481,7 @@ class DungeonWindowUI:
         if self._pending_bg is not None:
             pending, self._pending_bg = self._pending_bg, None
             self._apply_bg_data(*pending)
-        self._draw_background(w, h)
+        self._draw_background(w, h, shake_x, shake_y)
         draw_components = getattr(self, "_draw_components", None)
         if not getattr(self, "_is_entry_phase", False):
             # 文本主组件接管显示时，内置 story / 工具条整体跳过；
@@ -431,6 +497,10 @@ class DungeonWindowUI:
             if callable(draw_overlay):
                 draw_overlay(w, h)
         self._draw_notification(w, h)
+        # 视效覆盖层（反色 / 色差分离）：压在所有界面元素之上、闪光之下
+        self._draw_pixel_overlay(w, h, shake_x, shake_y)
+        # 闪光永远是最上面的一层（与 DPG 版"视效层提到最上"同序）
+        self._draw_flash(w, h, bleed_x, bleed_y)
         imgui.end()
         imgui.pop_style_var(3)
 
@@ -468,21 +538,66 @@ class DungeonWindowUI:
         self._finalize_close_once()
 
     # ==================== 绘制：背景 ====================
-    def _draw_background(self, w: float, h: float):
-        """背景铺满窗口：一张 ``TextureGpu`` 拉满整个客户区。"""
+    def _draw_background(self, w: float, h: float, shake_x: float = 0.0,
+                         shake_y: float = 0.0):
+        """背景铺满窗口：一张 ``TextureGpu`` 拉满整个客户区。
+
+        ``shake_*`` 是振动偏移（``fx.WindowFx.shake_offset()``）。根窗口原点此时
+        已被挪到 ``-offset``，所以这里把坐标平移 ``+offset``——背景的**屏幕位置**
+        因此纹丝不动（与 DPG 版"背景跟着抖"不同，但那本来就不是设计意图，
+        只是动子项的副作用）。
+        """
         draw_list = imgui.get_window_draw_list()
         texture = getattr(self, "_bg_texture", None)
         if texture is None:
-            # 首帧或没有背景素材：铺纯色，避免闪黑
-            draw_list.add_rect_filled(iu.v2(0.0, 0.0), iu.v2(w, h), iu.u32(12, 12, 18, 255))
+            # 首帧或没有背景素材：铺纯色。这里要盖住**整个加宽后的窗口**，
+            # 否则振动时屏幕边缘会闪出底色（根窗口是 no_background 的）。
+            bleed_x, bleed_y = abs(shake_x), abs(shake_y)
+            draw_list.add_rect_filled(
+                iu.v2(0.0, 0.0), iu.v2(w + 2 * bleed_x, h + 2 * bleed_y),
+                iu.u32(12, 12, 18, 255))
             return
-        pmin, pmax = iu.v2(0.0, 0.0), iu.v2(w, h)
+        pmin, pmax = iu.v2(shake_x, shake_y), iu.v2(shake_x + w, shake_y + h)
         rect = getattr(self, "_kb_rect", None)
         if getattr(self, "_is_entry_phase", False) and rect:
             # 入口阶段的 Ken Burns 运动接管几何（launcher._kb_tick 提供矩形）
-            pmin, pmax = iu.v2(*rect[0]), iu.v2(*rect[1])
+            pmin = iu.v2(rect[0][0] + shake_x, rect[0][1] + shake_y)
+            pmax = iu.v2(rect[1][0] + shake_x, rect[1][1] + shake_y)
         ref = imgui.ImTextureRef(int(texture.texture_id()))
         draw_list.add_image(ref, pmin, pmax, iu.v2(0.0, 0.0), iu.v2(1.0, 1.0))
+
+    # ==================== 绘制：窗口视效（P5） ====================
+    def _draw_pixel_overlay(self, w: float, h: float, shake_x: float,
+                            shake_y: float):
+        """反色 / 色差分离：把抓到的整帧染色后当全窗覆盖层压回来。
+
+        覆盖层是"这一瞬间的画面"，消退靠不透明度（由 ``fx`` 的帧任务按
+        时长推进），因此下层画面在消退期间照常活动——与 DPG 版同一观感。
+
+        几何必须**补偿振动偏移**：抓到的整帧画在客户区坐标上，而根窗口原点此刻
+        在 ``-offset``；直接画在窗口局部 ``(0,0)-(w,h)`` 会让覆盖层整体偏
+        ``offset``，看上去就是"画面变成两份"（P5 探针实测过这一版的观感）。
+        平移 ``+offset`` 之后覆盖层与它捕捉的内容逐像素对齐，同时盖住偏移让出来
+        的边缘。
+        """
+        overlay = self._window_fx.pixel_overlay()
+        if overlay is None:
+            return
+        texture, alpha = overlay
+        draw_list = imgui.get_window_draw_list()
+        ref = imgui.ImTextureRef(int(texture.texture_id()))
+        draw_list.add_image(ref, iu.v2(shake_x, shake_y),
+                            iu.v2(shake_x + w, shake_y + h),
+                            iu.v2(0.0, 0.0), iu.v2(1.0, 1.0),
+                            iu.u32(255, 255, 255, alpha))
+
+    def _draw_flash(self, w: float, h: float, bleed_x: float, bleed_y: float):
+        """闪光：全窗白色矩形，不透明度由 ``fx`` 的帧任务推进。"""
+        color = self._window_fx.flash_color()
+        if color is None:
+            return
+        imgui.get_window_draw_list().add_rect_filled(
+            iu.v2(0.0, 0.0), iu.v2(w + 2 * bleed_x, h + 2 * bleed_y), color)
 
     # ==================== 绘制：会话正文（text 底部渐变式） ====================
     #
@@ -1078,19 +1193,69 @@ class DungeonWindowUI:
             return
         self._on_next_step()
 
-    def _toggle_fullscreen(self, sender=None, app_data=None):
-        """F11：切换整屏。
+    def ui_snapshot(self) -> dict:
+        """窗口的 **UI 状态快照**：自检/探针/AI 驾驶读窗口状态的唯一入口。
 
-        走 ``RunnerParams.app_window_params.window_geometry.full_screen_mode``
-        ——这是 1.92.900 上的官方入口，**不需要**评估里写的
-        ``glfw_utils.GlfwHelpers``（该类在本版本不存在，见风险 R10 的更正）。
+        立即模式没有 retained 控件树可以内省——DPG 时代的
+        ``does_item_exist`` / ``get_item_configuration`` 在这里没有对应物，
+        P7 的 autopilot 改造正需要一份"窗口现在长什么样"的稳定契约。因此凡是
+        自检需要判定的东西都在这里出：阶段、尺寸、正文与上屏游标、视效是否在播。
+
+        返回的是**值快照**（数字/布尔/元组/字符串），调用方不必知道窗口内部字段名，
+        窗口也能自由重构内部实现。
         """
-        target = not self.is_fullscreen
-        runner = getattr(self, "_runner", None)
-        if runner is None or not runner.set_fullscreen(target):
-            self._notify("全屏切换不可用")
+        reveal = getattr(self, "_reveal", None)
+        fx = self._window_fx
+        overlay = fx.pixel_overlay()
+        story = list(getattr(self, "story_history", None) or [])
+        reveal_target = reveal.get("target") if reveal else ""
+        return {
+            "phase": "entry" if getattr(self, "_is_entry_phase", False) else "session",
+            "closing": bool(getattr(self, "_closing", False)),
+            "fullscreen": bool(getattr(self, "is_fullscreen", False)),
+            "dpi_scale": round(float(getattr(self, "_dpi_scale", 1.0) or 1.0), 4),
+            "layout": (float(self._layout_w), float(self._layout_h)),
+            "create_size": (int(self._runner.width), int(self._runner.height)),
+            "frames": int(getattr(self, "frames_rendered", 0)),
+            "history": len(story),
+            "visible_items": len(self._story_visible_items()),
+            "reveal_active": reveal is not None,
+            "reveal_pos": int(reveal["pos"]) if reveal else 0,
+            "reveal_len": len(reveal_target or ""),
+            "waiting_input": bool(self._waiting_for_continue()),
+            "autoplay": bool(getattr(self, "_autoplay", False)),
+            "overlay_open": bool(self.overlay_open()),
+            "option_open": bool(getattr(self, "pending_option", None)),
+            "toolbar_rect": tuple(getattr(self, "_toolbar_rect", ()) or ()),
+            "entry_panel_rect": tuple(getattr(self, "_entry_panel_rect", ()) or ()),
+            "ending_panel_rect": tuple(getattr(self, "_ending_panel_rect", ()) or ()),
+            "components": sorted(getattr(c, "id", "?")
+                                 for c in getattr(self, "_components", [])),
+            # 视效（P5）
+            "fx_active": sorted(getattr(fx, "_active", ()) or ()),
+            "fx_flash_alpha": round(float(getattr(fx, "_flash_alpha", 0.0)), 2),
+            "fx_shake": tuple(round(float(v), 2)
+                              for v in getattr(fx, "_shake", (0.0, 0.0))),
+            "fx_overlay": (int(overlay[0].width), int(overlay[0].height), overlay[1])
+            if overlay is not None else None,
+        }
+
+    def _toggle_fullscreen(self, sender=None, app_data=None):
+        """F11：切换整屏（走 GLFW 窗口，见 ``glfw_fullscreen`` 模块文档）。
+
+        P1 走的 ``window_geometry.full_screen_mode`` 在 1.92.900 上是坏的（实测把
+        窗口变成 420×34 且回不去），``glfw_utils.GlfwHelpers`` 本版本不存在。可用
+        的是 ``hello_imgui.get_glfw_window_address()`` + imgui_bundle 自带的
+        ``glfw3.dll``：零新增依赖，实测进/出全屏的位置与尺寸都能原样还原。
+        """
+        if not FULLSCREEN.available:
+            self._notify("全屏切换不可用（未找到 glfw3 运行库）")
             return
-        self.is_fullscreen = target
+        result = FULLSCREEN.toggle()
+        if result is None:
+            self._notify("全屏切换失败")
+            return
+        self.is_fullscreen = bool(result)
         # 离散尺寸跳变：下一帧立刻按新客户区重排 + 背景绕过防抖重采样
         self._bg_refresh_fast = True
 
@@ -1163,17 +1328,79 @@ class DungeonWindowUI:
         self.toggle_autoplay()
 
     def take_screenshot(self):
-        """把当前帧保存为 PNG 到用户数据区 screenshots/ 下。
+        """把当前帧保存为 PNG 到用户数据区 ``screenshots/`` 下（下一帧落盘）。
 
-        P5 占位：DPG 的 ``output_frame_buffer(file=...)`` 没有对应物。imgui 侧的
-        做法是 ``glReadPixels`` 抓帧缓冲再交给 PIL 落盘（需要后端指针），
-        与 F11 全屏、DPI 一起在 P5 处理。
+        实际的整帧抓取发生在 :meth:`_capture_frame`（``after_swap``，GL 上下文
+        仍然当前）；这里只置「下一帧抓一张」的意图位。
         """
-        process_log.log("[Screenshot] 截图功能待 P5 迁移（imgui 帧缓冲抓取）")
-        self._notify("截图功能迁移中（P5）")
+        self._screenshot_pending = True
+
+    def _capture_frame(self):
+        """（帧线程，``after_swap``）整帧抓取：F2 截图与 ``invert``/``rgb_split``
+        视效共用同一条通路。
+
+        平时这里是几条布尔判定，没有开销；只有真的要看画面时才回读后备缓冲。
+        """
+        # 视效优先：反色/色差只需要一帧，抓完就让给截图（同帧不会两件都做）
+        self._window_fx.capture()
+        if not getattr(self, "_screenshot_pending", False):
+            return
+        self._screenshot_pending = False
+        self._save_screenshot()
+
+    def _save_screenshot(self):
+        """回读整帧并交给像素工作者落盘（PNG 编码 + 磁盘 IO 不占帧）。"""
+        io = imgui.get_io()
+        w = int(round(io.display_size.x * io.display_framebuffer_scale.x))
+        h = int(round(io.display_size.y * io.display_framebuffer_scale.y))
+        rgba = gl_util.read_pixels(w, h)
+        if rgba is None:
+            process_log.log("[Screenshot] 抓帧失败（GL 回调不可用）")
+            self._notify("截图失败：无法读取画面")
+            return
+        from paths import data_dir
+        folder = os.path.join(data_dir(), "user", "screenshots")
+        try:
+            os.makedirs(folder, exist_ok=True)
+        except OSError as exc:
+            process_log.log(f"[Screenshot] 截图目录创建失败: {exc}")
+            self._notify(f"截图失败：{exc}")
+            return
+        filename = time.strftime("dungeon_%Y%m%d_%H%M%S.png")
+        path = os.path.join(folder, filename)
+        worker = getattr(self, "_shot_worker", None)
+        # GL 的通道序是 RGBA，PIL 按 "RGBA" 读没问题；截图落盘用 RGB 更省
+        # （画面本来就不透明），转换与 PNG 编码都在工作者线程里做。
+        if worker is None or not worker.submit(
+                lambda: self._write_screenshot(rgba, path, filename)):
+            self._notify("截图失败：像素工作者不可用")
+
+    def _write_screenshot(self, rgba, path, filename):
+        """（工作者线程）PNG 编码 + 落盘，完成后回帧线程弹通知。"""
+        try:
+            from PIL import Image
+            Image.fromarray(rgba, "RGBA").convert("RGB").save(path)
+        except Exception as exc:
+            process_log.log(f"[Screenshot] 截图失败: {exc}")
+            self._frame.call(self._notify, f"截图失败：{exc}")
+            return
+        process_log.log(f"[Screenshot] 已保存: {path}")
+        # 通知延后到截图落盘之后弹出，避免通知条被截进画面
+        self._frame.after(0.3, self._notify, f"截图已保存：{filename}")
 
     def _on_screenshot_hotkey(self, sender=None, app_data=None):
         self.take_screenshot()
+
+    def _shutdown_screenshot_worker(self):
+        """会话收尾（``base._finish_session``）：收掉截图落盘线程。
+
+        等一小会儿让正在进行的 PNG 写入落地即可——写不完的那张图留着半截也不算
+        事故（用户能在 ``screenshots/`` 里看到并自己删掉）。
+        """
+        worker = getattr(self, "_shot_worker", None)
+        if worker is not None:
+            worker.shutdown()
+            self._shot_worker = None
 
     # ==================== 组件工具条（P4 起才有组件） ====================
     def _component_toolbar_hovered(self):
