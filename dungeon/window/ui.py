@@ -1,9 +1,9 @@
 """UI 绘制、文本显示、布局自适应与事件回调（imgui 立即模式）。
 
-本文件是 P1「窗口骨架」的主体：**建主窗口 + 背景铺满 + 视口尺寸/DPI + 字体 +
-轻通知 + 最小入口面板 + 输入接线**。各自的后续阶段：
+本文件现覆盖 P1「窗口骨架」与 P2「阅读主循环」：**建主窗口 + 背景铺满 +
+视口尺寸/DPI + 字体两档 + 底部渐变式文本区 + 上屏游标 + 继续指示 ▼ +
+三图标工具条 + 轻通知 + 输入接线**；入口面板仍是最小版。后续阶段：
 
-- P2 阅读主循环：完整文本区容器、上屏游标接线、继续指示、工具条三图标；
 - P3 入口阶段：动态背景轮播、方案面板完整版、结局图标轮播、Ken Burns；
 - P4 组件包与覆盖层（``component_pack/*`` / ``overlay.py``）；
 - P5 视效与截图 / 全屏（``fx.py``）。
@@ -39,6 +39,13 @@ DPG 时代                 立即模式
 
 **上屏游标（``_reveal_*``）一行没改**：它本来就是原地改写
 ``story_history[i]["text"]``，立即模式每帧重画，天然就是"改写即上屏"。
+
+**阅读区与浮层（P2）**：正文区按旧组件 ``text_gradient`` 口径重画成"底部渐变
+衬底 + 最近 N 个显示段落 + 闪烁继续指示 ▼"，并补上三图标工具条（播放 / 截图 /
+过程日志）。入口面板、工具条、选项弹窗这些浮层一律在根窗口 ``end()`` 之后作为
+**顶层窗口**绘制，且必须用 :func:`_panel_flags`（不带
+``no_bring_to_front_on_focus``）——否则会被铺满客户区的根窗口整个盖住。详见
+:meth:`DungeonWindowUI._draw_frame`。
 
 ## 尺寸与 DPI 的口径（P1 实测：Windows @200%，imgui-bundle 1.92.900）
 
@@ -102,19 +109,75 @@ _AUTOPLAY_DWELL = 0.5            # 上屏结束后额外停留（秒）
 _AUTOPLAY_DWELL_PER_CHAR = 0.012  # 每个字符追加的停留（长句多停一点）
 _AUTOPLAY_TASK = "autoplay:tick"
 
+# ---------- 阅读区（"text" 底部渐变式）：与旧 DPG 组件 text_gradient 同口径 ----------
+_GRADIENT_HEIGHT_PERCENT = 45         # 渐变衬底占视口高度的百分比（15~80）
+_GRADIENT_COLOR = (10, 12, 22, 128)   # 渐变最底处的颜色（alpha 即最大不透明度）
+_STORY_MAX_LINES = 1                  # 屏幕上保留的最近显示段落数（旧组件默认 1）
+_STORY_MARGIN_X = 40                  # 文本框左右边距
+_STORY_MARGIN_BOTTOM = 20             # 文本框底边距
+_STORY_TOP_FLOOR = 60                 # 文本框顶边不越过窗口顶部这么多像素
+_STORY_PAD = 15                       # 文本框内边距
+_STORY_LINE_SPACING = 8               # 段落之间的额外间距
+_STORY_LABEL_COLOR = (255, 170, 210, 255)   # 说话人标签（与旧组件一致）
+_STORY_TEXT_COLOR = (240, 240, 245, 255)    # 正文
+_STORY_OLD_ALPHA = 0.55               # 非最新行的透明度系数
+
+# 继续指示 ▼：等待输入时闪烁（相位走帧任务，不开线程——窗口约束 C5）
+_INDICATOR_TEXT = "▼"
+_BLINK_SECONDS = 0.65
+_BLINK_TASK = "text:blink"
+
+# 文本功能工具条：圆角半透明容器 + 三个图标按钮（图标纹理程序化生成）
+_TOOLBAR_MARGIN = 12
+_TOOLBAR_ICON = 16        # 图标边长（px @ dpi=1）
+_TOOLBAR_PAD = 4          # 按钮内边距
+_TOOLBAR_GAP = 6          # 按钮间距
+_TOOLBAR_FRAME_X = 9      # 容器左右内边距
+_TOOLBAR_FRAME_Y = 6      # 容器上下内边距
+_TOOLBAR_TINT = (232, 236, 244, 220)      # 图标常态着色
+_TOOLBAR_TINT_ON = (255, 205, 100, 255)   # 自动播放中，播放图标转金色
+_TOOLBAR_ACTIONS = (
+    ("play", "自动播放（A）"),
+    ("camera", "截图（F2）"),
+    ("log", "过程日志（F12）"),
+)
+
 # ---------- imgui 窗口/子窗 ID（不进 ini，仅用于同层去重） ----------
 _ROOT_WINDOW = "##dungeon_root"
 _STORY_CHILD = "##dungeon_story"
 _ENTRY_PANEL = "##dungeon_entry"
 _OPTION_DIALOG = "##dungeon_option"
+_TOOLBAR = "##dungeon_toolbar"
+
+
+def _dim_color(color, factor):
+    """按系数调低 0~255 RGBA 的不透明度（保留颜色分量）。"""
+    return (color[0], color[1], color[2], int(round(color[3] * factor)))
+
+
+def _vec4(color):
+    """0~255 RGBA 常量 → ``ImVec4``（``image_button`` 的 tint 等 float 口径）。"""
+    r, g, b, a = color
+    return imgui.ImVec4(r / 255.0, g / 255.0, b / 255.0, a / 255.0)
 
 
 def _no_decoration_flags():
-    """无标题栏、不可移动/缩放、不滚动、不记忆设置的窗口标志（根窗口与面板共用）。"""
+    """无标题栏、不可移动/缩放、不记忆设置的窗口标志（**根窗口**用）。"""
     flags = imgui.WindowFlags_
     return (flags.no_title_bar.value | flags.no_resize.value | flags.no_move.value
             | flags.no_collapse.value | flags.no_saved_settings.value
             | flags.no_bring_to_front_on_focus.value)
+
+
+def _panel_flags():
+    """浮层面板（入口面板 / 工具条 / 选项弹窗）的窗口标志。
+
+    与 :func:`_no_decoration_flags` 的唯一差别是**不带** ``no_bring_to_front``：
+    实测 1.92.900 下，带该标志的窗口会被铺满客户区的根窗口盖在下面（根窗口
+    也是满屏无背景窗口，一旦排到前面就把面板整个挡住）。根窗口保留该标志，
+    点背景时它不会抢到最前；面板去掉它才能稳定浮在根窗口之上。
+    """
+    return _no_decoration_flags() & ~imgui.WindowFlags_.no_bring_to_front_on_focus.value
 
 
 class DungeonWindowUI:
@@ -140,9 +203,6 @@ class DungeonWindowUI:
         self._notify_until = 0.0
         self._notify_width = round(_NOTIFY_WIDTH * self._dpi_scale)
 
-        # 立即模式没有"控件树"可查询滚动位置，改为一个"下一帧滚到底"的意图位
-        self._story_scroll_bottom = True
-
         # 背景纹理句柄（hello_imgui.TextureGpu）。持有 Python 引用即持有 GPU
         # 资源；换图时先建新句柄再丢旧句柄，避免中间帧采样到已释放纹理。
         self._bg_texture = None
@@ -163,6 +223,14 @@ class DungeonWindowUI:
         self.dungeon_text_font = None
         self.dungeon_bold_font = None
         self._font_ui = None
+
+        # P2 阅读主循环：继续指示相位 + 工具条状态
+        self._indicator_on = True
+        self._indicator_shown = False
+        self._toolbar_textures = {}     # post_init（GL 就绪）里上传
+        self._toolbar_hovered = False
+        # 闪烁相位走帧任务：跟随帧循环生灭，收尾时随 _frame.stop() 一并清掉
+        self._frame.every(_BLINK_SECONDS, self._toggle_indicator, key=_BLINK_TASK)
 
         self._runner = WindowRunner(
             title=self._real_title,
@@ -215,8 +283,11 @@ class DungeonWindowUI:
                         + (f"（粗体 {bold_path}）" if bold_path else ""))
         # 字号传**基础值**：hello_imgui 会按 dpi_factor 放大（实测
         # load_font(p,24)+push_font(f,24) → 48px @200%），再乘一次就是双倍。
-        self.dungeon_text_font = hello_imgui.load_font(font_path, TEXT_FONT_SIZE)
+        # 加载顺序 = 图集顺序：第一个加载的字体成为默认字体（io.fonts.fonts[0]）。
+        # 面板 / 工具条 / 通知用 UI 档（21），正文用 24（有粗体文件时用粗体 24）
+        # ——与 DPG 时代 dpg.bind_font(UI) + 正文单独绑定的口径一致。
         self._font_ui = hello_imgui.load_font(font_path, UI_FONT_SIZE)
+        self.dungeon_text_font = hello_imgui.load_font(font_path, TEXT_FONT_SIZE)
         self.dungeon_bold_font = (hello_imgui.load_font(bold_path, BOLD_FONT_SIZE)
                                   if bold_path else None)
 
@@ -230,6 +301,8 @@ class DungeonWindowUI:
         """
         self._gl_ready = True
         self._apply_imgui_style()
+        # 工具条图标是 GPU 资源，必须等到 GL 就绪（post_init）之后才能上传
+        self._make_toolbar_textures()
         # 窗口视效层：P5 才实现（imgui 侧要为闪光/振动/反色/色差重画一遍），
         # 这里的 build 是保持调用链完整的 P5 占位（fx.py 里为空实现）。
         self._window_fx.build(self._layout_w, self._layout_h)
@@ -262,7 +335,19 @@ class DungeonWindowUI:
         self._frame.tick()
 
     def _draw_frame(self):
-        """构建整帧画面（每帧调用一次）。"""
+        """构建整帧画面（每帧调用一次）。
+
+        图层（imgui 1.92.900 实测）：
+
+        - ``_ROOT_WINDOW``：铺满客户区、无装饰无背景的根窗口，只放背景 / 渐变 /
+          正文子窗 / 继续指示 / 轻通知（draw list 与 ``begin_child`` 在根窗口内
+          都正常绘制）。
+        - 浮层（入口面板 / 工具条 / 选项弹窗）：在根窗口 ``end()`` 之后作为
+          **顶层窗口**绘制，并且必须用 :func:`_panel_flags`。带
+          ``no_bring_to_front_on_focus`` 的面板会被铺满客户区的根窗口整个盖住，
+          屏幕上完全不可见——P1 的入口面板就这样一直没显示出来，P2 截图取证时
+          才发现；根窗口保留该标志，点背景时不会抢到最前。
+        """
         io = imgui.get_io()
         w, h = float(io.display_size.x), float(io.display_size.y)
         if w <= 1.0 or h <= 1.0:
@@ -289,17 +374,25 @@ class DungeonWindowUI:
             pending, self._pending_bg = self._pending_bg, None
             self._apply_bg_data(*pending)
         self._draw_background(w, h)
+        # 组件接管文本显示（P4 起）时内置文本区整体跳过，显示由组件 refresh 完成
+        if (not getattr(self, "_is_entry_phase", False)
+                and not self._text_owned_by_component()):
+            self._draw_story(w, h)
+        self._draw_notification(w, h)
+        imgui.end()
+        imgui.pop_style_var(3)
+
+        # 顶层浮层：root end() 之后再 begin()（见方法文档）
         if getattr(self, "_is_entry_phase", False):
             self._draw_entry_panel(w, h)
         else:
-            self._draw_story(w, h)
-        # 输入放在控件绘制之后：``is_any_item_hovered`` 才是本帧的悬停真值
-        self._handle_input()
-        self._draw_notification(w, h)
-        self._draw_option_dialog(w, h)
+            # 工具条随文本组件走：组件接管显示时由组件自己画（P4）
+            if not self._text_owned_by_component():
+                self._draw_toolbar(w, h)
+            self._draw_option_dialog(w, h)
 
-        imgui.end()
-        imgui.pop_style_var(3)
+        # 输入放在所有控件绘制之后：``is_any_item_hovered`` 才是本帧的悬停真值
+        self._handle_input()
 
     def _on_frame_end(self):
         """换缓冲之后：计帧 + 自检限帧（等价于用户点了副本视口的关闭键）。"""
@@ -338,60 +431,266 @@ class DungeonWindowUI:
         ref = imgui.ImTextureRef(int(texture.texture_id()))
         draw_list.add_image(ref, pmin, pmax, iu.v2(0.0, 0.0), iu.v2(1.0, 1.0))
 
-    # ==================== 绘制：会话正文 ====================
+    # ==================== 绘制：会话正文（text 底部渐变式） ====================
+    #
+    # P2 阅读主循环：底部渐变衬底 + 最近若干显示段落 + 闪烁继续指示 ▼ + 三图标
+    # 工具条。与旧 DPG 组件包 ``text_gradient`` 同口径（渐变占视口底部 45%、
+    # 只呈现最近 N 个显示段落）；区别只在实现——立即模式没有控件树，正文每帧
+    # 从 ``story_history`` 现画，上屏游标"原地改写 text"天然就是"改写即上屏"。
     def _story_geometry(self, w: float, h: float):
-        """正文区几何：``(x, y, 宽, 高, 内边距)``。``_relayout`` 与绘制共用。"""
+        """阅读区几何：``(左边距, 渐变高, 文本宽, 内边距)``。
+
+        与旧 DPG 组件包 ``text_gradient`` 同口径：渐变衬底占视口底部 45%
+        （上下限 15%~80%），文本框左右各留 40×dpi、底部留 20×dpi。
+        """
         s = self._dpi_scale
-        margin_x = round(40 * s)
-        margin_top = round(40 * s)
-        margin_bottom = round(20 * s)
-        return (float(margin_x), float(margin_top),
-                max(1.0, w - 2 * margin_x),
-                max(1.0, h - margin_top - margin_bottom),
-                float(round(15 * s)))
+        margin_x = round(_STORY_MARGIN_X * s)
+        percent = min(80, max(15, _GRADIENT_HEIGHT_PERCENT))
+        grad_h = max(round(h * 0.15), round(h * percent / 100.0))
+        return (float(margin_x), float(grad_h),
+                max(1.0, w - 2 * margin_x), float(round(_STORY_PAD * s)))
+
+    def _story_visible_items(self):
+        """屏幕上保留的最近若干个显示段落（空段落与纯标签段落跳过）。"""
+        items = [it for it in (getattr(self, "story_history", None) or [])
+                 if (it.get("text") or str(it.get("speaker") or "").strip())]
+        return items[-max(1, _STORY_MAX_LINES):]
+
+    def _story_font(self):
+        """正文档字体：解析到粗体文件时用粗体（旧组件把行对绑到粗体上）。"""
+        return (getattr(self, "dungeon_bold_font", None)
+                or getattr(self, "dungeon_text_font", None))
+
+    def _push_story_font(self):
+        """正文档字体（字号传基础值，库按 DPI 放大——见模块文档）。"""
+        font = self._story_font()
+        if font is not None:
+            imgui.push_font(font, TEXT_FONT_SIZE)
+
+    def _pop_story_font(self):
+        if self._story_font() is not None:
+            imgui.pop_font()
+
+    def _story_box_geometry(self, w: float, h: float):
+        """阅读区完整几何：``(x, 渐变高, 文本宽, 文本高, 内边距, 文本 y)``。"""
+        x, grad_h, text_w, pad = self._story_geometry(w, h)
+        box_h = self._story_box_height(text_w, pad, h)
+        s = self._dpi_scale
+        box_y = max(0.0, h - float(round(_STORY_MARGIN_BOTTOM * s)) - box_h)
+        return x, grad_h, text_w, box_h, pad, box_y
 
     def _draw_story(self, w: float, h: float):
-        """正文区：深色衬底 + 可滚动的历史段落（P1 为直显，不接组件包）。"""
-        x, y, cw, ch, pad = self._story_geometry(w, h)
-        self._text_wrap_width = max(1.0, cw - 2 * pad)
+        """阅读主循环：渐变衬底 + 最近段落 + 继续指示 ▼（工具条是顶层浮层）。
 
-        # 深色衬底（旧时代由 bg_overlay_child 子窗承担）
+        只呈现最近 ``_STORY_MAX_LINES`` 个显示段落（旧 ``text_gradient`` 同
+        口径）；完整历史归回放/报告，回看面板在 P4。上屏游标原地改写
+        ``story_history[i]["text"]``，立即模式每帧重画即"改写即上屏"。
+        """
+        x, grad_h, text_w, box_h, pad, box_y = self._story_box_geometry(w, h)
+        self._text_wrap_width = max(1.0, text_w - 2 * pad)
+        self._draw_gradient_band(w, h, grad_h)
+        self._draw_story_lines(x, box_y, text_w, box_h, pad)
+        self._draw_continue_indicator(x, box_y, text_w, box_h)
+
+    def _draw_gradient_band(self, w: float, h: float, grad_h: float):
+        """底部向上淡出的深色衬底：imgui 的四角渐变矩形一步到位（不用纹理）。"""
+        r, g, b, a = _GRADIENT_COLOR
         draw_list = imgui.get_window_draw_list()
-        draw_list.add_rect_filled(iu.v2(x, y), iu.v2(x + cw, y + ch), iu.u32(0, 0, 0, 140))
+        top = iu.u32(r, g, b, 0)
+        bottom = iu.u32(r, g, b, a)
+        draw_list.add_rect_filled_multi_color(iu.v2(0.0, h - grad_h), iu.v2(w, h),
+                                              top, top, bottom, bottom)
 
-        imgui.set_cursor_pos(iu.v2(x, y))
-        self._push_text_font()
-        imgui.push_style_var(imgui.StyleVar_.window_padding, iu.v2(pad, pad))
-        imgui.begin_child(_STORY_CHILD, iu.v2(cw, ch), imgui.ChildFlags_.none.value)
-        for item in self.story_history:
-            self._draw_story_item(item)
-        # 保留全历史：新段落上屏后自动滚到底（意图位由 _display_text 置起）
-        if self._story_scroll_bottom:
-            self._story_scroll_bottom = False
-            max_scroll = imgui.get_scroll_max_y()
-            if max_scroll > 0.0:
-                imgui.set_scroll_y(max_scroll)
+    def _story_box_height(self, text_w: float, pad: float, h: float) -> float:
+        """文本框高度：按可见段落估算内容高度，再夹进几何预算。
+
+        估算是保守的（行高按字号 + 10，换行用 ``calc_text_size`` 实测宽度），
+        只多不少、不会裁字；顶边不越过窗口顶部 ``_STORY_TOP_FLOOR``。
+        """
+        s = self._dpi_scale
+        floor_h = float(round(60 * s))
+        wrap = max(1.0, text_w - 2 * pad)
+        line_h = float(round((TEXT_FONT_SIZE + 10) * s))
+        content = 2.0 * pad
+        for item in self._story_visible_items():
+            if str(item.get("speaker") or "").strip():
+                content += line_h
+            size = imgui.calc_text_size(item.get("text") or "", None, False, wrap)
+            content += max(line_h, float(size.y))
+            content += float(round(_STORY_LINE_SPACING * s))
+        cap = max(floor_h, h - float(round(_STORY_MARGIN_BOTTOM * s))
+                  - float(round(_STORY_TOP_FLOOR * s)))
+        return max(floor_h, min(cap, content))
+
+    def _draw_story_lines(self, x, box_y, text_w, box_h, pad):
+        """文本框：透明子窗里的最近段落；最新一行全亮、旧行降透明度。"""
+        s = self._dpi_scale
+        pad_v = float(round(pad))
+        flags = (imgui.WindowFlags_.no_scrollbar.value
+                 | imgui.WindowFlags_.no_scroll_with_mouse.value)
+        imgui.set_cursor_pos(iu.v2(x, max(0.0, box_y)))
+        # 内边距交给子窗自己的 WindowPadding：不能用 set_cursor_pos 往里推——
+        # 空历史（首帧）时子窗里没有条目接着提交 Item，imgui 会断言
+        # "SetCursorPos extends window boundaries"。
+        imgui.push_style_var(imgui.StyleVar_.window_padding, iu.v2(pad_v, pad_v))
+        imgui.push_style_color(imgui.Col_.child_bg, iu.u32(0, 0, 0, 0))
+        imgui.begin_child(_STORY_CHILD, iu.v2(text_w, box_h),
+                          imgui.ChildFlags_.none.value, flags)
+        self._push_story_font()
+        items = self._story_visible_items()
+        for index, item in enumerate(items):
+            newest = index == len(items) - 1
+            alpha = 1.0 if newest else _STORY_OLD_ALPHA
+            label = str(item.get("speaker") or "").strip()
+            if label:
+                imgui.push_style_color(
+                    imgui.Col_.text, iu.u32(*_dim_color(_STORY_LABEL_COLOR, alpha)))
+                imgui.text(label)
+                imgui.pop_style_color()
+            body = _HIGHLIGHT_COLOR if item.get("highlight") else _STORY_TEXT_COLOR
+            imgui.push_style_color(imgui.Col_.text, iu.u32(*_dim_color(body, alpha)))
+            imgui.push_text_wrap_pos(imgui.get_cursor_pos_x()
+                                     + max(1.0, text_w - 2 * pad_v))
+            imgui.text_wrapped(item.get("text") or "")
+            imgui.pop_text_wrap_pos()
+            imgui.pop_style_color()
+            imgui.dummy(iu.v2(0.0, float(round(_STORY_LINE_SPACING * s))))
+        self._pop_story_font()
         imgui.end_child()
-        imgui.pop_style_var()
-        imgui.pop_font()
-
-    def _draw_story_item(self, item: dict):
-        """画一条历史段落。前缀与正文拼成一串，保持与旧实现的换行口径一致。"""
-        prefix = item.get("type_str") or ""
-        speaker = item.get("speaker")
-        head = prefix + (f"【{speaker}】" if speaker else "")
-        body = item.get("text", "") or ""
-        if not head and not body:
-            return
-        color = (_HIGHLIGHT_COLOR if item.get("highlight") else _TEXT_COLOR)
-        imgui.push_style_color(imgui.Col_.text, iu.u32(*color))
-        imgui.text_wrapped(head + body)
         imgui.pop_style_color()
-        imgui.spacing()
+        imgui.pop_style_var()
 
-    def _push_text_font(self):
-        """正文档字体（字号传基础值，库按 DPI 放大——见模块文档）。"""
-        imgui.push_font(getattr(self, "dungeon_text_font", None), TEXT_FONT_SIZE)
+    # ---------- 继续指示（等待输入时右下角闪烁 ▼） ----------
+    def _toggle_indicator(self):
+        """继续指示的闪烁相位（帧任务；不开线程——窗口约束 C5）。"""
+        self._indicator_on = not getattr(self, "_indicator_on", True)
+
+    def _waiting_for_continue(self) -> bool:
+        """是否该显示继续指示：等待输入，且入口页/覆盖层没有挡着。"""
+        if getattr(self, "_is_entry_phase", False) or self.overlay_open():
+            return False
+        try:
+            return bool(self.session_waiting_for_input())
+        except Exception:
+            return False
+
+    def _draw_continue_indicator(self, x, box_y, text_w, box_h):
+        """继续指示与自动播放同源：``session_waiting_for_input`` 为真才闪。"""
+        self._indicator_shown = False
+        if not getattr(self, "_indicator_on", True) or not self._waiting_for_continue():
+            return
+        self._indicator_shown = True
+        s = self._dpi_scale
+        px = (x + text_w - float(round(46 * s)) - self._toolbar_width()
+              - float(round(16 * s)))
+        py = box_y + box_h - float(round(44 * s))
+        imgui.get_window_draw_list().add_text(
+            iu.v2(max(0.0, px), max(0.0, py)),
+            iu.u32(*_STORY_LABEL_COLOR), _INDICATOR_TEXT)
+
+    # ---------- 文本功能工具条（播放 / 截图 / 过程日志） ----------
+    def _toolbar_width(self) -> float:
+        s = self._dpi_scale
+        icon = max(6, round(_TOOLBAR_ICON * s))
+        pad = round(_TOOLBAR_PAD * s)
+        gap = round(_TOOLBAR_GAP * s)
+        frame_x = round(_TOOLBAR_FRAME_X * s)
+        n = len(_TOOLBAR_ACTIONS)
+        return float(n * (icon + 2 * pad) + (n - 1) * gap + 2 * frame_x)
+
+    def _toolbar_height(self) -> float:
+        s = self._dpi_scale
+        icon = max(6, round(_TOOLBAR_ICON * s))
+        pad = round(_TOOLBAR_PAD * s)
+        frame_y = round(_TOOLBAR_FRAME_Y * s)
+        return float(icon + 2 * pad + 2 * frame_y)
+
+    def _make_toolbar_textures(self):
+        """``post_init``（GL 就绪）后把三个程序化图标上传成 ``TextureGpu``。"""
+        s = self._dpi_scale
+        icon = max(6, round(_TOOLBAR_ICON * s))
+        textures = {}
+        try:
+            for key, _tip in _TOOLBAR_ACTIONS:
+                rgba = iu.icon_rgba(iu.ICON_SHAPES[key], icon)
+                textures[key] = hello_imgui.create_texture_gpu_from_rgba_data(rgba)
+        except Exception as exc:
+            process_log.log(f"[Dungeon] 工具条图标创建失败: {exc}")
+            textures = {}
+        self._toolbar_textures = textures
+
+    def _draw_toolbar(self, w, h):
+        """文本框右下角的三个图标按钮：播放 / 截图 / 过程日志。
+
+        只转调窗口同名服务（与 A / F2 / F12 等效），按钮本身不推进剧情；悬停
+        状态写进 ``_toolbar_hovered``，供 ``_component_toolbar_hovered`` 判定
+        "点在按钮上"而不是"点屏推进"。
+        """
+        self._toolbar_hovered = False
+        if getattr(self, "_is_entry_phase", False):
+            return
+        textures = getattr(self, "_toolbar_textures", None) or {}
+        if not textures:
+            return
+        s = self._dpi_scale
+        icon = max(6, round(_TOOLBAR_ICON * s))
+        pad = round(_TOOLBAR_PAD * s)
+        gap = round(_TOOLBAR_GAP * s)
+        frame_x = round(_TOOLBAR_FRAME_X * s)
+        frame_y = round(_TOOLBAR_FRAME_Y * s)
+        bar_w, bar_h = self._toolbar_width(), self._toolbar_height()
+        margin = round(_TOOLBAR_MARGIN * s)
+        _x, _grad_h, _text_w, box_h, _pad, box_y = self._story_box_geometry(w, h)
+        x = max(0.0, w - bar_w - margin)
+        y = max(0.0, box_y + box_h - bar_h - float(round(10 * s)))
+        imgui.set_next_window_pos(iu.v2(x, y))
+        imgui.set_next_window_size(iu.v2(bar_w, bar_h))
+        imgui.push_style_var(imgui.StyleVar_.window_padding, iu.v2(0.0, 0.0))
+        imgui.push_style_var(imgui.StyleVar_.item_spacing, iu.v2(float(gap), 0.0))
+        imgui.push_style_var(imgui.StyleVar_.frame_padding,
+                             iu.v2(float(pad), float(pad)))
+        imgui.push_style_color(imgui.Col_.window_bg, iu.u32(10, 12, 20, 100))
+        imgui.push_style_color(imgui.Col_.border, iu.u32(255, 255, 255, 32))
+        imgui.push_style_color(imgui.Col_.button, iu.u32(0, 0, 0, 0))
+        imgui.push_style_color(imgui.Col_.button_hovered, iu.u32(255, 255, 255, 46))
+        imgui.push_style_color(imgui.Col_.button_active, iu.u32(255, 255, 255, 72))
+        #: 供自检/后续阶段读的"UI 状态快照"（P7 的闸门会用到）
+        self._toolbar_rect = (x, y, bar_w, bar_h)
+        imgui.begin(_TOOLBAR, None,
+                    _panel_flags()
+                    | imgui.WindowFlags_.no_scrollbar.value
+                    | imgui.WindowFlags_.no_scroll_with_mouse.value
+                    | imgui.WindowFlags_.always_auto_resize.value)
+        imgui.set_cursor_pos(iu.v2(float(frame_x), float(frame_y)))
+        autoplay_on = bool(getattr(self, "_autoplay", False))
+        for index, (key, tip) in enumerate(_TOOLBAR_ACTIONS):
+            texture = textures.get(key)
+            if texture is None:
+                continue
+            if index:
+                imgui.same_line()
+            tint = _vec4(_TOOLBAR_TINT_ON if (key == "play" and autoplay_on)
+                         else _TOOLBAR_TINT)
+            ref = imgui.ImTextureRef(int(texture.texture_id()))
+            clicked = imgui.image_button(
+                f"##dungeon_toolbar_{key}", ref, iu.v2(float(icon), float(icon)),
+                None, None, None, tint)
+            if imgui.is_item_hovered():
+                self._toolbar_hovered = True
+                imgui.set_tooltip(tip)
+            if clicked:
+                self._on_toolbar_action(key)
+        imgui.end()
+        imgui.pop_style_color(5)
+        imgui.pop_style_var(3)
+
+    def _on_toolbar_action(self, key):
+        """工具条按钮 → 与快捷键等效的窗口服务。"""
+        handler = {"play": self.toggle_autoplay,
+                   "camera": self.take_screenshot,
+                   "log": self.toggle_proc_log}.get(key)
+        if callable(handler):
+            handler()
 
     def _push_ui_font(self):
         """界面档字体（工具条/面板/通知）。"""
@@ -456,10 +755,11 @@ class DungeonWindowUI:
         if not 0 <= self._entry_selection < len(items):
             self._entry_selection = 0
 
+        self._entry_panel_rect = (x, y, cw, ch)
         imgui.set_next_window_pos(iu.v2(x, y))
         imgui.set_next_window_size(iu.v2(cw, ch))
         imgui.begin(_ENTRY_PANEL, None,
-                    _no_decoration_flags()
+                    _panel_flags()
                     | imgui.WindowFlags_.no_scrollbar.value
                     | imgui.WindowFlags_.no_scroll_with_mouse.value)
         inner_w = cw - 2 * float(round(12 * s))
@@ -535,7 +835,7 @@ class DungeonWindowUI:
         imgui.set_next_window_pos(iu.v2(max(0.0, (w - dw) / 2.0),
                                        max(0.0, (h - dh) / 2.0)))
         imgui.set_next_window_size(iu.v2(dw, dh))
-        imgui.begin(_OPTION_DIALOG, None, _no_decoration_flags())
+        imgui.begin(_OPTION_DIALOG, None, _panel_flags())
         self._push_ui_font()
         imgui.text_wrapped(self._option_dialog_title())
         imgui.spacing()
@@ -564,11 +864,12 @@ class DungeonWindowUI:
         排除落在控件上的那一次（``is_any_item_hovered``），否则点按钮会顺带
         推进一句剧情。
         """
-        if getattr(self, "_is_entry_phase", False):
-            return
         key = imgui.Key
+        # F11 在入口页也生效（与 DPG 时代的全局 handler 等价）；其余键位只属于会话
         if imgui.is_key_pressed(key.f11):
             self._toggle_fullscreen()
+        if getattr(self, "_is_entry_phase", False):
+            return
         if imgui.is_key_pressed(key.f12):
             self._on_proc_log_hotkey()
         if imgui.is_key_pressed(key.f2):
@@ -703,7 +1004,13 @@ class DungeonWindowUI:
 
     # ==================== 组件工具条（P4 起才有组件） ====================
     def _component_toolbar_hovered(self):
-        """光标是否悬停在某个组件的功能按钮工具条上。"""
+        """光标是否悬停在功能按钮工具条上（内置工具条或组件工具条）。
+
+        内置工具条由 ``_draw_frame`` 先画（顶层浮层），``_handle_input`` 后跑，
+        因此本帧的悬停真值已经写进 ``_toolbar_hovered``。
+        """
+        if getattr(self, "_toolbar_hovered", False):
+            return True
         return any(comp.toolbar_hovered()
                    for comp in getattr(self, "_components", []))
 
@@ -727,18 +1034,16 @@ class DungeonWindowUI:
         if self._text_owned_by_component():
             self._refresh_components()
             return
-        self._story_scroll_bottom = True
         self._refresh_components()
 
     def _schedule_text_update(self):
         """合并密集刷新：AI 流式会高频调用，转成"下一帧滚到底"的意图位。
 
-        立即模式下面板内容本来就每帧重画，这里唯一要做的是**别把意图位漏掉**
-        （旧实现在这里经帧队列合并，保留该路径以维持 ``drain()`` 被驱动）。
+        立即模式下面板内容本来就每帧重画，这里保留该入口只为维持旧调用链
+        （``engine`` 的流式回调会调它）。
         """
         if self._closing:
             return
-        self._story_scroll_bottom = True
 
     def _flush_text_update(self):
         self._text_update_pending = False
@@ -752,7 +1057,6 @@ class DungeonWindowUI:
         prefix = self._display_type_prefix(text_type) if prefix is None else prefix
         self.story_history.append({"type_str": prefix, "text": text,
                                    "highlight": highlight, "speaker": speaker})
-        self._story_scroll_bottom = True
         self._update_text_display()
 
     def _try_advance_paragraph(self) -> bool:
@@ -786,7 +1090,6 @@ class DungeonWindowUI:
         # 说话人按单元携带的标记解析结果（Solea/Bulla 对话分支）
         item = {"type_str": "", "text": unit.text, "speaker": unit.speaker}
         self.story_history.append(item)
-        self._story_scroll_bottom = True
         self._reveal_start(item, unit.text)
         self._speak_item(item)
 
@@ -933,7 +1236,7 @@ class DungeonWindowUI:
         s = self._dpi_scale
         margin = round(_NOTIFY_MARGIN * s)
         self._notify_width = min(round(_NOTIFY_WIDTH * s), max(1, int(w) - 2 * margin))
-        _x, _y, cw, _ch, pad = self._story_geometry(w, h)
+        _x, _grad_h, cw, pad = self._story_geometry(w, h)
         self._text_wrap_width = max(1.0, cw - 2 * pad)
 
         self._window_fx.relayout(w, h)

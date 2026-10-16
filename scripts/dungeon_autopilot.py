@@ -498,13 +498,15 @@ class AutopilotWindow(DungeonSessionWindow):
             self._frame.call(self._close_loop)
 
     def _enter_start(self):
-        """入口页点「开始副本」：经真实控件取值，顺便覆盖 combo 读取路径。"""
-        try:
-            import dearpygui.dearpygui as dpg
-            if dpg.does_item_exist("ctl_dungeon") and self.scenario_ids:
-                dpg.set_value("ctl_dungeon", self.scenario_ids[0])
-        except Exception as exc:
-            print(f"[autopilot] 选择方案失败: {exc}")
+        """入口页点「开始副本」：直接落到窗口状态，不再读 DPG 控件树。
+
+        imgui 是立即模式，方案下拉的选中值就是 ``self._entry_selection``
+        （``ui._draw_entry_panel`` 每帧现画），没有可写的 retained 控件；旧实现
+        在无 DPG 上下文时调 ``dpg.does_item_exist`` 会以 access violation 崩掉
+        子进程（P7 清理项）。
+        """
+        if self.scenario_ids and not 0 <= getattr(self, "_entry_selection", 0) < len(self.scenario_ids):
+            self._entry_selection = 0
         self._on_entry_start()
 
     def _record_callback_thread(self, sender, app_data):

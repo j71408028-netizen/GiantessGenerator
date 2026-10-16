@@ -61,5 +61,62 @@ def clamp01(value):
     return 0.0 if value < 0.0 else (1.0 if value > 1.0 else float(value))
 
 
+def _shape_play(u, v):
+    """右向实心三角（播放）。"""
+    if not (0.15 <= v <= 0.85):
+        return 0.0
+    t = (u - 0.25) / 0.6          # 0 at 左缘顶点边，1 at 右侧尖角
+    if not 0.0 <= t <= 1.0:
+        return 0.0
+    half = 0.35 * (1.0 - t)
+    return 1.0 if abs(v - 0.5) <= half else 0.0
+
+
+def _shape_camera(u, v):
+    """相机机身 + 顶视窗 + 镜头圆孔。"""
+    if 0.35 <= u <= 0.65 and 0.18 <= v <= 0.32:
+        return 1.0
+    if 0.12 <= u <= 0.88 and 0.32 <= v <= 0.82:
+        du, dv = u - 0.5, v - 0.57
+        return 0.0 if du * du + dv * dv <= 0.16 ** 2 else 1.0
+    return 0.0
+
+
+def _shape_log(u, v):
+    """三条横线（日志列表）。"""
+    for cy in (0.24, 0.5, 0.76):
+        if 0.16 <= u <= 0.84 and abs(v - cy) <= 0.055:
+            return 1.0
+    return 0.0
+
+
+#: 工具条图标形状函数（归一化 uv → 0~1 不透明度）。与旧 DPG 组件包同一套
+#: 形状，P4 迁移组件包时从这里取，避免两处漂移。
+ICON_SHAPES = {"play": _shape_play, "camera": _shape_camera, "log": _shape_log}
+
+
+def icon_rgba(shape, size):
+    """按形状函数生成 ``size×size`` 的 RGBA ``numpy`` 图（白色 + alpha 形状）。
+
+    颜色由按钮的 ``tint_col`` 注入，因此 RGB 恒为白；返回 C 连续 ``uint8``，
+    可直接交给 ``hello_imgui.create_texture_gpu_from_rgba_data``。不需要 GL
+    上下文即可调用（上传才需要）。
+    """
+    import numpy as np
+    size = max(1, int(size))
+    img = np.zeros((size, size, 4), dtype=np.uint8)
+    step = 1.0 / size
+    for y in range(size):
+        v = (y + 0.5) * step
+        for x in range(size):
+            u = (x + 0.5) * step
+            alpha = max(0.0, min(1.0, float(shape(u, v))))
+            img[y, x, 0] = 255
+            img[y, x, 1] = 255
+            img[y, x, 2] = 255
+            img[y, x, 3] = int(round(255 * alpha))
+    return img
+
+
 __all__ = ["u32", "color", "with_alpha", "alpha_of", "v2", "v2_tuple",
-           "lerp", "clamp01"]
+           "lerp", "clamp01", "ICON_SHAPES", "icon_rgba"]
