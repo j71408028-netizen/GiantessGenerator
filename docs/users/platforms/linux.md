@@ -137,7 +137,7 @@ Xlib 默认处理器会直接 `exit(1)`，表现为冒烟里的 `X Error of fail
 .venv/bin/python scripts/dungeon_autopilot.py --scene all --isolate --timeout 60
 ```
 
-平台不适用项按设计 **SKIP**，不计失败：`callback-thread` 场景（靠 Windows
+平台不适用项按设计 **SKIP**，不计失败：`native-input` 场景（靠 Windows
 `SendMessage(WM_KEYDOWN)` 投原生按键）在非 Windows 跳过；`native-close` 同理。
 `smoke_mini` 在 Linux 只断言「置顶调用不抛异常」，置顶有效性由
 `ui/mini/topmost.py` 的 EWMH 回读路径覆盖。

@@ -231,15 +231,15 @@ run() → SessionResult
 会话收尾 `_finish_session()` 会 `_frame.stop()`，此后 `call()` 返回 `False` 而不是抛异常，
 后台线程不必再轮询 `_closing`。
 
-**DPG 回调的默认派发线程不是主线程**：DearPyGui 2.3.1 默认把控件 / 按键 handler 回调放到
-**工作线程**执行（官方文档明示，已实测复现——回调线程 ≠ 帧循环线程）。这意味着
-`_on_mouse_click` / `_on_key_down` / `_toggle_fullscreen` 这类回调若直接执行，
-天然违反上面的单线程约定（靠 DPG 内部互斥才没常崩）。因此窗口启用了
-**手动回调管理**（`ui._build_ui` 里 `dpg.configure_app(manual_callback_management=True)`）：
-回调进入 DPG 队列，由帧循环在渲染前 `run_callbacks(get_callback_queue())` 统一执行，
-回调与渲染同线程，上面的约定才真正成立。自动驾驶 `callback-thread` 场景用
-「SendMessage 直投 WM_KEYDOWN 触发真实按键 handler」锁住这条性质。
-新增回调时无需再手工转投递，但**不要**关掉手动回调管理。
+**输入只在帧循环线程上落地**：立即模式没有"回调线程"——`ui._handle_input` 每帧读
+`imgui.is_key_pressed` / `is_mouse_clicked`，鼠标与键盘天然在帧线程执行，上面的
+单线程约定不需要任何"收拢"就成立。自动驾驶 `native-input` 场景用
+「SendMessage 直投 WM_KEYDOWN 触发真原生按键」锁住这条性质。
+
+> 迁移前（DPG 2.3.1）控件 / 按键回调默认派发到**工作线程**，窗口靠
+> `dpg.configure_app(manual_callback_management=True)` + 帧循环
+> `run_callbacks(get_callback_queue())` 把它们收拢到帧线程（旧 C6）。那条补救链
+> 已随 imgui 迁移（P1）删除，本段落记的是它的来历；DPG 的其余兼容怪癖见 §5.1。
 
 帧时钟 API（`dungeon/window/frame.py::FrameScheduler`，窗口实例成员 `self._frame`）：
 
@@ -287,7 +287,7 @@ run() → SessionResult
 
 | 现象 | 应对 |
 |---|---|
-| 控件 / 按键回调默认在**工作线程**执行（非帧循环线程，官方文档明示、已实测） | `ui._build_ui` 启用 `configure_app(manual_callback_management=True)`，帧循环渲染前 `run_callbacks(get_callback_queue())`（见 §2.2 / §4）；自动驾驶 `callback-thread` 场景守护 |
+| 控件 / 按键回调的执行线程 | **迁移后不再需要收拢**：立即模式没有回调，`ui._handle_input` 在帧循环每帧读 `is_key_pressed` / `is_mouse_clicked`（见 §2.2）；自动驾驶 `native-input` 场景用原生 `WM_KEYDOWN` 锁住这条路 |
 | `dpg.add_child_window(..., no_scrollbar=...)` 等参数创建时传入不生效 | 创建后 `dpg.configure_item()` 再设一遍（见 `_build_ui` 对 `main_window`） |
 | viewport 级 drawlist 不渲染 `draw_image` | 背景图放在主窗口自己的 drawlist（`bg_drawlist`）；主窗口 `no_background=True` |
 | 入口阶段控件在容器块**之后**创建，DPG 推断不出父级 | 显式 `parent="main_window"`（见 `launcher._build_entry_ui`） |

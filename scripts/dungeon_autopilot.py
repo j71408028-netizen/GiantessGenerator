@@ -1,7 +1,9 @@
-"""副本窗口（DearPyGui）自动驾驶自检。
+"""副本窗口（imgui-bundle）自动驾驶自检。
 
-不用人手点击、不联网、不碰真实 ``data/``：用脚本代替玩家操作 DPG 会话窗口，
-跑完一个场景后对窗口状态与落盘结果做断言。
+不用人手点击、不联网、不碰真实 ``data/``：用脚本代替玩家操作会话窗口，
+跑完一个场景后对窗口状态与落盘结果做断言。窗口状态一律经
+``ui.ui_snapshot()`` 的**值快照**读取——立即模式没有 retained 控件树可内省，
+DPG 时代的 ``does_item_exist`` / ``get_item_configuration`` 在这里没有对应物。
 
 用法::
 
@@ -14,9 +16,9 @@
 场景：
 
 ===============  ==========================================================
-callback-thread  真实按键回调（SendMessage 直投 WM_KEYDOWN）的执行线程 == 帧循环线程
-                 ——DPG 2.3.1 默认把回调派发到工作线程，须由手动回调管理收拢
-                 （见 ui._build_ui 的 configure_app 与 base._run_frame_loop）
+native-input     真实原生按键（SendMessage 直投 WM_KEYDOWN）必须落到窗口自己的
+                 输入接线（``ui._handle_input`` 的 ``is_key_pressed``），且只在
+                 帧循环线程上执行——立即模式没有"回调线程"，本场景守住这条不变量
 chapter-bgm      章节背景音乐接线：起始章节起播 → 跳到无音乐章节停播 → 收尾收工
                  （用替身后端，自检不出声；真实后端由 check_audio_chain 探）
 chapter-voice-fx 章节对话语音效果（物理尺度，不是语气）：她那一档开分拍回声 →
@@ -33,7 +35,7 @@ tk-host          parent 换成真 Tk 根窗口 → 心跳计数证明宿主事�
 native-close     用原生关闭键（WM_CLOSE）关视口 → 队列里不得残留 WM_QUIT（§5-C12）
 ===============  ==========================================================
 
-``entry-replay`` 覆盖 L4：回放不再让调用方 ``new`` 第二个窗口，而是在同一个 DPG
+``entry-replay`` 覆盖 L4：回放不再让调用方 ``new`` 第二个窗口，而是在同一个运行器
 生命周期里切 ``is_replay``——因此本场景断言"整段回放只跑了一次窗口生命周期"。
 
 L3 的验收是帧时钟：每个场景结束后，窗口自有的 ``FrameScheduler`` 应已停止、
@@ -43,7 +45,7 @@ L3 的验收是帧时钟：每个场景结束后，窗口自有的 ``FrameSchedu
 
 与 ``tests/check_dungeon_finalize.py`` 等无 GUI 脚本的关系：那些脚本覆盖纯逻辑，
 本脚本覆盖**只有真窗口才能覆盖的部分**——构造 → 步进 → 关闭的完整生命周期与
-DPG 上下文的创建/销毁。属于 GUI 冒烟层，需要显示器，不进无 GUI 的 CI 门禁。
+hello_imgui 运行器的起停。属于 GUI 冒烟层，需要显示器，不进无 GUI 的 CI 门禁。
 """
 
 import argparse
@@ -212,14 +214,13 @@ class RecordingTkHost(TkHost):
 
 
 # ---------------------------------------------------------------------------
-# 自动驾驶窗口：在 UI 建好后起一个驾驶员线程，所有操作都经窗口自己的帧时钟回到主线程
+# 自动驾驶窗口：在 UI 建好后起一个驾驶员线程，所有操作都经窗口自己的帧时钟回到帧线程
 # ---------------------------------------------------------------------------
 from dungeon.window import DungeonSessionWindow  # noqa: E402
 from dungeon.window.launcher import REPLAY_MARK  # noqa: E402
 
 CLICK_GAP = 0.6      # 与 _on_next_step 的 0.4s 节流保持一致
-_MINIMIZE = False    # 是否最小化视口（默认否，见 _build_ui 注释）
-#: 自检里创建的 Tk 根窗口（不销毁：会话结束后碰 Tk 会崩，见 scene_tk_host）
+#: 自检里创建的 Tk 根窗口（故意不销毁，理由见 scene_tk_host 的 docstring）
 _KEEP_ALIVE_ROOTS = []
 
 _WM_CLOSE = 0x0010   #: 投给视口原生窗口 = 用户点关闭键
@@ -229,24 +230,19 @@ _WM_QUIT = 0x0012    #: GLFW 销毁原生窗口后 Windows 记下的「退出进
 def _viewport_hwnd(win=None) -> int:
     """本会话那个原生窗口的句柄（找不到返回 0；非 Windows 恒为 0）。
 
-    DPG 时代视口窗口用固定类名 ``DungeonSession`` 注册，本探针原先只认它；换到
-    imgui/GLFW 之后没有这个类名，只能按**标题**找——标题就是 ``base._real_title``
-    （``副本模式 - …`` / ``回放模式 - …``）。两条都试，谁在认谁，让本探针在后端
-    过渡期两侧都能用。
+    imgui/GLFW 不给窗口类名，只能按**标题**找——标题就是 ``base._real_title``
+    （``副本模式 - …`` / ``回放模式 - …``，入口阶段也是这两个前缀）。精确标题
+    查不到时按「本进程 + 标题像副本窗口」再找一遍，兜住被系统改写标题的情形。
     """
     if not sys.platform.startswith("win"):
         return 0
     import ctypes
     user32 = ctypes.windll.user32
-    hwnd = user32.FindWindowW("DungeonSession", None)
-    if hwnd:
-        return hwnd
     title = getattr(win, "_real_title", "") or ""
     if title:
         hwnd = user32.FindWindowW(None, title)
         if hwnd:
             return hwnd
-    # 兜底：标题可能被系统/后端改写过，按「本进程 + 标题像副本窗口」再找一遍
     return _first_own_viewport_hwnd()
 
 
@@ -289,7 +285,13 @@ def _post_viewport_native_close(win=None) -> bool:
 
 
 def _post_viewport_key(win=None) -> bool:
-    """向自检视口投一次 K 键按下/抬起（SendMessage 直达窗口过程，不依赖焦点）。"""
+    """向自检视口投一次「空格」按下/抬起（SendMessage 直达窗口过程，不依赖焦点）。
+
+    立即模式的键盘接线读 ``imgui.is_key_pressed``，按键经 **GLFW 的窗口过程**进
+    imgui 输入队列。GLFW 用 lParam 里的**扫描码**（bits 16–23）查键表，不是
+    WPARAM 的虚拟键码——所以这里必须给对扫描码（空格 = ``0x39``），否则消息投
+    出去也映射不到任何键。
+    """
     if not sys.platform.startswith("win"):
         return False
     import ctypes
@@ -297,11 +299,11 @@ def _post_viewport_key(win=None) -> bool:
     hwnd = _viewport_hwnd(win)
     if not hwnd:
         return False
-    vk_k = 0x4B
-    lparam = 0x00250001   # scancode=0x25 扩展位0 重复1
-    user32.SendMessageW(hwnd, 0x0100, vk_k, lparam)   # WM_KEYDOWN
+    vk_space = 0x20
+    lparam = 0x00390001                 # scancode=0x39（空格）扩展位0 重复1
+    user32.SendMessageW(hwnd, 0x0100, vk_space, lparam)                    # WM_KEYDOWN
     time.sleep(0.05)
-    user32.SendMessageW(hwnd, 0x0101, vk_k, lparam | 0xC0000000)   # WM_KEYUP
+    user32.SendMessageW(hwnd, 0x0101, vk_space, lparam | 0xC0000000)       # WM_KEYUP
     return True
 
 
@@ -321,10 +323,7 @@ def _pending_quit() -> int:
     return 1 if found else 0
 
 
-#: 会话视口在 Windows 上用的临时标题（DPG 时代 ``base._temp_title``）。
-#: imgui/GLFW 时代没有这个临时标题，窗口标题就是给用户看的真标题（见下）。
-_VP_TITLE = "DungeonSession"
-#: imgui/GLFW 时代的副本窗口标题前缀（``base._real_title`` 的两种形态）
+#: 副本窗口的标题前缀（``base._real_title`` 的两种形态：正式会话 / 回放）
 _VP_TITLE_PREFIXES = ("副本模式", "回放模式")
 
 
@@ -336,22 +335,22 @@ def _window_title(hwnd) -> str:
 
 
 def _is_dungeon_viewport(hwnd) -> bool:
-    """这个原生窗口是不是副本会话窗口（两代后端的命名都认）。"""
-    title = _window_title(hwnd)
-    return title == _VP_TITLE or title.startswith(_VP_TITLE_PREFIXES)
+    """这个原生窗口是不是副本会话窗口（按标题前缀认）。"""
+    return _window_title(hwnd).startswith(_VP_TITLE_PREFIXES)
 
 
 def _leftover_viewport_windows() -> int:
     """本进程里还活着的副本视口原生窗口数（仅 Windows；非 Windows 恒为 0）。
 
-    守住「会话收尾必须把视口原生窗口带走」：DPG 2.3.1 的 ``destroy_context()``
-    不销毁该窗口（见 ``dungeon.window.dpg_state.discard_viewport_windows``），
-    而本程序收尾后仍继续跑 Tk——不显式销毁就会在屏幕上留下一个不再响应的副本
-    窗口（使用者看到的就是「点了返回后卡死」），且每跑一局累加一个。
+    守住「会话收尾必须把视口原生窗口带走」：DPG 时代 ``destroy_context()`` 不销毁
+    那个窗口（旧实现见 ``dungeon.window.dpg_state.discard_viewport_windows``）——本
+    程序收尾后仍继续跑 Tk，残留窗口在屏幕上就是一个不再响应的副本窗口（使用者看到
+    的就是「点了返回后卡死」），且每跑一局累加一个。imgui/GLFW 的运行器会自己销毁
+    窗口，本守卫改成**回归断言**：无论后端怎么实现，收尾都不许留下这一代窗口。
 
-    枚举方式：列出本进程的**全部顶层窗口**再按标题筛，而不是拿旧标题去
-    ``FindWindowExW`` 精确匹配——迁到 imgui/GLFW 后标题已改成真标题，继续用旧标题
-    精确匹配会恒返回 0，让这条守卫变成永远通过的假绿。
+    枚举方式：列出本进程的**全部顶层窗口**再按标题筛，而不是拿标题去 ``FindWindowW``
+    精确匹配——标题可能被系统/后端改写，精确匹配会恒返回 0，让这条守卫变成永远
+    通过的假绿（P7 修的就是这个）。
     """
     if not sys.platform.startswith("win"):
         return 0
@@ -383,11 +382,11 @@ class AutopilotWindow(DungeonSessionWindow):
       ("enter", None)   入口页点「开始副本」
       ("cancel", None)  入口页点「返回」
       ("replay", 值)    入口页点「加载回放」：值为 "cancel" 时宿主不返回文件
-      ("check", fn)     会话中途在主线程（DPG 存活时）执行 fn(win)，断言失败记入
+      ("check", fn)     会话中途在帧循环线程上执行 fn(win)，断言失败记入
                         _check_results（run() 结束后场景据此判定）
-      ("close", None)   关闭窗口（走 _close_loop → dpg.stop_dearpygui）
+      ("close", None)   关闭窗口（走 _close_loop → 运行器收帧）
       ("native-close", None)  向视口投 WM_CLOSE（模拟用户点关闭键）
-      ("native-key", None)    向视口投 K 键按下/抬起（回调线程探针用）
+      ("native-key", None)    向视口投一次真原生按键（输入接线 + 线程探针用）
     """
 
     def __init__(self, *args, script=None, **kwargs):
@@ -396,37 +395,44 @@ class AutopilotWindow(DungeonSessionWindow):
         # 章节」的脚本游标，与本驾驶脚本撞名，撞上之后本线程就再也拿不到动作列表
         # （2026-10-14 修：7409330 引入 _script 后所有脚本化场景都静默失败）。
         self._scripted_actions = list(script or [])
-        #: 每个脚本动作执行后的状态快照，供场景断言"那一刻"的情形
+        #: 每个脚本动作执行后的 ``ui_snapshot()`` 值快照，供场景断言"那一刻"的情形
         self._snapshots = {}
         #: ("check", fn) 动作的断言结果 [("ok"|"fail", 说明), ...]
         self._check_results = []
         #: ``native-close`` 动作是否真的把 WM_CLOSE 投给了视口原生窗口
         self._native_close_posted = False
-        self._callback_thread = None
-        self._callback_received = threading.Event()
         self._native_key_posted = False
+        #: ``native-key`` 动作推进了几次（该动作没被吞掉的证据）
+        self._native_key_steps = 0
+        #: ``native-key`` 探针（见 scene_native_input）：原生键落到输入接线时的线程
+        self._probe_input = False
+        self._input_thread = None
+        self._input_received = threading.Event()
+        self._input_steps = 0
         super().__init__(*args, **kwargs)
 
     def _build_ui(self):
         super()._build_ui()
-        if getattr(self, "_probe_callback", False):
-            import dearpygui.dearpygui as dpg
-            dpg.add_button(label="Callback probe", tag="autopilot_callback_probe",
-                           parent="main_window", pos=[24, 24], width=160,
-                           height=42, callback=self._record_callback_thread)
-            with dpg.handler_registry():
-                dpg.add_key_press_handler(key=dpg.mvKey_K,
-                                          callback=self._record_callback_thread)
-        if _MINIMIZE:
-            try:
-                import dearpygui.dearpygui as dpg
-                if hasattr(dpg, "minimize_viewport"):
-                    # 默认不启用：最小化后 DPG 可能不再跑帧回调，调度队列里的动作
-                    # （含关闭）就再也执行不到，窗口会卡住。
-                    dpg.minimize_viewport()
-            except Exception as exc:
-                print(f"[autopilot] 最小化视口失败: {exc}")
         threading.Thread(target=self._run_script, daemon=True).start()
+
+    def _on_key_down(self, sender=None, app_data=None):
+        """原生键落到窗口输入接线时记一笔（线程探针用，见 ``scene_native_input``）。
+
+        imgui 是立即模式：``ui._handle_input`` 每帧读 ``is_key_pressed``，输入本来就是
+        在帧循环线程上消费的。本探针据此断言「真原生事件（GLFW 窗口过程 → imgui 输入
+        队列）也走这条路」，而不是断言某条回调派发链——那条链已随迁移消失。
+        """
+        try:
+            super()._on_key_down(sender, app_data)
+        finally:
+            if self._probe_input:
+                self._input_thread = threading.get_ident()
+                self._input_received.set()
+
+    def _on_next_step(self):
+        """推进一次就记一笔：``native-key`` 场景据此断言按键没被吞掉。"""
+        self._input_steps += 1
+        return super()._on_next_step()
 
     # ---- 驾驶员 ----
     def _run_script(self):
@@ -452,8 +458,8 @@ class AutopilotWindow(DungeonSessionWindow):
                     self._frame.call(self._on_entry_replay)
                     time.sleep(1.0)
                 elif action == "check":
-                    # 断言必须在主线程执行（DPG 单线程约束）；Event 等它真正跑完，
-                    # 后续动作与快照才有意义
+                    # 断言在帧循环线程上执行（立即模式的一切窗口状态都只在那里变），
+                    # Event 等它真正跑完，后续动作与快照才有意义
                     done = threading.Event()
 
                     def _run_check(fn=value, win_ref=self, done=done):
@@ -473,9 +479,9 @@ class AutopilotWindow(DungeonSessionWindow):
                     self._frame.call(self._close_loop)
                     time.sleep(1.0)
                 elif action == "native-close":
-                    # 模拟用户点视口关闭键（X）：DPG 时代只有这条路径会在队列里留下
-                    # WM_QUIT。拿不到原生窗口时必须兜底关掉——否则帧循环会一直等一个
-                    # 永远不来的关闭请求，场景以「超时未见结论」收场，看不出真因。
+                    # 模拟用户点视口关闭键（X）。拿不到原生窗口时必须兜底关掉——
+                    # 否则帧循环会一直等一个永远不来的关闭请求，场景以「超时未见
+                    # 结论」收场，看不出真因。
                     self._native_close_posted = _post_viewport_native_close(self)
                     if not self._native_close_posted:
                         print("[autopilot] native-close：找不到副本视口原生窗口，"
@@ -483,35 +489,34 @@ class AutopilotWindow(DungeonSessionWindow):
                         self._frame.call(self._close_loop)
                     time.sleep(1.0)
                 elif action == "native-key":
+                    # 投一个真原生按键，等窗口自己的输入接线消费它（在帧循环线程上）
+                    steps_before = self._input_steps
                     self._native_key_posted = _post_viewport_key(self)
-                    self._callback_received.wait(timeout=3.0)
-                # 每个动作之后留一张快照，场景可以断言"那一刻"的情形
-                self._snapshots[(action, str(value))] = {
-                    "closing": bool(self._closing),
-                    "replay": bool(self.is_replay),
-                    "entry": bool(getattr(self, "_is_entry_phase", False)),
-                    "history": len(self.story_history),
-                }
+                    self._input_received.wait(timeout=3.0)
+                    time.sleep(0.3)      # 让这一帧的推进真正落到窗口状态上
+                    self._native_key_steps = self._input_steps - steps_before
+                # 每个动作之后留一张快照，场景可以断言"那一刻"的情形。
+                # 走窗口自己的 ``ui_snapshot()`` 值快照：立即模式没有 retained 控件树，
+                # 这份契约是自检与 AI 驾驶读窗口状态的唯一入口（P7 的闸门改造）。
+                snap = self.ui_snapshot()
+                snap["replay"] = bool(self.is_replay)
+                self._snapshots[(action, str(value))] = snap
         except Exception as exc:
             print(f"[autopilot] 脚本执行异常: {exc}")
             traceback.print_exc()
             self._frame.call(self._close_loop)
 
     def _enter_start(self):
-        """入口页点「开始副本」：直接落到窗口状态，不再读 DPG 控件树。
+        """入口页点「开始副本」：直接落到窗口状态，不读任何控件树。
 
         imgui 是立即模式，方案下拉的选中值就是 ``self._entry_selection``
-        （``ui._draw_entry_panel`` 每帧现画），没有可写的 retained 控件；旧实现
-        在无 DPG 上下文时调 ``dpg.does_item_exist`` 会以 access violation 崩掉
-        子进程（P7 清理项）。
+        （``ui._draw_entry_panel`` 每帧现画），没有可写的 retained 控件——DPG 时代
+        那句 ``dpg.does_item_exist`` 在无 DPG 上下文时会以 access violation 崩掉
+        子进程，随 P7 一并删除。
         """
         if self.scenario_ids and not 0 <= getattr(self, "_entry_selection", 0) < len(self.scenario_ids):
             self._entry_selection = 0
         self._on_entry_start()
-
-    def _record_callback_thread(self, sender, app_data):
-        self._callback_thread = threading.get_ident()
-        self._callback_received.set()
 
 
 # ---------------------------------------------------------------------------
@@ -617,9 +622,14 @@ def _written_files():
 def scene_session_close():
     """挑战模式直进会话 → 步进 → 关闭：应落「未完成」回放与报告。"""
     vp_before = _leftover_viewport_windows()
-    win, result = _make_window([("click", 4), ("close", None)], explore=False)
+    win, result = _make_window(
+        [("click", 4), ("check", _check_session_snapshot), ("close", None)],
+        explore=False)
     check("会话：宿主为脚本宿主", win.host is _HOST)
     check("会话：窗口已关闭", win._closing is True)
+    check("会话：中途快照断言通过",
+          bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
+          win._check_results)
     check("会话：生成了段落", len(win.story_history) > 0, len(win.story_history))
     check("会话：调用了 AI", _AI.stream_calls > 0, _AI.stream_calls)
     files = _written_files()
@@ -991,20 +1001,24 @@ def scene_chapter_bgm():
         audio_mod.set_backends(previous)
 
 
-def scene_callback_thread():
-    """真实 DPG 回调必须与手动渲染循环运行在同一线程。
+def scene_native_input():
+    """真实原生按键必须落到窗口自己的输入接线，且只在帧循环线程上执行。
 
-    回调经由「SendMessage 直投 WM_KEYDOWN」触发的真实按键 handler 触发
-    （悬停判定的按钮对合成鼠标输入不可靠）；断言其执行线程就是跑 ``run()``
-    帧循环的线程。此前 DPG 默认把回调派发到工作线程，与 window 层线程约定
-    冲突，靠 ui._build_ui 的 manual_callback_management + 帧循环
-    run_callbacks 收拢（见 window.md §2.2 / §4）。
+    按键用「SendMessage 直投 WM_KEYDOWN」注入视口原生窗口（不依赖焦点）：GLFW 的
+    窗口过程把它变成 imgui 输入队列里的一次 ``is_key_pressed``，由 ``ui._handle_input``
+    在下一帧消费。断言三件事：真原生事件确实投出去了、确实抵达输入接线（并推进了
+    剧情）、执行线程就是跑 ``run()`` 帧循环的那个线程。
+
+    立即模式没有"回调线程"这回事——DPG 2.3.1 默认把控件/按键回调派发到工作线程，
+    才需要 ``manual_callback_management`` + 帧循环 ``run_callbacks`` 把它收拢到帧
+    线程（见 window.md §2.2 / §4）；那条补救链已随迁移消失，本场景现在守住的是
+    「原生事件这条路本身仍然只在帧线程上落地」。
 
     ``SendMessage(WM_KEYDOWN)`` 是 Win32 专有；非 Windows 没有等价直投路径，
     因此本场景在非 Windows 上按不适用跳过，而不是把平台差异记成失败。
     """
     if not sys.platform.startswith("win"):
-        print("  SKIP callback-thread：SendMessage/WM_KEYDOWN 为 Win32 专有，非 Windows 不适用")
+        print("  SKIP native-input：SendMessage/WM_KEYDOWN 为 Win32 专有，非 Windows 不适用")
         return
     win = AutopilotWindow(
         None, name="自检角色", nick="", height=100.0, personality=_Personality(),
@@ -1015,21 +1029,32 @@ def scene_callback_thread():
         body_parts={}, character=None, character_repo=None, gui=None,
         mode="challenge", host=_HOST,
         script=[("native-key", None), ("close", None)])
-    win._probe_callback = True
+    win._probe_input = True
     render_thread = threading.get_ident()
     win.run()
-    check("回调：原生按键已投递", win._native_key_posted)
-    check("回调：真实按钮回调已触发", win._callback_received.is_set())
-    check("回调：按钮在帧循环线程执行", win._callback_thread == render_thread,
-          (win._callback_thread, render_thread))
+    snap = win._snapshots.get(("native-key", "None"), {})
+    check("输入：原生按键已投递", win._native_key_posted)
+    check("输入：按键抵达窗口输入接线", win._input_received.is_set())
+    check("输入：按键在帧循环线程执行", win._input_thread == render_thread,
+          (win._input_thread, render_thread))
+    check("输入：按键推进了剧情（没被吞掉）", win._native_key_steps > 0,
+          win._native_key_steps)
+    check("输入：快照停在会话阶段", snap.get("phase") == "session", snap.get("phase"))
+    check("输入：那一帧的布局是有效尺寸",
+          bool(snap.get("layout")) and snap["layout"][0] > 0 and snap["layout"][1] > 0,
+          snap.get("layout"))
 
 
 def scene_entry_cancel():
     """入口页点「返回」：入口退出，不应落任何盘，也不该留下视口原生窗口。"""
     files_before = _written_files()
     vp_before = _leftover_viewport_windows()
-    win, result = _make_window([("cancel", None)], explore=True)
+    win, result = _make_window(
+        [("check", _check_entry_panel_snapshot), ("cancel", None)], explore=True)
     check("入口返回：窗口已关闭", win._closing is True)
+    check("入口返回：中途快照断言通过",
+          bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
+          win._check_results)
     check("入口返回：标记为入口退出", win._exit_from_entry is True)
     check("入口返回：未生成内容", len(win.story_history) == 0, len(win.story_history))
     check("入口返回：不落盘", _written_files() == files_before,
@@ -1038,8 +1063,9 @@ def scene_entry_cancel():
           result.reason == "entry-cancelled" and result.cancelled, result)
     check("入口返回：帧时钟已停止", win._frame.running is False)
     check("入口返回：像素工作者已收工", win._background.worker_alive is False)
-    # DPG 2.3.1 的 destroy_context() 不销毁视口原生窗口；收尾必须显式清掉，
-    # 否则屏幕上会留下一个不再响应的副本窗口（2026-10-07「返回后卡死」根因）
+    # 收尾必须把视口原生窗口带走：DPG 时代 destroy_context() 不销毁它，屏幕上会
+    # 留下一个不再响应的副本窗口（2026-10-07「返回后卡死」根因）；imgui/GLFW 侧
+    # 运行器自己销毁窗口，本断言转成回归守卫（P7 见 _leftover_viewport_windows）
     vp_after = _leftover_viewport_windows()
     check("入口返回：未留下副本视口原生窗口", vp_after <= vp_before,
           (vp_before, vp_after))
@@ -1079,10 +1105,17 @@ def scene_entry_replay():
     win, result = _make_window(script, explore=True)
 
     check("回放：宿主被问过两次文件", _HOST.replay_calls == 2, _HOST.replay_calls)
-    # 「取消」那一刻：仍停在入口页，没关窗、没切回放
+    # 「取消」那一刻：仍停在入口页（快照里的阶段与面板几何都是入口页的），
+    # 没关窗、没切回放
     snap = win._snapshots.get(("replay", "cancel"), {})
     check("回放：取消选择时不关窗", snap.get("closing") is False, snap)
     check("回放：取消选择时不切回放", snap.get("replay") is False, snap)
+    check("回放：取消选择时快照停在入口阶段", snap.get("phase") == "entry",
+          snap.get("phase"))
+    check("回放：取消选择时入口面板几何有效",
+          len(snap.get("entry_panel_rect") or ()) == 4
+          and (snap.get("entry_panel_rect") or (0, 0, 0, 0))[2] > 0,
+          snap.get("entry_panel_rect"))
     check("回放：窗口已切到回放模式", win.is_replay is True)
     check("回放：入口选择记录为回放标记", win._launch_choice == REPLAY_MARK,
           win._launch_choice)
@@ -1103,12 +1136,11 @@ def scene_tk_host():
     在 Tk 主窗口里时，主窗口不再"假死"。用 100ms 心跳计数验证：心跳只在
     宿主的事件循环被处理过之后才会增长。
 
-    **故意不在会话结束后碰 Tk**：``destroy_context()`` 之后现场那个 Tk 根窗口的
-    窗口级命令（``destroy()`` / ``withdraw()``）会以 0xC0000005 崩掉进程；会话收尾
-    会立刻补一个隐藏保活视口把它修回来（见 ``dungeon/window/dpg_state.py`` 与
-    ``base._finish_session``），这里仍保持「创建了就不销毁」的老做法，省得自检
-    自己踩在修复链路上。真应用的 Tk 对话框也都在 ``destroy_context()`` 之前
-    （见 base._finish_session 的顺序）。
+    **故意不在会话结束后碰 Tk**：DPG 时代 ``destroy_context()`` 之后的 Tk 根窗口
+    级命令（``destroy()`` / ``withdraw()``）会以 0xC0000005 崩掉进程，本场景因此
+    保持「创建了就不销毁」的老做法。P0 的 S1 spike 已证 imgui 侧 ``run()`` 之后
+    销毁 Tk 根是安全的（见 ``30-spike-lifecycle.md``），但本场景不依赖它——留着
+    这份克制不影响覆盖面，销毁时机等 P8 统一。
     """
     import tkinter as tk
     root = tk.Tk()
@@ -1140,7 +1172,7 @@ def scene_tk_host():
     check("Tk宿主：视口尺寸取自宿主", win._main_client_w > 0, win._main_client_w)
     check("Tk宿主：宿主就是注入的适配器", win.host is host)
     check("Tk宿主：收尾提示经宿主端口", bool(host.calls), host.calls)
-    # 留给 GC：主动销毁 Tk 根窗口会触发上面那条 0xC0000005
+    # 留给 GC：保持「创建了就不销毁」的老做法（见上面的 docstring）
     _KEEP_ALIVE_ROOTS.append(root)
 
 
@@ -1159,12 +1191,14 @@ class NativeCloseTkHost(RecordingTkHost):
 def scene_native_close():
     """视口用**原生关闭键（X）**退出：收尾提示与宿主计时器都不得被拖死（§5-C12）。
 
-    这是唯一一条会往主线程队列里留 ``WM_QUIT`` 的关闭路径——GLFW 销毁自己的原生
-    窗口时，Windows 的 ``DefWindowProc(WM_DESTROY)`` 记下这条「退出进程」消息。
+    DPG 时代这是唯一一条会往主线程队列里留 ``WM_QUIT`` 的关闭路径——GLFW 销毁自己的
+    原生窗口时，Windows 的 ``DefWindowProc(WM_DESTROY)`` 记下这条「退出进程」消息。
     Tk 不会吃掉它，但 Windows 从此不再合成 ``WM_TIMER``：收尾提示框的 ``tkwait``
     与主窗口的 ``after`` 计时器全部停摆，表现为「提示框弹出来，主窗口卡死」。
-    三条断言锁住它：弹框那一刻队列里没有残留、会话结束后宿主计时器仍在跑、
-    未完成回放照常落盘。
+
+    imgui/GLFW 侧 P0 实测不再残留 ``WM_QUIT``（见 ``30-spike-lifecycle.md``），本场景
+    因此转成**回归守卫**：三条断言锁住它——弹框那一刻队列里没有残留、会话结束后
+    宿主计时器仍在跑、未完成回放照常落盘。
     """
     if not sys.platform.startswith("win"):
         print("  SKIP native-close：WM_QUIT 是 Win32 专有，非 Windows 不适用")
@@ -1209,35 +1243,81 @@ def scene_native_close():
         time.sleep(0.02)
     check("原生关闭：会话结束后宿主计时器仍在跑", beats["n"] > before,
           (before, beats["n"]))
-    # 留给 GC：主动销毁 Tk 根窗口会触发 destroy_context 之后的 0xC0000005
+    # 留给 GC：保持「创建了就不销毁」的老做法（见 scene_tk_host 的 docstring）
     _KEEP_ALIVE_ROOTS.append(root)
+
+
+def _check_entry_panel_snapshot(win):
+    """入口页中途读一次 ``ui_snapshot()``：阶段、面板几何、还没落盘。"""
+    snap = win.ui_snapshot()
+    assert snap["phase"] == "entry", snap["phase"]
+    assert snap["closing"] is False, snap
+    assert snap["frames"] > 0, snap["frames"]
+    assert snap["history"] == 0, snap["history"]
+    assert snap["visible_items"] == 0, snap["visible_items"]
+    assert snap["overlay_open"] is False, snap
+    assert snap["create_size"][0] > 0 and snap["create_size"][1] > 0, snap["create_size"]
+    rect = snap.get("entry_panel_rect") or ()
+    assert len(rect) == 4 and rect[2] > 0 and rect[3] > 0, f"入口面板几何无效: {rect}"
+
+
+def _check_session_snapshot(win):
+    """会话中途读一次 ``ui_snapshot()``：阶段、尺寸、正文、组件都在位。
+
+    默认配置的文本主组件（``text_component="text"``）会**接管文本显示**，内置工具条
+    由它自己的面板顶替——所以这里不查 ``ui._toolbar_rect``，而是查「接管者真的画了
+    一帧、面板几何有效」。
+    """
+    snap = win.ui_snapshot()
+    assert snap["phase"] == "session", snap["phase"]
+    assert snap["closing"] is False, snap
+    assert snap["layout"][0] > 0 and snap["layout"][1] > 0, snap["layout"]
+    assert snap["create_size"][0] > 0 and snap["create_size"][1] > 0, snap["create_size"]
+    assert snap["dpi_scale"] > 0, snap["dpi_scale"]
+    assert snap["frames"] > 0, snap["frames"]
+    assert snap["history"] > 0, snap["history"]
+    assert snap["visible_items"] > 0, snap["visible_items"]
+    assert snap["overlay_open"] is False, snap
+    assert snap["option_open"] is False, snap
+    assert snap["components"], "默认配置应构建文本主组件"
+    owners = [c for c in win._components if getattr(c, "owns_text_display", False)]
+    assert owners, "默认配置应由文本主组件接管显示"
+    for comp in owners:
+        assert int(getattr(comp, "_drawn_line_count", 0)) > 0, \
+            f"{comp.id}: 最近一帧未画出文本行"
+        rect = getattr(comp, "_panel_rect", None)
+        assert rect and rect[2] > 0 and rect[3] > 0, f"{comp.id}: 面板几何无效: {rect}"
 
 
 def _check_owned_display(cid):
     """会话中途验证组件接管文本显示的状态。
 
-    imgui 立即模式没有 DPG 控件树；这里读组件自己的状态快照：接管声明 +
-    最近一帧实际画出的行数。真正的可见性由 P4 截图探针覆盖。
+    imgui 立即模式没有 DPG 控件树；「窗口认不认这个组件」一律读 ``ui_snapshot()``
+    的值快照（组件清单 + 已上屏条数），「组件自己画没画」读组件自持的几何/行数。
+    真正的可见性由 P4 截图探针覆盖。
     """
     def _probe(win):
+        snap = win.ui_snapshot()
+        assert cid in snap["components"], f"组件未构建: {snap['components']}"
         comps = {c.id: c for c in win._components}
-        assert cid in comps, f"组件未构建: {list(comps)}"
         comp = comps[cid]
         assert getattr(comp, "owns_text_display", False), "应声明接管文本显示"
         assert win._text_owned_by_component(), "窗口应识别组件接管文本显示"
         assert int(getattr(comp, "_drawn_line_count", 0)) > 0, "最近一帧未画出文本行"
+        assert snap["visible_items"] > 0, "快照应看到已上屏的正文"
+        assert snap["history"] > 0, "快照应看到正文条数"
         rect = getattr(comp, "_panel_rect", None)
         assert rect and rect[2] > 0 and rect[3] > 0, f"组件面板几何无效: {rect}"
         if cid == "text_nvl":
-            assert int(comp._drawn_line_count) == len(win.story_history), \
-                (comp._drawn_line_count, len(win.story_history))
+            assert int(comp._drawn_line_count) == snap["history"], \
+                (comp._drawn_line_count, snap["history"])
 
     _probe.__name__ = f"owned-display:{cid}"
     return _probe
 
 
 def _check_text_component(cid, extra_ids=()):
-    """会话中途（主线程）验证组件构建顺序：文本主组件在前、其余组件在后。"""
+    """会话中途（帧循环线程上）验证组件构建顺序：文本主组件在前、其余组件在后。"""
     def _probe(win):
         ids = [c.id for c in win._components]
         assert ids == [cid] + list(extra_ids), f"组件构建结果: {ids}"
@@ -1647,7 +1727,7 @@ def _check_escape_cleared(win):
 
 
 SCENES = {
-    "callback-thread": scene_callback_thread,
+    "native-input": scene_native_input,
     "chapter-bgm": scene_chapter_bgm,
     "chapter-voice-fx": scene_chapter_voice_fx,
     "dialogue-voice": scene_dialogue_voice,
@@ -1697,7 +1777,7 @@ def _watchdog(seconds):
 def _drain_output(proc, sink):
     """在独立线程里把子进程输出逐行收进 ``sink``。
 
-    ``readline`` 在管道上没有超时：一旦子进程停止出字（如 DPG 渲染占住 GIL），
+    ``readline`` 在管道上没有超时：一旦子进程停止出字（如渲染占住 GIL），
     主循环里再怎么检查 deadline 都会被它无限期吊住——正是文档要求「父进程兜
     超时」要防的事。读操作挪到 daemon 线程后，主线程的等待才是真正有界的。
     """
@@ -1794,7 +1874,7 @@ def main():
                              "不作失败信号。适用于重启系统后复测退出路径")
     parser.add_argument("--skip", action="append", default=[], metavar="SCENE",
                         help="跳过指定场景（可重复）。给「已知会踩第三方原生崩溃」的场景"
-                             "留出口（如 text-components 在 Linux/X11 上复现 DPG/GLFW "
+                             "留出口（如 text-components 在 Linux/X11 上复现 GLFW "
                              "反复拆建上下文的 SIGSEGV，见 docs/users/platforms/linux.md 附录A §5），"
                              "避免把环境风险记成产品失败")
     args = parser.parse_args()
@@ -1837,12 +1917,12 @@ def main():
         print(f"[dungeon_autopilot] 残留非 daemon 线程: {leftover}")
     print(f"[dungeon_autopilot] report: {_REPORT_PATH}")
     # 结论行当场冲出缓冲：父进程按这行判定成败，而管道 stdout 是块缓冲，默认的
-    # flush 排在解释器退出收尾的最后——若 DPG/GLFW 的退出清理卡住（文档 §6 的
+    # flush 排在解释器退出收尾的最后——若 imgui/GLFW 的退出清理卡住（文档 §6 的
     # 「退出挂死」），结论行会困在缓冲里，父进程就会把「已通过但退出挂死」
     # 误判成「超时未出结论」。
     sys.__stdout__.flush()
     sys.__stderr__.flush()
-    # 走正常解释器退出（sys.exit），让 DPG 有机会完成自己的收尾；
+    # 走正常解释器退出（sys.exit），让 imgui/GLFW 有机会完成自己的收尾；
     # 若仍有残留的 native 线程导致退出挂死，由外层 --isolate 的超时兜底。
     _log.flush()
     sys.exit(1 if failures else 0)
