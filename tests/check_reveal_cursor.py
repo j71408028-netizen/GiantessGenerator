@@ -103,6 +103,12 @@ def _advance_clock(host, seconds, start=None):
     """把帧时钟推进 ``seconds`` 秒（按 ``_REVEAL_TICK_SECONDS`` 步进）。
 
     ``start`` 是上一次返回的合成时刻；不传则锚到当前真 monotonic。
+
+    **推时钟一律"接着上一次返回的时刻累加"**：``FrameScheduler`` 的周期任务走
+    ``due_at += interval`` 这条浮点路径，测试若改用重算式 ``base + i * 步长`` 生成
+    时刻，两条路径会差 1 ULP，个别 tick 被判成"未到期"而跳过，1 秒里少打一次字
+    （实测 20 次触发变 19 次，游标 30 字变 28 字）。累加式让两次比较的浮点结果
+    只差一个恒定的起点偏移，不会误判。
     """
     t = _clock_base() if start is None else start
     steps = int(round(seconds / _REVEAL_TICK_SECONDS))
@@ -124,12 +130,12 @@ h._reveal_start(item, TEXT)
 check("起手：游标已激活且从 0 开始",
       h._reveal_active() and h._reveal["pos"] == 0 and h._reveal["target"] == TEXT)
 
-_advance_clock(h, 1.0)
+_t1 = _advance_clock(h, 1.0)
 pos_1s = h._reveal["pos"]
 check("仿流式 1 秒后推进约 30 字（±1 字）",
       abs(pos_1s - int(_REVEAL_CHARS_PER_SECOND)) <= 1, f"pos={pos_1s}")
 
-_t1 = _clock_base() + 1.0
+# 第二秒接着第一秒的合成时刻累加，而不是重读真 monotonic 再 +1（见 _advance_clock）。
 _advance_clock(h, 1.0, start=_t1)
 pos_2s = h._reveal["pos"]
 check("仿流式 2 秒后约 60 字（±1 字）",
@@ -165,7 +171,9 @@ _tb = _clock_base()
 for i in range(10):
     full += "".join(chr(0x4e00 + (i * 30 + j) % 200) for j in range(30))
     h2._reveal_extend(item2, full)
-    _advance_clock(h2, 0.1, start=_tb + i * 0.1)
+    # 累加式推时钟（``t += tick``），与 due_at 的 ``+= interval`` 同一条浮点路径。
+    # 原先的 ``_tb + i * 0.1`` 重算式差 1 ULP：10 个 chunk 里会有一个 tick 被判未到期。
+    _tb = _advance_clock(h2, 0.1, start=_tb)
 
 check("真流式：target 被延长到最新全长",
       h2._reveal["target"] == full, f"target={len(h2._reveal['target'])} want={len(full)}")
