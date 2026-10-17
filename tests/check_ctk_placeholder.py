@@ -29,6 +29,7 @@
 """
 
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -64,6 +65,9 @@ check("CTkEntry 的 placeholder 方法已替换为仓库实现",
       CTkEntry._activate_placeholder.__module__)
 
 # 设置页的「屏蔽词 / 网络代理」正是"变量 + 提示词"组合，改动这两处等于挪走回归样本。
+# 只认"这两个字段仍带非空 placeholder_text"，不认提示词文案：文案在 501bc63 改过一次
+# （「用逗号分隔」→「（逗号分隔）」、「留空 = 直连（语音 / AI 共用）」→「直连」），
+# 写死文案的旧断言跟着过期，此后一直误报。
 _SETTINGS_SRC = open(os.path.join(ROOT, "ui", "settings", "__init__.py"),
                      encoding="utf-8").read()
 check("设置页 _make_entry 同时支持 textvariable 与 placeholder_text",
@@ -71,8 +75,10 @@ check("设置页 _make_entry 同时支持 textvariable 与 placeholder_text",
       and "textvariable=variable" in _SETTINGS_SRC
       and "placeholder_text=placeholder_text or \"\"" in _SETTINGS_SRC)
 check("设置页保留两个带提示词的输入框（屏蔽词 / 网络代理）",
-      "placeholder_text=\"用逗号分隔\"" in _SETTINGS_SRC
-      and "placeholder_text=\"留空 = 直连（语音 / AI 共用）\"" in _SETTINGS_SRC)
+      all(f"self.{name}_entry = self._make_entry(" in _SETTINGS_SRC
+          for name in ("blocked_words", "net_proxy"))
+      and len(re.findall(r'placeholder_text\s*=\s*"[^"]+"', _SETTINGS_SRC)) >= 2,
+      str(re.findall(r'placeholder_text\s*=\s*"([^"]*)"', _SETTINGS_SRC)))
 
 
 # ---------------- 2/3. 行为：替身对象驱动，无需显示器 ----------------
