@@ -10,11 +10,11 @@
     if result.failed:
         ui.ctk.dialogs.showerror("错误", result.launch_error)
 
-为什么搬进程：副本的 DPG/GLFW 与 Tk 同进程共存时共享线程消息队列、GLFW
-单例与 X11 连接，由此长出一整套同进程补救机器（保活视口 ``park_context``、
-``WM_QUIT`` 残留清理、视口僵尸窗口销毁、热切换兜底修复……）。会话独立成
-子进程后，``destroy_context()`` 终止的是子进程自己的 GLFW，父进程的 Tk 从此
-不再接触 DPG；子进程崩溃也不再带走整个应用。
+为什么搬进程：副本窗口的渲染后端（imgui-bundle，迁移前是 Dear PyGui/GLFW）与
+Tk 同进程共存时共享线程消息队列、GLFW 单例与 X11 连接，由此长出一整套同进程
+补救机器（保活视口 ``park_context``、``WM_QUIT`` 残留清理、视口僵尸窗口销毁、
+热切换兜底修复……，见 git 历史）。会话独立成子进程后，上下文销毁只影响子进程
+自己的 GL 栈，父进程的 Tk 从此不再接触副本窗口栈；子进程崩溃也不再带走整个应用。
 
 职责（全部收在本模块，调用方无感知）：
 

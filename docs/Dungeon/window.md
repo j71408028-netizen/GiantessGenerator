@@ -1,4 +1,4 @@
-# 副本窗口（DearPyGui）索引
+# 副本窗口（imgui-bundle）索引
 
 > **定位**：`dungeon/window/` 会话窗口的**文件地图、生命周期与约束清单**。
 > 分层与领域层见 [架构说明](architecture.md)，配置结构见 [数据模型](script.md)，
@@ -7,11 +7,13 @@
 
 窗口由 Tkinter 主程序拉起的**独立子进程**承载：父进程（Tk 主程序）经
 `ui/hosting/dungeon_spawner.py` 序列化构造参数并 spawn 子进程，会话窗口在子进程里
-运行 DearPyGui（下称 DPG），DPG/GLFW 独占子进程（见 [宿主边界与可移植性](window_host.md) §7）。
-渲染帧由窗口自己驱动（`run()` 里的手动渲染循环），不用 `dpg.start_dearpygui()` 堵死宿主主循环。
+跑 **imgui-bundle**（`hello_imgui` + GLFW/OpenGL，2026-10 前是 Dear PyGui，下称 DPG），
+渲染后端独占子进程（见 [宿主边界与可移植性](window_host.md) §7）。
+窗口起停收在 `dungeon/window/runner.py::WindowRunner.run()`——一次 `hello_imgui.run()`
+内部建 GL 后端 / ImGui 上下文 / 视口与帧循环，返回时一并释放，不堵死宿主主循环。
 窗口对宿主的全部依赖收敛在宿主端口 `dungeon/window/host.py`，因此 `dungeon/window/` 里没有任何
-`tkinter` / `ui.*` import；§5-C2/C12/C14 描述的同进程共存约束现在只约束**子进程内部**
-（父进程从不创建 DPG 上下文）。
+`tkinter` / `ui.*` import；§5 里约束进程内共存的那几条现在只约束**子进程内部**
+（父进程从不 import 副本窗口栈）。
 
 ## 目录
 
@@ -21,7 +23,7 @@
 | §2 | 生命周期（构造 / 运行 / 帧循环 / 阶段 / 退出 / 收尾） |
 | §3 | 一步会话数据流 |
 | §4 | 线程与帧时钟 |
-| §5 | 约束清单（C1–C14） |
+| §5 | 约束清单（C1–C15） |
 | §6 | 自检命令 |
 
 ---
@@ -31,19 +33,21 @@
 | 文件 | 职责 |
 |---|---|
 | `dungeon/window/__init__.py` | 用 mixin 组装出 `DungeonSessionWindow` |
-| `dungeon/window/base.py` | 构造（`__init__` 只存参数 + 会话初始化）与运行（`run()` 建 UI、帧循环 `_run_frame_loop`、收尾 `_finish_session`）、入口 / 会话阶段切换、关闭路径、视口尺寸（取自宿主端口） |
+| `dungeon/window/base.py` | 构造（`__init__` 只存参数 + 会话初始化）与运行（`run()` 建 UI、`_runner.run()` 托管帧循环、收尾 `_finish_session`）、入口 / 会话阶段切换、关闭路径、视口尺寸（取自宿主端口） |
+| `dungeon/window/runner.py` | **宿主运行器** `WindowRunner`：把 `RunnerParams` 的回调挂到窗口原有生命周期语义上（`on_post_init` / `on_load_fonts` / `on_frame_start` / `on_draw` / `on_frame_end` / `on_capture` / `on_before_exit`），`request_exit()` 只置位、帧边界落实 `app_shall_exit`（C1） |
 | `dungeon/window/host.py` | **宿主端口** `HostPort`（含无宿主缺省实现）：尺寸/DPI、宿主显隐、事件泵、收尾弹框、活动窗口登记、缺省字体、回放文件选择 |
 | `ui/hosting/tk_host.py` | 宿主端口的 Tk/CTk 适配器 `TkHost`——**window 层唯一的 Tk 细节所在地** |
-| `dungeon/window/ui.py` | DPG 上下文 / 视口 / 主窗口构建、**副本字体对接**（经 `dungeon/window/fonts.py` 解析家族名→字体文件，按两档字号建 `dungeon_text_font` 与粗体 `dungeon_bold_font` 供文本组件使用——DPG 无字重 API，粗度靠选字体文件）、文本显示、**上屏游标**（`_reveal_*` 一族，30 字/秒限速真相源，仿流式与真流式共用）、布局自适应（`_relayout`）、输入事件、**F12 过程日志开关**、**A 自动播放 / F2 截图**（`toggle_autoplay` / `take_screenshot`，与文本组件工具条按钮共用入口）与 **顶部轻通知窗**（`_notify`，窗口级常驻） |
+| `dungeon/window/ui.py` | 建窗参数与 `WindowRunner` 组装、**副本字体对接**（经 `dungeon/window/fonts.py` 解析家族名→字体文件，按两档字号建 `dungeon_text_font` 与粗体 `dungeon_bold_font` 供文本组件使用）、每帧自绘（`_draw_frame`：根窗口 → 背景 → 文本 → 工具条 → 帧末顶层浮层）、**上屏游标**（`_reveal_*` 一族，30 字/秒限速真相源，仿流式与真流式共用）、布局自适应（`_relayout`，每帧比对 `io.display_size`）、输入接线（`_handle_input` 每帧读 `imgui.is_key_pressed` / `is_mouse_clicked`）、**F12 过程日志开关**、**A 自动播放 / F2 截图**（`toggle_autoplay` / `take_screenshot`，与文本组件工具条按钮共用入口）与 **顶部轻通知窗**（`_notify`，窗口级常驻） |
 | `dungeon/window/engine.py` | 推进核心：AI 流式生成、JSON 解析、伤亡结算、回放步进、关闭回调 `_on_close` |
 | `dungeon/window/triggers.py` | 触发器判定（所在章节 / 前置 / 条件）、章节进入、章节效果短暂覆盖、插入段落 |
 | `dungeon/window/options.py` | 选项触发器：后台生成选项文字并弹出选择弹窗 |
 | `dungeon/window/ending.py` | 敏感效果结算与结局生成 |
 | `dungeon/window/persistence.py` | 统一收尾 `_finalize`、退出处理 `_handle_exit`、回放 / 报告保存（原子写）、结局索引 `data/user/endings.json`；弹框一律经宿主端口 |
-| `dungeon/window/components.py` | 显示组件生命周期接入（构建 / 布局 / 刷新 / 销毁） |
+| `dungeon/window/components.py` | 显示组件生命周期接入（构建 / 布局 / 每帧绘制 / 销毁） |
 | `dungeon/window/launcher.py` | 入口阶段混入 `DungeonLaunchStages`：动态背景轮播、方案选择面板、结局图标轮播、阶段切换 |
 | `dungeon/window/background.py` | 背景图加载 / 旋转 / 模糊 / 淡入淡出 / 纹理更新（含单工作者 `PixelWorker`） |
 | `dungeon/window/fx.py` | 窗口视效（闪光 / 振动 / 反色 / 色差分离）：顶层绘制列表 + 视效纹理，帧时钟计时、绝对时间消退，不阻塞其他动作 |
+| `dungeon/window/gpu_textures.py` | **GPU 纹理句柄的释放口径**（C15）：`TextureGpu` 是 RAII 句柄，只在 GL 存活时丢；`release()` = 正常路径（`before_exit`），`retire()` = GL 已失效时的兜底仓库 |
 | `dungeon/window/frame.py` | 帧时钟 `FrameScheduler`（窗口实例成员 `self._frame`）：`every` / `after` / `cancel` / `call` / `tick` / `drain` / `stop`——window 层唯一的时间源 |
 | `dungeon/window/result.py` | `SessionResult` 与原因常量：`run()` 的返回值，替代「读窗口私有属性」 |
 | `dungeon/window/fonts.py` | **字体与字号唯一真相源**：两档字号（`TEXT_FONT_SIZE` 24 / `UI_FONT_SIZE` 21 / `BOLD_FONT_SIZE`）、家族名→字体文件映射 `_FAMILY_FONT_FILES` + 平台回退链 + 粗体/衬线候选链 + `resolve_font_files()`；窗口 `ui.py` 与组件包共用同一份 |
@@ -73,7 +77,8 @@ TriggerHandler, OptionHandler, EndingHandler, DungeonPersistence, ComponentHandl
 
 ### 2.1 构造与运行分离
 
-`__init__` 只保存参数并初始化会话内容，不碰 DPG；`run()` 建 UI、驱动帧循环、收尾，并返回 `SessionResult`。
+`__init__` 只保存参数并初始化会话内容，不碰渲染后端；`run()` 建 UI、起停收在
+`hello_imgui.run()`（帧循环由库驱动）、收尾，并返回 `SessionResult`。
 调用方在 Tk 回调里 `result = DungeonSessionWindow(...).run()`，只看返回值就够了
 （`result.failed` / `result.cancelled` / `result.succeeded`）；需要细看窗口内部状态时也可以自己留着实例引用
 （自动驾驶自检就是这么做的）。
@@ -89,18 +94,14 @@ run() → SessionResult
 ├─ _register_with_parent()
 ├─ _start_session()
 │  ├─ host.viewport_metrics()  # 宿主仍可见时先取尺寸/DPI（缓存给 _get_initial_viewport_size）
-│  ├─ host.hide_window()       # 必须排在 unpark 之前：拆保活会终止 GLFW，withdraw 会崩
-│  ├─ dpg_state.unpark_context()  # 拆掉上一局收尾留下的保活视口，让出 DPG 单例
-│  ├─ _build_ui()          # create_context → 视口 → 主窗口 → 事件注册 → setup/show
+│  ├─ host.hide_window()       # 副本窗口是独立顶层窗口，不藏会两个窗口同时占屏
+│  ├─ _build_ui()              # 算建窗/布局尺寸、建 WindowRunner（此时不碰 GL）
 │  ├─ _enter_entry_phase() # 仅探索模式：动态背景 + 方案选择面板
 │  │   或 _init_components() + _build_components()  # 挑战/回放：直接进会话
-│  ├─ _frame.call(_fix_windows_title)   # 首帧：此时原生窗口已建好
-│  └─ _run_frame_loop()    # ← 手动渲染
-└─ _finish_session()    # _frame.stop() + 背景工作者 shutdown → 恢复主窗口 → join 结局线程 0.5s
+│  └─ _runner.run()        # ← 阻塞到关窗（hello_imgui 内部建上下文/视口/帧循环）
+└─ _finish_session()    # _frame.stop() → GPU 纹理兜底退役 → 背景工作者 shutdown → 恢复主窗口 → join 结局线程 0.5s
    ├─ _closing 且非入口退出 → _handle_exit()   # 结局已触发时内部还会再 join 最长 15s（persistence._handle_exit）
-   ├─ dpg_state.discard_viewport_windows()   # 显式销毁视口原生窗口（**必须在 destroy_context 之前**，§5-C14）
-   ├─ destroy_context() → _unregister_with_parent()
-   └─ dpg_state.park_context()   # 补一个隐藏保活视口，Tk 根窗口才拿得回 destroy/withdraw（§5-C2）
+   └─ _unregister_with_parent()
 ```
 
 注：入口页「加载回放」不再重开窗口——同一生命周期内由 `_on_entry_replay()` 经端口
@@ -108,35 +109,30 @@ run() → SessionResult
 
 ### 2.2 帧循环
 
-每帧顺序固定：`_pump_host_events()` → `self._frame.tick()` → `dpg.run_callbacks(dpg.get_callback_queue())` → **落实关闭请求**（`_stop_requested` 置位时在帧边界 `stop_dearpygui()`）→ 判 `dpg.is_dearpygui_running()` → `render_dearpygui_frame()` → **按帧起点补偿让位**（见下）。
+窗口不再自己写循环：`WindowRunner` 把本窗口的钩子挂到 `hello_imgui` 的帧回调上，
+每帧顺序固定：`before_imgui_render`（先落实关闭请求，再 `on_frame_start`：
+`_pump_host_events()` → `self._frame.tick()`）→ `show_gui`（`_draw_frame` 重建整个
+画面）→ `after_swap`（计帧/限帧、`on_capture` 抓帧）；收尾走 `before_exit`。
+帧率上限由 `fps_max` 给库（`fps_idling.enable_idling = False` 保证静默期也出帧，
+否则帧时钟停摆）；真实节拍由 vsync 决定，自检限帧钩子挂在 `after_swap`
+（`ui._on_frame_end`，`GIANTESS_DUNGEON_TEST_FRAMES`）。
 
-- **让位按帧起点补偿，不无条件 `sleep(FRAME_INTERVAL)`**（2026-10-14）。`render_dearpygui_frame()`
-  走 `glfwSwapBuffers`，默认开 vsync，本身就阻塞约一个刷新周期（1080p@60Hz 实测 16.9 ms）；
-  再无条件补睡 1/60 s 等于 `帧周期 = 16.7(vsync) + 16.7(sleep) + CPU`，把**整个窗口
-  （含小游戏）**的帧率上限压到 ~34 FPS，且每 1 ms CPU 开销要付双倍。现在的写法是
-  `budget = FRAME_INTERVAL - (本帧已用时间)`，只有 `budget > FRAME_INTERVAL/3`（死区，
-  躲开 vsync 抖动）才 `sleep(budget)`：vsync 已吃满时预算≈0 → 回到 ~60 FPS；
-  vsync 被驱动关掉时仍补满到 60 Hz 上限，不空转跑满一核。
-- 先 tick 后判关闭：保证「关闭前最后一次 UI 更新」不丢
-- 回调队列必须在渲染前于**本线程**执行完（DPG 默认把回调派发到工作线程，见 §4）；
-  回调与渲染同线程，上面的约定才真正成立
-- **关闭请求在回调批结束后的帧边界才落实**（2026-10-07）：点击/按键回调就发生在
-  `run_callbacks` 的执行途中，在其中途直接 `stop_dearpygui()` 会让上下文收尾不干净——
-  实测「入口页返回」后进程在 `_dearpygui.pyd` 内延迟崩溃（0xC0000005/0xC000041D，
-  与 2026-09-13 修复过的旧症状同型）或视口僵尸残留（标题停在临时标题、收尾半途而废）。
-  因此 `_request_close()` 只置位，帧循环在本轮回调批执行完、渲染前统一停止
-- 判关闭放在渲染前：`stop_dearpygui()` 后不再白渲染一帧
-- 判定关闭**只能**用 `dpg.is_dearpygui_running()`（`is_viewport_ok()` 关闭后仍返回 True）
+- **先 tick 后判关闭**：保证「关闭前最后一次 UI 更新」不丢
+- **关闭请求在帧边界才落实**（C1）：`request_exit()` 只置位，`before_imgui_render`
+  里统一写 `app_shall_exit`。绝不在回调执行途中直接退出——`hello_imgui` 的
+  `confirm_exit` 路径会在帧中途把上下文拆掉（`runner.py` 模块文档详述）
+- **输入接线在帧线程**：立即模式没有回调线程，`ui._handle_input` 每帧读
+  `imgui.is_key_pressed` / `is_mouse_clicked`，天然与渲染同线程（§4）
 
 ### 2.3 入口阶段 → 会话阶段（探索模式）
 
-两者共享同一个 DPG 上下文 / 视口 / 主窗口，切换不重建上下文。
+两者共享同一次窗口生命周期（同一个 ImGui 上下文 / 视口 / 根窗口），切换不重建。
 
 | 动作 | 路径 |
 |---|---|
 | 进入入口 | `_enter_entry_phase()` 启动三组后台轮播（背景图随机、结局图标、Ken Burns 帧级运动），构建右下角方案面板 + 左下角结局面板 |
 | 点「开始副本」 | `_enter_dungeon_phase()` → 冻结背景 → 销毁入口 UI → `_load_session_config()`（加载配置、校验 error 级阻止进入、扣 AP、建 AI 客户端与提示词）→ 构建组件 → 显示文本容器 → `check_triggers()`。任一步失败置 `_launch_error` 并 `_close_loop()`，由调用方在 Tk 侧弹错误框 |
-| 点「加载回放」 | 冻结背景后经宿主端口 `open_replay_file()` 取数据；取不到就**留在入口页**，取到就在同一 DPG 生命周期里切 `is_replay` |
+| 点「加载回放」 | 冻结背景后经宿主端口 `open_replay_file()` 取数据；取不到就**留在入口页**，取到就在同一窗口生命周期里切 `is_replay` |
 | 点「返回」 | `_close_loop()` 关窗，不视为会话结束（见 `_exit_from_entry`） |
 
 阶段标记（都定义在 `__init__`，勿随意改名）：
@@ -148,17 +144,17 @@ run() → SessionResult
 | `_session_initialized` | `_init_session()` 是否已执行 |
 | `_exit_from_entry` | 入口阶段退出（返回 / 加载回放 / 启动失败），`_finish_session` 据此跳过 `_handle_exit` |
 | `_closing` | 已请求关闭；`_on_close` 与 `_close_loop` 都会置位 |
-| `_session_running` | `run()` 重入保护（宿主事件泵会回到调用方回调，避免嵌套建第二个 DPG 上下文） |
+| `_session_running` | `run()` 重入保护（宿主事件泵会回到调用方回调，避免嵌套建第二个窗口） |
 
 ### 2.4 退出路径
 
 | 入口 | 路径 | 说明 |
 |---|---|---|
-| 入口页「返回」 | `_on_entry_cancel` → `_close_loop()` → `_request_close()` 置位 → 帧循环回调批结束后 `stop_dearpygui()` | 帧循环本轮回看到 not running，走 `_on_close` 清理 |
-| 会话中点窗口 X | DPG 原生关闭 | 同样由帧循环判定（**不再依赖 exit callback**，见 §5-C6） |
+| 入口页「返回」 | `_on_entry_cancel` → `_close_loop()` → `_request_close()` 置位 → `before_imgui_render` 帧边界写 `app_shall_exit` | 帧回调继续到库决定退出，走 `before_exit` → `_on_close` 清理 |
+| 会话中点窗口 X | GLFW 原生关闭 | 库关窗后走同一条 `before_exit` → `_on_close` 清理（**不再依赖 exit callback**，见 §5-C6） |
 | 回放播完 | `_replay_next_step` → `_request_close()` | 同「返回」 |
 | 会话未触发结局就退出 | `_handle_exit()` → `_finalize(completed=False)` | 落盘「未完成」回放与报告；**不**写 `endings.json`、不记挑战达成 |
-| 宿主关闭整个应用 | `MainWindowManager.on_closing` → 句柄 `request_close()`（协议请子进程收尾）→ `os._exit(0)`；父进程退出即管道断开，子进程的看护线程立即终结 | 父进程不再有 DPG 上下文可停；`import dearpygui` 在父进程是段错误 |
+| 宿主关闭整个应用 | `MainWindowManager.on_closing` → 句柄 `request_close()`（协议请子进程收尾）→ `os._exit(0)`；父进程退出即管道断开，子进程的看护线程立即终结 | 父进程从不加载副本窗口栈（imgui-bundle）；子进程收尾随管道断开结束 |
 
 三条程序化关闭路径都归到 `_request_close()`（见 §5-C1）。
 
@@ -177,6 +173,25 @@ run() → SessionResult
 - `completed=False`：**不**结算、**不**写 `endings.json`、**不**记挑战达成；已生成内容落盘为「未完成」回放与报告（文件名带 `_未完成`，报告头部标注 `【未完成】` 与原因，中断退出时弹窗给出保存路径）。会话没有任何内容时只提示、不落盘。
 - 落盘位置：有角色（探索模式）写 `data/archives/<角色>/回放|报告`；无角色或挑战模式写 `data/user/replays`、`data/user/reports`。
 - 回放文件仍是 `[记录, ...]` 数组、后缀仍为 `.replay.json`，回放加载与档案导出照常识别。
+
+### 2.6 GPU 纹理句柄的收尾口径（C15）
+
+`hello_imgui.TextureGpu` 是 **RAII** 句柄：丢掉最后一个 Python 引用就去释放底层 GL
+纹理，所以**只能在 GL 存活时丢**。窗口层有六处句柄容器（背景 / 窗口工具条 / 结局
+图标 / 视效覆盖层 / 组件工具条 / 小游戏贴图），一律走 `dungeon/window/gpu_textures.py`
+的两个出口：
+
+| 出口 | 时机 | 行为 |
+|---|---|---|
+| `ui._release_gpu_textures()` → `gpu_textures.release()` | `before_exit`（**GL 后端与 ImGui 上下文仍存活**，库收尾前最后一站） | 一次性收走全部句柄并丢弃引用 ⇒ RAII 当场释放显存 |
+| `ui._retire_gpu_textures()` → `gpu_textures.retire()` | `_finish_session`（`hello_imgui.run()` **已返回**） | 兜底：把残余句柄挂进进程级仓库**保住引用不让析构跑**；正常路径走不到（走到会记一条告警日志） |
+
+坑在容器：清空一个 `{key: TextureGpu}` / `[TextureGpu]` 就等于丢引用，而「清空容器」
+看着人畜无害，很容易被顺手写进 `_finish_session`——那样每局收尾都会在驱动层段错误
+（2026-10 在 Linux 上实测**每局必崩**，与软/硬 GL 无关）。因此
+`ui._drain_gpu_textures()` 是**唯一**的句柄清单，`_retire_gpu_textures()` 必须排在
+`_destroy_components` / `_destroy_overlays` / `_window_fx.shutdown`（这三步会清空容器）
+之前；`tests/check_gpu_texture_lifetime.py` 机械守住清单、两个出口与调用次序。
 
 ## 3. 一步会话数据流
 
@@ -221,25 +236,26 @@ run() → SessionResult
 | **剧情压缩** | `StorySummarizer` 按块（默认 20 段）与换章时机压缩；`build_user_prompt` 注入「全部压缩概要 + 关键事实 + 关键事件」。近期原文不再注入——对话历史（窗口大小即 `story_recent_count` 设置，`_message_window_size`）已逐字携带最近剧情，重复注入只会推高 prefill 与首字延迟。AI 额外输出 `facts`（跨块去重成事实卡）；确定性关键事件（章节进出、选项选择、介入度 / 破坏性跨整数阈值）由代码直接登记 |
 | **回放模式** | 不建 AI 客户端，`_replay_next_step` 逐条重放 `loaded_replay`（`kind == "trigger"` → `_replay_trigger`，`kind == "chapter"` → `_replay_chapter`） |
 | **过程日志（proc_log 组件）** | 右上角日志面板是官方组件包里的 `proc_log` 组件：方案在 `components` 里声明才构建（`_default` 已声明），默认收起，**F12** 切换展开 / 收起。数据源是 `dungeon/process_log.py`：组件 build 时订阅并取走缓冲积压（构造 / 会话初始化阶段的报错也会补显），此后任意线程的 `log()` 经订阅回调 → `ctx._frame.call()` 进主线程追加（上限 300 行，自动滚底）；组件 destroy 时退订。方案未配置该组件时按 F12 弹通知「日志查看已禁用」 |
-| **文本组件功能工具条** | 三种文本组件（text / text_card / text_nvl）各自在合适位置挂一条悬浮工具条（基类 `_build_toolbar` 统一创建，圆角低透明度容器 + 三个图标按钮——图标为程序化生成的小纹理，无底色仅悬停色，常驻不可关）：播放（自动播放，A）/ 相机（截图，F2）/ 列表（过程日志面板，F12），悬停有文字提示。渐变文本栏放渐变区右下角（继续指示 ▼ 左移让位），卡片文本栏骑在卡片右上角，NVL 顶部居中。按钮只转调窗口同名服务，与快捷键等效；自动播放由帧时钟任务采样（`toggle_autoplay` 挂 `every(_AUTOPLAY_INTERVAL = 0.2)`，只是采样频率），真正的推进节奏由**事件驱动**：上屏游标自然走完时 `_on_reveal_finished` 登记 `_advance_due = now + _AUTOPLAY_DWELL(0.5s) + _AUTOPLAY_DWELL_PER_CHAR(0.012) × 句长`，`_autoplay_tick` 三重检查（等待条件同源 → 游标已收尾 → 停留期已过）后才 `_on_next_step`，长句多停一点、不再固定 1.2 秒。等待条件与继续指示同源（选项 / 结局 / 生成 / 上屏未结束期间自动停），自动播放中播放图标转金色。窗口 `_on_mouse_click` 用 `toolbar_hovered()` 区分点按钮与点屏幕推进剧情。截图经 `dpg.output_frame_buffer` 存到 `data/user/screenshots/`（通知延后弹出，避免通知条被截进画面）。正文颜色为固定常量（`_DEFAULT_TEXT_COLOR`），可配置的是标签 / 高亮 / 渐变底色（见组件包 `param_specs`） |
+| **文本组件功能工具条** | 三种文本组件（text / text_card / text_nvl）各自在合适位置挂一条悬浮工具条（基类 `_build_toolbar` 统一创建，圆角低透明度容器 + 三个图标按钮——图标为程序化生成的小纹理，无底色仅悬停色，常驻不可关）：播放（自动播放，A）/ 相机（截图，F2）/ 列表（过程日志面板，F12），悬停有文字提示。渐变文本栏放渐变区右下角（继续指示 ▼ 左移让位），卡片文本栏骑在卡片右上角，NVL 顶部居中。按钮只转调窗口同名服务，与快捷键等效；自动播放由帧时钟任务采样（`toggle_autoplay` 挂 `every(_AUTOPLAY_INTERVAL = 0.2)`，只是采样频率），真正的推进节奏由**事件驱动**：上屏游标自然走完时 `_on_reveal_finished` 登记 `_advance_due = now + _AUTOPLAY_DWELL(0.5s) + _AUTOPLAY_DWELL_PER_CHAR(0.012) × 句长`，`_autoplay_tick` 三重检查（等待条件同源 → 游标已收尾 → 停留期已过）后才 `_on_next_step`，长句多停一点、不再固定 1.2 秒。等待条件与继续指示同源（选项 / 结局 / 生成 / 上屏未结束期间自动停），自动播放中播放图标转金色。窗口 `_on_mouse_click` 用 `toolbar_hovered()` 区分点按钮与点屏幕推进剧情。截图经 `RunnerParams.callbacks.after_swap` 的 `on_capture` 钩子（`glReadPixels` 抓整帧）交给 `PixelWorker` 存到 `data/user/screenshots/`（通知延后弹出，避免通知条被截进画面）。正文颜色为固定常量（`_DEFAULT_TEXT_COLOR`），可配置的是标签 / 高亮 / 渐变底色（见组件包 `param_specs`） |
 | **轻通知窗** | 主窗口顶部居中的通知条（`ui.py::_notify`），窗口级常驻、**不受组件配置影响**；显示约 3 秒自动隐藏（`after` 同 key 任务互斥，连续通知覆盖前一条并重置计时）。副本内需要「提示但不必确认」的场景都可用它 |
 
 ## 4. 线程与帧时钟
 
-**只有主线程（帧循环所在线程）允许直接调用 DPG API。** 后台线程一律通过
-`self._frame.call(fn, *args)` 投递；队列由帧循环每帧 `tick()` 时 `drain()` 清空。
+**只有主线程（帧循环所在线程）允许直接调用 imgui API。** 后台线程一律通过
+`self._frame.call(fn, *args)` 投递；队列由帧回调每帧 `before_imgui_render` 里
+`tick()` 时 `drain()` 清空。
 会话收尾 `_finish_session()` 会 `_frame.stop()`，此后 `call()` 返回 `False` 而不是抛异常，
 后台线程不必再轮询 `_closing`。
 
-**DPG 回调的默认派发线程不是主线程**：DearPyGui 2.3.1 默认把控件 / 按键 handler 回调放到
-**工作线程**执行（官方文档明示，已实测复现——回调线程 ≠ 帧循环线程）。这意味着
-`_on_mouse_click` / `_on_key_down` / `_toggle_fullscreen` 这类回调若直接执行，
-天然违反上面的单线程约定（靠 DPG 内部互斥才没常崩）。因此窗口启用了
-**手动回调管理**（`ui._build_ui` 里 `dpg.configure_app(manual_callback_management=True)`）：
-回调进入 DPG 队列，由帧循环在渲染前 `run_callbacks(get_callback_queue())` 统一执行，
-回调与渲染同线程，上面的约定才真正成立。自动驾驶 `callback-thread` 场景用
-「SendMessage 直投 WM_KEYDOWN 触发真实按键 handler」锁住这条性质。
-新增回调时无需再手工转投递，但**不要**关掉手动回调管理。
+**输入只在帧循环线程上落地**：立即模式没有"回调线程"——`ui._handle_input` 每帧读
+`imgui.is_key_pressed` / `is_mouse_clicked`，鼠标与键盘天然在帧线程执行，上面的
+单线程约定不需要任何"收拢"就成立。自动驾驶 `native-input` 场景用
+「SendMessage 直投 WM_KEYDOWN 触发真原生按键」锁住这条性质。
+
+> 迁移前（DPG 2.3.1）控件 / 按键回调默认派发到**工作线程**，窗口靠
+> `dpg.configure_app(manual_callback_management=True)` + 帧循环
+> `run_callbacks(get_callback_queue())` 把它们收拢到帧线程（旧 C6）。那条补救链
+> 已随 imgui 迁移（P1）删除，本段落记的是它的来历；DPG 的其余兼容怪癖见 §5.1。
 
 帧时钟 API（`dungeon/window/frame.py::FrameScheduler`，窗口实例成员 `self._frame`）：
 
@@ -260,7 +276,7 @@ run() → SessionResult
 | **AI 类**（后台线程） | AI 流式生成、细节提问、选项文字生成、结局生成 | 真正吃 IO/CPU，会阻塞数秒；结果经 `_frame.call()` 回主线程 |
 | **像素类**（单工作者） | `PixelWorker`（背景重采样与淡入淡出的像素混合） | `Image.resize` / `Image.blend` 是 CPU 密集；**节拍仍由帧任务决定**，工作者只干脏活 |
 
-规则：窗口关闭的判定只在主线程；后台线程永远不要直接调 DPG（含 `stop_dearpygui`），
+规则：窗口关闭的判定只在主线程；后台线程永远不要直接调 imgui（含 `app_shall_exit`），
 要关窗就 `_frame.call(self._close_loop)`。`join(timeout=...)` 只允许带超时，且不要在渲染回调内 join
 （会阻塞帧处理，最长约 1s 的假死）。
 
@@ -268,12 +284,12 @@ run() → SessionResult
 
 | 编号 | 约束 | 原因 / 出处 | 验证 |
 |---|---|---|---|
-| **C1** | 任何「程序主动关闭副本窗口」都必须走 `base._request_close()`，业务代码不直接 `dpg.stop_dearpygui()`；且停止动作由帧循环在**回调批结束后的帧边界**统一落实（`_request_close` 只置位） | 在 DPG 回调（`run_callbacks` 执行途中）直接 stop 会让上下文收尾不干净：2026-09-13 表现为「窗口关闭后进程在 Tk 主循环中于 _dearpygui.pyd 内崩溃」，当时改投 WM_CLOSE 延迟停止；2026-10-07 实测手动渲染架构下从入口页「返回」的回调内 stop 同样复现（关闭后延迟崩溃 0xC0000005/0xC000041D，或视口僵尸残留），于是把停止挪回帧边界，`_request_close` 只置 `_stop_requested` | `python tests/check_dungeon_window_contract.py`（属主白名单）；`python scripts/dungeon_autopilot.py --scene session-close --isolate`（含 `--repeat 2`）；真应用手测「进入副本 → 返回 → 再进入副本」 |
-| **C2** | GLFW 被终止（`destroy_context()` / `unpark_context()`）**之前** Tk 照常可用——收尾顺序（恢复主窗口 → 弹框）正是刻意把 Tk 交互放在 `destroy_context()` **之前**；终止**之后**，当时存在的那个 Tk 根窗口**不能**再 `destroy()` / `withdraw()`（0xC0000005，无 traceback），`quit()` / `geometry()` / `attributes('-alpha')` / `winfo_*()` / `update()` 仍正常（完整矩阵见 `dungeon/window/dpg_state.py` 模块说明）；且**之后新建**的 `CTk` 根首次 `deiconify()` 同样硬崩——所以 `destroy_context()` 之后必须立刻补一个隐藏的保活视口（`dpg_state.park_context()`），下一局开头（宿主隐藏之后）由 `dpg_state.unpark_context()` 拆掉 | 硬崩的是「GLFW 终止**后**」的窗口级命令，不是「碰 Tk」本身（2026-09-28 复核矩阵，取代早先「销毁前碰 Tk 即崩」的过宽结论）。保活视口把进程留在「Tk 根窗口健康」状态，热切换（销毁旧根 → 建另一套根）才走得通；它从不 `show_viewport()`，对使用者完全不可见。顺序固定为：恢复主窗口 → join → `_handle_exit()` 弹框 → `destroy_context()` → 解除宿主登记 → `park_context()`；下一局为 `viewport_metrics()`（宿主仍可见时取）→ `hide_window()` → `unpark_context()` → `_build_ui()`（拆保活要排在藏宿主之后，否则 `withdraw` 会崩） | `tests/smoke_switch.py` 第 2/5 轮（真跑两局副本 + 三次切换）；`scripts/dungeon_autopilot.py` |
+| **C1** | 任何「程序主动关闭副本窗口」都必须走 `base._request_close()`，业务代码不直接退（不写 `app_shall_exit`、不调库的退出函数）；`runner.request_exit()` 只置位，由 `before_imgui_render` 帧边界统一落实 `app_shall_exit` | 在回调执行途中直接退会让 `hello_imgui` 的 `confirm_exit` 路径在帧中途拆掉上下文。迁移前 DPG 直接 `stop_dearpygui()` 同样收尾不干净（入口页「返回」后进程延迟崩溃 / 视口僵尸残留，见历史档案），当时的补救是把停止挪回帧边界——本约束即那条纪律的 imgui 版 | `python tests/check_dungeon_window_contract.py`（`hello_imgui.run` / `app_shall_exit` 只许出现在 `runner.py`）；`python scripts/dungeon_autopilot.py --scene session-close --isolate`（含 `--repeat 2`）；真应用手测「进入副本 → 返回 → 再进入副本」 |
+| **C2** | 窗口的 GL 后端 / ImGui 上下文 / 视口生命周期**全权交给 `hello_imgui.run()`**：进程内不手动建 / 毁上下文，`run()` 返回即全部释放，不需要保活视口；收尾（恢复主窗口、弹框）在 `_finish_session` 里、`run()` 返回之后做，与子进程的 GL 栈生命周期无关 | 迁移前 DPG 的进程单例上下文 + GLFW 终止会让 Tk 根窗口失去窗口级命令（`destroy()` / `withdraw()` 硬崩 0xC0000005），才需要「保活视口 `park_context` / `unpark_context`」把进程留在健康状态（当年实测矩阵见 `history/`）。imgui 的 runner 把上述全收进库内部（R1 实测 3 轮开关窗零崩溃）、会话又跑在独立子进程里，那条补救链整体退场 | `tests/smoke_switch.py` 第 2/5 轮（真跑两局副本 + 三次切换，断言父进程始终没在本进程启动副本窗口）；`scripts/dungeon_autopilot.py` |
 | **C3** | `__init__` 的每个构造参数都必须存到 `self` 上 | `_init_session()` 在入口阶段**迟到执行**（点「开始副本」时才跑），此时局部变量早已不可见；曾因漏存 `merged_quips` 导致「开始副本」必然 AttributeError | 构造后读属性 / `entry-start` 场景 |
-| **C4** | 跨线程 UI 更新走 `self._frame.call()`；禁止后台线程直接调 DPG | 帧时钟是窗口实例成员（随会话创建与停止），不是模块级单例；`stop()` 后 `call()` 返回 `False` 不抛异常 | `dungeon_autopilot.py` |
+| **C4** | 跨线程 UI 更新走 `self._frame.call()`；禁止后台线程直接调 imgui | 帧时钟是窗口实例成员（随会话创建与停止），不是模块级单例；`stop()` 后 `call()` 返回 `False` 不抛异常 | `dungeon_autopilot.py` |
 | **C5** | 计时类逻辑不开线程，用 `every` / `after` 帧任务 | 旧实现各自靠 `_closing` 标志轮询退出、收尾时逐个 join；现在退出不需要 join | `python tests/check_dungeon_window_contract.py`（禁 `threading.Timer`）；场景结束时断言 `threading.enumerate()` 无非 daemon 残留 |
-| **C6** | DPG 2.3.1 兼容性怪癖，见 §5.1 子表 | 实测结论 | 手测 + 自动驾驶 |
+| **C6** | 后端迁移的已知差异与已退役的 DPG 怪癖见 §5.1 | 实测结论 | 手测 + 自动驾驶 |
 | **C7** | 入口阶段与会话页共用 `bg_texture` / `bg_image_item` | 进入会话时 `_freeze_background` 把冻结帧设为 `_bg_pil_full`，后续 relayout 沿用冻结画面 | 手测入口 → 会话 |
 | **C8** | window 层不许 import `tkinter` / `customtkinter` / `ui`；宿主能力一律经 `HostPort`，见 §5.2 端口表 | 换 UI 框架只需换适配器；自检不再需要打桩 `ui.ctk.dialogs` | `tests/check_dungeon_layering.py` |
 | **C9** | 构造 / 复制 `DungeonState` 只用关键字参数 | 字段顺序会随迭代变化（`chapter_steps` 就是从中间插入的）；`clone()` 曾按位置传参导致伤亡数组被填成步长浮点数，于是**每一步** `_finish_step` 都抛 `'float' object is not iterable`——故事看着还在出字，但总计数不增长、触发器与结局永不触发 | 断言「回放记录是否增长」 |
@@ -281,22 +297,36 @@ run() → SessionResult
 | **C11** | 术语不混用：`scenario_*` = 方案，`dungeon_*` = 一局 | 见 [术语表](domain_terms.md) 与 `dungeon/terms.py` | `tests/check_scenario_naming.py` |
 | **C12** | 任何 Tk 交互前必须调用 `self._discard_pending_quit()` | 用户通过视口原生关闭键（X）退出时，GLFW 销毁原生窗口会导致 Windows 在本线程队列中留下一条 `WM_QUIT`；它不会被 Tk 消费，却会让 Windows 停止合成 `WM_TIMER`，造成随后的收尾提示模态对话框（`wait_window`）以及主窗口所有 `after` 计时器彻底收不到事件而表现为**弹出提示对话框后主窗口卡死**；收尾时在 `show_window()` / 弹框前由端口抛弃该残留消息 | `python scripts/dungeon_autopilot.py --scene native-close --isolate` |
 | **C13** | 组件只经**组件服务面**访问窗口（`ctx.component_viewport / schedule / schedule_every / cancel_task / session_waiting_for_input / component_autoplay_on / text_font_tag / bold_font_tag / component_top_inset / component`），不得读窗口私有属性（`_dpi_scale` / `_layout_w` / `_frame` / `_autoplay`…） | 组件 ctx 就是窗口实例，摸私有零成本，一旦窗口侧改名即静默 AttributeError；契约的可执行版本是守卫里的**替身 ctx**（只实现服务面）与 AST 越界扫描 | `tests/check_component_pack.py` |
-| **C14** | 会话收尾必须显式销毁视口原生窗口——`_finish_session` 在 `destroy_context()` **之前**调用 `dpg_state.discard_viewport_windows(self._temp_title, self._real_title)`，且**只有它能在 destroy 之后碰任何 Win32 窗口函数** | DPG 2.3.1 的 `destroy_context()` **不销毁视口对应的 GLFW 原生窗口**（2026-10-07 最小复现：`IsWindow/IsWindowVisible` 在 destroy 之后仍为真，`park_context()` 也不会带走它）。典型 DPG 程序感知不到（destroy 后进程随即退出，窗口由 OS 回收），但本程序收尾后仍跑 Tk 主循环，于是那个不再渲染、不再响应回调的副本窗口**留在屏幕上**——就是使用者报的「启动界面点返回后卡死」（DPG 窗口还能被右上角关闭键"表面关闭"），且每局累加一个（实测 1→2）。更糟：用户去点这个残留窗口的 X 时 GLFW 投出无人清理的 `WM_QUIT`，把 Tk 计时器/模态框一起停摆（§5-C12 同型）。销毁**必须**排在 `destroy_context()` 之前——那之后 GLFW 的 WndProc 已释放，`DestroyWindow` / `EnumWindows` 会以 0xC0000005 掀掉进程（2026-10-07 实测；`FindWindowW` 尚可，`DestroyWindow` 崩）。趁 GLFW 有效时销毁等于走「用户点视口关闭键」这条受支持的销毁路径 | `python tests/run_checks.py`；`python scripts/dungeon_autopilot.py --scene entry-cancel` / `--scene session-close`（断言「返回/关闭后不再新增副本视口原生窗口」） |
+| **C14** | 会话收尾不许留下本代窗口：`hello_imgui.run()` 返回后，本进程不应再有标题以 `副本模式` / `回放模式` 开头的顶层原生窗口 | 迁移前 DPG 的 `destroy_context()` **不销毁**视口对应的 GLFW 原生窗口（2026-10-07 最小复现：`IsWindow/IsWindowVisible` 在 destroy 之后仍为真，`park_context()` 也不会带走它）。典型 DPG 程序感知不到（destroy 后进程随即退出，窗口由 OS 回收），但本程序收尾后仍跑 Tk 主循环，那个不再响应的副本窗口就**留在屏幕上**——用户报的「启动界面点返回后卡死」，且每局累加一个；当时必须趁 GLFW 有效时显式销毁（那之后 GLFW 的 WndProc 已释放，`DestroyWindow` 会以 0xC0000005 掀掉进程）。imgui 的 runner 自己销毁窗口，本条改为**回归断言**：无论后端怎么实现，收尾都不许留下这一代窗口 | `python scripts/dungeon_autopilot.py --scene entry-cancel` / `--scene session-close`（断言「返回/关闭后不再新增副本视口原生窗口」） |
+| **C15** | `hello_imgui.TextureGpu` 等 GL 资源句柄**只在 GL 存活时释放**：统一走 `dungeon/window/gpu_textures.py` 的 `release()`（`before_exit`，`ui._release_gpu_textures`）；`hello_imgui.run()` 返回后的 `_finish_session` 只许 `retire()` 兜底保住引用。六处句柄容器（背景 / 窗口工具条 / 结局图标 / 视效覆盖层 / 组件工具条 / 小游戏贴图）一律经 `ui._drain_gpu_textures()` 收走，`_retire_gpu_textures()` 必须排在 `_destroy_components` / `_destroy_overlays` / `_window_fx.shutdown` 之前 | `TextureGpu` 是 RAII：丢最后一个引用即释放底层 GL 纹理。`run()` 返回后 GL 后端与 ImGui 上下文已随库释放，此时再丢引用会去解引用失效后端，在驱动层**直接段错误**——2026-10 在 Linux 上实测**每局副本收尾必崩**（软/硬 GL 都复现），成因是组件基类的 `destroy` 在 `_finish_session` 里清了工具条图标纹理。看着人畜无害的「清空容器」正是丢引用 | `python tests/check_gpu_texture_lifetime.py`（六处容器清单 + `release`/`retire` 口径 + `_finish_session` 次序与 `_on_before_exit` 释放的 AST 断言）；`scripts/dungeon_autopilot.py`（真窗口收尾后退役仓库必须为 0） |
 
-### 5.1 C6：DPG 2.3.1 兼容性怪癖
+### 5.1 C6：后端差异与已退役的 DPG 怪癖
 
-| 现象 | 应对 |
+现行后端是 imgui-bundle（`hello_imgui` + GLFW/OpenGL）。立即模式与 DPG 的保留模式
+有几处必须记住的差异：
+
+| 项 | 现状（imgui 立即模式） |
 |---|---|
-| 控件 / 按键回调默认在**工作线程**执行（非帧循环线程，官方文档明示、已实测） | `ui._build_ui` 启用 `configure_app(manual_callback_management=True)`，帧循环渲染前 `run_callbacks(get_callback_queue())`（见 §2.2 / §4）；自动驾驶 `callback-thread` 场景守护 |
-| `dpg.add_child_window(..., no_scrollbar=...)` 等参数创建时传入不生效 | 创建后 `dpg.configure_item()` 再设一遍（见 `_build_ui` 对 `main_window`） |
-| viewport 级 drawlist 不渲染 `draw_image` | 背景图放在主窗口自己的 drawlist（`bg_drawlist`）；主窗口 `no_background=True` |
-| 入口阶段控件在容器块**之后**创建，DPG 推断不出父级 | 显式 `parent="main_window"`（见 `launcher._build_entry_ui`） |
-| 动态纹理更新 | 背景 `bg_texture` 在 `_build_ui` 一次建到「客户区 ∨ 主显示器物理尺寸」，**永不重建**：数据与纹理同尺寸时 `set_value`（接受 numpy float32，~30ms）；数据小于纹理（窗口模式 vs 全屏）时经 background 的常驻组合缓冲贴进左上角，`draw_image` 的 uv 子区域映射铺到窗口矩形——窗口/全屏切换因此全程快速路径（~200ms 落地，无主线程卡顿）。若纹理不够大（换更大显示器）走换新 tag 重建：**同 tag delete+重建会复用旧 GL 存储导致花屏**（DPG 2.3.1 怪癖），且不依赖 default_value 上传大列表——建零列表纹理后立即 `set_value`。重采样结果按 (来源代, 尺寸) 缓存两份，来回切换免重采样。`pil_to_dpg` 已用 numpy 整块转换，**不要改回逐像素 Python 推导**；保持 `_bg_revision` 检查丢弃过期帧 |
-| 初始 `bg_texture` 尺寸 | 按主窗口**客户区**尺寸创建，`_layout_w/h` 初始也取客户区尺寸；视口外框尺寸只用于创建视口，参与布局会因客户区查询时机不同造成首图被守卫丢弃 |
-| 无过渡背景（`smooth_transition=False`，如入口首图 `_prime_background`） | 在 `background.change` 内**同步直接应用**，不走 Timer + 队列，否则常因视口未稳定延迟数秒 |
-| 窗口标题 | 创建时用临时标题 `DungeonSession`，首帧后 `_fix_windows_title` 改真实标题（绕过 DPG 标题缓存）；`_temp_title` 只用于这个修正 |
-| `set_exit_callback` 语义 | 是「最后一帧运行」而非「点 X 时运行」；手动渲染下它**只在 `destroy_context()` 内部**触发，对清理太晚，故 `ui.py` 不再注册，关闭统一由帧循环判定 |
-| 入口背景图收集 | `collect_dungeon_images` 按规范化路径去重（同一图会经副本仓库相对根与自由副本绝对根各采一次）；只有一张图时轮播禁止 `random.randint(1, n-1)`（low>high 会抛异常杀死线程） |
+| 画面构建 | 没有常驻控件树：`_build_ui` 只备参数与建 `WindowRunner`，`_draw_frame` 每帧重建全部浮层；「改属性找控件」一律变成「改状态、下帧重画」 |
+| 浮层顺序 | 根窗口铺满客户区，入口方案面板 / 工具条 / 通知 / 小游戏舞台必须是根窗口 `end()` 之后的**顶层窗口**，且用 `_panel_flags`（不带 `no_bring_to_front_on_focus`），否则被根窗口整个盖住 |
+| 字体 | `hello_imgui.load_font` 只能在 `load_additional_fonts` 回调里调（放 `post_init` 会 access violation）；`push_font(font, base)` 传**基础字号**（库按 dpi_factor 放大） |
+| 建窗尺寸 | `window_geometry.size` 是 96-PPI 逻辑点 = 宿主客户区物理像素 ÷ `_dpi_scale`（R7 定标，见 `ui._window_create_size`） |
+| 背景 / 视效纹理 | `hello_imgui.TextureGpu` 句柄持有即持有 GPU 资源：换图**先建新句柄再丢旧句柄**，避免中间帧采样到已释放纹理 |
+| 截图 / 反色 / 色差抓帧 | 走 `RunnerParams.callbacks.after_swap` 的 `on_capture`（`before_imgui_render` 阶段读后备缓冲是全黑，R13） |
+| 静默期出帧 | `fps_idling.enable_idling = False`（否则帧时钟停摆）；`fps_max` 只是高刷屏封顶，节拍由 vsync 定 |
+| 关窗 | 点 X 与程序侧关窗共用一条路径（库关窗 → `before_exit`）；`confirm_exit` 显式置 None，不弹库自带确认框 |
+
+DPG 时代记进本小节的怪癖（`dpg.add_child_window(no_scrollbar=)` 创建时不生效、
+viewport drawlist 不渲染、动态纹理同 tag 重建复用旧 GL 存储导致花屏、
+`set_exit_callback` 是「最后一帧」语义、控件回调默认派发到工作线程需要
+`manual_callback_management` 收拢、`destroy_context()` 不销毁视口原生窗口、
+保活视口、临时标题绕过标题缓存……）**已随迁移整体退场**。它们的完整来历与
+当时的应对留在 [imgui 迁移档案](history/imgui_migration.md) 与更早的
+[宿主改造档案](history/host_refactor.md)、[退出挂死调查](history/exit_hang_investigation.md)。
+
+与后端无关的一条旧坑仍在：入口背景图收集 `collect_dungeon_images` 按规范化路径
+去重（同一图会经副本仓库相对根与自由副本绝对根各采一次）；只有一张图时轮播禁止
+`random.randint(1, n-1)`（low>high 会抛异常杀死线程）。
 
 ### 5.2 C8：宿主端口方法表
 
@@ -323,21 +353,24 @@ DungeonSessionWindow(..., host=TkHost(self)).run()   # 探索模式 exp_frame / 
 DungeonSessionWindow(...).run()                      # 不传 = HostPort()，无宿主（自检）
 ```
 
-注意：`dungeon/window/ui.py` 里仍有两处 Windows 平台代码（`_temp_title` 与 `_update_dpi_scale` 里的
-`FindWindowW` / `GetDpiForWindow`），属于 DPG/Win32 细节而非宿主端口范畴，是后续可选的清理项。
+注意：`dungeon/window/ui.py::_update_dpi_scale` 里仍有一处 Windows 平台代码
+（`FindWindowW` + `GetDpiForWindow`，运行期发现 DPI 变化后重算 `_dpi_scale`），
+属于 Win32 细节而非宿主端口范畴，是后续可选的清理项（迁移前它还与临时标题
+`_temp_title` 配套，后者已随 imgui 迁移删除）。
 
 ## 6. 自检命令
 
 | 改动范围 | 先跑 |
 |---|---|
-| 关闭路径、收尾、入口阶段、生命周期、帧时钟、回调线程、章节背景音乐、章节对话语音物理效果、对话语音 | `python scripts/dungeon_autopilot.py`（11 场景 100 项断言，含 `text-components` 组件冒烟）；单场景 `--scene <名字> --isolate`，连开关窗 `--scene session-close --repeat 2 --isolate` |
+| 关闭路径、收尾、入口阶段、生命周期、帧时钟、回调线程、章节背景音乐、章节对话语音物理效果、对话语音 | `python scripts/dungeon_autopilot.py`（15 场景 109 项断言，含 `text-components` 组件冒烟）；单场景 `--scene <名字> --isolate`，连开关窗 `--scene session-close --repeat 2 --isolate` |
 | 启动载荷序列化 / 结果往返（进程隔离线格式） | `python tests/check_dungeon_launch_payload.py`（无 GUI，73 项断言） |
 | 会话子进程端到端（spawn、协议代答、登记/注销、限帧钩子） | `python tests/smoke_mini.py`（副本链路实测一节；`GIANTESS_DUNGEON_TEST_FRAMES` 限帧子进程） |
 | `_finalize` / `json_store` / `scenario_repo` | `python tests/check_dungeon_finalize.py`（无 GUI，32 项断言） |
-| 显示组件包 / 文本组件 / 组件参数 | `python tests/check_component_pack.py`（无 GUI，102 项断言：加载链、契约与服务面（替身 ctx + AST 越界扫描）、元数据与参数夹取、外部包覆盖、隐藏 DPG 上下文里的四钩子冒烟与控件无残留） |
+| 显示组件包 / 文本组件 / 组件参数 | `python tests/check_component_pack.py`（无 GUI，93 项断言：加载链、契约与服务面（替身 ctx + AST 越界扫描）、元数据与参数夹取、外部包覆盖、build/layout/refresh/destroy 冒烟与帧任务成对清理） |
 | 分句器 / 说话人标记 | `python tests/check_splitter.py` |
 | 新增 import / 分层 | `python tests/check_dungeon_layering.py`（窗口层含 `component_pack/` 子包） |
-| 新增 dpg 生命周期 / 线程调用（stop/create/destroy、Timer、join） | `python tests/check_dungeon_window_contract.py`（C1 / C4 / C5 的机械可查部分） |
+| 新增后端生命周期 / 线程调用（`hello_imgui.run`、`app_shall_exit`、Timer、join、dearpygui 回归） | `python tests/check_dungeon_window_contract.py`（C1 / C4 / C5 的机械可查部分） |
+| 收尾释放纹理 / 新增 `TextureGpu` 持有处 | `python tests/check_gpu_texture_lifetime.py`（C15 的机械可查部分，13 项断言）；真窗口收尾看 `scripts/dungeon_autopilot.py` 后退役仓库是否仍为 0 |
 | schema / 校验器 | `python tests/check_scenario_schema.py`；批量校验 `python scripts/scenario_validate.py --errors-only` |
 
 无 GUI 守卫（`check_dungeon_layering.py` / `check_dungeon_finalize.py` / `check_splitter.py` 等）+
@@ -347,7 +380,7 @@ DungeonSessionWindow(...).run()                      # 不传 = HostPort()，无
 
 其它提示：
 
-- 涉及关闭路径的改动**必须**在真实应用中手测（最小 DPG 脚本复现不了 Tk 宿主 + 完整线程栈的组合行为）。
+- 涉及关闭路径的改动**必须**在真实应用中手测（最小 imgui 脚本复现不了 Tk 宿主 + 完整线程栈的组合行为）。
 - 回放结束、入口返回、会话 X 关闭是三条独立路径，改 `_request_close` / `_on_close` / `_handle_exit` 时逐一回归。
 - 控制台出现 `流式任务执行异常: '...xxx' object has no attribute ...` 通常是 `_init_session` 没跑完（某属性缺失），先看完整 traceback 的第一个异常点。
 
@@ -359,6 +392,7 @@ DungeonSessionWindow(...).run()                      # 不传 = HostPort()，无
 
 | 档案 | 内容 |
 |---|---|
+| [imgui 迁移档案](history/imgui_migration.md) | 2026-10：Dear PyGui → imgui-bundle 的整体迁移（P0 可行性 → P8 清场），逐阶段取舍与验收 |
 | [宿主改造档案](history/host_refactor.md) | 手动渲染、构造/运行分离、宿主端口、帧时钟、结果对象化的全过程与验收 |
 | [退出挂死调查](history/exit_hang_investigation.md) | 进程退出挂死的复现矩阵与修正结论；`destroy_context()` 后碰 Tk 崩溃的实测（对应 C2） |
 

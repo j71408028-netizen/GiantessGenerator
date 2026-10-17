@@ -2,9 +2,10 @@
 """副本子进程的宿主端口实现与子进程主体。
 
 副本会话运行在**独立子进程**里（父进程侧见 ``ui.hosting.dungeon_spawner``）：
-DPG / GLFW 从此独占子进程，与 Tk 主程序不再共享线程消息队列、GLFW 单例与
-X11 连接——``dpg.destroy_context()`` 终止的是子进程的 GLFW，父进程的 Tk 根
-窗口因此不再需要保活视口（``dpg_state.park_context``）这类同进程共存补救。
+渲染后端 / GLFW 从此独占子进程，与 Tk 主程序不再共享线程消息队列、GLFW 单例与
+X11 连接——子进程内的上下文销毁只影响它自己的 GL 栈，父进程的 Tk 根窗口因此
+不再需要保活视口（迁移前 ``dungeon.window.dpg_state.park_context`` 那套同进程
+共存补救）。
 
 本模块在子进程内充当 ``HostPort`` 的实现，宿主能力按这样映射：
 

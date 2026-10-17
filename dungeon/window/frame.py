@@ -115,6 +115,10 @@ class FrameScheduler:
     def every(self, interval, fn, *args, key=None, **kwargs) -> int:
         """每 ``interval`` 秒执行一次；``interval <= 0`` 表示每帧执行一次。
 
+        节奏按**相位累积**（``due_at += interval``）而不是"上次触发 + interval"：
+        后者会每帧吃掉半帧过冲、周期任务系统性偏慢（R11）。落后超过一个周期时
+        只重锚不补跑，卡顿恢复后不会爆发一串回调。
+
         ``key`` 用于取消（见 :meth:`cancel`）。返回任务 id。
         """
         return self._schedule(float(interval), True, fn, args, kwargs, key, 0.0)
@@ -156,8 +160,20 @@ class FrameScheduler:
                 if task.due_at <= now:
                     due.append(task)
                     if task.repeat:
-                        # 掉帧不补跑：下一轮以当前时刻重排，避免卡顿后出现爆发
-                        task.due_at = now + max(0.0, task.interval)
+                        interval = max(0.0, task.interval)
+                        if interval > 0.0:
+                            # 相位累积：due_at += interval，而不是锚在当前帧时刻。
+                            # 锚在 now 会把"帧边界到 due 之间的过冲"每触发一次就
+                            # 吃掉一次且不补偿，周期任务因此系统性慢于名义速率
+                            # （R11：60fps 下 every(0.05) 实测只跑出约 17 次/秒）。
+                            task.due_at += interval
+                            if task.due_at <= now:
+                                # 落后超过一个周期（卡顿/挂起）：只重锚、不补跑，
+                                # 保持"掉帧不补跑"的原有语义，避免恢复瞬间爆发。
+                                task.due_at = now + interval
+                        else:
+                            # EVERY_FRAME：due_at 停在过去，下一帧继续触发
+                            task.due_at = now
                         alive.append(task)
                     continue
                 alive.append(task)

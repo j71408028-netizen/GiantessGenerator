@@ -115,10 +115,10 @@ BASE_ALLOWED = {
 # 的假例外。真正要防的是 PIL 里**直通 Tk 的两个桥**：
 #   · ``ImageTk``   —— 把 PIL 图转成 tk 可显示的 PhotoImage，等于偷用窗口框架；
 #   · ``ImageGrab`` —— 抓屏，需窗口环境。
-# 因此顶层名禁 tkinter / _tkinter / customtkinter / dearpygui，PIL 只禁这两个子模块。
+# 因此顶层名禁 tkinter / _tkinter / customtkinter / imgui_bundle / dearpygui，PIL 只禁这两个子模块。
 FRAMEWORK_LAYERS = {"infra", "core", "persistence", "services"}
 UI_FRAMEWORKS = {
-    "tkinter", "_tkinter", "customtkinter", "dearpygui",
+    "tkinter", "_tkinter", "customtkinter", "imgui_bundle", "dearpygui",
 }
 # 顶层名不禁、但特定子模块要禁的框架（PIL 只放行纯图像部分）。
 UI_FRAMEWORK_SUBMODULES = {
@@ -232,7 +232,7 @@ def _framework_hit(target, subnames):
     """返回被命中的 UI 框架名；未命中返回 None。
 
     两种命中方式：
-    - 顶层名在 ``UI_FRAMEWORKS`` 里（tkinter / customtkinter / dearpygui …）；
+    - 顶层名在 ``UI_FRAMEWORKS`` 里（tkinter / customtkinter / imgui_bundle …）；
     - ``import PIL.ImageTk`` 或 ``from PIL import ImageTk`` 这类**子模块**命中
       ``UI_FRAMEWORK_SUBMODULES``（PIL 只禁这两个直通 Tk 的桥）。
     """

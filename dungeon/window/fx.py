@@ -9,49 +9,58 @@
 
 - **时机**全部挂在帧时钟（``owner._frame``）：每类视效一条 repeating 帧任务，
   按 ``time.monotonic`` 计算进度，到期由任务自己收尾——不数步数、不开线程；
-- **重活**（帧快照的反相 / 通道分离）丢给像素工作者，结果经 ``_frame.call``
+- **重活**（整帧像素的反相 / 通道分离）丢给像素工作者，结果经 ``_frame.call``
   回帧线程上屏；
-- DPG 调用只出现在帧线程路径里（``start`` 经 ``_frame.call`` 投递，任意线程可调）。
+- 触发（``start``）可能来自任意线程，一律 ``_frame.call`` 投递给帧线程。
 
-四个视效的画法：
+## imgui 立即模式的画法（P5 重写）
 
-- ``flash`` 闪光：视效层里一块全窗白色矩形，fill 不透明度从峰值线性退到 0；
-- ``shake`` 振动：主窗口全部直接子项按基线位置叠加衰减正弦偏移，整窗内容
-  一起抖；
-- ``invert`` 反色 / ``rgb_split`` 色差分离：先 ``dpg.output_frame_buffer`` 抓
-  一帧当前画面（整窗真实像素，含文本与 UI），像素工作者加工后上到视效纹理，
-  经视效层的半透明 ``draw_image`` 盖回全窗，再按时长把不透明度退到 0——
-  消退期间下层画面照常活动。抓帧失败退回处理当前背景图。
+DPG 版的这一层靠「主窗口里的透明子窗 + 绘制列表 + 动态纹理 + 抓帧落盘」实现，
+imgui 侧四个视效各走各的路（见 ``.workbuddy/imgui-migration/40-status-p5.md``）：
 
-层叠陷阱（帧缓冲实测，DPG 2.3.1）：嵌在窗口里的裸 drawlist **无论子项顺序**
-都在子窗口之下渲染——直接盖不住文字与组件；也不能用视口级绘制列表
-（``viewport_drawlist`` 在本版本不渲染 ``draw_image``，见 ui.py 同款注释）。
-因此视效层是主窗口里的**透明子窗**包住绘制列表，触发时移到子项末尾（最上）
-并显示，全部视效结束后隐藏（常驻透明层会挡住组件工具条的悬停判定）。
+============  ==================================================================
+视效           实现
+============  ==================================================================
+``flash``     根窗口 draw list 上一块全窗白色矩形，不透明度从峰值线性退到 0
+``shake``     根窗口原点与尺寸每帧按衰减正弦偏移（``ui._draw_frame`` 落实），
+              **整窗内容一起抖**，与 DPG 版"移动主窗口全部直接子项"等价
+``invert``    ``after_swap`` 里 ``glReadPixels`` 抓整帧 → 工作者反相 → 上
+``rgb_split`` ``TextureGpu`` 当全窗覆盖层，不透明度按时长退到 0
+============  ==================================================================
+
+三点与 DPG 版**故意不同**：
+
+1. **抓帧不落盘**。旧版靠 ``dpg.output_frame_buffer(file=...)`` 写临时 PNG 再
+   轮询读回（因为 DPG 的抓帧是帧末异步写文件）。这里直接读后备缓冲得到
+   ``numpy`` 数组，省掉一轮 PNG 编解码与磁盘往返。
+2. **抓一次，不每帧抓**。反色/色差是"把这一瞬间的画面染色"，消退靠覆盖层的
+   不透明度；每帧都抓会白白多花一次全窗回读（720p 约 2 ms）且画面会随着下层
+   动画不停变化，反而比旧版更花。
+3. **闪光与覆盖层画在根窗口自己的 draw list 上**，不再需要"透明子窗 + 移动子项
+   到最上层"那套层级体操——立即模式里后画的就在上面。
 """
 
 import math
-import os
-import tempfile
 import time
 
 import numpy as np
 from PIL import Image, ImageChops, ImageOps
-import dearpygui.dearpygui as dpg
 
 from dungeon import process_log
 from dungeon.actions import WINDOW_FX_KEYS
+from dungeon.window import gl_util
+from dungeon.window import imgui_util as iu
 from dungeon.window.background import PixelWorker
 
 #: 各视效的帧任务 key（同类互斥：重触发顶掉旧的）
 _FLASH_TASK = "fx:flash"
 _SHAKE_TASK = "fx:shake"
 _OVERLAY_TASK = "fx:overlay"
-#: 帧快照落盘的轮询任务 key（output_frame_buffer 在帧末异步写文件）
+#: 覆盖层「等像素结果」的轮询任务 key（P5 起只是在等工作者线程，不再等落盘）
 _SNAP_POLL_TASK = "fx:snapshot"
-#: 快照轮询的间隔与最多次数（超过即视为抓帧失败，退回背景图）
-_SNAP_POLL_INTERVAL = 0.05
-_SNAP_POLL_MAX = 20
+#: 抓帧后等工作者线程处理的间隔与最多次数（超过即视为失败，放弃这次视效）
+_SNAP_POLL_INTERVAL = 0.02
+_SNAP_POLL_MAX = 25
 #: 振动频率（Hz）：太低拖沓，太高在低帧率下走样
 _SHAKE_HZ = 14.0
 
@@ -78,130 +87,146 @@ def parse_fx_params(action_data):
 
 
 class WindowFx:
-    """会话窗口的瞬时视效层：构建一次，触发即播，按时长自消。"""
+    """会话窗口的瞬时视效层：构建一次，触发即播，按时长自消。
+
+    对窗口层的可见面只有四个：``build`` / ``relayout`` / ``shutdown`` /
+    ``start``；绘制相关的三个查询（``flash_color`` / ``pixel_overlay`` /
+    ``shake_offset``）供 ``ui._draw_frame`` 每帧取用。
+    """
 
     def __init__(self, owner):
         self.owner = owner
+        #: 视效层是否已建（``build`` 之后为真；``post_init`` 时调用）
         self._built = False
-        #: 视效层 = 主窗口里的透明子窗（tag fx_layer）包住绘制列表。**不能直接用
-        #: 裸 drawlist**：DPG 2.3.1 里嵌在窗口里的 drawlist 无论子项顺序都在
-        #: 子窗口之下渲染（帧缓冲实测），只有再包一层子窗才能盖到文字与组件上。
-        self._layer = "fx_layer"
-        self._drawlist = "fx_drawlist"
-        self._flash_rect = "fx_flash_rect"
-        self._overlay_image = "fx_overlay_image"
-        self._texture = "fx_texture"
-        self._tex_w = 0
-        self._tex_h = 0
-        #: 视效纹理的组合缓冲（数据小于纹理时贴进左上角，与背景 apply_data 同理）
-        self._compose_buf = None
+        #: 布局尺寸（客户区物理像素，``relayout`` 每帧/每次重排同步）
+        self._w = 1.0
+        self._h = 1.0
+        #: 像素工作者：反色 / 色差的重活线程
         self._worker = PixelWorker(name="dungeon-fx-worker")
-        #: 进行中的视效种类（"flash" / "shake" / "overlay"）：全空时隐藏视效层，
-        #: 避免常驻透明层挡住组件工具条的悬停判定
+        #: 进行中的视效种类（"flash" / "shake" / "overlay"）
         self._active = set()
-        #: 振动基线：开始时主窗口直接子项的 pos（收尾/重排时还原）
-        self._shake_base = {}
-        #: 帧快照落盘路径（临时文件，用完即删）
-        self._snap_path = os.path.join(
-            tempfile.gettempdir(), f"dungeon_fx_snap_{os.getpid()}.png")
+
+        # ---- 闪光 ----
+        #: 闪光峰值不透明度（0~255）；0 表示当前没有闪光
+        self._flash_alpha = 0.0
+
+        # ---- 振动 ----
+        #: 根窗口内容偏移 ``(dx, dy)``；``(0.0, 0.0)`` 表示不振
+        self._shake = (0.0, 0.0)
+
+        # ---- 反色 / 色差覆盖层 ----
+        #: 覆盖层纹理句柄（``TextureGpu``）；换图时先建后丢
+        self._pixel_texture = None
+        #: 覆盖层不透明度（0~255）；0 表示当前没有覆盖层
+        self._pixel_alpha = 0.0
+        #: 覆盖层的像素处理代数：重触发会让旧结果作废
+        self._pixel_gen = 0
+        #: 已抓到的整帧 ``(rgba, w, h, gen)``，等工作者线程取走
+        self._pixel_pending = None
+        #: 待上屏的覆盖层像素 ``(rgba, gen)``，由工作者线程经 ``_frame.call`` 投递
+        self._pixel_ready = None
+        #: 覆盖层的色差分离像素数（``_begin_overlay`` 算好后交给 ``_process_pixels``）
+        self._split_px = 2
+        #: 覆盖层种类（"invert" / "rgb_split"）：工作者线程按它选变换
+        self._overlay_key = "invert"
 
     @property
     def _frame(self):
         return self.owner._frame
 
-    # ---------- 构建 / 重排 / 收尾 ----------
-    def build(self, viewport_w, viewport_h, tex_w, tex_h):
-        """会话建 UI 时创建视效层（仅帧线程）：透明子窗 + 绘制列表 + 视效纹理。
+    # ==================== 构建 / 重排 / 收尾 ====================
+    def build(self, *args, **kwargs):
+        """会话建 UI 时定标（``post_init``，GL 已就绪）。
 
-        纹理与背景纹理同规格（客户区 ∨ 主显示器物理尺寸），一次建好之后
-        每次视效只走 set_value 快速路径，不重建纹理。视效层平时隐藏。
+        立即模式没有视效层控件要建——闪光/覆盖层是每帧现画的 draw list 矩形与
+        图片，振动是根窗口原点偏移。这里只记下布局尺寸并置位。
+
+        兼容旧签名：DPG 版是 ``build(viewport_w, viewport_h, tex_w, tex_h)``，
+        多出来的参数（视口尺寸）按前两个取用。
         """
-        self._tex_w, self._tex_h = tex_w, tex_h
-        dpg.add_dynamic_texture(
-            width=tex_w, height=tex_h,
-            default_value=[0.0] * (tex_w * tex_h * 4),
-            tag=self._texture, parent="dungeon_texture_registry")
-        with dpg.child_window(tag=self._layer, parent="main_window",
-                              pos=[0, 0], width=viewport_w, height=viewport_h,
-                              no_scrollbar=True, no_scroll_with_mouse=True,
-                              border=False, show=False):
-            with dpg.drawlist(tag=self._drawlist, width=viewport_w,
-                              height=viewport_h):
-                dpg.draw_rectangle(tag=self._flash_rect, pmin=[0, 0],
-                                   pmax=[viewport_w, viewport_h],
-                                   color=(0, 0, 0, 0), fill=(255, 255, 255, 0))
-                dpg.draw_image(tag=self._overlay_image, texture_tag=self._texture,
-                               pmin=[0, 0], pmax=[viewport_w, viewport_h],
-                               color=(255, 255, 255, 0), show=False)
-        with dpg.theme() as layer_theme:
-            with dpg.theme_component(dpg.mvAll):
-                dpg.add_theme_color(dpg.mvThemeCol_ChildBg, (0, 0, 0, 0))
-        dpg.bind_item_theme(self._layer, layer_theme)
+        if len(args) >= 2:
+            self._w, self._h = float(args[0]), float(args[1])
         self._built = True
 
     def relayout(self, w, h):
-        """视口重排：覆盖层几何跟随（仅帧线程；``_relayout`` 末尾调用）。"""
-        if not self._built or self.owner._closing:
-            return
-        if dpg.does_item_exist(self._layer):
-            dpg.configure_item(self._layer, width=w, height=h)
-        if dpg.does_item_exist(self._drawlist):
-            dpg.configure_item(self._drawlist, width=w, height=h)
-        if dpg.does_item_exist(self._flash_rect):
-            dpg.configure_item(self._flash_rect, pmin=[0, 0], pmax=[w, h])
-        if dpg.does_item_exist(self._overlay_image):
-            dpg.configure_item(self._overlay_image, pmin=[0, 0], pmax=[w, h],
-                               uv_min=[0.0, 0.0],
-                               uv_max=[w / max(1, self._tex_w), h / max(1, self._tex_h)])
-        if self._shake_base:
-            # 振动中遇到重排：_relayout 刚把子项摆回正确基线，振动立即收场
-            # （继续用旧基线会把 resize 后的布局抖回错位）
+        """视口重排：闪光/覆盖层覆盖的矩形跟随客户区（仅帧线程）。"""
+        self._w, self._h = float(max(1.0, w)), float(max(1.0, h))
+        if self._shake != (0.0, 0.0):
+            # 振动中遇到重排：基线换了，继续用旧振幅会把新布局抖回错位。
+            # 与 DPG 版同一个处置——立刻收场，交给 `_relayout` 后的静态布局。
             self._frame.cancel(_SHAKE_TASK)
-            self._shake_base = {}
+            self._shake = (0.0, 0.0)
             self._end_effect("shake")
 
+    def drain_gpu_textures(self):
+        """交出路覆盖层纹理句柄（见 :mod:`dungeon.window.gpu_textures`）。
+
+        覆盖层是"这一瞬间的画面"，换图时先建后丢；最后一个句柄由窗口在
+        ``before_exit``（GL 仍存活）统一收走释放——``shutdown`` 跑在
+        ``hello_imgui.run()`` 返回之后，在那里丢引用会段错误。
+        """
+        handle, self._pixel_texture = self._pixel_texture, None
+        return [handle] if handle is not None else []
+
     def shutdown(self):
-        """会话收尾：撤掉帧任务与像素工作者，清掉临时快照。"""
+        """会话收尾：撤掉帧任务与像素工作者。
+
+        纹理句柄**不在这里丢**：本方法在 ``hello_imgui.run()`` 返回之后才跑，
+        GL 已释放。正常路径的句柄已在 ``before_exit`` 里交出去；这里的赋值只是
+        兜底清状态（此时 ``_pixel_texture`` 已经是 None）。
+        """
         for key in (_FLASH_TASK, _SHAKE_TASK, _OVERLAY_TASK, _SNAP_POLL_TASK):
             self._frame.cancel(key)
         self._active.clear()
-        self._shake_base = {}
+        self._flash_alpha = 0.0
+        self._shake = (0.0, 0.0)
+        self._pixel_alpha = 0.0
+        self._pixel_texture = None
+        self._pixel_pending = None
+        self._pixel_ready = None
         self._worker.shutdown()
-        self._remove_snap()
 
-    # ---------- 视效层显隐 ----------
-    def _show_layer(self):
-        """把视效层提到最前并显示（move_item 必须显式给 parent，否则 DPG 报
-        [1005]；不带 before 即追加到子项末尾 = 最上层）。"""
-        dpg.move_item(self._layer, parent="main_window")
-        dpg.configure_item(self._layer, show=True)
+    # ==================== 绘制查询（ui._draw_frame 每帧调用） ====================
+    def flash_color(self):
+        """当前闪光矩形的打包色；没有闪光时返回 ``None``。"""
+        if self._flash_alpha <= 0.0 or "flash" not in self._active:
+            return None
+        return iu.u32(255, 255, 255, int(round(self._flash_alpha)))
 
-    def _end_effect(self, kind):
-        self._active.discard(kind)
-        if not self._active and dpg.does_item_exist(self._layer):
-            dpg.configure_item(self._layer, show=False)
+    def shake_offset(self):
+        """根窗口内容的当前偏移 ``(dx, dy)``（振幅 0 时为 ``(0.0, 0.0)``）。"""
+        return self._shake
 
-    # ---------- 启动 ----------
+    def pixel_overlay(self):
+        """当前覆盖层 ``(texture, alpha)``；没有覆盖层时返回 ``None``。
+
+        ``texture`` 是 ``hello_imgui.TextureGpu`` 句柄，调用方用
+        ``texture.texture_id()`` 取 GL 名字。
+        """
+        if self._pixel_texture is None or self._pixel_alpha <= 0.0:
+            return None
+        return (self._pixel_texture, int(round(self._pixel_alpha)))
+
+    # ==================== 启动 ====================
     def start(self, fx_key, duration, intensity):
-        """启动一个窗口视效（任意线程可调）：经帧队列投递，不阻塞调用方。"""
+        """启动一个窗口视效（任意线程可调）：投递给帧线程，不阻塞调用方。"""
         if fx_key not in WINDOW_FX_KEYS:
+            return
+        if getattr(self.owner, "_closing", False) or not self._built:
             return
         self._frame.call(self._begin, fx_key, duration, intensity)
 
     def _begin(self, fx_key, duration, intensity):
-        if self.owner._closing or not self._built:
+        if getattr(self.owner, "_closing", False) or not self._built:
             return
         if fx_key == "flash":
             self._active.add("flash")
-            self._show_layer()
             self._begin_flash(duration, intensity)
         elif fx_key == "shake":
             self._active.add("shake")
-            self._show_layer()
             self._begin_shake(duration, intensity)
         else:
             self._active.add("overlay")
-            self._show_layer()
             self._begin_overlay(fx_key, duration, intensity)
 
     @staticmethod
@@ -209,185 +234,221 @@ class WindowFx:
         """强度 0~100 → 峰值不透明度：低强度保底可见，100 即完全不透明。"""
         return min(255, max(64, round(255 * (0.25 + 0.75 * intensity / 100.0))))
 
-    # ---------- 闪光 ----------
+    def _end_effect(self, kind):
+        self._active.discard(kind)
+
+    # ==================== 闪光 ====================
     def _begin_flash(self, duration, intensity):
+        """全窗白色矩形，不透明度从峰值线性退到 0（每帧重画，故只需记峰值）。"""
         peak = self._peak_alpha(intensity)
         frame = self._frame
         started = time.monotonic()
+        self._flash_alpha = float(peak)
 
         def tick():
-            if self.owner._closing:
+            if getattr(self.owner, "_closing", False):
+                self._flash_alpha = 0.0
                 frame.cancel(_FLASH_TASK)
+                self._end_effect("flash")
                 return
             progress = (time.monotonic() - started) / max(0.01, duration)
             if progress >= 1.0:
+                self._flash_alpha = 0.0
                 frame.cancel(_FLASH_TASK)
-                dpg.configure_item(self._flash_rect, fill=(255, 255, 255, 0))
                 self._end_effect("flash")
                 return
-            alpha = round(peak * (1.0 - progress))
-            dpg.configure_item(self._flash_rect, pmin=[0, 0],
-                               pmax=[self.owner._layout_w, self.owner._layout_h],
-                               fill=(255, 255, 255, alpha))
+            self._flash_alpha = peak * (1.0 - progress)
 
         frame.every(0.0, tick, key=_FLASH_TASK)
 
-    # ---------- 振动 ----------
+    # ==================== 振动 ====================
     def _begin_shake(self, duration, intensity):
-        s = getattr(self.owner, "_dpi_scale", 1.0)
-        amp = (4.0 + 36.0 * intensity / 100.0) * s
+        """整窗内容按衰减正弦偏移：``ui._draw_frame`` 每帧读 :meth:`shake_offset`。
+
+        与 DPG 版的差别：那边要遍历主窗口的直接子项逐个 ``set_item_pos`` 并记基线，
+        这边只挪**根窗口原点**——内容坐标完全不动，等价于"整窗一起抖"，而且
+        组件、浮层、背景全部自动跟随（它们都画在根窗口坐标系里）。
+        """
+        scale = float(getattr(self.owner, "_dpi_scale", 1.0) or 1.0)
+        amp = (4.0 + 36.0 * intensity / 100.0) * scale
         frame = self._frame
         started = time.monotonic()
-        if not self._shake_base:
-            # 上一次振动还没收尾时沿用旧基线：不能把「已偏移的位置」存成基线
-            self._shake_base = {
-                item: dpg.get_item_pos(item)
-                for item in (dpg.get_item_children("main_window", 1) or [])
-            }
 
         def tick():
-            if self.owner._closing:
+            if getattr(self.owner, "_closing", False):
+                self._shake = (0.0, 0.0)
                 frame.cancel(_SHAKE_TASK)
-                self._shake_base = {}
+                self._end_effect("shake")
                 return
             elapsed = time.monotonic() - started
             progress = elapsed / max(0.01, duration)
             if progress >= 1.0:
+                self._shake = (0.0, 0.0)
                 frame.cancel(_SHAKE_TASK)
-                self._restore_shake()
                 self._end_effect("shake")
                 return
             decay = 1.0 - progress
             phase = 2.0 * math.pi * _SHAKE_HZ * elapsed
             dx = amp * decay * math.sin(phase)
             dy = 0.6 * amp * decay * math.cos(phase * 0.9)
-            for item, pos in self._shake_base.items():
-                dpg.set_item_pos(item, [round(pos[0] + dx), round(pos[1] + dy)])
+            self._shake = (dx, dy)
 
         frame.every(0.0, tick, key=_SHAKE_TASK)
 
-    def _restore_shake(self):
-        for item, pos in self._shake_base.items():
-            try:
-                if dpg.does_item_exist(item):
-                    dpg.set_item_pos(item, pos)
-            except Exception:
-                pass
-        self._shake_base = {}
-
-    # ---------- 反色 / 色差分离：帧快照覆盖层 ----------
+    # ==================== 反色 / 色差分离：整帧覆盖层 ====================
     def _begin_overlay(self, fx_key, duration, intensity):
+        """抓一帧当前画面 → 工作者加工 → 当覆盖层压回，不透明度按时长退到 0。
+
+        抓手在 ``after_swap``（``ui._capture_frame`` → :meth:`capture`），因为只有
+        那时 GL 后备缓冲里才是刚画完的整帧；本方法只登记"要抓"，然后等结果。
+        """
         peak = self._peak_alpha(intensity)
-        s = getattr(self.owner, "_dpi_scale", 1.0)
-        split_px = max(1, round((2.0 + 28.0 * intensity / 100.0) * s))
-        # 清掉旧快照再抓帧：output_frame_buffer 的落盘时机是帧末，轮询等文件出现
-        self._remove_snap()
-        dpg.output_frame_buffer(file=self._snap_path)
-        state = {"tries": 0}
-        frame = self._frame
+        scale = float(getattr(self.owner, "_dpi_scale", 1.0) or 1.0)
+        self._overlay_key = "invert" if fx_key == "invert" else "rgb_split"
+        self._split_px = max(1, round((2.0 + 28.0 * intensity / 100.0) * scale))
+        self._pixel_gen += 1
+        gen = self._pixel_gen
+        self._pixel_pending = None
+        self._pixel_ready = None
+        self._pixel_alpha = 0.0
+        # 旧覆盖层立刻撤掉：新的一帧还没抓到，留着旧的会闪一下上一帧的残影
+        self._pixel_texture = None
 
-        def poll():
-            if self.owner._closing:
-                return
-            if not os.path.exists(self._snap_path):
-                state["tries"] += 1
-                if state["tries"] > _SNAP_POLL_MAX:
-                    process_log.log("[Fx] 帧快照抓取失败，退回处理当前背景")
-                    self._worker.submit(lambda: self._prepare_overlay_image(
-                        None, fx_key, duration, peak, split_px))
-                    return
-                frame.after(_SNAP_POLL_INTERVAL, poll, key=_SNAP_POLL_TASK)
-                return
-            self._worker.submit(lambda: self._prepare_overlay_image(
-                self._load_snap(), fx_key, duration, peak, split_px))
-
-        frame.after(_SNAP_POLL_INTERVAL, poll, key=_SNAP_POLL_TASK)
-
-    def _load_snap(self):
-        try:
-            return Image.open(self._snap_path).convert("RGB")
-        except Exception as exc:
-            process_log.log(f"[Fx] 帧快照读取失败: {exc}")
-            return None
-
-    def _remove_snap(self):
-        try:
-            if os.path.exists(self._snap_path):
-                os.remove(self._snap_path)
-        except OSError:
-            pass
-
-    def _prepare_overlay_image(self, source, fx_key, duration, peak, split_px):
-        """（工作者线程）把快照 / 背景加工成覆盖层图像并交回主线程上屏。"""
-        try:
-            img = self._process_fx_image(source, fx_key, split_px)
-        except Exception as exc:
-            process_log.log(f"[Fx] 视效图像处理失败: {exc}")
-            self._frame.call(self._overlay_aborted)
-            return
-        self._remove_snap()
-        if img is None:
-            self._frame.call(self._overlay_aborted)
-            return
-        w, h = img.size
-        data = np.frombuffer(img.tobytes(), dtype=np.uint8).astype(np.float32) / 255.0
-        self._frame.call(self._show_overlay, data, w, h, duration, peak)
-
-    def _process_fx_image(self, source, fx_key, split_px):
-        layout_w = max(2, self.owner._layout_w)
-        layout_h = max(2, self.owner._layout_h)
-        if source is not None:
-            img = source
-        else:
-            # 抓帧失败退回背景图；连背景都没有就放弃这次视效
-            base = getattr(self.owner, "_bg_pil_original", None)
-            if base is None:
-                return None
-            img = base.convert("RGB")
-        if img.size != (layout_w, layout_h):
-            img = img.resize((layout_w, layout_h), Image.Resampling.LANCZOS)
-        if fx_key == "invert":
-            out = ImageOps.invert(img)
-        else:
-            # 色差分离：R 左移、G 原位、B 右移，通道相加合成一张
-            r, g, b = img.split()
-            out = ImageChops.add(ImageChops.add(
-                ImageChops.offset(r, -split_px, 0), g),
-                ImageChops.offset(b, split_px, 0))
-        return out.convert("RGBA")
-
-    def _show_overlay(self, data, w, h, duration, peak):
-        if self.owner._closing or not self._built:
-            return
-        if self._compose_buf is None:
-            self._compose_buf = np.zeros(self._tex_w * self._tex_h * 4,
-                                         dtype=np.float32)
-        self._compose_buf.reshape(self._tex_h, self._tex_w, 4)[:h, :w] = \
-            data.reshape(h, w, 4)
-        dpg.set_value(self._texture, self._compose_buf)
-        dpg.configure_item(self._overlay_image, show=True, pmin=[0, 0], pmax=[w, h],
-                           uv_min=[0.0, 0.0],
-                           uv_max=[w / max(1, self._tex_w), h / max(1, self._tex_h)],
-                           color=(255, 255, 255, peak))
         frame = self._frame
         started = time.monotonic()
+        state = {"tries": 0}
 
         def tick():
-            if self.owner._closing:
+            if getattr(self.owner, "_closing", False):
+                frame.cancel(_OVERLAY_TASK)
+                self._end_effect("overlay")
+                return
+            # 换代：本任务属于上一代，直接退场（新一代有自己的任务）
+            if self._pixel_gen != gen:
                 frame.cancel(_OVERLAY_TASK)
                 return
             progress = (time.monotonic() - started) / max(0.01, duration)
             if progress >= 1.0:
                 frame.cancel(_OVERLAY_TASK)
-                dpg.configure_item(self._overlay_image, show=False,
-                                   color=(255, 255, 255, 0))
+                self._pixel_alpha = 0.0
+                self._pixel_texture = None
                 self._end_effect("overlay")
                 return
-            alpha = round(peak * (1.0 - progress))
-            dpg.configure_item(self._overlay_image, color=(255, 255, 255, alpha))
+            if self._pixel_texture is not None:
+                # 覆盖层已上屏：只推进不透明度（下层画面照常活动）
+                self._pixel_alpha = peak * (1.0 - progress)
+                return
+            # 工作者刚交付的像素：本帧上传成纹理（`capture` 里不会再抓第二张，
+            # 因为 `_pixel_ready` 的判据把它挡住了）
+            ready = self._pixel_ready
+            if ready is not None and ready[1] == gen:
+                self._apply_pixel_texture(ready[0], gen)
+                if self._pixel_texture is not None:
+                    self._pixel_ready = None
+                    self._pixel_alpha = peak * (1.0 - progress)
+                    return
+            # 还没有可用画面：等像素工作者（抓帧到上屏通常 1~3 帧）
+            state["tries"] += 1
+            if state["tries"] > _SNAP_POLL_MAX:
+                process_log.log("[Fx] 视效覆盖层已放弃（抓帧/处理未完成）")
+                frame.cancel(_OVERLAY_TASK)
+                self._end_effect("overlay")
 
-        frame.every(0.0, tick, key=_OVERLAY_TASK)
+        frame.every(_SNAP_POLL_INTERVAL, tick, key=_OVERLAY_TASK)
 
-    def _overlay_aborted(self):
-        process_log.log("[Fx] 视效覆盖层已放弃（无可用画面）")
-        self._end_effect("overlay")
+    def capture(self):
+        """（帧线程，``after_swap``）把刚画完的一帧交给像素工作者反相/分离通道。
+
+        四条早退合起来保证**每一代只抓一次**：没有覆盖层在播、上一张还在工作者手里
+        （``_pixel_pending``）、本代结果已交付、或者本代已经上屏
+        （``_pixel_texture`` 即为这一代的产物）。漏掉最后一条会让每一帧都重新抓、
+        重新上传同一张覆盖层——P5 探针实测到的正是这个（同一个 ``gen`` 的
+        ``_apply_pixel_texture`` 被调了几十次）。
+        """
+        if "overlay" not in self._active:
+            return
+        if self._pixel_pending is not None:
+            return
+        if (self._pixel_ready is not None
+                and self._pixel_ready[1] == self._pixel_gen):
+            return
+        if self._pixel_texture is not None:
+            return
+        rgba = self._read_framebuffer()
+        if rgba is None:
+            return
+        gen = self._pixel_gen
+        self._pixel_pending = (rgba, gen)
+        self._worker.submit(lambda: self._process_pixels(gen))
+
+    def _read_framebuffer(self):
+        """从当前 GL 后备缓冲读一帧，返回 ``(h, w, 4)`` 的 ``uint8``（行序已翻正）。"""
+        size = self._framebuffer_size()
+        if size is None:
+            return None
+        w, h = size
+        rgba = gl_util.read_pixels(w, h)
+        if rgba is None:
+            process_log.log("[Fx] 抓帧失败：GL 回调不可用（见 gl_util）")
+        return rgba
+
+    def _framebuffer_size(self):
+        """当前帧缓冲的**像素**尺寸 ``(w, h)``（= 客户区 × framebuffer_scale）。"""
+        try:
+            from imgui_bundle import imgui
+            io = imgui.get_io()
+            w = int(round(io.display_size.x * io.display_framebuffer_scale.x))
+            h = int(round(io.display_size.y * io.display_framebuffer_scale.y))
+        except Exception:
+            return None
+        if w <= 1 or h <= 1:
+            return None
+        return (w, h)
+
+    # ---------- 工作者线程 ----------
+    def _process_pixels(self, gen):
+        """（工作者线程）把抓到的整帧加工成覆盖层图像，交回帧线程上屏。"""
+        job = self._pixel_pending
+        self._pixel_pending = None
+        if job is None or job[1] != gen:
+            return
+        rgba = job[0]
+        try:
+            out = self._transform(rgba)
+        except Exception as exc:
+            process_log.log(f"[Fx] 视效图像处理失败: {exc}")
+            return
+        self._frame.call(self._pixel_processed, out, gen)
+
+    def _transform(self, rgba):
+        """反色 / 色差分离：纯像素变换（工作者线程，不碰 GL）。"""
+        img = Image.fromarray(np.ascontiguousarray(rgba), "RGBA").convert("RGB")
+        if self._overlay_key == "invert":
+            out = ImageOps.invert(img)
+        else:
+            # 色差分离：R 左移、G 原位、B 右移，通道相加合成一张（与 DPG 版同款）
+            r, g, b = img.split()
+            px = max(0, int(self._split_px))
+            out = ImageChops.add(ImageChops.add(
+                ImageChops.offset(r, -px, 0), g), ImageChops.offset(b, px, 0))
+        return np.asarray(out.convert("RGBA"), dtype=np.uint8)
+
+    def _pixel_processed(self, rgba, gen):
+        """（帧线程）工作者交付结果：登记待上屏。"""
+        if gen != self._pixel_gen or getattr(self.owner, "_closing", False):
+            return
+        self._pixel_ready = (rgba, gen)
+
+    def _apply_pixel_texture(self, rgba, gen):
+        """（帧线程，GL 就绪）把覆盖层像素上传成 ``TextureGpu``。"""
+        if gen != self._pixel_gen or getattr(self.owner, "_closing", False):
+            return
+        try:
+            from imgui_bundle import hello_imgui
+            texture = hello_imgui.create_texture_gpu_from_rgba_data(rgba)
+        except Exception as exc:
+            process_log.log(f"[Fx] 覆盖层纹理上传失败: {exc}")
+            return
+        # 先建后丢：中间不留"没有覆盖层"的帧
+        self._pixel_texture = texture
+

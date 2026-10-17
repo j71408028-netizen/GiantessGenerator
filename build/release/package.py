@@ -60,7 +60,7 @@ ENTRY_CANDIDATES = ("main.py",)
 #: 不再有 networkx / graphviz：编辑器关系图已改为自绘画布（见
 #: docs/Dungeon/scenario_graph.md §5）。
 COLLECT_ALL_IMPORTS = (
-    "customtkinter", "dearpygui", "PIL", "openai", "numpy", "webview",
+    "customtkinter", "imgui_bundle", "PIL", "openai", "numpy", "webview",
 )
 
 #: 随包发布的只读资源目录（存在才收）。用户数据（data/user、data/archives）**不进包**：

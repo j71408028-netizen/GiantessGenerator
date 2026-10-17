@@ -6,7 +6,7 @@
   反向依赖 ``dungeon.window``，见 ``tests/check_dungeon_layering.py``）；
 - ``dungeon.window.minigame``——运行时解析游戏包。
 
-这里只读 ``data/packs/minigames/<id>/`` 的文件与内置注册表，不 import DPG。
+这里只读 ``data/packs/minigames/<id>/`` 的文件与内置注册表，不 import 渲染后端。
 """
 
 import json

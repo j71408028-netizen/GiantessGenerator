@@ -66,7 +66,7 @@ PYINSTALLER_ARGS=(
     --add-data "data/packs:data/packs"
     --add-data "data/static:data/static"
     --collect-all customtkinter
-    --collect-all dearpygui
+    --collect-all imgui_bundle
     --collect-all PIL
     --collect-all openai
     --collect-all numpy
@@ -146,10 +146,11 @@ kill "$APP_PID" 2>/dev/null || true
 wait "$APP_PID" 2>/dev/null || true
 unset APP_PID
 
-# 2) 副本窗口场景：打包态里真开 DPG 窗口
-# 场景都验证过能在打包态跑通。不含 text-components：它在 Linux/X11 上会踩已知的
-# DPG/GLFW「反复拆建上下文」段错误（源码态同样复现，见 linux_compat_plan.md §5），
-# 放进打包自检只会把第三方风险记成打包问题。
+# 2) 副本窗口场景：打包态里真开副本窗口（imgui/GLFW）
+# 场景都验证过能在打包态跑通。不含 text-components：它在 Linux/X11 上曾踩
+# DPG/GLFW「反复拆建上下文」段错误（迁移前的已知问题，源码态同样复现，见
+# linux_compat_plan.md §5），imgui 迁移后尚未在 Linux 复测，放进打包自检只会
+# 把第三方风险记成打包问题。
 SELF_CHECK_BIN="$ROOT/dist/$SELF_CHECK_NAME/$SELF_CHECK_NAME"
 SCENES=(entry-start session-close entry-replay chapter-bgm mini-game mini-game-py)
 FAILED=0

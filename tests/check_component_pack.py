@@ -15,10 +15,9 @@ L1 纯逻辑（无 DPG）：
 - 组件包 AST 约束：不直接 ``print``（一律 ``dungeon.process_log``）、
   所有定义了 ``id`` 的组件类都登记进 ``REGISTRY``（防「写了组件忘注册」）。
 
-L2 组件冒烟：在**隐藏的** DPG 上下文（``create_viewport`` 但不 ``show_viewport``，
-不会弹窗）里对每个组件跑 ``build → layout → refresh → destroy``，断言不抛异常、
-destroy 后 main_window 子项数回到基线、文本组件接管期间内置 ``text_container`` 被隐藏；
-无显示环境（DPG 起不来）时打印 SKIP、不计失败。
+L2 组件冒烟：不建 GUI 上下文，在替身 ctx 上跑 ``build → layout → refresh → destroy``，
+断言不抛异常、帧任务成对清理、文本组件声明 ``owns_text_display``。真正的每帧
+``draw`` 需要 GL/ImGui 上下文，由 autopilot 的 GUI 场景覆盖。
 """
 
 import ast
@@ -175,7 +174,7 @@ def check_pack_sources(registry):
 
 def check_contract(registry):
     """契约与元数据：展示文案、可选钩子、参数范围、tag 前缀。"""
-    required_hooks = ("build", "layout", "refresh", "destroy",
+    required_hooks = ("build", "layout", "draw", "refresh", "destroy",
                       "top_inset", "toggle", "toolbar_hovered")
     prefixes = {}
     reserved = {"main_window", "bg_overlay_child", "text_container",
@@ -257,7 +256,7 @@ def check_external_pack():
 
 
 # ---------------------------------------------------------------------------
-# L2：隐藏 DPG 上下文里的组件冒烟
+# L2：替身 ctx 上的 build/layout/refresh/destroy 冒烟
 # ---------------------------------------------------------------------------
 
 class _FakeCtx:
@@ -360,91 +359,49 @@ class _FakeCtx:
         self.toolbar_calls.append("proc_log")
 
 
-def _dpg_context():
-    """建一个**不显示**的 DPG 上下文与组件所需容器；不可用时返回 None。"""
-    try:
-        import dearpygui.dearpygui as dpg
-    except Exception as exc:
-        print(f"  SKIP 组件冒烟：无法 import dearpygui（{exc}）")
-        return None
-    try:
-        dpg.create_context()
-        dpg.create_viewport(title="component_pack_check", width=1024, height=768)
-        with dpg.texture_registry(tag="dungeon_texture_registry"):
-            pass
-        with dpg.window(tag="main_window", label="Main", no_title_bar=True,
-                        no_scrollbar=True, no_scroll_with_mouse=True):
-            # 内置文本管线容器：文本组件接管期间应被隐藏
-            with dpg.child_window(tag="bg_overlay_child", width=200, height=200):
-                pass
-            with dpg.child_window(tag="text_container", width=200, height=200):
-                pass
-        return dpg
-    except Exception as exc:
-        print(f"  SKIP 组件冒烟：DPG 上下文不可用（{type(exc).__name__}: {exc}）")
-        try:
-            dpg.destroy_context()
-        except Exception:
-            pass
-        return None
-
-
-
-
 def check_smoke(registry):
-    """隐藏上下文里跑 build→layout→refresh→destroy，并核对控件无残留。"""
-    dpg = _dpg_context()
-    if dpg is None:
-        return
-    try:
-        ctx = _FakeCtx()
-        baseline = len(dpg.get_item_children("main_window", 1) or [])
-        for cid in registry.available_ids:
-            comp = registry.instantiate(ctx, cid, config={"components_params": {}})
-            if comp is None:
-                check(f"冒烟 {cid}：实例可创建", False, "instantiate 返回 None")
-                continue
-            ctx._components.append(comp)
-            error = ""
-            try:
-                comp.build(ctx)
-                comp.layout(ctx)
-                comp.refresh(ctx)
-            except Exception as exc:
-                error = f"{type(exc).__name__}: {exc}"
-                traceback.print_exc()
-            check(f"冒烟 {cid}：build/layout/refresh 不抛异常", not error, error)
-            if not error and cid in TEXT_COMPONENT_IDS:
-                check(f"冒烟 {cid}：接管期间内置 text_container 被隐藏",
-                      not dpg.get_item_configuration("text_container").get("show", True))
-            try:
-                comp.destroy(ctx)
-            except Exception as exc:
-                error = f"{type(exc).__name__}: {exc}"
-                traceback.print_exc()
-            check(f"冒烟 {cid}：destroy 不抛异常", not error, error)
-            ctx._components.remove(comp)
-            remaining = len(dpg.get_item_children("main_window", 1) or [])
-            check(f"冒烟 {cid}：destroy 后无残留控件", remaining == baseline,
-                  (baseline, remaining))
-            if getattr(comp, "_BLINK_TASK", ""):
-                check(f"冒烟 {cid}：帧任务经 schedule_every/cancel_task 配对",
-                      comp._BLINK_TASK not in ctx.frame_tasks, ctx.frame_tasks)
+    """无 GUI 替身 ctx 上跑 build/layout/refresh/destroy，核对帧任务成对清理。"""
+    ctx = _FakeCtx()
+    for cid in registry.available_ids:
+        comp = registry.instantiate(ctx, cid, config={"components_params": {}})
+        if comp is None:
+            check(f"冒烟 {cid}：实例可创建", False, "instantiate 返回 None")
+            continue
+        ctx._components.append(comp)
+        error = ""
+        try:
+            comp.build(ctx)
+            comp.layout(ctx)
+            comp.refresh(ctx)
+            if cid in TEXT_COMPONENT_IDS:
+                assert getattr(comp, "owns_text_display", False), "文本组件应声明接管显示"
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            traceback.print_exc()
+        check(f"冒烟 {cid}：build/layout/refresh 不抛异常", not error, error)
+        try:
+            comp.destroy(ctx)
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            traceback.print_exc()
+        check(f"冒烟 {cid}：destroy 不抛异常", not error, error)
+        ctx._components.remove(comp)
+        blink_key = getattr(comp, "_BLINK_TASK", "")
+        if blink_key:
+            check(f"冒烟 {cid}：帧任务经 schedule_every/cancel_task 配对",
+                  blink_key not in ctx.frame_tasks, ctx.frame_tasks)
 
-        check("冒烟：全部 destroy 后内置 text_container 恢复可见",
-              bool(dpg.get_item_configuration("text_container").get("show", True)))
-
-        # 真实构建入口：build_components 保序 + 跳过未知 id
-        ctx2 = _FakeCtx()
-        comps = build_components(ctx2, ["text", "ghost", "attr_bar", "proc_log"],
-                                 {"components_params": {}})
-        check("冒烟：build_components 保序且跳过未知 id",
-              [c.id for c in comps] == ["text", "attr_bar", "proc_log"],
-              [c.id for c in comps])
-        for comp in comps:
-            comp.destroy(ctx2)
-    finally:
-        dpg.destroy_context()
+    # 真实构建入口：build_components 保序 + 跳过未知 id
+    ctx2 = _FakeCtx()
+    comps = build_components(ctx2, ["text", "ghost", "attr_bar", "proc_log"],
+                             {"components_params": {}})
+    check("冒烟：build_components 保序且跳过未知 id",
+          [c.id for c in comps] == ["text", "attr_bar", "proc_log"],
+          [c.id for c in comps])
+    for comp in comps:
+        comp.build(ctx2)
+        comp.layout(ctx2)
+        comp.destroy(ctx2)
 
 
 def main() -> int:

@@ -751,10 +751,11 @@ class DungeonStoryEngine:
         self._update_text_display()
 
     def _on_close(self):
-        """收尾钩子：由帧循环在 DPG **已停止**后调用（base._run_frame_loop 的
-        退出分支），这里只做清理标记。不再调用 ``stop_dearpygui()``——那时
-        DPG 已经停了；业务侧主动关窗一律走 ``base._request_close()``（§5-C1），
-        契约由 ``check_dungeon_window_contract.py`` 守住。"""
+        """收尾钩子：由 ``ui._on_before_exit``（库决定收尾时触发，GL 上下文仍在）
+        经 ``base._finalize_close_once`` 调用一次，这里只做清理标记。迁移前这里会
+        调 ``stop_dearpygui()``，imgui 下那一步已随迁移删除；业务侧主动关窗一律走
+        ``base._request_close()``（§5-C1），契约由
+        ``check_dungeon_window_contract.py`` 守住。"""
         self._closing = True
         # 尚未进入会话阶段（仍在入口选择页）直接关闭窗口时，
         # 不触发会话退出处理（未触发结局的数据丢失警告只对会话阶段有意义）

@@ -3,9 +3,10 @@
 组件包由 dungeon.window.component_registry 提供注册表；本 mixin 负责按副本配置
 （``text_component`` 三选一 + ``components`` 列表）在会话阶段构建组件实例，并把
 这些实例接入窗口现有的更新链：
-- _relayout() → 各组件 layout(ctx)
-- _update_text_display() → 有组件声明 ``owns_text_display`` 时转调各组件
-  refresh(ctx)（如底部渐变式文本栏接管显示），否则走内置 text_container 管线
+- _relayout() → 各组件 layout(ctx)（只算几何，不碰 imgui）
+- _draw_frame() → 各组件 draw(ctx) 每帧立即绘制
+- _update_text_display() → 有组件声明 ``owns_text_display`` 时由组件接管显示，
+  否则走内置 story 管线
 - 会话退出 _handle_exit() 前 → 各组件 destroy(ctx) + 注册表丢弃
 
 组件的根对象 ctx 即窗口实例；组件**只允许**经本 mixin 提供的组件服务面访问窗口
@@ -15,11 +16,16 @@ cancel_task / component`，另有覆盖层与工具服务的 `toggle_overlay` �
 组件不得再读窗口私有属性（`_dpi_scale` / `_layout_w` / `_frame` / `_autoplay`…）；
 契约由 ``tests/check_component_pack.py`` 的替身 ctx 强制——替身只实现服务面，
 组件一旦伸手摸私有一律在守卫里报错。
+
+## 迁移状态（P4）
+
+``component_pack/*`` 已改为 imgui 立即模式：``build`` 准备状态，``layout`` 只算
+几何，``draw(ctx)`` 每帧绘制；``refresh`` 保留为 ``layout`` 的兼容别名。
+组件服务面（``component_viewport`` / ``text_font_tag`` /
+``session_waiting_for_input`` …）保持不变，仍是组件访问窗口的唯一入口。
 """
 
 import traceback
-
-import dearpygui.dearpygui as dpg
 
 from dungeon import process_log
 from dungeon.window import component_registry as _components_module
@@ -60,7 +66,7 @@ class ComponentHandler:
         return [text_cid or DEFAULT_TEXT_COMPONENT] + others
 
     def _build_components(self):
-        """按配置构建组件实例（主线程，会话阶段进入时调用）。"""
+        """按配置构建组件实例并调用 build（主线程，会话阶段进入时调用）。"""
         self._components = []
         if getattr(self, "_closing", False):
             return
@@ -74,20 +80,32 @@ class ComponentHandler:
             try:
                 comp.build(self)
             except Exception as exc:
-                process_log.log(f"[Components] 组件 build 失败 ({getattr(comp, 'id', '?')}): {exc}")
-        # 只有真的建出组件才算「接管」：空列表时 _relayout/_update_text_display 要走
-        # 内置几何与内置 text_container 管线（否则内置容器在窗口缩放后不再重排）
+                process_log.log(f"[Components] 组件 build 失败 "
+                                f"({getattr(comp, 'id', '?')}): {exc}")
         self._components_built = bool(self._components)
         if not self._components:
             process_log.log("[Components] 本次会话未构建任何显示组件，回退内置文本容器")
 
     def _relayout_components(self):
-        """窗口重排后调用各组件 layout（主线程）。"""
+        """窗口重排后调用各组件 layout（主线程，只算几何，不碰 imgui）。"""
         for comp in self._components:
             try:
                 comp.layout(self)
             except Exception as exc:
-                process_log.log(f"[Components] 组件 layout 失败 ({getattr(comp, 'id', '?')}): {exc}")
+                process_log.log(f"[Components] 组件 layout 失败 "
+                                f"({getattr(comp, 'id', '?')}): {exc}")
+
+    def _draw_components(self):
+        """每帧调用各组件 draw（主线程，在根窗口内绘制）。"""
+        for comp in self._components:
+            hook = getattr(comp, "draw", None)
+            if not callable(hook):
+                continue
+            try:
+                hook(self)
+            except Exception as exc:
+                process_log.log(f"[Components] 组件 draw 失败 "
+                                f"({getattr(comp, 'id', '?')}): {exc}")
 
     def _refresh_components(self):
         """状态更新后调用各组件 refresh（主线程，经调度器）。"""
@@ -113,10 +131,14 @@ class ComponentHandler:
 
     # ---- 组件服务面（组件访问窗口的唯一入口，见 DungeonComponent 契约） ----
     def component_viewport(self):
-        """返回 ``(dpi_scale, 布局宽, 布局高)``：组件的唯一几何来源。"""
+        """返回 ``(dpi_scale, 布局宽, 布局高)``：组件的唯一几何来源。
+
+        立即模式下窗口尺寸由 ``ui._draw_frame`` 每帧从 ``io.display_size`` 现算，
+        缓存到 ``_layout_w/_layout_h``，因此这里直接读缓存即可（不再回头问后端）。
+        """
         s = getattr(self, "_dpi_scale", 1.0) or 1.0
-        w = getattr(self, "_layout_w", 0) or dpg.get_viewport_client_width()
-        h = getattr(self, "_layout_h", 0) or dpg.get_viewport_client_height()
+        w = getattr(self, "_layout_w", 0) or 1.0
+        h = getattr(self, "_layout_h", 0) or 1.0
         return s, w, h
 
     def component_top_inset(self):
@@ -154,14 +176,16 @@ class ComponentHandler:
         return bool(getattr(self, "_autoplay", False))
 
     def text_font_tag(self):
-        """窗口创建的正文 24 号字体 tag（组件绑正文用；未建时为 None）。"""
-        tag = getattr(self, "dungeon_text_font", None)
-        return tag if tag and dpg.does_item_exist(tag) else None
+        """窗口创建的正文（``TEXT_FONT_SIZE``）字体对象（组件绑正文用；未建时为 None）。
+
+        imgui 的 ``push_font(font, size)`` 收字体句柄而不是 DPG 的 tag，因此这里
+        直接返回 ``post_init`` 里 ``hello_imgui.load_font`` 拿到的对象。
+        """
+        return getattr(self, "dungeon_text_font", None)
 
     def bold_font_tag(self):
-        """窗口创建的 24 号粗体 tag（DPG 无字重 API，粗度靠字体文件；可能为 None）。"""
-        tag = getattr(self, "dungeon_bold_font", None)
-        return tag if tag and dpg.does_item_exist(tag) else None
+        """窗口创建的粗体字体对象（可能为 None：解析不到粗体文件时回退正文）。"""
+        return getattr(self, "dungeon_bold_font", None)
 
     # ---- 帧时钟（组件不得直接触碰 self._frame） ----
     def schedule(self, fn, *args):

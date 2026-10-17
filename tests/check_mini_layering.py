@@ -34,6 +34,7 @@ MINI_DIR = ROOT / "ui" / "mini"
 # 顶层/次级模块名 -> 为什么不能用
 FORBIDDEN_ROOTS = {
     "customtkinter": "CTk 外观库（挂件只用原生 tkinter）",
+    "imgui_bundle": "副本窗口框架（经 ui.hosting.tk_host 间接进入，不在界面层直接用）",
     "dearpygui": "副本窗口框架（经 ui.hosting.tk_host 间接进入，不在界面层直接用）",
     "ui": "见 ALLOWED_UI 白名单以外的界面模块",
 }

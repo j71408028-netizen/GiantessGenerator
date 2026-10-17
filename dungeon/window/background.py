@@ -5,7 +5,6 @@ import threading
 import numpy as np
 from PIL import Image
 from PIL import ImageFilter
-import dearpygui.dearpygui as dpg
 
 from dungeon import process_log
 from dungeon.actions import VISUAL_FILTER_KEYS
@@ -87,8 +86,6 @@ class PixelWorker:
                 self._jobs.task_done()
 
 
-_BYTE_TO_FLOAT = [value / 255.0 for value in range(256)]
-
 # 滤镜键单一出处：清单（键+展示名）定义在 dungeon/actions.py::VISUAL_FILTERS，
 # 这里只提供键 → PIL 滤镜的映射；键不一致在导入时直接报错，不再靠注释手工同步
 _PIL_FILTERS = {
@@ -157,22 +154,22 @@ class DungeonBackground:
     - **何时**走一步淡入淡出、何时触发一次 resize 后的重采样——都是帧任务，跟着
       会话生死，不必再轮询 ``_closing`` 也不必 join；
     - 真吃 CPU 的重采样与像素混合则丢给 :class:`PixelWorker`，不占帧循环的时间。
+
+    纹理口径（迁移后简化）：imgui 的 ``TextureGpu`` **不能原地改像素**（P0-S3），
+    所以每次上屏都是"新建一个精确尺寸的句柄 + 丢掉旧的"。因此旧实现里那套
+    「纹理只增不减 + ``uv`` 子区域映射 + 组合缓冲」全部删除——那是为绕开
+    DPG 对动态纹理改尺寸的存储复用怪癖才存在的。上传的数据统一是
+    ``H×W×4`` 的 uint8 连续数组（``hello_imgui.create_texture_gpu_from_rgba_data``
+    的入参形状）。
     """
 
     def __init__(self, owner):
         self.owner = owner
         self._worker = PixelWorker()
-        #: 当前背景纹理 tag。DPG 2.3.1 怪癖：同 tag 的 delete+重建会复用旧 GL
-        #: 纹理存储（新尺寸数据写入被截断 → 花屏），因此尺寸增长时换新 tag
-        #: 建新纹理、重新绑定 bg_image_item 后再删旧纹理
-        self.texture_tag = "bg_texture"
-        self._tex_gen = 0
-        #: 组合缓冲（纹理尺寸的 numpy 画布，避免每次 apply 分配大内存）
-        self._compose_buf = None
         #: 重采样来源代数：change() 换源图（含滤镜/旋转）时 +1，作缓存键一部分
         self._src_gen = 0
-        #: 重采样结果缓存：(来源代, 宽, 高) → 平铺 float32。最多 2 份——
-        #: 窗口/全屏来回切换（标题栏导致比例略有不同，必须各自重采样）时
+        #: 重采样结果缓存：(来源代, 宽, 高) → HxWx4 uint8。最多 2 份——
+        #: 窗口/全屏来回切换（客户区比例略有不同，必须各自重采样）时
         #: 第二个方向直接命中，免掉一次重采样
         self._resize_cache = {}
 
@@ -182,6 +179,15 @@ class DungeonBackground:
         frame = getattr(owner, "_frame", None)
         if frame is not None:
             frame.cancel(BG_REFRESH_TASK)
+
+    def target_size(self):
+        """当前背景纹理的目标像素尺寸。
+
+        立即模式下布局单位就是像素（``io.display_size``），所以直接用布局尺寸，
+        不需要再单独维护一套纹理尺寸与 ``uv`` 映射。
+        """
+        owner = self.owner
+        return (max(1, int(owner._layout_w)), max(1, int(owner._layout_h)))
 
     @property
     def worker_alive(self) -> bool:
@@ -218,12 +224,12 @@ class DungeonBackground:
 
         owner._bg_pil_full = new_pil
         self._src_gen += 1
-        width, height = owner._layout_w, owner._layout_h
+        width, height = self.target_size()
         if owner._bg_pil_original is None or not smooth_transition:
             # 无过渡（首图/强制刷新）：在当前线程同步应用。改走"延迟一帧 + 队列"时
             # 首图常因视口尚未稳定、revision 被后续刷新顶掉而延迟数秒才显示。
             resized = self.crop_and_resize(new_pil, width, height)
-            self.apply_data(resized, self.pil_to_dpg(resized), width, height)
+            self.apply_data(resized, self.pil_to_rgba(resized), width, height)
             return
 
         owner._bg_revision += 1
@@ -251,7 +257,7 @@ class DungeonBackground:
                 if old_resized.size != (width, height):
                     old_resized = old_resized.resize(
                         (width, height), Image.Resampling.LANCZOS)
-                old_data = self.pil_to_dpg(old_resized)
+                old_data = self.pil_to_rgba(old_resized)
                 frame.call(owner._apply_prepared_bg, old_resized, old_data,
                            width, height, revision)
                 state["pair"] = (old_resized, new_resized)
@@ -266,7 +272,7 @@ class DungeonBackground:
                 old_resized, new_resized = pair
                 alpha = step / max(1, _FADE_STEPS - 1)
                 blended = Image.blend(old_resized, new_resized, alpha)
-                frame.call(owner._set_bg_texture, self.pil_to_dpg(blended),
+                frame.call(owner._set_bg_texture, self.pil_to_rgba(blended),
                            width, height, revision)
                 state["busy"] = False
             state["busy"] = True
@@ -303,9 +309,9 @@ class DungeonBackground:
         full = owner._bg_pil_full
         if full is None:
             return
-        width, height = owner._layout_w, owner._layout_h
-        if width <= 1 or height <= 1:
+        if owner._layout_w <= 1 or owner._layout_h <= 1:
             return
+        width, height = self.target_size()
 
         owner._bg_revision += 1
         revision = owner._bg_revision
@@ -331,7 +337,7 @@ class DungeonBackground:
         pil_img = None
         if data is None:
             resized = self.crop_and_resize(full, width, height)
-            data = self.pil_to_dpg(resized)
+            data = self.pil_to_rgba(resized)
             self._resize_cache[key] = data
             while len(self._resize_cache) > 2:
                 self._resize_cache.pop(next(iter(self._resize_cache)))
@@ -339,57 +345,17 @@ class DungeonBackground:
         owner._frame.call(owner._apply_prepared_bg, pil_img,
                           data, width, height, revision)
 
-    def apply_data(self, pil_img, dpg_data, width, height):
-        """把 (width, height) 的背景数据上到纹理（仅主线程）。
+    def apply_data(self, pil_img, rgba, width, height):
+        """把 ``width × height`` 的 RGBA 数据上到背景纹理（仅帧线程）。
 
-        纹理尺寸**只增不减**：够大时永远走 set_value 快速路径（接受 numpy，
-        ~30ms）——数据按当前窗口比例贴进纹理左上角，经 draw_image 的 uv
-        子区域映射到窗口矩形，因此窗口/全屏切换（客户区比例因标题栏略有
-        不同）不再触发纹理重建；仅当纹理比数据小（首次进全屏、换更大的
-        显示器）时一次性重建。``pil_img`` 为 None 表示淡入淡出中间帧等
-        不更新 ``_bg_pil_original`` 的写入。
+        迁移后**每次都是新纹理**（``TextureGpu`` 不能原地改像素，P0-S3 实测）：
+        由 ``ui._apply_bg_data`` 调 ``create_texture_gpu_from_rgba_data`` 建新句柄、
+        再丢掉旧句柄。旧实现那套「纹理只增不减 / uv 子区域 / 组合缓冲」是新架构下
+        完全不需要的复杂度，已随本次迁移删除。
+
+        ``pil_img`` 为 None 表示淡入淡出中间帧等不更新 ``_bg_pil_original`` 的写入。
         """
-        tag = self.texture_tag
-        if dpg.does_item_exist(tag):
-            cur = dpg.get_item_configuration(tag)
-            tex_w, tex_h = cur.get("width") or 0, cur.get("height") or 0
-        else:
-            tex_w = tex_h = 0
-        if tex_w < width or tex_h < height:
-            # 纹理生长（首次进全屏 / 换更大显示器）：换新 tag 建新纹理——
-            # 同 tag delete+重建会复用旧 GL 存储（DPG 2.3.1 怪癖，见 __init__）。
-            # 建法与 ui._build_ui 的已知可靠路径一致：零列表建纹理 + set_value
-            # 上数据（不依赖 default_value 直接上传大列表）
-            self._tex_gen += 1
-            new_tag = f"bg_texture_{self._tex_gen}"
-            dpg.add_dynamic_texture(
-                width=width, height=height,
-                default_value=[0.0] * (width * height * 4),
-                tag=new_tag, parent="dungeon_texture_registry",
-            )
-            if dpg.does_item_exist("bg_image_item"):
-                dpg.configure_item("bg_image_item", texture_tag=new_tag,
-                                   pmax=[width, height])
-            if dpg.does_item_exist(tag):
-                dpg.delete_item(tag)
-                if dpg.does_alias_exist(tag):
-                    dpg.remove_alias(tag)
-            self.texture_tag = new_tag
-            self._compose_buf = None
-            dpg.set_value(new_tag, dpg_data)
-        elif (width, height) == (tex_w, tex_h):
-            dpg.set_value(tag, dpg_data)
-        else:
-            # 数据小于纹理：贴进左上角，其余区域在 uv 子区域之外不会被采样
-            if self._compose_buf is None or len(self._compose_buf) != tex_w * tex_h * 4:
-                self._compose_buf = np.empty(tex_w * tex_h * 4, dtype=np.float32)
-            self._compose_buf.reshape(tex_h, tex_w, 4)[:height, :width] =                 dpg_data.reshape(height, width, 4)
-            dpg.set_value(tag, self._compose_buf)
-        if dpg.does_item_exist("bg_image_item"):
-            dpg.configure_item("bg_image_item", uv_min=[0.0, 0.0],
-                               uv_max=[width / tex_w, height / tex_h])
-        if pil_img is not None:
-            self.owner._bg_pil_original = pil_img
+        self.owner._apply_bg_data(pil_img, rgba, width, height)
 
     def resolve_path(self, image_path):
         owner = self.owner
@@ -415,6 +381,7 @@ class DungeonBackground:
 
     @staticmethod
     def crop_and_resize(image, width, height):
+        width, height = int(width), int(height)
         if width <= 1 or height <= 1:
             return image
         target_ratio = width / height
@@ -430,10 +397,13 @@ class DungeonBackground:
         return cropped.resize((width, height), Image.Resampling.LANCZOS)
 
     @staticmethod
-    def pil_to_dpg(image):
+    def pil_to_rgba(image):
+        """PIL 图 → ``H×W×4`` 的 uint8 连续数组（``create_texture_gpu_from_rgba_data`` 的入参）。
+
+        与旧 ``pil_to_dpg`` 的差异：不再逐像素除 255 转 float32。imgui 侧要的就是
+        原始 8 位分量，省掉一次全图乘法（全屏图约 2.5k×1.6k，这一省是实打实的）。
+        """
         if image.mode != "RGBA":
             image = image.convert("RGBA")
-        # 全屏图约 2.5k×1.6k，逐像素 Python 推导需 ~1s；numpy 整块转换 ~30ms。
-        arr = np.frombuffer(image.tobytes(), dtype=np.uint8).astype(np.float32)
-        arr /= 255.0
-        return arr
+        width, height = image.size
+        return np.frombuffer(image.tobytes(), dtype=np.uint8).reshape(height, width, 4)

@@ -18,7 +18,8 @@
 ===================  ==================================================
 
 层约束（``tests/check_import_graph.py``）：本包属 ``services`` 层，**不得** import
-``ui.*``，也不得引入 ``tkinter`` / ``customtkinter`` / ``dearpygui`` / ``PIL``。
+``ui.*``，也不得引入 ``tkinter`` / ``customtkinter`` / ``imgui_bundle``（迁移前是
+``dearpygui``）/ ``PIL``。
 唯一的例外是 ``services/preview``（预览渲染，已单独登记），本包只按需延迟
 调用它，不在模块顶层 import。
 """

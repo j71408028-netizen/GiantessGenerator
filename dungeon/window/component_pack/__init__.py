@@ -11,7 +11,7 @@
 - ``attr_bar.py``      ``attr_bar``   属性状态条
 - ``proc_log.py``      ``proc_log``   过程日志面板
 
-组件类实现 build/layout/refresh/destroy 生命周期钩子，ctx 即副本会话窗口
+组件类实现 build/layout/draw/destroy 生命周期钩子，ctx 即副本会话窗口
 实例（dungeon.window.DungeonSessionWindow 的 mixin 组合）。
 
 文本组件三选一（方案配置 ``text_component`` 字段声明，主组件层）：
@@ -30,8 +30,8 @@
 与 A / F2 / F12 快捷键等效；窗口的 _on_mouse_click 靠 toolbar_hovered()
 区分「点按钮」与「点屏幕推进剧情」。
 
-线程约束：所有钩子都只由主线程调用；组件内不得在后台线程操作 DPG，
-刷新经窗口的 _dispatch 调度链（_schedule_text_update / _relayout）完成。
+线程约束：所有钩子都只由主线程调用；组件内不得在后台线程操作 imgui，
+需要回主线程的更新走 ctx.schedule / schedule_every。
 """
 
 from .attr_bar import AttrBarComponent

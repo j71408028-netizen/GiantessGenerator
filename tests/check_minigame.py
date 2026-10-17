@@ -11,7 +11,7 @@ manifest 层：
 
 py 游戏代码层（AST 扫描 ``entry``）：
 - **恰一个** ``MiniGame`` 子类，且 ``id`` 与包 id 一致；
-- 禁 import：dearpygui / tkinter / customtkinter / threading / subprocess /
+- 禁 import：imgui_bundle / dearpygui / tkinter / customtkinter / threading / subprocess /
   socket / ui / services / PIL（贴图加载是运行时职责，走 ``api.draw_image``）；
 - 禁调用 ``print``（输出走过程日志 / ``api.notify``）；
 - 禁触碰私有面：``api._`` / ``self.api._`` / ``stage._`` 属性访问一律违规。
@@ -33,7 +33,8 @@ _BUILTIN_ROOT = os.path.join(_ROOT, "dungeon", "window", "minigame", "games")
 _ALLOWED_BACKENDS = ("py", "web")
 #: py 游戏代码里禁止 import 的顶层模块
 FORBIDDEN_IMPORTS = {
-    "dearpygui": "绘制必须走 GameAPI（运行时才允许 DPG）",
+    "imgui_bundle": "绘制必须走 GameAPI（运行时才持有渲染后端）",
+    "dearpygui": "绘制必须走 GameAPI（运行时才持有渲染后端）",
     "tkinter": "禁 GUI 宿主细节",
     "customtkinter": "禁 GUI 宿主细节",
     "threading": "帧时钟是唯一时间源，禁自开线程",

@@ -1,7 +1,16 @@
 # Runtime dependencies. Build tooling (PyInstaller) is installed by the
 # platform-specific packaging scripts so normal development installs stay lean.
 customtkinter==6.0.0
-dearpygui==2.3.1
+# 副本窗口的渲染后端（原为 Dear PyGui，2026-10 迁至 imgui-bundle，计划/评估/探针见
+# .workbuddy/imgui-migration/；P8 起 dearpygui 已从依赖里移除）。
+# 实际版本下限是 3.11——该版本只发 cp311/cp312/cp313/cp314 wheel，没有 cp310
+# （PyPI 上的 requires-python>=3.10 只是名义值）；macOS 只有 arm64 wheel。
+# 精确钉版本：窗口骨架依赖 1.92 的「动态字体图集」口径——load_font 必须在
+# callbacks.load_additional_fonts 里调用（放 post_init 会 access violation），
+# 且 push_font(font, size) 的 size 是**基础字号**（库内按 dpi_factor 放大）。
+# 换小版本要先重跑三条门禁：dungeon_autopilot 的 entry-cancel / session-close
+# 与 tests/smoke_switch.py。
+imgui-bundle==1.92.900
 Pillow>=10.0
 openai>=2.0,<3.0
 # 必需：副本窗口背景合成、小游戏画布与挑战数值计算都直接 import（原先漏声明，

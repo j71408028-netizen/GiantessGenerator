@@ -40,9 +40,10 @@ jobs:
       - name: 副本窗口自动驾驶（全部场景，逐场景子进程）
         run: |
           mkdir -p "$TMPDIR"
-          # text-components 在 Linux/X11 上会踩已知的 DPG/GLFW「反复拆建上下文」段错误
-          # （在开发机源码态可稳定复现，见 docs/users/platforms/linux-history.md 附录A §5），先跳过它；
-          # 其余场景全跑。它覆盖的组件功能由 smoke_switch / smoke_mini 兜着。
+          # text-components 在 Linux/X11 上曾踩 DPG/GLFW「反复拆建上下文」段错误
+          # （迁移前的已知问题，见 docs/users/platforms/linux-history.md 附录A §5）。
+          # imgui 迁移后预期消失，但尚未在 Linux CI 复测，先保留跳过；其余场景全跑。
+          # 它覆盖的组件功能由 smoke_switch / smoke_mini 兜着。
           xvfb-run -a -s "-screen 0 1600x1000x24" \
             env LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe \
             python scripts/dungeon_autopilot.py --scene all --skip text-components \
