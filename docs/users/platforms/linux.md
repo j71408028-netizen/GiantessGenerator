@@ -128,7 +128,7 @@ Xlib 默认处理器会直接 `exit(1)`，表现为冒烟里的 `X Error of fail
 ## 6. 自动化与压测
 
 ```bash
-# 离线守卫（不需要显示器）：29 项
+# 离线守卫（不需要显示器）：30 项
 .venv/bin/python tests/run_checks.py
 .venv/bin/python scripts/scenario_validate.py    # 方案校验，0 error 才退 0
 
