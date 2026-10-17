@@ -4,15 +4,14 @@ from typing import Optional
 import customtkinter as ctk
 
 import ui.ctk
-from dungeon.actions import (VISUAL_FILTERS, action_label,
-                             normalize_action_type)
+from dungeon.actions import (MINI_GAME_DEFAULT_ID, VISUAL_FILTERS, WINDOW_FX,
+                             action_label, normalize_action_type)
 from dungeon.validate import LEGACY_ACTIONS
-from dungeon.audio import buses
 from dungeon.audio.chapters import (
-    CHAPTER_ANY, CHAPTER_NONE, CHAPTER_ANY_LABEL, CHAPTER_NONE_LABEL,
-    bgm_level, default_chapter_color, shade_for_mode,
+    CHAPTER_ANY, CHAPTER_NONE, default_chapter_color, shade_for_mode,
 )
-from dungeon.audio.voice_fx import SLOTS, label_of
+from dungeon.overrides import describe as describe_overrides
+from dungeon.overrides import parse_overrides
 from ui.ctk.managers import TreeviewManager
 from ui.ctk.theme import (
     SCRIPT_BORDER, SCRIPT_HOVER, SCRIPT_TEXT_SOFT, SCRIPT_OK,
@@ -24,6 +23,12 @@ from ui.scenario.trigger_dlg import TriggerEditDialog
 
 ROW_CHAPTER = "chapter"
 ROW_TRIGGER = "trigger"
+
+# 「关键信息」列里插入文本预览保留的字数（超出截断并加省略号）
+INSERT_PREVIEW_LEN = 12
+
+# 触发器名后用于表示「可重复」的循环图标
+LOOP_ICON = "↻"
 
 # 无章节归属的触发器（任意章节 / 无章节）在列表里合成一组，排在所有章节之后
 LOOSE_GROUP = "__loose__"
@@ -43,14 +48,11 @@ class ChapterTriggerManager(TreeviewManager):
         self._rows = []  # [(行类型, 数据对象), ...]，与 Treeview 子项一一对应
         columns = [
             ("名称", 140, "name"),
-            ("章节", 80, "scope"),
-            ("特定背景", 100, "background"),
-            ("背景音乐", 90, "bgm"),
-            ("语音效果", 140, "voice_fx"),
-            ("敏感效果", 100, "sensitivity"),
-            ("条件", 150, "condition"),
-            ("动作类型", 60, "action_type"),
-            ("重复", 40, "repeatable"),
+            ("特定背景", 160, "background"),
+            ("背景音乐", 80, "bgm"),
+            ("条件", 220, "condition"),
+            ("动作类型", 50, "action_type"),
+            ("关键信息", 220, "key_info"),
             ("前置条件", 80, "precondition")
         ]
         super().__init__(parent, repository, columns, item_name="章节/触发器")
@@ -230,12 +232,6 @@ class ChapterTriggerManager(TreeviewManager):
     def _values(self, row_kind: str, item) -> tuple:
         if row_kind == ROW_CHAPTER:
             name = item.get("name", "未命名")
-            if item.get("ending"):
-                kind = "结束章节"
-            elif item.get("start"):
-                kind = "起始章节"
-            else:
-                kind = "章节"
             try:
                 max_p = int(item.get("max_paragraphs", 99) or 99)
             except (TypeError, ValueError):
@@ -251,32 +247,26 @@ class ChapterTriggerManager(TreeviewManager):
             return (
                 f"▌ {name}" + ("  ★" if item.get("start") else "")
                 + ("  ✦" if item.get("ending") else ""),
-                kind,
                 self._format_background(item.get("background") or {}),
                 self._format_bgm(item.get("bgm") or {}),
-                self._format_voice_fx(item.get("voice_fx") or {}),
-                self._format_sensitivity(item.get("sensitivity") or []),
-                condition_text, "", "", "",
+                condition_text,
+                "", "", "",
             )
         return (
-            f"    └ {item.get('name', '未命名')}",
-            self._trigger_scope_text(item.get("chapter")),
-            "", "", "", "",
+            self._trigger_name_text(item),
+            "", "",
             self._format_condition(item.get("condition", {})),
             self._action_text(item),
-            "是" if item.get("repeatable", True) else "否",
+            self._key_info(item),
             ", ".join(item.get("precondition_names", [])) or "无",
         )
 
-    def _trigger_scope_text(self, scope) -> str:
-        """触发器已按章节归组，只有特殊作用域需要在行内点明。"""
-        if not scope or scope == CHAPTER_ANY:
-            return CHAPTER_ANY_LABEL
-        if scope == CHAPTER_NONE:
-            return CHAPTER_NONE_LABEL
-        if scope in self._chapter_names():
-            return ""
-        return f"{scope}（章节已删除）"
+    def _trigger_name_text(self, trigger: dict) -> str:
+        """触发器名 + 可重复标记（循环图标）。"""
+        text = f"    └ {trigger.get('name', '未命名')}"
+        if trigger.get("repeatable", True):
+            text += f"  {LOOP_ICON}"
+        return text
 
     def _action_text(self, trigger: dict) -> str:
         action_type = normalize_action_type(trigger.get("action_type"), trigger.get("action_data"))
@@ -298,42 +288,74 @@ class ChapterTriggerManager(TreeviewManager):
         audio_path = bgm.get("path") or ""
         if not audio_path:
             return "（无）"
-        text = os.path.basename(str(audio_path))
-        text += f" 音量{buses.step_label(bgm_level(bgm))}"
-        if not bgm.get("loop", True):
-            text += "（不循环）"
+        return os.path.basename(str(audio_path))
+
+    def _key_info(self, trigger: dict) -> str:
+        """动作的关键信息摘要。
+
+        各动作类型各自的「关键选择」：
+        ``insert`` 取正文开头若干字、``option`` 取选项数量、``effect`` 列覆盖项、
+        ``fx`` 取窗口视效、``goto`` 取目标章节、``mini_game`` 取小游戏。
+        旧版动作与空动作不显示。
+        """
+        action_type = normalize_action_type(
+            trigger.get("action_type"), trigger.get("action_data"))
+        if action_type in LEGACY_ACTIONS:
+            return ""
+        data = trigger.get("action_data")
+        data = data if isinstance(data, dict) else {}
+        if action_type == "insert":
+            return self._format_insert_preview(data.get("text"))
+        if action_type == "option":
+            return self._format_option_count(data.get("options"))
+        if action_type == "effect":
+            return describe_overrides(parse_overrides(data))
+        if action_type == "fx":
+            return self._format_window_fx(data.get("fx"))
+        if action_type == "goto":
+            return self._format_goto_target(data.get("chapter"))
+        if action_type == "mini_game":
+            return str(data.get("game") or MINI_GAME_DEFAULT_ID)
+        return ""
+
+    @staticmethod
+    def _format_insert_preview(text) -> str:
+        """插入文本的开头若干字（折叠换行与连续空白，过长截断）。"""
+        text = " ".join(str(text or "").split())
+        if not text:
+            return "（空文本）"
+        if len(text) > INSERT_PREVIEW_LEN:
+            text = text[:INSERT_PREVIEW_LEN] + "…"
         return text
 
-    def _format_voice_fx(self, fx: dict) -> str:
-        """两档效果压缩成一行：``她:旷野回声  其他:震地余波``。"""
-        if not fx:
-            return "（无）"
-        parts = []
-        for slot in SLOTS:
-            spec = fx.get(slot) or {}
-            preset = str(spec.get("preset") or "").strip()
-            if not preset:
-                continue
-            parts.append(f"{'她' if slot == 'her' else '其他'}:{label_of(preset)}")
-        return "  ".join(parts) or "（无）"
+    @staticmethod
+    def _format_option_count(options) -> str:
+        count = len(options) if isinstance(options, list) else 0
+        return f"{count} 个选项"
+
+    def _format_window_fx(self, key) -> str:
+        key = str(key or "").strip()
+        if not key:
+            return "（未选视效）"
+        for fx_key, label in WINDOW_FX:
+            if fx_key == key:
+                return label
+        return key
+
+    def _format_goto_target(self, scope) -> str:
+        """跳转目标：空串是「离开章节」，指向已删除的章节时标注出来。"""
+        scope = str(scope or "")
+        if not scope:
+            return "离开章节"
+        if scope in self._chapter_names():
+            return scope
+        return f"{scope}（章节已删除）"
 
     def _filter_label(self, key: str) -> str:
         for filter_key, label in VISUAL_FILTERS:
             if filter_key == key:
                 return label
         return str(key)
-
-    def _format_sensitivity(self, effects: list) -> str:
-        if not effects:
-            return "（无）"
-        parts = []
-        for effect in effects:
-            text = f"{effect.get('attr', '')}×{effect.get('strength', 1.0)}"
-            objective = effect.get("objective", 0.0)
-            if objective:
-                text += f"(客观{objective:+g})"
-            parts.append(text)
-        return "，".join(parts)
 
     def _format_condition(self, cond: dict) -> str:
         if not cond:
