@@ -88,6 +88,7 @@ from imgui_bundle import hello_imgui, imgui
 from dungeon import process_log
 from dungeon.models import DungeonTextType
 from dungeon.window import gl_util
+from dungeon.window import gpu_textures
 from dungeon.window import imgui_util as iu
 from dungeon.window.background import PixelWorker
 from dungeon.window.fonts import (BOLD_FONT_SIZE, TEXT_FONT_SIZE, UI_FONT_SIZE,
@@ -542,8 +543,82 @@ class DungeonWindowUI:
         hello_imgui 都会走到这里，因此不需要再区分两条路径。收尾只跑一次，
         交给 :meth:`_finalize_close_once` 把关——它**不能**用 ``_closing`` 当判据，
         否则入口页"返回"（先置 ``_closing`` 再请求关闭）会漏掉 ``_exit_from_entry``。
+
+        这里同时是**唯一**还能安全释放 ``TextureGpu`` 的地方：本钩子跑在
+        ``hello_imgui.run()`` 内部、GL 后端与 ImGui 上下文仍然存活；等 ``run()``
+        返回（``base._finish_session``）再丢句柄就是段错误。见
+        :mod:`dungeon.window.gpu_textures`。
         """
+        self._release_gpu_textures()
         self._finalize_close_once()
+
+    # ==================== GPU 纹理句柄的释放 ====================
+    def _drain_gpu_textures(self):
+        """把窗口各处持有的 ``TextureGpu`` 句柄收进一个列表，并清空原容器。
+
+        唯一的"句柄清单"就在本方法里（改窗口持有纹理的方式时，记得同步这里）：
+
+        ====================  ==============================================
+        位置                  说明
+        ====================  ==============================================
+        ``_bg_texture``       背景铺满图（每换一次图先建后丢，只剩最后一张）
+        ``_toolbar_textures`` 窗口自绘工具条的三张图标
+        ``_ending_textures``  入口页结局图标轮播
+        ``_window_fx``        反色 / 色差覆盖层
+        ``_mini_game_stage``  小游戏静态贴图
+        ``_components``       组件自己的悬浮工具条图标
+        ====================  ==============================================
+
+        调用方见 :meth:`_release_gpu_textures`（正常释放，GL 存活）与
+        :meth:`_retire_gpu_textures`（收尾兜底，GL 已释放）。
+        """
+        handles = []
+
+        texture, self._bg_texture = getattr(self, "_bg_texture", None), None
+        if texture is not None:
+            handles.append(texture)
+
+        toolbar = getattr(self, "_toolbar_textures", None)
+        if isinstance(toolbar, dict):
+            handles.extend(toolbar.values())
+        self._toolbar_textures = {}
+
+        endings = getattr(self, "_ending_textures", None)
+        if isinstance(endings, (list, tuple)):
+            handles.extend(endings)
+        self._ending_textures = []
+
+        for owner in (getattr(self, "_window_fx", None),
+                      getattr(self, "_mini_game_stage", None)):
+            drain = getattr(owner, "drain_gpu_textures", None)
+            if callable(drain):
+                handles.extend(drain())
+        for comp in getattr(self, "_components", None) or []:
+            drain = getattr(comp, "drain_gpu_textures", None)
+            if callable(drain):
+                handles.extend(drain())
+
+        return handles
+
+    def _release_gpu_textures(self):
+        """（``before_exit``，GL 仍存活）真正释放本窗口持有的全部 GPU 纹理句柄。"""
+        count = gpu_textures.release(self._drain_gpu_textures())
+        if count:
+            process_log.log(f"[Dungeon] 收尾释放 GPU 纹理 {count} 张")
+
+    def _retire_gpu_textures(self):
+        """（``_finish_session``，GL 已释放）兜底：剩下的句柄退役，别让析构跑。
+
+        正常路径走不到这里——``before_exit`` 已经把它们释放干净了。真走到说明
+        收尾钩子没被 hello_imgui 调用（异常退出之类），此时**只能**保住引用
+        留到进程结束：宁可留几张显存，也不要在收尾期段错误。
+        """
+        handles = self._drain_gpu_textures()
+        if handles:
+            gpu_textures.retire(handles)
+            process_log.log(
+                f"[Dungeon] 收尾期仍有 {len(handles)} 张 GPU 纹理未释放"
+                "（before_exit 未走到），已退役留到进程结束")
 
     # ==================== 绘制：背景 ====================
     def _draw_background(self, w: float, h: float, shake_x: float = 0.0,

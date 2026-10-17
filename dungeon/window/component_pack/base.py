@@ -75,7 +75,25 @@ class _TextDisplayBase(DungeonComponent):
     def _blink(self):
         self._indicator_on = not self._indicator_on
 
+    def drain_gpu_textures(self):
+        """交出自己的 ``TextureGpu`` 句柄（窗口在 GL 存活时统一释放）。
+
+        ``destroy`` 在 ``_finish_session`` 里跑，那时 ``hello_imgui.run()`` 已经
+        返回、GL 后端已释放；在那里丢句柄会让 RAII 析构去碰失效后端而段错误
+        （见 :mod:`dungeon.window.gpu_textures`）。所以句柄一律提前经这里交出去，
+        由窗口的 ``_release_gpu_textures``（``before_exit``，GL 仍存活）真正释放。
+
+        离屏自检（``check_component_pack``）里没有 GL，工具条纹理恒为空表，
+        本方法返回空列表。
+        """
+        handles = list(self._toolbar_textures.values())
+        self._toolbar_textures = {}
+        return handles
+
     def destroy(self, ctx):
+        # 工具条纹理是 GPU 资源，正常路径已在 before_exit 里经 drain_gpu_textures
+        # 交出去释放；这里只兜底清状态（若组件是在会话中途被销毁、GL 仍在，清空
+        # 即释放，也是对的）。**别把这一步当成"资源释放点"**——收尾期 GL 已没了。
         if self._BLINK_TASK:
             ctx.cancel_task(self._BLINK_TASK)
         self._toolbar_textures = {}

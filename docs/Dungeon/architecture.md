@@ -324,7 +324,7 @@ data/
 
 ## 9. 自检与守卫脚本
 
-见 [副本文档索引](README.md) §4（无 GUI 八个 + GUI 冒烟一个）。
+见 [副本文档索引](README.md) §4（无 GUI 九个 + GUI 冒烟一个）。
 改动领域层 import、演化链路、收尾路径或配置结构后跑对应脚本；以上全部通过才算绿。
 
 ## 10. 硬性约定
@@ -336,6 +336,7 @@ data/
 | 关闭一律走 `_request_close()` | 业务代码不直接退（不写 `app_shall_exit`、不调库的退出函数）；由 `before_imgui_render` 帧边界落实 | [窗口文档](window.md) §5-C1 |
 | 跨线程 UI 更新走 `self._frame.call()` | 帧时钟是**窗口实例成员**；计时类逻辑用 `every/after` 帧任务而不是开线程 | [窗口文档](window.md) §5-C4、`window/frame.py` |
 | 窗口的 GL / 上下文 / 视口生命周期全交给 `hello_imgui.run()` | 进程内不手动建/毁上下文、不需要保活视口；收尾在 `run()` 返回之后做。**2026-10 起会话在独立子进程里跑**（[宿主边界](window_host.md) §7）：父进程从不加载副本窗口栈，热切换与 GL 生命周期不再相关 | [窗口文档](window.md) §5-C2 |
+| GL 资源句柄只在 GL 存活时丢 | `hello_imgui.TextureGpu` 是 RAII，清空容器 = 丢引用；释放点在 `before_exit`（`ui._release_gpu_textures`），`run()` 返回后的 `_finish_session` 只许 `retire()` 兜底保住引用——否则每局收尾在驱动层段错误（2026-10 Linux 实测） | [窗口文档](window.md) §5-C15、`window/gpu_textures.py`、`tests/check_gpu_texture_lifetime.py` |
 | 写盘必走原子写 | 半截文件不可恢复 | 本文 §8 |
 | 剧本 / 运营术语不混用 | `scenario_*` = 方案，`dungeon_*` = 一局 | [术语表](domain_terms.md) |
 | 组件只读窗口状态 | 组件 ctx 即窗口实例，不反向写状态；**访问只经组件服务面**（`component_viewport` / `schedule*` / `session_waiting_for_input` / `component_top_inset` 等，C13），不读窗口私有属性 | `component_registry.py::DungeonComponent` 契约文档、`components.py::ComponentHandler`、`tests/check_component_pack.py` |

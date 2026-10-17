@@ -408,6 +408,14 @@ class DungeonWindowBase:
         # 帧时钟先停：此后后台线程投递的界面更新与未跑的帧任务一律丢弃，
         # 不会再碰到即将消失的窗口。
         self._frame.stop()
+        # GPU 纹理句柄兜底：本方法跑在 ``hello_imgui.run()`` **返回之后**，此时
+        # ``TextureGpu`` 的 RAII 析构会去碰已释放的 GL 后端而段错误——下面
+        # ``_destroy_components`` / ``_destroy_overlays`` / ``_window_fx.shutdown``
+        # 清空的容器里**不许**再有句柄。正常路径它们在 ``before_exit``
+        # （``ui._release_gpu_textures``，GL 仍存活）里就释放干净了；这里兜住
+        # 「钩子没被调用」的异常收尾，必须排在那几步之前。
+        # 口径与理由见 dungeon/window/gpu_textures.py。
+        self._retire_gpu_textures()
         # 显示组件销毁：丢弃实例缓存（P1 无组件，P4 起才有实体）
         self._destroy_components()
         # 覆盖层（对话记录等）同批清理，并复位阅读模态标记

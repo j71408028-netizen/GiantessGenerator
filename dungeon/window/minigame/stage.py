@@ -46,6 +46,7 @@ from imgui_bundle import hello_imgui, imgui
 
 from dungeon import process_log
 from dungeon.window import gl_texture as _gl
+from dungeon.window import gpu_textures
 from dungeon.window import imgui_util as _iu
 from dungeon.window.ui import _panel_flags
 from .base import GameAPI, clamp_dt
@@ -801,6 +802,17 @@ class _MiniGameStage:
             _draw_text_run(dl, self._hud, pos, _HUD_COLOR, _HUD_SIZE,
                            self._text_font(), dpi)
 
+    def drain_gpu_textures(self):
+        """交出静态贴图句柄（窗口在 ``before_exit``、GL 仍存活时统一释放）。
+
+        见 :mod:`dungeon.window.gpu_textures`：收尾期丢 ``TextureGpu`` 引用会段
+        错误，所以句柄一律提前交出去。离屏画布那张纹理是宿主自持的 GL 名字
+        （``gl_texture``），不走这里，仍由 :meth:`destroy` 按 ``_gl_ops_ok`` 处置。
+        """
+        handles = list(self._textures.values())
+        self._textures.clear()
+        return handles
+
     def destroy(self):
         """销毁 GPU 资源并回传结果（会话收尾路径帧时钟已停，回传自然失效）。"""
         gl_ok = self._gl_ops_ok()
@@ -810,8 +822,16 @@ class _MiniGameStage:
             except Exception as exc:
                 process_log.log(f"[MiniGame] 游戏「{self._game.id}」收尾异常: {exc}")
             self._game = None
-        # 静态贴图是 hello_imgui.TextureGpu（RAII）：丢引用即释放
+        # 静态贴图是 hello_imgui.TextureGpu（RAII）：GL 还在时丢引用即释放；
+        # 收尾期（窗口在游戏进行中被关掉，走 _destroy_overlays）上下文已释放，
+        # 丢引用会段错误，只能退役。正常路径已由 drain_gpu_textures 收走，
+        # 这里拿到的是空表。
+        handles = list(self._textures.values())
         self._textures.clear()
+        if gl_ok:
+            gpu_textures.release(handles)
+        else:
+            gpu_textures.retire(handles)
         for texture in self._canvas_texes.values():
             texture.destroy(gl_ok)
         self._canvas_texes.clear()

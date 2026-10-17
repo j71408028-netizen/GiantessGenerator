@@ -78,6 +78,28 @@
   `hello_imgui.run`；C14 = 「收尾不许留下本代窗口」的回归断言），C12 仍有效
   （GLFW 原生关窗的 `WM_QUIT` 残留对**同进程自检**场景仍然存在）。
 
+### 4.1 补：`TextureGpu` 收尾口径（C15，2026-10-17）
+
+P8 之后在 Linux 上发现**每局副本收尾必崩**（软/硬 GL 都复现）：`TextureGpu` 是
+RAII 句柄，`hello_imgui.run()` 返回后 GL 后端与 ImGui 上下文已随库释放，此时再丢
+引用（典型动作是 `_destroy_components` / `_window_fx.shutdown` / `stage.destroy`
+里**清空容器**）会让析构去解引用失效后端，在驱动层直接段错误。
+
+修法（不迁移主线结构，只补口径）：
+
+- 新增 `dungeon/window/gpu_textures.py`：`release()` = GL 存活时释放（丢引用即
+  释放显存）；`retire()` = GL 已失效时的兜底，把句柄挂进进程级仓库**保住引用**。
+- 释放点前移到 `before_exit`（`ui._release_gpu_textures`），
+  `ui._drain_gpu_textures()` 是窗口层**唯一**的句柄清单；`_finish_session` 只在
+  最前面调 `_retire_gpu_textures()` 兜底，且必须排在会清空容器的三步之前。
+- 六处持有者各加 `drain_gpu_textures()`（`fx` / `component_pack.base` /
+  `minigame.stage` 主动交出，窗口统一汇总）。
+- 新增离线守卫 `tests/check_gpu_texture_lifetime.py`（13 项）：清单、两条口径、
+  以及 `_finish_session` / `_on_before_exit` 的调用次序；窗口文档 §5 增补 C15。
+
+Windows 侧复核（2026-10-17）：真窗口 7 个场景收尾全部走 `release`、`retire` 零调用、
+退役仓库恒为 0；autopilot 15 场景与 `smoke_switch` 50/50 全绿。
+
 ## 5. 已知遗留
 
 - `scripts/dpg_probe/` 的探针不能直接跑（依赖已移除），需要时先临时装 `dearpygui`。

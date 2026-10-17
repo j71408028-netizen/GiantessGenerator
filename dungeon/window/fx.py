@@ -158,15 +158,30 @@ class WindowFx:
             self._shake = (0.0, 0.0)
             self._end_effect("shake")
 
+    def drain_gpu_textures(self):
+        """交出路覆盖层纹理句柄（见 :mod:`dungeon.window.gpu_textures`）。
+
+        覆盖层是"这一瞬间的画面"，换图时先建后丢；最后一个句柄由窗口在
+        ``before_exit``（GL 仍存活）统一收走释放——``shutdown`` 跑在
+        ``hello_imgui.run()`` 返回之后，在那里丢引用会段错误。
+        """
+        handle, self._pixel_texture = self._pixel_texture, None
+        return [handle] if handle is not None else []
+
     def shutdown(self):
-        """会话收尾：撤掉帧任务与像素工作者，丢掉纹理句柄。"""
+        """会话收尾：撤掉帧任务与像素工作者。
+
+        纹理句柄**不在这里丢**：本方法在 ``hello_imgui.run()`` 返回之后才跑，
+        GL 已释放。正常路径的句柄已在 ``before_exit`` 里交出去；这里的赋值只是
+        兜底清状态（此时 ``_pixel_texture`` 已经是 None）。
+        """
         for key in (_FLASH_TASK, _SHAKE_TASK, _OVERLAY_TASK, _SNAP_POLL_TASK):
             self._frame.cancel(key)
         self._active.clear()
         self._flash_alpha = 0.0
         self._shake = (0.0, 0.0)
         self._pixel_alpha = 0.0
-        self._pixel_texture = None          # RAII：丢最后一个引用即释放 GPU 资源
+        self._pixel_texture = None
         self._pixel_pending = None
         self._pixel_ready = None
         self._worker.shutdown()

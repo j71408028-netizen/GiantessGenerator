@@ -56,6 +56,7 @@
 |---|---|---|
 | `check_dungeon_layering.py` | 分层守卫：领域层禁 import GUI/服务层/反向依赖 window；`window/` 禁 import `tkinter`/`customtkinter`/`ui` | `python tests/check_dungeon_layering.py` |
 | `check_dungeon_window_contract.py` | 窗口契约守卫：`window/` 内禁 `threading.Timer`、禁无超时 `join`；禁 `dearpygui` 回归（import / `dpg.*`）；`hello_imgui.run` 与给 `app_shall_exit` 赋值只允许出现在 `runner.py`；禁 `sys.exit` / `os._exit` | `python tests/check_dungeon_window_contract.py` |
+| `check_gpu_texture_lifetime.py` | GPU 纹理句柄生命周期（C15）：`hello_imgui.TextureGpu` 是 RAII 句柄，六处容器（背景 / 窗口工具条 / 结局图标 / 视效覆盖层 / 组件工具条 / 小游戏贴图）经 `_drain_gpu_textures()` 一次收干净；`release`（GL 存活时释放）/ `retire`（GL 已失效时保住引用）两条口径；AST 断言 `_finish_session` 的退役兜底排在 `_destroy_components` / `_destroy_overlays` 之前、`_on_before_exit` 真调了 `_release_gpu_textures` | `python tests/check_gpu_texture_lifetime.py` |
 | `check_scenario_schema.py` | schema 单一真相源（空模板键集合、字段漂移）+ 校验器规则 + 演化配置链路 | `python tests/check_scenario_schema.py` |
 | `check_audio_chain.py` | 方案音频端到端链：说话人分音色 / 队列 / 两档效果 / 三条引擎路径 / 降级 / BGM 缺坏文件收尾（假合成器 + 替身后端，不出声不联网） | `python tests/check_audio_chain.py` |
 | `check_splitter.py` | 内置分句器：断点切分、流式幂等、`@说话人@` 标记解析与落盘净化 | `python tests/check_splitter.py` |
