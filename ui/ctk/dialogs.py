@@ -72,11 +72,11 @@ class BaseDialog(ctk.CTkToplevel):
       操作系统窗口框架本身无法圆角。
     """
 
-    UI_FONT = ui_fonts.ui_font(11)
-    UI_FONT_SMALL = ui_fonts.ui_font(10)
-    UI_FONT_LARGE = ui_fonts.ui_font(12)
-    UI_FONT_BOLD = ui_fonts.ui_font(11, "bold")
-    SECTION_FONT = ui_fonts.ui_font(12, "bold")
+    UI_FONT = ui_fonts.ui_font(13)
+    UI_FONT_SMALL = ui_fonts.ui_font(12)
+    UI_FONT_LARGE = ui_fonts.ui_font(14)
+    UI_FONT_BOLD = ui_fonts.ui_font(13, "bold")
+    SECTION_FONT = ui_fonts.ui_font(14, "bold")
 
     def __init__(self, parent, fg_color=None, corner_radius=8, *args, **kwargs):
         if fg_color is None:

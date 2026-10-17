@@ -21,9 +21,12 @@ from dungeon.overrides import parse_overrides
 from dungeon.validate import LEGACY_ACTIONS
 from ui.ctk.dialogs import BaseDialog
 from ui.ctk.theme import (
-    TRIGGER_BTN_TEXT, TRIGGER_CMP_BTN, TRIGGER_CMP_BTN_HOVER,
-    TRIGGER_HINT, TRIGGER_KEY_BTN, TRIGGER_KEY_BTN_HOVER,
-    TRIGGER_METRIC_BTN, TRIGGER_METRIC_BTN_HOVER, TRIGGER_TEXT,
+    TRIGGER_BTN_TEXT, TRIGGER_CARD_BG, TRIGGER_CARD_BORDER,
+    TRIGGER_CHECK_BG, TRIGGER_CHECK_BG_HOVER, TRIGGER_CMP_BTN,
+    TRIGGER_CMP_BTN_HOVER, TRIGGER_FIELD_BG, TRIGGER_FIELD_BORDER,
+    TRIGGER_FIELD_HOVER, TRIGGER_HINT, TRIGGER_KEY_BTN, TRIGGER_KEY_BTN_HOVER,
+    TRIGGER_LABEL, TRIGGER_METRIC_BTN, TRIGGER_METRIC_BTN_HOVER,
+    TRIGGER_TEXT, WIDGET_HOVER,
 )
 from ui.ctk.widgets import OptionButton
 
@@ -40,65 +43,45 @@ class TriggerEditDialog(BaseDialog):
         ]
     }
 
-    # 当前动作类型的参数说明（显示在参数滚动框末尾）
+    # 当前动作类型的参数说明（固定显示在动作设置下方，只留要点，2~3 行）
     ACTION_DESCRIPTIONS = {
         "insert": (
-            "触发后将文本插入插入故事正文，不能为空。\n"
-            "段落属性：决定插入内容在副本中的文本类型，可选背景、分支、对话、互动或行动。\n"
-            "高亮：勾选后用高亮样式显示该段落。\n"
-            "延迟插入：勾选后先排队，等待下一条 AI 段落返回后再显示；不勾选则在触发后立即插入。"
+            "把文本插入故事正文；勾选「延迟插入」则等下一段 AI 段落返回后再显示。"
         ),
         "option": (
-            "选项列表：至少填写 1 项；每项的编号从 0 开始，玩家的选择会按编号记录。\n"
-            "选择记录：其他触发器可使用“选择:本触发器名称”判定选择次数、某编号占比、最后一次选择或趋势变化。\n"
-            "注意：选项触发器需要先填写有效选项，否则触发时会被跳过。"
+            "至少填 2 项，编号从 0 开始；玩家的选择按编号记入本触发器的选择记录。\n"
+            "其他触发器可用「选择:本触发器名称」判定。"
         ),
         "effect": (
-            "章节效果覆盖：在指定步数内临时改写本章节的「环境」，走完步数后各维度\n"
-            "交还章节默认值。可勾选覆盖的维度（至少勾一个，都不勾运行时跳过）：\n"
-            "· 背景滤镜：给当前背景叠一层滤镜；选「清除滤镜」则这段期间没有滤镜。\n"
-            "· 音乐音量：只改音量、不换曲；本章节没有音乐时忽略。\n"
-            "· 语音效果：覆盖对话语音的物理效果（她 / 其他人两档）；两档都留「不加效果」\n"
-            "  即这段期间不加效果。\n"
-            "· 敏感效果：临时替换本章节的持续敏感效果；不加条目即临时清空。\n"
-            "同名维度多条并存时后触发的优先，到期逐条回退；换章立即清除全部未到期的覆盖。"
+            "在指定步数内临时改写本章节的部分「环境」（至少勾选一个），走完后交还章节默认值。"
         ),
         "fx": (
-            "窗口视效：触发即播放一段作用于整个会话窗口的瞬时画面，按持续秒数（绝对时间）\n"
-            "自动消退，与步进无关。可选：闪光（全窗白光）、振动（整窗内容抖动）、\n"
-            "反色（画面负片）、色差分离（RGB 通道错位）。\n"
-            "视效期间其他动作照常：流式生成与上屏、音频播放、切换背景等都不会被阻塞。\n"
-            "反色与色差分离按触发瞬间的画面快照加工；窗口最小化等抓帧失败时退回当前背景图。"
+            "触发即播放一段作用于整个会话窗口的视效；按持续秒数自动消退，期间其他动作照常。"
         ),
         "goto": (
-            "跳转到章节：进入目标章节，立即应用该章节的特定背景与持续敏感效果。\n"
-            "选择“离开章节”表示跳出当前章节，回到无章节状态。\n"
-            "章节本身没有条件，所有进入与离开都由本动作执行。\n"
-            "注意：位于「结束章节」内的跳转触发器会被跳过；跳转到结束章节后"
-            "只能等其段落数耗尽终止副本。"
+            "进入目标章节并应用该章节的「环境」;「结束章节」内不可用。"
         ),
         "mini_game": (
-            "小游戏挑战：触发时进入小游戏，副本步进暂停。\n"
-            "py 后端：在会话窗口内以覆盖层舞台进行，ESC 中止；\n"
-            "web 后端：弹独立窗口进行（需 pywebview，兼容通道）。\n"
-            "返回值：小游戏不区分胜负，结算时把游戏回传的整数（语义由游戏自定，\n"
-            "如达成关数/命中数）记入本触发器的选择记录；其他触发器可用\n"
-            "“选择:本触发器名称”按返回值判定（次数/占比/趋势/最后一次），\n"
-            "并执行跳转、插入等动作——分支不要配在小游戏自身。\n"
-            "结算后的重判不会重复触发本触发器（不会原地重启游戏）；\n"
-            "勾选“可再次触发”时，后续步进中条件仍成立会再次进入。\n"
-            "注意：位于「结束章节」内的小游戏触发器会被跳过；结果会写入回放记录，\n"
-            "回放时不再进入游戏，直接按记录复现返回值。"
+            "触发时进入小游戏、副本步进暂停；结算回传的整数记入本触发器的选择记录。\n"
+            "其他触发器可用「选择:本触发器名称」判定。"
         ),
-        "none": (
-            "条件满足时不执行实际动作，只记录该触发器已经成立，其他触发器可以在前置条件中引用它。\n"
-            "适用场景：作为多个触发器共用的中间条件节点。"
-        ),
+        "none": "不执行实际动作，只标记条件已成立，供其他触发器作为前置条件引用。",
     }
+    #: 条件预览的行号（列表位置 → 标记）
+    CONDITION_MARKS = ("①", "②", "③", "④")
     OPERATOR_LABELS = (("且（全部满足）", "and"), ("或（任一满足）", "or"))
     GOTO_LEAVE_LABEL = "（离开章节）"
     #: 「章节效果覆盖」滤镜下拉里表示**显式清除**的选项（写空串，区别于「不覆盖」）
     EFFECT_FILTER_CLEAR_LABEL = "（清除滤镜）"
+
+    #: 动作卡片的基础高度（逻辑像素）：卡片会吃掉窗口剩余高度（expand），
+    #: 这是它在窗口被压小时的下限——多数动作类型放得下，超出的才卡片内滚动
+    ACTION_CARD_HEIGHT = 160
+    #: 对话框固定尺寸（逻辑像素）：宽度按两列表单留够（旧版 560），高度比旧版 720 矮
+    DIALOG_WIDTH = 580
+    DIALOG_HEIGHT = 640
+    DIALOG_MIN_WIDTH = 500
+    DIALOG_MIN_HEIGHT = 540
 
     def __init__(self, parent, trigger: dict, evolution_names=None, all_triggers=None,
                  scenario_repo=None, scenario_id=None, evolution_attrs=None, chapters=None):
@@ -108,8 +91,8 @@ class TriggerEditDialog(BaseDialog):
             all_triggers = []
         super().__init__(parent)
         self.title("编辑触发器")
-        self.geometry("560x720")
-        self.minsize(500, 620)
+        self.geometry(f"{self.DIALOG_WIDTH}x{self.DIALOG_HEIGHT}")
+        self.minsize(self.DIALOG_MIN_WIDTH, self.DIALOG_MIN_HEIGHT)
         self.resizable(True, True)
         self.trigger = trigger if trigger is not None else {}
         self.evolution_names = evolution_names
@@ -165,77 +148,68 @@ class TriggerEditDialog(BaseDialog):
     def _build_ui(self):
         main = ctk.CTkFrame(self, fg_color="transparent")
         main.pack(fill='both', expand=True, padx=14, pady=12)
+        self._main = main
+        section_label = dict(font=self.SECTION_FONT, anchor='w')
 
-        # 动作模板按钮：仅新版动作（背景切换/性格敏感化已由章节属性承担，
-        # 结局已迁移为「结束章节」；旧配置中的结局触发器仍可编辑保存）
-        template_commands = {
+        # 动作模板：仅新版动作（背景切换/性格敏感化已由章节属性承担，
+        # 结局已迁移为「结束章节」；旧配置中的结局触发器仍可编辑保存）。
+        # 由基础信息里的「动作类型」下拉选择，见 _on_action_type_picked。
+        self._template_commands = {
             "insert": self._insert_template, "option": self._option_template,
             "effect": self._effect_template, "fx": self._fx_template,
             "goto": self._goto_template,
             "mini_game": self._mini_game_template, "none": self._empty_template,
         }
+
+        # 确定/取消：先按 side='bottom' 占位，任何布局下都留在可视区
         btn_frame = ctk.CTkFrame(main, fg_color="transparent")
-        btn_frame.pack(fill='x', pady=(0, 2))
-        self.action_buttons = {}
-        for action_type in NEW_ACTIONS:
-            button = ctk.CTkButton(btn_frame, text=action_label(action_type),
-                                   width=70, height=28, font=self.UI_FONT,
-                                   command=template_commands[action_type])
-            button.pack(side='left', padx=1)
-            self.action_buttons[action_type] = button
+        btn_frame.pack(side='bottom', pady=(10, 0))
+        self._make_std_button(btn_frame, "确定", True, self._ok).pack(
+            side='left', padx=6)
+        self._make_std_button(btn_frame, "取消", False, self._cancel).pack(
+            side='left', padx=6)
 
-        # 主滚动区：基础信息 -> 动作设置 -> 类型说明
-        content = ctk.CTkScrollableFrame(main)
-        content.pack(fill='both', expand=True, pady=(4, 0))
-        section_label = dict(font=self.SECTION_FONT, anchor='w')
+        # ---------- 触发条件（固定区域，始终可见）----------
+        # 条件区 / 类型说明 / 按钮都先按 side='bottom' 占位（顺序＝从下往上），
+        # 中间的「动作设置」卡片吃掉剩余高度。
+        condition_frame = ctk.CTkFrame(main, fg_color="transparent")
+        condition_frame.pack(side='bottom', fill='x', pady=(10, 0))
+        cond_head = ctk.CTkFrame(condition_frame, fg_color="transparent")
+        cond_head.pack(fill='x', pady=(0, 2))
+        ctk.CTkLabel(cond_head, text="触发条件", **section_label).pack(side='left')
+        ctk.CTkLabel(cond_head, text="最多 4 条；连接符切换处保存时自动加括号",
+                     font=self.UI_FONT_SMALL, text_color=TRIGGER_HINT).pack(
+                         side='left', padx=(12, 0))
+        self._build_condition_controls(condition_frame)
 
-        # ---------- 基础信息 ----------
-        ctk.CTkLabel(content, text="基础信息", **section_label).pack(fill='x', padx=6, pady=(4, 4))
-        common = ctk.CTkFrame(content, fg_color="transparent")
-        common.pack(fill='x', padx=6, pady=(0, 6))
+        # ---------- 类型说明（固定区域：当前动作类型的要点）----------
+        hint_area = ctk.CTkFrame(main, fg_color="transparent")
+        hint_area.pack(side='bottom', fill='x', pady=(10, 0))
+        self.action_description_label = ctk.CTkLabel(
+            hint_area, text="", justify='left', anchor='nw', wraplength=560,
+            font=self.UI_FONT_SMALL, text_color=TRIGGER_HINT)
+        self.action_description_label.pack(fill='x')
 
-        ctk.CTkLabel(common, text="名称:", font=self.UI_FONT).grid(
-            row=0, column=0, sticky='w', padx=5)
-        self.name_var = tk.StringVar(value=self.trigger.get("name", ""))
-        self.name_entry = ctk.CTkEntry(
-            common, textvariable=self.name_var, width=250, height=28, font=self.UI_FONT)
-        self.name_entry.grid(row=0, column=1, sticky='w', padx=5)
+        # ---------- 基础信息（固定区域，不随动作设置滚动）----------
+        ctk.CTkLabel(main, text="基础信息", **section_label).pack(
+            side='top', fill='x', pady=(0, 4))
+        common = ctk.CTkFrame(main, fg_color="transparent")
+        common.pack(side='top', fill='x', padx=6, pady=(0, 6))
+        self._build_basic_info(common)
 
-        ctk.CTkLabel(common, text="所在章节:", font=self.UI_FONT).grid(
-            row=1, column=0, sticky='w', padx=5, pady=(5, 0))
-        self.chapter_var = tk.StringVar(
-            value=self._chapter_scope_to_label(self.trigger.get("chapter")))
-        self.chapter_combo = ctk.CTkComboBox(
-            common, values=self._chapter_scope_labels(), variable=self.chapter_var,
-            state="readonly", width=250, height=28, font=self.UI_FONT)
-        self.chapter_combo.grid(row=1, column=1, sticky='w', padx=5, pady=(4, 0))
-        # 所在章节决定「插入文本」是否可用（固定文本章节里与文本流冲突）
-        self.chapter_var.trace_add(
-            "write", lambda *_a: self._refresh_action_availability())
-
-        ctk.CTkLabel(common, text="前置条件 (名称, 逗号分隔):", font=self.UI_FONT).grid(
-            row=2, column=0, sticky='w', padx=5, pady=(5, 0))
-        pre_names = ",".join(self.trigger.get("precondition_names", []))
-        self.pre_var = tk.StringVar(value=pre_names)
-        self.pre_entry = ctk.CTkEntry(
-            common, textvariable=self.pre_var, width=250, height=28, font=self.UI_FONT)
-        self.pre_entry.grid(row=2, column=1, sticky='w', padx=5, pady=(4, 0))
-
-        # 可再次触发（所有动作类型通用）
-        self.repeatable_var = tk.BooleanVar(value=self.trigger.get("repeatable", True))
-        self.repeatable_check = ctk.CTkCheckBox(
-            common, text="可再次触发", variable=self.repeatable_var,
-            font=self.UI_FONT, text_color=TRIGGER_TEXT,
-            checkbox_width=20, checkbox_height=20)
-        self.repeatable_check.grid(row=3, column=0, columnspan=2, sticky='w', padx=5, pady=(4, 0))
-        common.grid_columnconfigure(1, weight=1)
-
-        # ---------- 动作设置（各类型独立分区，仅显示当前所选类型）----------
-        self.action_section_label = ctk.CTkLabel(
-            content, text="动作设置", font=self.SECTION_FONT, anchor='w')
-        self.action_section_label.pack(fill='x', padx=6, pady=(6, 2))
-        self.action_area = ctk.CTkFrame(content, fg_color="transparent")
-        self.action_area.pack(fill='x', padx=6)
+        # ---------- 动作设置（明亮卡片：只放当前类型的动作表单）----------
+        self.action_head = ctk.CTkLabel(main, text="动作设置", **section_label)
+        self.action_head.pack(side='top', fill='x', pady=(6, 4))
+        self.action_card = ctk.CTkScrollableFrame(
+            main, fg_color=TRIGGER_CARD_BG, border_width=1,
+            border_color=TRIGGER_CARD_BORDER, corner_radius=6,
+            height=self.ACTION_CARD_HEIGHT)
+        # 内置滚动条的默认请求高度是 200，会盖过更矮的卡片高度；缩到 1 让
+        # ACTION_CARD_HEIGHT 说了算（滚动条本身仍随卡片拉伸，超长时才可拖）。
+        self.action_card._scrollbar.configure(height=1)
+        self.action_card.pack(side='top', fill='both', expand=True)
+        self.action_area = ctk.CTkFrame(self.action_card, fg_color="transparent")
+        self.action_area.pack(fill='x', padx=6, pady=6)
         self.action_frames = {}
         self.action_frames["insert"] = self._build_insert_form(self.action_area)
         self.action_frames["option"] = self._build_option_form(self.action_area)
@@ -244,81 +218,216 @@ class TriggerEditDialog(BaseDialog):
         self.action_frames["goto"] = self._build_goto_form(self.action_area)
         self.action_frames["mini_game"] = self._build_mini_game_form(self.action_area)
 
-        # ---------- 类型说明（滚动区内的说明文案）----------
-        hint_area = ctk.CTkFrame(content, fg_color="transparent")
-        hint_area.pack(fill='x', padx=6, pady=(8, 2))
-        ctk.CTkLabel(hint_area, text="类型说明", **section_label).pack(fill='x', pady=(0, 4))
-        self.action_description_label = ctk.CTkLabel(
-            hint_area, text="", justify='left', anchor='nw', wraplength=460,
-            font=self.UI_FONT, text_color=TRIGGER_HINT)
-        self.action_description_label.pack(fill='x', pady=(2, 6))
-
-        # ---------- 触发条件（固定区域，始终可见）----------
-        condition_frame = ctk.CTkFrame(main, fg_color="transparent")
-        condition_frame.pack(fill='x', pady=(10, 0))
-        ctk.CTkLabel(condition_frame, text="触发条件", **section_label).pack(fill='x', pady=(0, 4))
-        self._build_condition_controls(condition_frame)
-
         self._load_condition_controls()
         self._load_action_controls(self.trigger.get("action_data", {}))
-        self._update_action_description()
         self._refresh_action_availability()
-
-        # 确定/取消按钮
-        btn_frame2 = ctk.CTkFrame(main, fg_color="transparent")
-        btn_frame2.pack(pady=(10, 0))
-        ctk.CTkButton(btn_frame2, text="确定", width=88, height=28,
-                      font=self.UI_FONT, command=self._ok).pack(side='left', padx=5)
-        ctk.CTkButton(btn_frame2, text="取消", width=88, height=28,
-                      font=self.UI_FONT, command=self._cancel).pack(side='left', padx=5)
 
         self.bind("<Escape>", lambda _event: self._cancel())
         self.bind("<Control-s>", lambda _event: self._ok())
         self.protocol("WM_DELETE_WINDOW", self._cancel)
 
+    # ---------- 表单排版（标签列 + 控件列）----------
+    #: 动作设置表单左右分栏的权重（标签列, 控件列）。文本型动作（插入 / 选项）
+    #: 以填写文本为主，主要宽度让给右栏的输入控件；参数型动作（效果 / 视效 /
+    #: 跳转 / 小游戏）标签较长、数值控件短，主要宽度留给左栏。
+    FORM_SPLIT_TEXT = (1, 3)
+    FORM_SPLIT_PARAM = (3, 2)
+
+    def _form_grid(self, frame, weights=FORM_SPLIT_PARAM):
+        """把 frame 排成两列：0 = 标签列，1 = 控件列。
+
+        ``weights`` 只决定两列**分配多余宽度**时的比例（标签列, 控件列）——
+        控件本身给不给拉伸由 ``_form_row`` 的 sticky 决定。这里刻意不设
+        uniform：uniform 会按权重强行撑开列宽，小游戏参数那种长标签会把
+        控件挤出卡片右侧。
+        """
+        frame.grid_columnconfigure(0, weight=weights[0])
+        frame.grid_columnconfigure(1, weight=weights[1])
+        return frame
+
+    def _form_row(self, parent, row, text, fill=False):
+        """一行：标签在左，控件容器在右（fill=True 时容器拉满控件列）。"""
+        ctk.CTkLabel(parent, text=text, anchor='w', font=self.UI_FONT,
+                     text_color=TRIGGER_LABEL).grid(
+                         row=row, column=0, sticky='w', padx=(10, 12), pady=(0, 8))
+        control = ctk.CTkFrame(parent, fg_color="transparent")
+        control.grid(row=row, column=1, sticky='ew' if fill else 'e',
+                     padx=(0, 10), pady=(0, 8))
+        if fill:
+            control.grid_columnconfigure(0, weight=1)
+        return control
+
+    def _form_wide(self, parent, row, pady=(0, 8)):
+        """跨两列的容器：放子表单（语音两档 / 敏感效果条目 / 小游戏参数）。
+
+        右侧不留边距，让子表单里的控件与其它行的控件落在同一条右边缘上。
+        """
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
+        frame.grid(row=row, column=0, columnspan=2, sticky='ew',
+                   padx=(10, 0), pady=pady)
+        return frame
+
+    def _form_hint(self, parent, row, text):
+        ctk.CTkLabel(parent, text=text, justify='left', anchor='w', wraplength=520,
+                     font=self.UI_FONT_SMALL, text_color=TRIGGER_HINT).grid(
+                         row=row, column=0, columnspan=2, sticky='w',
+                         padx=10, pady=(0, 8))
+
+    def _option_field(self, parent, values, variable=None, command=None, width=150):
+        """表单下拉统一用 OptionButton + 输入底色。"""
+        return OptionButton(
+            parent, values=values, variable=variable, command=command,
+            width=width, height=28, corner_radius=7, font=self.UI_FONT,
+            fg_color=TRIGGER_FIELD_BG, border_color=TRIGGER_FIELD_BORDER,
+            hover_color=TRIGGER_FIELD_HOVER, text_color=TRIGGER_LABEL,
+            text_color_disabled=TRIGGER_HINT,
+            popup_fg_color=TRIGGER_FIELD_BG, popup_hover_color=TRIGGER_FIELD_HOVER,
+            popup_text_color=TRIGGER_LABEL, popup_border_color=TRIGGER_FIELD_BORDER)
+
+    def _entry_field(self, parent, variable=None, width=110, placeholder=""):
+        return ctk.CTkEntry(
+            parent, textvariable=variable, width=width, height=28,
+            font=self.UI_FONT, placeholder_text=placeholder, border_width=1,
+            border_color=TRIGGER_FIELD_BORDER, fg_color=TRIGGER_FIELD_BG,
+            corner_radius=7)
+
+    def _label_field(self, parent, text="", width=None):
+        return ctk.CTkLabel(parent, text=text, font=self.UI_FONT,
+                            text_color=TRIGGER_LABEL, anchor='w', width=width or 0)
+
+    def _checkbox_field(self, parent, text, variable):
+        # 无文字时收窄到只放得下勾选框，好让勾选框贴住右边的控件列
+        return ctk.CTkCheckBox(parent, text=text, variable=variable,
+                               width=100 if text else 24,
+                               font=self.UI_FONT, text_color=TRIGGER_TEXT,
+                               fg_color=TRIGGER_CHECK_BG,
+                               hover_color=TRIGGER_CHECK_BG_HOVER,
+                               checkbox_width=20, checkbox_height=20)
+
+    def _small_button(self, parent, text, command, width=76, danger=False):
+        """卡片内的次要动作按钮（描边透明底，与设置页 / 章节页一致）。
+
+        danger=True 时用警示色描边（删除 / 移除这类破坏性操作）。
+        """
+        return ctk.CTkButton(
+            parent, text=text, width=width, height=28, font=self.UI_FONT,
+            fg_color="transparent", border_width=1, corner_radius=8,
+            text_color=TRIGGER_HINT,
+            hover_color=TRIGGER_CMP_BTN_HOVER if danger else TRIGGER_FIELD_HOVER,
+            border_color=TRIGGER_CMP_BTN if danger else TRIGGER_FIELD_BORDER,
+            command=command)
+
+    # ---------- 基础信息 ----------
+    def _build_basic_info(self, common):
+        """名称 / 动作类型 / 所在章节 / 前置条件 / 可再次触发（固定区域）。
+
+        两列「标签 + 控件」：控件用固定宽度、左对齐，不随窗口拉伸；行末留一列
+        吸收多余宽度，使输入框两侧始终有留白（对比 _entry_field / _option_field）。
+        """
+        label_style = dict(font=self.UI_FONT, text_color=TRIGGER_LABEL, anchor='w')
+        common.grid_columnconfigure(4, weight=1)
+
+        ctk.CTkLabel(common, text="名称", **label_style).grid(
+            row=0, column=0, sticky='w', padx=(12, 8), pady=4)
+        self.name_var = tk.StringVar(value=self.trigger.get("name", ""))
+        self.name_entry = self._entry_field(common, self.name_var, width=180)
+        self.name_entry.grid(row=0, column=1, sticky='w', padx=(0, 28), pady=4)
+
+        ctk.CTkLabel(common, text="动作类型", **label_style).grid(
+            row=0, column=2, sticky='w', padx=(0, 8), pady=4)
+        self.action_labels = [action_label(action_type) for action_type in NEW_ACTIONS]
+        self.action_type_var = tk.StringVar(value=action_label("none"))
+        self.action_type_button = self._option_field(
+            common, self.action_labels, variable=self.action_type_var,
+            command=self._on_action_type_picked, width=150)
+        self.action_type_button.grid(row=0, column=3, sticky='w', pady=4)
+
+        ctk.CTkLabel(common, text="所在章节", **label_style).grid(
+            row=1, column=0, sticky='w', padx=(12, 8), pady=4)
+        self.chapter_var = tk.StringVar(
+            value=self._chapter_scope_to_label(self.trigger.get("chapter")))
+        self.chapter_combo = self._option_field(
+            common, self._chapter_scope_labels(), variable=self.chapter_var,
+            width=180)
+        self.chapter_combo.grid(row=1, column=1, sticky='w', padx=(0, 28), pady=4)
+        # 所在章节决定「插入文本」的说明（固定文本章节里与文本流冲突）
+        self.chapter_var.trace_add(
+            "write", lambda *_a: self._refresh_action_availability())
+
+        ctk.CTkLabel(common, text="前置条件", **label_style).grid(
+            row=1, column=2, sticky='w', padx=(0, 8), pady=4)
+        pre_names = ",".join(self.trigger.get("precondition_names", []))
+        self.pre_var = tk.StringVar(value=pre_names)
+        self.pre_entry = self._entry_field(
+            common, self.pre_var, width=180, placeholder="触发器名称，逗号分隔")
+        self.pre_entry.grid(row=1, column=3, sticky='w', pady=4)
+
+        # 可再次触发（所有动作类型通用）
+        self.repeatable_var = tk.BooleanVar(value=self.trigger.get("repeatable", True))
+        self.repeatable_check = ctk.CTkCheckBox(
+            common, text="可再次触发", variable=self.repeatable_var,
+            font=self.UI_FONT, text_color=TRIGGER_TEXT,
+            fg_color=TRIGGER_CHECK_BG, hover_color=TRIGGER_CHECK_BG_HOVER,
+            checkbox_width=20, checkbox_height=20)
+        self.repeatable_check.grid(row=2, column=0, columnspan=5, sticky='w',
+                                   padx=12, pady=(6, 0))
+
+    def _action_type_from_label(self, label: str) -> str:
+        for action_type in NEW_ACTIONS:
+            if action_label(action_type) == label:
+                return action_type
+        return "none"
+
+    def _on_action_type_picked(self, label):
+        """动作类型下拉：切到该类型的空白模板（名称与动作数据一并重置）。"""
+        action_type = self._action_type_from_label(label)
+        if action_type == self.current_action_type:
+            return
+        self._template_commands[action_type]()
+
     # ---------- 各动作类型的独立表单构造 ----------
     def _build_insert_form(self, parent):
-        frame = ctk.CTkFrame(parent, fg_color="transparent")
-        ctk.CTkLabel(frame, text="插入段落文本:",
-                     font=self.UI_FONT_BOLD).pack(anchor='w', pady=(2, 4))
+        frame = self._form_grid(ctk.CTkFrame(parent, fg_color="transparent"),
+                                self.FORM_SPLIT_TEXT)
+        row = 0
+        text_control = self._form_row(frame, row, "插入段落文本", fill=True)
         self.insert_text = ctk.CTkTextbox(
-            frame, height=82, wrap='word', font=self.UI_FONT)
-        self.insert_text.pack(fill='x')
-        attr_row = ctk.CTkFrame(frame, fg_color="transparent")
-        attr_row.pack(fill='x', pady=(8, 2))
-        ctk.CTkLabel(attr_row, text="段落属性:", font=self.UI_FONT).pack(side='left')
+            text_control, height=82, wrap='word', font=self.UI_FONT,
+            border_width=1, border_color=TRIGGER_FIELD_BORDER,
+            fg_color=TRIGGER_FIELD_BG, corner_radius=7)
+        self.insert_text.pack(fill='both', expand=True)
+        row += 1
+
+        attr_control = self._form_row(frame, row, "段落属性")
         self.insert_type_var = tk.StringVar(value="background")
-        self.insert_type_combo = ctk.CTkComboBox(
-            attr_row, values=["background", "branch", "dialog", "interaction", "action"],
-            variable=self.insert_type_var, state="readonly", width=140, height=28,
-            font=self.UI_FONT)
-        self.insert_type_combo.pack(side='left', padx=(5, 12))
+        self.insert_type_button = self._option_field(
+            attr_control, ["background", "branch", "dialog", "interaction", "action"],
+            variable=self.insert_type_var, width=140)
+        self.insert_type_button.pack(side='left')
+        row += 1
+
         self.highlight_var = tk.BooleanVar(value=False)
-        ctk.CTkCheckBox(attr_row, text="高亮", variable=self.highlight_var,
-                        font=self.UI_FONT, text_color=TRIGGER_TEXT,
-                        checkbox_width=20, checkbox_height=20).pack(side='left', padx=5)
+        self._checkbox_field(self._form_row(frame, row, "高亮"), "",
+                             self.highlight_var).pack(side='left')
+        row += 1
+
         self.delayed_var = tk.BooleanVar(value=False)
-        ctk.CTkCheckBox(attr_row, text="延迟插入", variable=self.delayed_var,
-                        font=self.UI_FONT, text_color=TRIGGER_TEXT,
-                        checkbox_width=20, checkbox_height=20).pack(side='left', padx=5)
+        self._checkbox_field(self._form_row(frame, row, "延迟插入"), "",
+                             self.delayed_var).pack(side='left')
         return frame
 
     def _build_option_form(self, parent):
-        frame = ctk.CTkFrame(parent, fg_color="transparent")
-        ctk.CTkLabel(frame, text="选项列表（固定 4 项，可留空）:",
-                     font=self.UI_FONT_BOLD).pack(anchor='w', pady=(2, 4))
-        option_grid = ctk.CTkFrame(frame, fg_color="transparent")
-        option_grid.pack(fill='x')
+        frame = self._form_grid(ctk.CTkFrame(parent, fg_color="transparent"),
+                                self.FORM_SPLIT_TEXT)
         self.option_entries = []
         for index in range(4):
-            ctk.CTkLabel(option_grid, text=f"{index + 1}.", width=24,
-                         font=self.UI_FONT,
-                         anchor="e").grid(row=index, column=0, padx=(0, 6), pady=3)
-            entry = ctk.CTkEntry(option_grid, height=28, font=self.UI_FONT,
-                                 placeholder_text=f"选项 {index + 1} 提示（可留空）")
-            entry.grid(row=index, column=1, sticky='ew', pady=3)
+            ctk.CTkLabel(frame, text=f"{index + 1}.", anchor='e', width=24,
+                         font=self.UI_FONT, text_color=TRIGGER_LABEL).grid(
+                             row=index, column=0, sticky='e', padx=(10, 12), pady=(0, 8))
+            entry = self._entry_field(
+                frame, width=240, placeholder=f"选项 {index + 1} 提示（可留空）")
+            entry.grid(row=index, column=1, sticky='we', padx=(0, 10), pady=(0, 8))
             self.option_entries.append(entry)
-        option_grid.grid_columnconfigure(1, weight=1)
         return frame
 
     # ---------- 新版动作：章节效果短暂覆盖 / 跳转章节 ----------
@@ -328,103 +437,98 @@ class TriggerEditDialog(BaseDialog):
         背景滤镜 / 音乐音量 / 语音效果 / 敏感效果各自一个勾选；同名维度多条覆盖
         并存时后触发的优先，所以这里只负责挑选值，合成由运行时按集合算。
         """
-        frame = ctk.CTkFrame(parent, fg_color="transparent")
-        top = ctk.CTkFrame(frame, fg_color="transparent")
-        top.pack(fill='x', pady=(2, 6))
-        ctk.CTkLabel(top, text="持续步数:", font=self.UI_FONT).pack(side='left')
+        frame = self._form_grid(ctk.CTkFrame(parent, fg_color="transparent"))
+        row = 0
+
+        # --- 持续步数 ---
+        duration_control = self._form_row(frame, row, "持续步数")
         self.effect_duration_var = tk.StringVar(value="1")
-        ctk.CTkEntry(top, textvariable=self.effect_duration_var, width=68, height=28,
-                     font=self.UI_FONT).pack(side='left', padx=(6, 10))
-        ctk.CTkLabel(top, text="（走完这么多步后各维度交还章节默认值）",
-                     font=self.UI_FONT_SMALL, text_color=TRIGGER_HINT).pack(side='left')
+        self._entry_field(duration_control, self.effect_duration_var, width=68).pack(
+            side='left')
+        self._label_field(duration_control, "步").pack(side='left', padx=(6, 0))
+        row += 1
 
         # --- 背景滤镜 ---
-        filter_row = ctk.CTkFrame(frame, fg_color="transparent")
-        filter_row.pack(fill='x', pady=(2, 3))
         self.effect_filter_on = tk.BooleanVar(value=False)
-        self._effect_checkbox(filter_row, "背景滤镜", self.effect_filter_on).pack(side='left')
+        filter_control = self._form_row(frame, row, "背景滤镜")
         self.effect_filter_labels = [self.EFFECT_FILTER_CLEAR_LABEL] + \
             [label for _key, label in VISUAL_FILTERS]
         self.effect_filter_var = tk.StringVar(value=self.effect_filter_labels[0])
-        ctk.CTkComboBox(filter_row, values=self.effect_filter_labels,
-                        variable=self.effect_filter_var, state="readonly",
-                        width=150, height=28,
-                        font=self.UI_FONT).pack(side='left', padx=(8, 0))
+        self._option_field(filter_control, self.effect_filter_labels,
+                           variable=self.effect_filter_var, width=150).pack(
+                               side='left')
+        self._checkbox_field(filter_control, "", self.effect_filter_on).pack(
+            side='left', padx=(10, 0))
+        row += 1
 
         # --- 音乐档位 ---
-        bgm_row = ctk.CTkFrame(frame, fg_color="transparent")
-        bgm_row.pack(fill='x', pady=(2, 3))
         self.effect_bgm_on = tk.BooleanVar(value=False)
-        self._effect_checkbox(bgm_row, "音乐音量", self.effect_bgm_on).pack(side='left')
+        bgm_control = self._form_row(frame, row, "音乐音量")
         self.effect_bgm_level_var = tk.StringVar(
             value=buses.step_display(DEFAULT_BGM_LEVEL))
-        OptionButton(bgm_row, values=[label for label, _ in buses.step_choices()],
-                     variable=self.effect_bgm_level_var, width=96, height=28,
-                     font=self.UI_FONT).pack(side='left', padx=(8, 0))
+        self._option_field(bgm_control, [label for label, _ in buses.step_choices()],
+                           variable=self.effect_bgm_level_var, width=96).pack(
+                               side='left')
+        self._checkbox_field(bgm_control, "", self.effect_bgm_on).pack(
+            side='left', padx=(10, 0))
+        row += 1
 
         # --- 语音效果（她 / 其他人两档）---
-        voice_head = ctk.CTkFrame(frame, fg_color="transparent")
-        voice_head.pack(fill='x', pady=(4, 0))
         self.effect_voice_on = tk.BooleanVar(value=False)
-        self._effect_checkbox(voice_head, "语音效果（两档都留「不加效果」= 这段期间不加效果）",
-                              self.effect_voice_on).pack(side='left')
-        self._build_effect_voice_rows(frame)
+        self._checkbox_field(self._form_row(frame, row, "语音效果"), "",
+                             self.effect_voice_on).pack(side='left')
+        row += 1
+        self._build_effect_voice_rows(self._form_wide(frame, row, pady=(0, 8)))
+        row += 1
 
         # --- 敏感效果 ---
-        sens_head = ctk.CTkFrame(frame, fg_color="transparent")
-        sens_head.pack(fill='x', pady=(6, 0))
         self.effect_sens_on = tk.BooleanVar(value=False)
-        self._effect_checkbox(sens_head, "敏感效果（不加条目 = 这段期间临时清空）",
-                              self.effect_sens_on).pack(side='left')
-        ctk.CTkButton(sens_head, text="添加条目", width=76, height=26, font=self.UI_FONT,
-                      fg_color="transparent", border_width=1, corner_radius=8,
-                      text_color=TRIGGER_HINT, hover_color=TRIGGER_CMP_BTN_HOVER,
-                      border_color=TRIGGER_CMP_BTN,
-                      command=self._add_effect_sens_row).pack(side='right')
-        self.effect_sens_container = ctk.CTkFrame(frame, fg_color="transparent")
-        self.effect_sens_container.pack(fill='x', padx=(22, 0))
+        sens_control = self._form_row(frame, row, "敏感效果")
+        self._small_button(sens_control, "添加条目", self._add_effect_sens_row).pack(
+            side='left')
+        self._checkbox_field(sens_control, "", self.effect_sens_on).pack(
+            side='left', padx=(10, 0))
+        row += 1
+        self.effect_sens_container = self._form_wide(frame, row, pady=(0, 4))
+        self.effect_sens_container.grid_columnconfigure(0, weight=1)
         self.effect_sens_rows = []
         self._effect_sens_hint = None
         self._refresh_effect_sens_hint()
+        row += 1
 
-        ctk.CTkLabel(
-            frame, justify='left', anchor='w', wraplength=460,
-            font=self.UI_FONT_SMALL, text_color=TRIGGER_HINT,
-            text="覆盖是逐维度的：只改勾选的维度，其余沿用章节默认。同名维度多条并存时"
-                 "后触发的优先，\n到期逐条回退；换章立即清除全部未到期的覆盖。"
-        ).pack(anchor='w', pady=(8, 0))
+        self._form_hint(
+            frame, row,
+            "覆盖是逐维度的：只改勾选的维度，其余沿用章节默认。同名维度多条并存时"
+            "后触发的优先，到期逐条回退；换章立即清除全部未到期的覆盖。")
         return frame
-
-    def _effect_checkbox(self, parent, text, variable):
-        return ctk.CTkCheckBox(parent, text=text, variable=variable, font=self.UI_FONT,
-                               text_color=TRIGGER_TEXT, checkbox_width=20,
-                               checkbox_height=20)
 
     def _build_effect_voice_rows(self, parent):
         """两档语音效果的预设 + 强度（与章节编辑同一套预设，含「不加效果」）。"""
         self._effect_fx_vars = {}
         self._effect_fx_label_keys = {}
-        container = ctk.CTkFrame(parent, fg_color="transparent")
-        container.pack(fill='x', padx=(22, 0))
-        for slot in SLOTS:
+        self._form_grid(parent)
+        for row_index, slot in enumerate(SLOTS):
             keys = preset_keys_for(slot)
             labels = [label_of(key) for key in keys]
             self._effect_fx_label_keys[slot] = {label_of(key): key for key in keys}
 
-            row = ctk.CTkFrame(container, fg_color="transparent")
-            row.pack(fill='x', pady=2)
-            ctk.CTkLabel(row, text=f"{SLOT_LABELS[slot]}:", font=self.UI_FONT).pack(side='left')
+            ctk.CTkLabel(parent, text=SLOT_LABELS[slot], anchor='w',
+                         font=self.UI_FONT, text_color=TRIGGER_LABEL).grid(
+                             row=row_index, column=0, sticky='w',
+                             padx=(10, 12), pady=(0, 8))
+            control = ctk.CTkFrame(parent, fg_color="transparent")
+            control.grid(row=row_index, column=1, sticky='e',
+                         padx=(0, 10), pady=(0, 8))
             preset_var = tk.StringVar(value=label_of(PRESET_NONE))
-            ctk.CTkComboBox(row, values=labels, variable=preset_var, state="readonly",
-                            width=150, height=28,
-                            font=self.UI_FONT).pack(side='left', padx=(6, 12))
-            ctk.CTkLabel(row, text="强度:", font=self.UI_FONT).pack(side='left')
+            self._option_field(control, labels, variable=preset_var, width=150).pack(
+                side='left')
+            self._label_field(control, "强度").pack(side='left', padx=(10, 4))
             intensity_var = tk.IntVar(value=DEFAULT_INTENSITY)
-            value_label = ctk.CTkLabel(row, text=str(DEFAULT_INTENSITY), width=30,
-                                       anchor='w', font=self.UI_FONT)
-            ctk.CTkSlider(row, from_=0, to=MAX_INTENSITY, number_of_steps=MAX_INTENSITY,
-                          variable=intensity_var, width=120).pack(side='left', padx=(6, 0))
-            value_label.pack(side='left', padx=(6, 0))
+            value_label = self._label_field(control, str(DEFAULT_INTENSITY), width=30)
+            ctk.CTkSlider(control, from_=0, to=MAX_INTENSITY,
+                          number_of_steps=MAX_INTENSITY, variable=intensity_var,
+                          width=110).pack(side='left', padx=(0, 6))
+            value_label.pack(side='left')
             intensity_var.trace_add(
                 "write",
                 lambda *_a, label=value_label, var=intensity_var:
@@ -448,36 +552,38 @@ class TriggerEditDialog(BaseDialog):
     def _add_effect_sens_row(self, effect: dict = None):
         effect = effect or {}
         row = ctk.CTkFrame(self.effect_sens_container, fg_color="transparent")
-        row.pack(fill='x', pady=2)
+        row.grid(row=len(self.effect_sens_rows), column=0, sticky='ew',
+                 padx=(0, 10), pady=(0, 8))
         attrs = self.sens_targets or ["介入度", "破坏性"]
         attr_var = tk.StringVar(value=effect.get("attr") or attrs[0]
                                 or DEFAULT_SENSITIVITY_ATTR)
-        ctk.CTkComboBox(row, values=attrs, variable=attr_var, state="readonly",
-                        width=130, height=28, font=self.UI_FONT).pack(side='left')
-        ctk.CTkLabel(row, text="强度:", font=self.UI_FONT).pack(side='left', padx=(10, 2))
+        self._option_field(row, attrs, variable=attr_var, width=130).pack(side='left')
+        self._label_field(row, "强度").pack(side='left', padx=(10, 4))
         strength_var = tk.StringVar(value=str(effect.get("strength", 1.0)))
-        ctk.CTkEntry(row, textvariable=strength_var, width=60, height=28,
-                     font=self.UI_FONT).pack(side='left')
-        ctk.CTkLabel(row, text="客观影响:", font=self.UI_FONT).pack(side='left', padx=(10, 2))
+        self._entry_field(row, strength_var, width=60).pack(side='left')
+        self._label_field(row, "客观影响").pack(side='left', padx=(10, 4))
         objective_var = tk.StringVar(value=str(effect.get("objective", 0.0)))
-        ctk.CTkEntry(row, textvariable=objective_var, width=60, height=28,
-                     font=self.UI_FONT).pack(side='left')
+        self._entry_field(row, objective_var, width=60).pack(side='left')
 
         entry = {"frame": row, "attr_var": attr_var, "strength_var": strength_var,
                  "objective_var": objective_var}
-        ctk.CTkButton(row, text="移除", width=48, height=28, font=self.UI_FONT,
-                      fg_color="transparent", border_width=1, corner_radius=8,
-                      text_color=TRIGGER_HINT, hover_color=TRIGGER_CMP_BTN_HOVER,
-                      border_color=TRIGGER_CMP_BTN,
-                      command=lambda: self._remove_effect_sens_row(entry)).pack(
-                          side='left', padx=(10, 0))
+        self._small_button(
+            row, "移除", lambda: self._remove_effect_sens_row(entry), width=52,
+            danger=True).pack(side='left', padx=(10, 0))
         self.effect_sens_rows.append(entry)
+        self._regrid_effect_sens_rows()
         self._refresh_effect_sens_hint()
+
+    def _regrid_effect_sens_rows(self):
+        """删条目后会留下空行号，重排一遍避免新条目与旧条目落进同一格。"""
+        for index, entry in enumerate(self.effect_sens_rows):
+            entry["frame"].grid_configure(row=index)
 
     def _remove_effect_sens_row(self, entry):
         entry["frame"].destroy()
         if entry in self.effect_sens_rows:
             self.effect_sens_rows.remove(entry)
+        self._regrid_effect_sens_rows()
         self._refresh_effect_sens_hint()
 
     def _clear_effect_sens_rows(self):
@@ -499,7 +605,7 @@ class TriggerEditDialog(BaseDialog):
                 self.effect_sens_container,
                 text="（未添加条目：勾选后覆盖为空，即这段期间没有敏感效果）",
                 font=self.UI_FONT_SMALL, text_color=TRIGGER_HINT, anchor='w')
-            self._effect_sens_hint.pack(fill='x')
+            self._effect_sens_hint.grid(row=0, column=0, sticky='w')
 
     def _effect_sensitivity_from_ui(self) -> list:
         result = []
@@ -552,28 +658,29 @@ class TriggerEditDialog(BaseDialog):
 
     # ---------- 新版动作：窗口视效 ----------
     def _build_fx_form(self, parent):
-        frame = ctk.CTkFrame(parent, fg_color="transparent")
-        row = ctk.CTkFrame(frame, fg_color="transparent")
-        row.pack(fill='x', pady=(2, 4))
-        ctk.CTkLabel(row, text="视效:", font=self.UI_FONT).pack(side='left')
+        frame = self._form_grid(ctk.CTkFrame(parent, fg_color="transparent"))
+        row = 0
+
+        fx_control = self._form_row(frame, row, "视效")
         self.fx_labels = [label for _key, label in WINDOW_FX]
         self.fx_var = tk.StringVar(value=self.fx_labels[0])
-        ctk.CTkComboBox(row, values=self.fx_labels, variable=self.fx_var,
-                        state="readonly", width=150, height=28,
-                        font=self.UI_FONT).pack(side='left', padx=(6, 16))
-        ctk.CTkLabel(row, text="持续秒数:", font=self.UI_FONT).pack(side='left')
+        self._option_field(fx_control, self.fx_labels, variable=self.fx_var,
+                           width=150).pack(side='left')
+        row += 1
+
+        duration_control = self._form_row(frame, row, "持续秒数")
         self.fx_duration_var = tk.StringVar(value="0.8")
-        ctk.CTkEntry(row, textvariable=self.fx_duration_var, width=68, height=28,
-                     font=self.UI_FONT).pack(side='left', padx=(6, 16))
-        ctk.CTkLabel(row, text="强度:", font=self.UI_FONT).pack(side='left')
+        self._entry_field(duration_control, self.fx_duration_var, width=68).pack(
+            side='left')
+        self._label_field(duration_control, "秒").pack(side='left', padx=(6, 0))
+        row += 1
+
+        intensity_control = self._form_row(frame, row, "强度 (0~100)")
         self.fx_intensity_var = tk.StringVar(value="60")
-        ctk.CTkEntry(row, textvariable=self.fx_intensity_var, width=68, height=28,
-                     font=self.UI_FONT).pack(side='left', padx=(6, 0))
-        ctk.CTkLabel(frame,
-                     text="持续秒数为绝对时间（0.1~10）；强度 0~100：闪光/反色的峰值亮度、"
-                          "振动幅度与色差错位幅度。视效期间其他动作照常。",
-                     font=self.UI_FONT_SMALL, text_color=TRIGGER_HINT
-                     ).pack(anchor='w', pady=(4, 0))
+        self._entry_field(intensity_control, self.fx_intensity_var, width=68).pack(
+            side='left')
+        row += 1
+
         return frame
 
     def _fx_label_to_key(self, label: str) -> str:
@@ -589,47 +696,33 @@ class TriggerEditDialog(BaseDialog):
         return WINDOW_FX[0][1]
 
     def _build_goto_form(self, parent):
-        frame = ctk.CTkFrame(parent, fg_color="transparent")
-        row = ctk.CTkFrame(frame, fg_color="transparent")
-        row.pack(fill='x', pady=(2, 4))
-        ctk.CTkLabel(row, text="目标章节:", font=self.UI_FONT).pack(side='left')
+        frame = self._form_grid(ctk.CTkFrame(parent, fg_color="transparent"))
+        control = self._form_row(frame, 0, "目标章节")
         self.goto_values = [self.GOTO_LEAVE_LABEL] + self.chapter_names
         self.goto_var = tk.StringVar(value=self.goto_values[0])
-        ctk.CTkComboBox(row, values=self.goto_values, variable=self.goto_var,
-                        state="readonly", width=200, height=28,
-                        font=self.UI_FONT).pack(side='left', padx=(6, 0))
+        self._option_field(control, self.goto_values, variable=self.goto_var,
+                           width=200).pack(side='left')
         if not self.chapter_names:
-            ctk.CTkLabel(frame, text="当前副本还没有章节，请先到「章节」页签添加。",
-                         font=self.UI_FONT_SMALL, text_color=TRIGGER_HINT).pack(anchor='w', pady=(2, 0))
+            self._form_hint(frame, 1, "当前副本还没有章节，请先到「章节」页签添加。")
         return frame
 
     def _build_mini_game_form(self, parent):
-        frame = ctk.CTkFrame(parent, fg_color="transparent")
-        row1 = ctk.CTkFrame(frame, fg_color="transparent")
-        row1.pack(fill='x', pady=(2, 4))
-        ctk.CTkLabel(row1, text="小游戏:", font=self.UI_FONT).pack(side='left')
+        frame = self._form_grid(ctk.CTkFrame(parent, fg_color="transparent"))
         game_ids = [gid for gid, _label, _backend in list_mini_games()] \
             or [MINI_GAME_DEFAULT_ID]
         self.minigame_game_var = tk.StringVar(
             value=MINI_GAME_DEFAULT_ID if MINI_GAME_DEFAULT_ID in game_ids
             else game_ids[0])
-        ctk.CTkComboBox(row1, values=game_ids, variable=self.minigame_game_var,
-                        state="readonly", width=160, height=28,
-                        font=self.UI_FONT,
-                        command=self._rebuild_minigame_params).pack(
-            side='left', padx=(6, 0))
+        game_control = self._form_row(frame, 0, "小游戏")
+        self._option_field(game_control, game_ids, variable=self.minigame_game_var,
+                           width=160, command=self._rebuild_minigame_params).pack(
+                               side='left')
 
         # 参数区：按所选小游戏 manifest.params 动态生成（切换游戏即重建）
         self.minigame_param_vars = {}
-        self.minigame_params_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        self.minigame_params_frame.pack(fill='x', pady=(2, 4))
+        self.minigame_params_frame = self._form_wide(frame, 1)
+        self._form_grid(self.minigame_params_frame)
         self._rebuild_minigame_params()
-
-        ctk.CTkLabel(frame,
-                     text="小游戏不区分胜负：结算回传的整数（如达成关数）记入本触发器的\n"
-                          "选择记录，跳转等分支由其他触发器用“选择:本触发器名称”判定。",
-                     font=self.UI_FONT_SMALL, text_color=TRIGGER_HINT
-                     ).pack(anchor='w', pady=(2, 0))
         return frame
 
     def _rebuild_minigame_params(self, *_args):
@@ -654,9 +747,9 @@ class TriggerEditDialog(BaseDialog):
 
         params = mini_game_params(self.minigame_game_var.get())
         if not params:
-            ctk.CTkLabel(frame, text="该小游戏没有可配参数。",
-                         font=self.UI_FONT_SMALL, text_color=TRIGGER_HINT
-                         ).pack(anchor='w')
+            ctk.CTkLabel(frame, text="该小游戏没有可配参数。", anchor='w',
+                         font=self.UI_FONT_SMALL, text_color=TRIGGER_HINT).grid(
+                             row=0, column=0, columnspan=2, sticky='w', pady=(0, 8))
             return
 
         def initial(key, default):
@@ -666,7 +759,7 @@ class TriggerEditDialog(BaseDialog):
                 return prev_values[key]
             return default
 
-        for param in params:
+        for index, param in enumerate(params):
             key = str(param.get("key") or "").strip()
             ptype = str(param.get("type") or "str")
             label = str(param.get("label") or key)
@@ -679,18 +772,15 @@ class TriggerEditDialog(BaseDialog):
                 if isinstance(value, str):
                     value = value.strip().lower() in ("1", "true", "yes", "是")
                 var = tk.BooleanVar(value=bool(value))
-                ctk.CTkCheckBox(frame, text=label, variable=var,
-                                font=self.UI_FONT).pack(anchor='w', pady=(2, 2))
+                self._checkbox_field(self._form_row(frame, index, label), "",
+                                     var).pack(side='left')
                 self.minigame_param_vars[key] = (var, ptype)
                 continue
-            row = ctk.CTkFrame(frame, fg_color="transparent")
-            row.pack(fill='x', pady=(2, 2))
-            ctk.CTkLabel(row, text=f"{label}:", font=self.UI_FONT).pack(side='left')
             var = tk.StringVar()
             value = initial(key, default)
             var.set("" if value is None else str(value))
-            ctk.CTkEntry(row, textvariable=var, width=110, height=28,
-                         font=self.UI_FONT).pack(side='left', padx=(6, 0))
+            self._entry_field(self._form_row(frame, index, label), var, width=110).pack(
+                side='left')
             self.minigame_param_vars[key] = (var, ptype)
 
     def _minigame_params_to_data(self, data):
@@ -729,23 +819,24 @@ class TriggerEditDialog(BaseDialog):
         return self.EFFECT_FILTER_CLEAR_LABEL
 
     def _show_action_frame(self, action_type):
-        """仅显示当前动作类型的表单，其余动作帧隐藏。"""
-        if action_type == "none":
-            self.action_section_label.pack_forget()
-            self.action_area.pack_forget()
-        else:
-            if self.action_section_label.winfo_manager() != "pack":
-                self.action_section_label.pack(
-                    fill='x', padx=6, pady=(6, 2), before=self.action_description_label.master)
-            if self.action_area.winfo_manager() != "pack":
-                self.action_area.pack(
-                    fill='x', padx=6, before=self.action_description_label.master)
+        """仅显示当前动作类型的表单，其余动作帧隐藏。
+
+        「条件标记」没有动作参数：连标题一起收起整个动作区
+        （空卡片留着会撑出一块空白，说明由下方「类型说明」承担）。
+        """
         for type_name, frame in self.action_frames.items():
             if type_name == action_type:
-                frame.pack(fill='both', expand=True)
+                frame.pack(fill='x')
             else:
                 frame.pack_forget()
+        if action_type == "none":
+            self.action_card.pack_forget()
+            self.action_head.pack_forget()
+        else:
+            self.action_head.pack(side='top', fill='x', pady=(6, 4))
+            self.action_card.pack(side='top', fill='both', expand=True)
         self.current_action_type = action_type
+        self.action_type_var.set(action_label(action_type))
 
     # ---------- 模板方法 ----------
     def _set_action_template(self, action_type, name, action_data):
@@ -756,24 +847,22 @@ class TriggerEditDialog(BaseDialog):
         self._set_action_template("none", "新空触发", {})
 
     def _build_condition_controls(self, parent):
-        frame = ctk.CTkFrame(parent, fg_color="transparent")
-        frame.pack(fill='x', pady=(0, 4))
-        top = ctk.CTkFrame(frame, fg_color="transparent")
-        top.pack(fill='x', pady=(0, 4))
-        ctk.CTkLabel(top, text="规则间连接符", font=self.UI_FONT).pack(side='left')
-        ctk.CTkLabel(top, text="切换连接符处自动加括号；最多 4 条，整行留空表示忽略",
-                     font=self.UI_FONT_SMALL).pack(side='left', padx=10)
+        """条件区：可点击的文字预览（每条一行）+ 一行编辑控件。
 
-        # 条件预览：把所有规则实时翻译成中文句子，数组判定更直观
-        self.cond_preview = ctk.CTkLabel(
-            frame, text="条件预览: （留空或整行未填 → 无条件触发）", anchor='w', justify='left',
-            wraplength=470, font=self.UI_FONT_SMALL,
-            text_color=TRIGGER_HINT)
-        self.cond_preview.pack(fill='x', padx=6, pady=(0, 4))
-
+        预览只列已添加的条件，末尾固定「＋ 添加条件」；点某条即用下面这一行
+        控件编辑它——四条条件共用同一个编辑行，不必把四行控件同时铺开。
+        """
+        self._active_slots = []      # 已添加的条件槽位（按下标升序）
+        self._selected_slot = None   # 正在编辑的槽位
         self.condition_rows = []
-        # 行间连接符（第 i 个连接第 i 与第 i+1 行）；切换处预览加括号、保存时成组
+        # 行间连接符（第 i 个连接第 i-1 与第 i 条）；切换处保存时成组加括号
         self.condition_connectors = []
+
+        self.cond_list_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        self.cond_list_frame.pack(fill='x', pady=(0, 4))
+        self.cond_editor_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        self.cond_editor_frame.pack(fill='x')
+
         op_labels = [label for label, _code in self.OPERATOR_LABELS]
         base_keys = list(dict.fromkeys(
             self.evolution_names + ["介入度", "破坏性", "总伤亡", "总计数", "间隔计数",
@@ -782,64 +871,83 @@ class TriggerEditDialog(BaseDialog):
         base_keys += [f"选择:{t['name']}" for t in self.all_triggers
                       if t.get("name") and t.get("action_type") in ("option", "mini_game")]
         for index in range(4):
-            if index > 0:
-                conn_row = ctk.CTkFrame(frame, fg_color="transparent")
-                conn_row.pack(fill='x', pady=0)
-                ctk.CTkLabel(conn_row, text="── 连接:", font=self.UI_FONT_SMALL
-                             ).pack(side='left')
-                conn_var = tk.StringVar(value=self.OPERATOR_LABELS[0][0])
-                ctk.CTkOptionMenu(conn_row, values=op_labels, variable=conn_var,
-                                  width=150, height=26, font=self.UI_FONT
-                                  ).pack(side='left', padx=(6, 0))
-                conn_var.trace_add("write", lambda *_a: self._update_condition_preview())
-                self.condition_connectors.append(conn_var)
-            row = ctk.CTkFrame(frame, fg_color="transparent")
-            row.pack(fill='x', pady=3)
-            key_var = tk.StringVar()
-            key_button = self._dropdown_button(
-                row, lambda: base_keys or ["总计数"], key_var,
-                TRIGGER_KEY_BTN, TRIGGER_KEY_BTN_HOVER, width=150,
-                command=lambda i=index: self._sync_condition_row(i))
-            key_button.grid(row=0, column=0, sticky='w')
-            metric_var = tk.StringVar(value=self._metric_options("总伤亡")[0][0])
-            metric_button = self._dropdown_button(
-                row,
-                lambda kv=key_var: [lab for lab, _c in self._metric_options(kv.get().strip())],
-                metric_var, TRIGGER_METRIC_BTN, TRIGGER_METRIC_BTN_HOVER, width=104,
-                command=lambda i=index: self._sync_condition_row(i))
-            metric_button.grid(row=0, column=1, padx=(6, 0))
-            target_var = tk.StringVar()
-            target_widget = ctk.CTkEntry(row, textvariable=target_var, width=68,
-                                         height=28, font=self.UI_FONT,
-                                         placeholder_text="目标编号")
-            target_widget.grid(row=0, column=2, padx=(6, 0))
-            comparator_var = tk.StringVar(value=">=")
-            comparator_button = self._dropdown_button(
-                row, lambda: [">=", "<=", ">", "<", "==", "!="], comparator_var,
-                TRIGGER_CMP_BTN, TRIGGER_CMP_BTN_HOVER, width=58)
-            comparator_button.grid(row=0, column=3, padx=(6, 0))
-            comparator_var.trace_add(
-                "write", lambda *_a, i=index: self._update_condition_preview())
-            value_var = tk.StringVar()
-            value_widget = ctk.CTkEntry(row, textvariable=value_var, width=88,
-                                        height=28, font=self.UI_FONT,
-                                        placeholder_text="数值")
-            value_widget.grid(row=0, column=4, padx=(6, 0), sticky='w')
-            window_var = tk.StringVar()
-            window_widget = ctk.CTkEntry(row, textvariable=window_var, width=68,
-                                         height=28, font=self.UI_FONT,
-                                         placeholder_text="窗口(≥2)")
-            window_widget.grid(row=0, column=5, padx=(6, 0))
-            self.condition_rows.append({
-                "key_var": key_var, "metric_var": metric_var, "target_var": target_var,
-                "comparator_var": comparator_var, "value_var": value_var, "window_var": window_var,
-                "key_widget": key_button, "metric_widget": metric_button,
-                "target_widget": target_widget, "comparator_widget": comparator_button,
-                "value_widget": value_widget, "window_widget": window_widget,
-            })
-            for var in (value_var, target_var, window_var):
-                var.trace_add("write", lambda *_a, i=index: self._update_condition_preview())
-            self._sync_condition_row(index)
+            self.condition_rows.append(
+                self._build_condition_row(index, op_labels, base_keys))
+
+    def _build_condition_row(self, index, op_labels, base_keys):
+        """单条条件的编辑控件（默认隐藏；选中该条才显示，见 _select_condition）。"""
+        frame = ctk.CTkFrame(self.cond_editor_frame, fg_color="transparent")
+        top = ctk.CTkFrame(frame, fg_color="transparent")
+        top.pack(fill='x', pady=(0, 3))
+        bottom = ctk.CTkFrame(frame, fg_color="transparent")
+        bottom.pack(fill='x')
+
+        conn_var = None
+        key_column = 0
+        if index > 0:
+            ctk.CTkLabel(top, text="与上一条:", font=self.UI_FONT,
+                         text_color=TRIGGER_HINT).grid(row=0, column=0, sticky='w')
+            conn_var = tk.StringVar(value=self.OPERATOR_LABELS[0][0])
+            OptionButton(top, values=op_labels, variable=conn_var, width=150,
+                         height=28, font=self.UI_FONT).grid(
+                             row=0, column=1, sticky='w', padx=(6, 18))
+            conn_var.trace_add("write", lambda *_a: self._refresh_condition_list())
+            self.condition_connectors.append(conn_var)
+            key_column = 2
+
+        key_var = tk.StringVar()
+        key_button = self._dropdown_button(
+            top, lambda: base_keys or ["总计数"], key_var,
+            TRIGGER_KEY_BTN, TRIGGER_KEY_BTN_HOVER, width=150,
+            command=lambda i=index: self._sync_condition_row(i))
+        key_button.grid(row=0, column=key_column, sticky='w')
+
+        metric_var = tk.StringVar(value=self._metric_options("总伤亡")[0][0])
+        metric_button = self._dropdown_button(
+            top,
+            lambda kv=key_var: [lab for lab, _c in self._metric_options(kv.get().strip())],
+            metric_var, TRIGGER_METRIC_BTN, TRIGGER_METRIC_BTN_HOVER, width=104,
+            command=lambda i=index: self._sync_condition_row(i))
+        metric_button.grid(row=0, column=key_column + 1, padx=(8, 0), sticky='w')
+
+        comparator_var = tk.StringVar(value=">=")
+        comparator_button = self._dropdown_button(
+            bottom, lambda: [">=", "<=", ">", "<", "==", "!="], comparator_var,
+            TRIGGER_CMP_BTN, TRIGGER_CMP_BTN_HOVER, width=58)
+        comparator_button.grid(row=0, column=0, sticky='w')
+        comparator_var.trace_add("write", lambda *_a: self._refresh_condition_list())
+
+        value_var = tk.StringVar()
+        value_widget = ctk.CTkEntry(bottom, textvariable=value_var, width=120,
+                                    height=28, font=self.UI_FONT,
+                                    placeholder_text="数值")
+        value_widget.grid(row=0, column=1, padx=(8, 18), sticky='w')
+
+        target_var = tk.StringVar()
+        target_widget = ctk.CTkEntry(bottom, textvariable=target_var, width=100,
+                                     height=28, font=self.UI_FONT,
+                                     placeholder_text="目标编号")
+        target_widget.grid(row=0, column=2, padx=(0, 8), sticky='w')
+
+        window_var = tk.StringVar()
+        window_widget = ctk.CTkEntry(bottom, textvariable=window_var, width=100,
+                                     height=28, font=self.UI_FONT,
+                                     placeholder_text="窗口(≥2)")
+        window_widget.grid(row=0, column=3, sticky='w')
+
+        row = {
+            "frame": frame,
+            "key_var": key_var, "metric_var": metric_var, "target_var": target_var,
+            "comparator_var": comparator_var, "value_var": value_var, "window_var": window_var,
+            "conn_var": conn_var,
+            "key_widget": key_button, "metric_widget": metric_button,
+            "target_widget": target_widget, "comparator_widget": comparator_button,
+            "value_widget": value_widget, "window_widget": window_widget,
+        }
+        for var in (value_var, target_var, window_var):
+            var.trace_add("write", lambda *_a: self._refresh_condition_list())
+        self._sync_condition_row_widgets(row)
+        return row
 
     # ---------- 条件规则的直观化 ----------
     def _dropdown_button(self, parent, values, var, fg_color, hover_color,
@@ -888,15 +996,18 @@ class TriggerEditDialog(BaseDialog):
                 return lab
         return self.OPERATOR_LABELS[0][0]
 
-    def _sync_condition_row(self, index):
-        row = self.condition_rows[index]
+    def _sync_condition_row_widgets(self, row):
+        """按当前键 / 统计方式调整单条条件的控件可见性。
+
+        度量下拉只在「选择:」与「伤亡数组」上出现；目标编号跟着需要它的
+        统计方式（占比 / 趋势 / 最后一次），窗口只在趋势上出现。
+        """
         key = row["key_var"].get().strip()
         metric_label = row["metric_var"].get().strip()
         if not key.startswith("选择:") and key != "伤亡数组":
             row["metric_widget"].grid_remove()
             row["target_widget"].grid_remove()
             row["window_widget"].grid_remove()
-            self._update_condition_preview()
             return
         options = self._metric_options(key)
         labels = [lab for lab, _code in options]
@@ -918,7 +1029,10 @@ class TriggerEditDialog(BaseDialog):
             row["window_widget"].grid()
         else:
             row["window_widget"].grid_remove()
-        self._update_condition_preview()
+
+    def _sync_condition_row(self, index):
+        self._sync_condition_row_widgets(self.condition_rows[index])
+        self._refresh_condition_list()
 
     def _rule_to_text(self, rule) -> str:
         key = rule.get("key", "")
@@ -1042,58 +1156,149 @@ class TriggerEditDialog(BaseDialog):
                 push(rule, top_op)
         return leaves, conns
 
-    def _update_condition_preview(self):
-        texts = []
-        filled = []
-        for index, row in enumerate(self.condition_rows):
-            key = row["key_var"].get().strip()
-            value = row["value_var"].get().strip()
-            if not key and not value:
-                continue
-            filled.append(index)
-            if not key or not value:
-                texts.append("（未填完整）")
-                continue
-            rule = {
-                "key": key,
-                "comparator": row["comparator_var"].get(),
-                "metric": self._metric_label_to_code(key, row["metric_var"].get().strip()),
-            }
+    def _rule_text_of(self, slot) -> str:
+        """某条条件的可读文案（未填完整时给出提示），供预览行显示。"""
+        row = self.condition_rows[slot]
+        key = row["key_var"].get().strip()
+        value = row["value_var"].get().strip()
+        if not key and not value:
+            return "（未填写）"
+        if not key or not value:
+            return "（未填完整）"
+        rule = {
+            "key": key,
+            "comparator": row["comparator_var"].get(),
+            "metric": self._metric_label_to_code(key, row["metric_var"].get().strip()),
+        }
+        try:
+            parsed = float(value)
+            rule["value"] = int(parsed) if parsed.is_integer() else parsed
+        except ValueError:
+            rule["value"] = value
+        target = row["target_var"].get().strip()
+        if key.startswith("选择:") and rule["metric"] in ("ratio", "trend", "last") and target:
             try:
-                parsed = float(value)
-                rule["value"] = int(parsed) if parsed.is_integer() else parsed
+                rule["target"] = int(float(target))
             except ValueError:
-                rule["value"] = value
-            target = row["target_var"].get().strip()
-            if key.startswith("选择:") and rule["metric"] in ("ratio", "trend", "last") and target:
-                try:
-                    rule["target"] = int(float(target))
-                except ValueError:
-                    rule["target"] = target
-            window = row["window_var"].get().strip()
-            if rule["metric"] == "trend" and window:
-                try:
-                    rule["window"] = int(float(window))
-                except ValueError:
-                    rule["window"] = window
-            texts.append(self._rule_to_text(rule))
-        conns = self._effective_connectors(filled)
-        if not texts:
-            preview = "（留空或整行未填 → 无条件触发）"
+                rule["target"] = target
+        window = row["window_var"].get().strip()
+        if rule["metric"] == "trend" and window:
+            try:
+                rule["window"] = int(float(window))
+            except ValueError:
+                rule["window"] = window
+        return self._rule_to_text(rule)
+
+    def _connector_label_of(self, slot) -> str:
+        """某条条件与上一条之间的连接符（预览行前缀）。"""
+        var = self.condition_connectors[slot - 1]
+        return "且" if self._op_label_to_code(var.get()) == "and" else "或"
+
+    # ---------- 条件预览（可点击的文字列表）----------
+    def _refresh_condition_list(self):
+        """重建条件预览：每条已添加的条件一行，末尾固定「＋ 添加条件」。"""
+        frame = getattr(self, "cond_list_frame", None)
+        if frame is None:
+            return
+        for child in frame.winfo_children():
+            child.destroy()
+        if not self._active_slots:
+            ctk.CTkLabel(frame, text="（无条件：每一步都算条件成立）",
+                         font=self.UI_FONT_SMALL, text_color=TRIGGER_HINT,
+                         anchor='w').pack(fill='x', padx=6, pady=(0, 2))
+        for order, slot in enumerate(self._active_slots):
+            self._build_condition_preview_row(frame, order, slot)
+        if len(self._active_slots) < len(self.condition_rows):
+            ctk.CTkButton(frame, text="＋ 添加条件", anchor='w', height=26,
+                          font=self.UI_FONT, fg_color="transparent",
+                          hover_color=WIDGET_HOVER, text_color=TRIGGER_KEY_BTN,
+                          command=self._add_condition).pack(fill='x', pady=(2, 0))
+
+    def _build_condition_preview_row(self, parent, order, slot):
+        """一行条件预览：点它就用下面的编辑行改它，右侧「删除」删掉这条。"""
+        selected = slot == self._selected_slot
+        text = f"{self.CONDITION_MARKS[order]} {self._rule_text_of(slot)}"
+        if order > 0:
+            text = f"{self._connector_label_of(slot)}　{text}"
+        row = ctk.CTkFrame(parent, corner_radius=6,
+                           fg_color=WIDGET_HOVER if selected else "transparent")
+        row.pack(fill='x', pady=1)
+        label = ctk.CTkLabel(row, text=text, justify='left', anchor='w', wraplength=430,
+                             cursor="hand2", font=self.UI_FONT,
+                             text_color=TRIGGER_TEXT if selected else TRIGGER_HINT)
+        label.pack(side='left', fill='x', expand=True, padx=(6, 4), pady=2)
+        ctk.CTkButton(row, text="删除", width=52, height=24, font=self.UI_FONT_SMALL,
+                      fg_color="transparent", border_width=1, corner_radius=8,
+                      text_color=TRIGGER_HINT, hover_color=TRIGGER_CMP_BTN_HOVER,
+                      border_color=TRIGGER_CMP_BTN,
+                      command=lambda s=slot: self._remove_condition(s)).pack(
+                          side='right', padx=(0, 4), pady=2)
+        for widget in (row, label):
+            widget.bind("<Button-1>", lambda _event, s=slot: self._select_condition(s))
+        row.bind("<Enter>", lambda _event, r=row: r.configure(fg_color=WIDGET_HOVER))
+        row.bind("<Leave>", lambda _event, r=row, s=selected:
+                 r.configure(fg_color=WIDGET_HOVER if s else "transparent"))
+
+    # ---------- 条件的增删与选中 ----------
+    def _select_condition(self, slot):
+        """选中一条条件：只显示它的编辑控件（其余条目收起）。"""
+        if slot not in self._active_slots:
+            return
+        self._selected_slot = slot
+        for index, row in enumerate(self.condition_rows):
+            if index == slot:
+                row["frame"].pack(fill='x')
+            else:
+                row["frame"].pack_forget()
+        self._refresh_condition_list()
+
+    def _hide_condition_editor(self):
+        for row in self.condition_rows:
+            row["frame"].pack_forget()
+
+    def _add_condition(self):
+        """占用一个空槽位并选中它（最多 4 条）。"""
+        free = [index for index in range(len(self.condition_rows))
+                if index not in self._active_slots]
+        if not free:
+            return
+        self._active_slots.append(free[0])
+        self._active_slots.sort()
+        self._select_condition(free[0])
+
+    def _remove_condition(self, slot):
+        """删掉一条条件：清空它的槽位，选中位置上的下一条。"""
+        if slot not in self._active_slots:
+            return
+        order = self._active_slots.index(slot)
+        self._active_slots.remove(slot)
+        self._clear_condition_slot(slot)
+        if self._selected_slot != slot:
+            self._refresh_condition_list()
+            return
+        self._hide_condition_editor()
+        self._selected_slot = None
+        if self._active_slots:
+            self._select_condition(
+                self._active_slots[min(order, len(self._active_slots) - 1)])
         else:
-            top_op, groups = self._split_condition_groups(texts, conns)
-            parts = []
-            for op, group in groups:
-                text = (" 且 " if op == "and" else " 或 ").join(group)
-                if op:  # 同连接符连续段：编辑器自动加括号的地方
-                    text = f"（{text}）"
-                parts.append(text)
-            preview = (" 且 " if top_op == "and" else " 或 ").join(parts)
-        self.cond_preview.configure(text="条件预览: " + preview)
+            self._refresh_condition_list()
+
+    def _clear_condition_slot(self, slot):
+        """把槽位变量清回默认（删除后的槽位可以被再次添加）。"""
+        row = self.condition_rows[slot]
+        row["key_var"].set("")
+        row["metric_var"].set(self._metric_options("总伤亡")[0][0])
+        row["comparator_var"].set(">=")
+        row["value_var"].set("")
+        row["target_var"].set("")
+        row["window_var"].set("")
+        self._sync_condition_row_widgets(row)
 
     def _load_condition_controls(self):
         condition = self.trigger.get("condition") or self.DEFAULT_CONDITION_TEMPLATE
         leaves, conns = self._flatten_condition(condition)
+        self._active_slots = []
         for index, row in enumerate(self.condition_rows):
             if index >= len(leaves):
                 break
@@ -1105,10 +1310,16 @@ class TriggerEditDialog(BaseDialog):
             row["metric_var"].set(self._metric_code_to_label(key, rule.get("metric", "count")))
             row["target_var"].set(str(rule.get("target", "")) if rule.get("target") is not None else "")
             row["window_var"].set(str(rule.get("window", "")) if rule.get("window") is not None else "")
-            self._sync_condition_row(index)
+            self._active_slots.append(index)
+            self._sync_condition_row_widgets(row)
         for index, conn_var in enumerate(self.condition_connectors):
             conn_var.set(self._op_code_to_label(conns[index]) if index < len(conns)
                          else self.OPERATOR_LABELS[0][0])
+        if self._active_slots:
+            self._select_condition(self._active_slots[0])
+        else:
+            self._hide_condition_editor()
+            self._refresh_condition_list()
 
     def _collect_condition(self):
         rules = []
@@ -1225,24 +1436,21 @@ class TriggerEditDialog(BaseDialog):
                 in getattr(self, "fixed_chapter_names", set()))
 
     def _refresh_action_availability(self):
-        """固定文本章节内「插入文本」不可用（与文本流冲突，运行时被跳过）。"""
-        button = getattr(self, "action_buttons", {}).get("insert")
-        if button is not None:
-            try:
-                button.configure(state="disabled" if self._is_fixed_scope() else "normal")
-            except tk.TclError:
-                pass
+        """所在章节变化后刷新动作类型说明。
+
+        固定文本章节内「插入文本」与文本流冲突、运行时被跳过；动作类型改成
+        下拉后无法单独禁用其中一项，改为在说明里给出警示（见 _update_action_description）。
+        """
         self._update_action_description()
 
     def _update_action_description(self):
-        """只显示当前动作类型的详细参数说明。"""
+        """只显示当前动作类型的要点（2~3 行，固定区域）。"""
         title = action_label(self.current_action_type)
         description = self.ACTION_DESCRIPTIONS.get(self.current_action_type, "")
-        text = f"【{title}】\n{description}" if title else ""
+        text = f"{title}：{description}" if title else ""
         if self.current_action_type == "insert" and self._is_fixed_scope():
-            text += ("\n\n⚠ 所在章节是固定文本章节：插入文本要在 AI 对话历史里"
-                     "衔接并触发预生成，与文本流是两套推进模型，运行时会被跳过。"
-                     "请把这段内容写进脚本的逻辑段落。")
+            text += ("\n⚠ 所在章节是固定文本章节，与文本流是两套推进模型，"
+                     "插入文本运行时会被跳过。")
         self.action_description_label.configure(text=text)
 
     def _effect_template(self):
@@ -1294,18 +1502,15 @@ class TriggerEditDialog(BaseDialog):
                 if part:
                     pre_names.append(part)
 
-        # 校验前置条件是否存在，并检查循环依赖
+        # 校验前置条件是否存在，并检查是否把自己当作前置条件
         existing_names = {t["name"] for t in self.all_triggers if t.get("name") != name}
         for pn in pre_names:
-            if pn not in existing_names and pn != name:  # 自身不能作为前置条件
+            if pn not in existing_names and pn != name:
                 ui.ctk.dialogs.showerror("错误", f"前置条件名称 '{pn}' 不存在")
                 return
             if pn == name:
                 ui.ctk.dialogs.showerror("错误", "触发器不能将自身作为前置条件")
                 return
-        # 简单循环依赖检测（A->B, B->A）
-        # 构建依赖图，从当前名称开始，检查是否形成环（包括间接）
-        # 这里只做一次直接检查，更复杂需要递归，但暂不实现
 
         try:
             condition = self._collect_condition()
@@ -1322,52 +1527,42 @@ class TriggerEditDialog(BaseDialog):
             ui.ctk.dialogs.showerror("错误", f"所在章节 '{chapter_scope}' 不存在")
             return
 
-        # 章节效果覆盖表单字段（仅本动作生效）
+        # 各动作类型的字段已在 _collect_action_data 收集好；这里只做校验与规范化。
         if action_type == "effect":
             try:
-                duration = int(float(self.effect_duration_var.get()))
-            except ValueError:
+                duration = int(float(action_data.get("duration", 1)))
+            except (TypeError, ValueError):
                 ui.ctk.dialogs.showerror("错误", "章节效果覆盖的持续步数必须是数字")
                 return
             if duration < 1:
                 ui.ctk.dialogs.showerror("错误", "章节效果覆盖的持续步数至少为 1")
                 return
-            overrides = self._collect_effect_overrides()
-            if not overrides:
+            if not any(key in action_data for key in
+                       ("filter", "bgm_level", "voice_fx", "sensitivity")):
                 ui.ctk.dialogs.showerror(
                     "错误", "请至少勾选一个要覆盖的维度"
                             "（背景滤镜 / 音乐音量 / 语音效果 / 敏感效果）")
                 return
-            for key in ("filter", "bgm_level", "voice_fx", "sensitivity"):
-                action_data.pop(key, None)
-            action_data.update(overrides)
             action_data["duration"] = duration
 
-        # 窗口视效表单字段（仅窗口视效动作生效）
         if action_type == "fx":
             try:
-                fx_duration = float(self.fx_duration_var.get())
-            except ValueError:
-                ui.ctk.dialogs.showerror("错误", "视效的持续秒数必须是数字")
+                fx_duration = float(action_data.get("duration", 0.8))
+                fx_intensity = float(action_data.get("intensity", 60))
+            except (TypeError, ValueError):
+                ui.ctk.dialogs.showerror("错误", "视效的持续秒数与强度必须是数字")
                 return
             if not 0.1 <= fx_duration <= 10:
                 ui.ctk.dialogs.showerror("错误", "视效的持续秒数必须在 0.1~10 之间")
                 return
-            try:
-                fx_intensity = float(self.fx_intensity_var.get())
-            except ValueError:
-                ui.ctk.dialogs.showerror("错误", "视效的强度必须是数字")
-                return
             if not 0 <= fx_intensity <= 100:
                 ui.ctk.dialogs.showerror("错误", "视效的强度必须在 0~100 之间")
                 return
-            action_data["fx"] = self._fx_label_to_key(self.fx_var.get())
             action_data["duration"] = fx_duration
             action_data["intensity"] = fx_intensity
 
-        # 跳转章节表单字段（仅跳转动作生效）
         if action_type == "goto":
-            target = self._goto_label_to_scope(self.goto_var.get())
+            target = action_data.get("chapter") or ""
             if target and target not in self.chapter_names:
                 ui.ctk.dialogs.showerror(
                     "错误", f"目标章节 '{target}' 不存在，请先在「章节」页签添加")
@@ -1376,21 +1571,6 @@ class TriggerEditDialog(BaseDialog):
                 ui.ctk.dialogs.showerror(
                     "错误", "目标章节与所在章节相同，触发器触发后会立即被跳过")
                 return
-            action_data["chapter"] = target
-
-        # 插入段落表单字段（仅插入动作生效）
-        if action_type == "insert":
-            action_data["text"] = self.insert_text.get("1.0", "end-1c").strip()
-            action_data["text_type"] = self.insert_type_var.get()
-            action_data["highlight"] = bool(self.highlight_var.get())
-            action_data["delayed"] = bool(self.delayed_var.get())
-
-        # 选项表单字段（仅选项动作生效）
-        if action_type == "option":
-            action_data["options"] = [{"id": i, "prompt": entry.get().strip()}
-                                       for i, entry in enumerate(self.option_entries)
-                                       if entry.get().strip()]
-
 
         # 验证 condition 结构
         if not isinstance(condition, dict):
@@ -1472,13 +1652,11 @@ class TriggerEditDialog(BaseDialog):
         if action_type == "insert" and not action_data.get("text"):
             ui.ctk.dialogs.showerror("错误", "插入动作必须填写插入段落文本")
             return
-        if action_type == "option" and (not action_data.get("options")
-                                        or len(action_data["options"]) < 2):
-            ui.ctk.dialogs.showerror("错误", "选项动作至少需要 2 个选项")
-            return
-        if action_type == "option" and ("options" not in action_data or not isinstance(action_data["options"], list)):
-            ui.ctk.dialogs.showerror("错误", "选项类型必须包含 options 列表")
-            return
+        if action_type == "option":
+            options = action_data.get("options")
+            if not isinstance(options, list) or len(options) < 2:
+                ui.ctk.dialogs.showerror("错误", "选项动作至少需要 2 个选项")
+                return
 
         self.result = {
             "name": name,
