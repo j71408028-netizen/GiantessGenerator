@@ -23,10 +23,10 @@ from ui.ctk.dialogs import BaseDialog
 from ui.ctk.theme import (
     TRIGGER_BTN_TEXT, TRIGGER_CARD_BG, TRIGGER_CARD_BORDER,
     TRIGGER_CHECK_BG, TRIGGER_CHECK_BG_HOVER, TRIGGER_CMP_BTN,
-    TRIGGER_CMP_BTN_HOVER, TRIGGER_FIELD_BG, TRIGGER_FIELD_BORDER,
-    TRIGGER_FIELD_HOVER, TRIGGER_HINT, TRIGGER_KEY_BTN, TRIGGER_KEY_BTN_HOVER,
-    TRIGGER_LABEL, TRIGGER_METRIC_BTN, TRIGGER_METRIC_BTN_HOVER,
-    TRIGGER_TEXT, WIDGET_HOVER,
+    TRIGGER_CMP_BTN_HOVER, TRIGGER_ERR, TRIGGER_ERR_HOVER, TRIGGER_FIELD_BG,
+    TRIGGER_FIELD_BORDER, TRIGGER_FIELD_HOVER, TRIGGER_HINT, TRIGGER_KEY_BTN,
+    TRIGGER_KEY_BTN_HOVER, TRIGGER_LABEL, TRIGGER_METRIC_BTN,
+    TRIGGER_METRIC_BTN_HOVER, TRIGGER_TEXT, WIDGET_HOVER,
 )
 from ui.ctk.widgets import OptionButton
 
@@ -307,14 +307,14 @@ class TriggerEditDialog(BaseDialog):
     def _small_button(self, parent, text, command, width=76, danger=False):
         """卡片内的次要动作按钮（描边透明底，与设置页 / 章节页一致）。
 
-        danger=True 时用警示色描边（删除 / 移除这类破坏性操作）。
+        danger=True 时用警示色描边 + 淡色悬停（移除这类破坏性操作）。
         """
         return ctk.CTkButton(
             parent, text=text, width=width, height=28, font=self.UI_FONT,
             fg_color="transparent", border_width=1, corner_radius=8,
             text_color=TRIGGER_HINT,
-            hover_color=TRIGGER_CMP_BTN_HOVER if danger else TRIGGER_FIELD_HOVER,
-            border_color=TRIGGER_CMP_BTN if danger else TRIGGER_FIELD_BORDER,
+            hover_color=TRIGGER_ERR_HOVER if danger else TRIGGER_FIELD_HOVER,
+            border_color=TRIGGER_ERR if danger else TRIGGER_FIELD_BORDER,
             command=command)
 
     # ---------- 基础信息 ----------
@@ -496,10 +496,6 @@ class TriggerEditDialog(BaseDialog):
         self._refresh_effect_sens_hint()
         row += 1
 
-        self._form_hint(
-            frame, row,
-            "覆盖是逐维度的：只改勾选的维度，其余沿用章节默认。同名维度多条并存时"
-            "后触发的优先，到期逐条回退；换章立即清除全部未到期的覆盖。")
         return frame
 
     def _build_effect_voice_rows(self, parent):
@@ -1215,7 +1211,7 @@ class TriggerEditDialog(BaseDialog):
                           command=self._add_condition).pack(fill='x', pady=(2, 0))
 
     def _build_condition_preview_row(self, parent, order, slot):
-        """一行条件预览：点它就用下面的编辑行改它，右侧「删除」删掉这条。"""
+        """一行条件预览：点它就用下面的编辑行改它，右侧「移除」删掉这条。"""
         selected = slot == self._selected_slot
         text = f"{self.CONDITION_MARKS[order]} {self._rule_text_of(slot)}"
         if order > 0:
@@ -1227,12 +1223,9 @@ class TriggerEditDialog(BaseDialog):
                              cursor="hand2", font=self.UI_FONT,
                              text_color=TRIGGER_TEXT if selected else TRIGGER_HINT)
         label.pack(side='left', fill='x', expand=True, padx=(6, 4), pady=2)
-        ctk.CTkButton(row, text="删除", width=52, height=24, font=self.UI_FONT_SMALL,
-                      fg_color="transparent", border_width=1, corner_radius=8,
-                      text_color=TRIGGER_HINT, hover_color=TRIGGER_CMP_BTN_HOVER,
-                      border_color=TRIGGER_CMP_BTN,
-                      command=lambda s=slot: self._remove_condition(s)).pack(
-                          side='right', padx=(0, 4), pady=2)
+        self._small_button(row, "移除", lambda s=slot: self._remove_condition(s),
+                           width=52, danger=True).pack(
+                               side='right', padx=(0, 4), pady=2)
         for widget in (row, label):
             widget.bind("<Button-1>", lambda _event, s=slot: self._select_condition(s))
         row.bind("<Enter>", lambda _event, r=row: r.configure(fg_color=WIDGET_HOVER))

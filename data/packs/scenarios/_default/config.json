@@ -257,7 +257,8 @@
       "casualty_step": 0,
       "action_points_refund": 0,
       "custom_deltas": {},
-      "icon_path": ""
+      "icon_path": "",
+      "fixed_text": {}
     }
   ],
   "protagonist_title": "",

@@ -647,7 +647,8 @@ class ChapterTriggerManager(TreeviewManager):
     # ---------- 对话框 ----------
     def _chapter_dialog(self, item):
         """item 为 None 时新建，配色按预设轮换，避免新章节全是一个颜色。"""
-        if item is None:
+        is_new = item is None
+        if is_new:
             item = {"color": default_chapter_color(len(self._chapter_list()))}
         dlg = ChapterEditDialog(
             self, item,
@@ -655,6 +656,7 @@ class ChapterTriggerManager(TreeviewManager):
             scenario_id=self.scenario_editor.current_scenario_id,
             evolution_attrs=self.scenario_editor.evolution_attrs,
             all_chapters=self._chapter_list(),
+            is_new=is_new,
         )
         return dlg.result
 
