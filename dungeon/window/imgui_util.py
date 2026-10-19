@@ -10,6 +10,8 @@
 :func:`u32` 就做这一件事，于是那些常量的字面值**可以原样搬过来**，不必逐个换算。
 """
 
+import math
+
 from imgui_bundle import imgui
 
 
@@ -90,9 +92,22 @@ def _shape_log(u, v):
     return 0.0
 
 
+def _shape_gear(u, v):
+    """齿轮（设置）：带齿外圈 + 中心圆孔。"""
+    du, dv = u - 0.5, v - 0.5
+    radius = (du * du + dv * dv) ** 0.5
+    if radius <= 0.17:
+        return 0.0
+    teeth = 6
+    frac = (math.atan2(dv, du) / (2.0 * math.pi) * teeth) % 1.0
+    outer = 0.47 if abs(frac - 0.5) < 0.22 else 0.30
+    return 1.0 if radius <= outer else 0.0
+
+
 #: 工具条图标形状函数（归一化 uv → 0~1 不透明度）。与旧 DPG 组件包同一套
 #: 形状，P4 迁移组件包时从这里取，避免两处漂移。
-ICON_SHAPES = {"play": _shape_play, "camera": _shape_camera, "log": _shape_log}
+ICON_SHAPES = {"play": _shape_play, "camera": _shape_camera, "log": _shape_log,
+               "settings": _shape_gear}
 
 
 def icon_rgba(shape, size):

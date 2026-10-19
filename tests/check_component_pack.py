@@ -358,6 +358,9 @@ class _FakeCtx:
     def toggle_proc_log(self):
         self.toolbar_calls.append("proc_log")
 
+    def toggle_settings(self):
+        self.toolbar_calls.append("settings")
+
 
 def check_smoke(registry):
     """无 GUI 替身 ctx 上跑 build/layout/refresh/destroy，核对帧任务成对清理。"""

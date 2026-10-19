@@ -176,5 +176,61 @@ check("设置页读写副本设置仓库",
       "DungeonSettingsRepo" in _settings_page
       and "self.dungeon_settings_repo.update(" in _settings_page)
 
+# ---------------- 7. 副本窗口内的设置面板（覆盖层） ----------------
+from dungeon.window import fonts as window_fonts  # noqa: E402
+from dungeon.window import imgui_util as iu_panel  # noqa: E402
+from dungeon.window.overlay import OverlayHandler  # noqa: E402
+
+
+class _PanelWin(OverlayHandler):
+    """只提供覆盖层服务面所需的最小替身（不碰 imgui 上下文 / GL）。"""
+
+    def __init__(self):
+        self.calls = []
+
+    def _notify(self, text):
+        self.calls.append(("notify", text))
+
+    def set_dungeon_settings(self, patch, *, persist=True):
+        self.calls.append(("set", dict(patch), persist))
+        return {}
+
+
+_win = _PanelWin()
+check("初始没有覆盖层", _win.overlay_open() is None, _win.overlay_open())
+_win.toggle_settings()
+check("可调出副本设置覆盖层", _win.overlay_open() == "settings", _win.overlay_open())
+_win.toggle_settings()
+check("再次触发即关闭设置覆盖层", _win.overlay_open() is None, _win.overlay_open())
+_win.toggle_overlay("log")
+check("覆盖层白名单收下对话记录", _win.overlay_open() == "log", _win.overlay_open())
+_win.close_overlay()
+
+_win.toggle_settings()
+_win._apply_settings_live({"fps_max": 120.0})
+check("滑条式改动先只改内存（不逐帧落盘）",
+      _win.calls[-1] == ("set", {"fps_max": 120.0}, False), _win.calls[-1])
+check("连续改动被标脏", _win._settings_dirty is True, _win._settings_dirty)
+_win.close_overlay()
+check("关闭面板把攒下的改动落盘一次",
+      ("set", {}, True) in _win.calls and _win.overlay_open() is None, _win.calls)
+check("落盘后不再标脏", _win._settings_dirty is False, _win._settings_dirty)
+
+check("工具条图标含设置齿轮", "settings" in iu_panel.ICON_SHAPES)
+_gear = iu_panel.icon_rgba(iu_panel.ICON_SHAPES["settings"], 16)
+check("齿轮图标有可见像素", int(_gear[:, :, 3].max()) > 0)
+check("设置面板可循环挑选段落字体",
+      bool(window_fonts.font_family_choices()))
+
+_overlay_src = _src("dungeon", "window", "overlay.py")
+check("覆盖层提供设置面板的根层/顶层绘制入口",
+      "def _draw_overlay_root" in _overlay_src
+      and "def _draw_overlay_top" in _overlay_src
+      and "def _draw_settings_panel" in _overlay_src)
+
+_pack_toolbar = _src("dungeon", "window", "component_pack", "base.py")
+check("文本组件工具条也挂了设置入口",
+      '"toggle_settings"' in _pack_toolbar)
+
 print(f"PASSED ({_checked} assertions)")
 sys.exit(0)

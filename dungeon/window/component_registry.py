@@ -116,10 +116,11 @@ class DungeonComponent:
       也不得直接推进剧情）；顶部让位用 ``ctx.component_top_inset()``
       而不是去读兄弟组件的私有几何；
     - 覆盖层（见 dungeon/window/overlay.py）：``ctx.toggle_overlay("log")`` /
-      ``ctx.close_overlay()`` / ``ctx.overlay_open()``；覆盖层打开期间窗口进入
-      阅读模态（点击只关闭覆盖层，剧情推进挂起）；
+      ``ctx.toggle_overlay("settings")`` / ``ctx.close_overlay()`` /
+      ``ctx.overlay_open()``；覆盖层打开期间窗口进入阅读模态（点击只关闭
+      覆盖层，剧情推进挂起）；
     - 工具服务：``ctx.toggle_autoplay()`` / ``ctx.take_screenshot()`` /
-      ``ctx.toggle_proc_log()``。
+      ``ctx.toggle_proc_log()`` / ``ctx.toggle_settings()``。
 
     组件**不得**读窗口的私有属性（``_dpi_scale`` / ``_layout_w`` / ``_frame`` /
     ``_autoplay`` …）——守卫脚本的替身 ctx 只实现上面的服务面，越界即报错。

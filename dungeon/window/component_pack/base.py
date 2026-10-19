@@ -18,16 +18,18 @@ _DEFAULT_LABEL_COLOR = (255, 170, 210, 255)
 _DEFAULT_TEXT_COLOR = (240, 240, 245, 255)
 _BLINK_SECONDS = 0.65
 
-# 文本组件共享的悬浮工具条（自动播放 / 截图 / 日志面板）。
+# 文本组件共享的悬浮工具条（自动播放 / 截图 / 日志面板 / 副本设置）。
 _TOOLBAR_ACTIONS = (
     ("autoplay", "play", "自动播放（A）"),
     ("screenshot", "camera", "截图（F2）"),
     ("proclog", "log", "过程日志面板（F12）"),
+    ("settings", "settings", "副本设置（O）"),
 )
 _TOOLBAR_HANDLERS = {
     "autoplay": "toggle_autoplay",
     "screenshot": "take_screenshot",
     "proclog": "toggle_proc_log",
+    "settings": "toggle_settings",
 }
 _TOOLBAR_MARGIN = 12
 _TOOLBAR_ICON = 16

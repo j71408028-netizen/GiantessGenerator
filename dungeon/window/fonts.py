@@ -277,6 +277,31 @@ def resolve_serif_font():
     return (path, 0) if path else None
 
 
+#: 副本设置面板可循环挑选的段落字体 ``(显示名, 家族名)``。家族名与主设置页
+#: （``ui/ctk/fonts.py`` 的平台候选）同一套；窗口层不能 import ui，故另存一份。
+#: 解析仍走 :func:`resolve_font_files` 的候选链，未装该家族时静默回退。
+_FONT_PLATFORM_CHOICES = {
+    "win32": (("微软雅黑", "Microsoft YaHei"), ("黑体", "SimHei"),
+              ("宋体", "SimSun"), ("楷体", "KaiTi"),
+              ("仿宋", "FangSong"), ("等线", "DengXian")),
+    "darwin": (("苹方", "PingFang SC"), ("冬青黑体", "Hiragino Sans GB"),
+               ("黑体-简", "Heiti SC"), ("宋体", "Songti SC")),
+    "linux": (("思源黑体", "Noto Sans CJK SC"),
+              ("思源宋体", "Noto Serif CJK SC"),
+              ("文泉驿微米黑", "WenQuanYi Micro Hei"),
+              ("文泉驿正黑", "WenQuanYi Zen Hei")),
+}
+
+
+def font_family_choices():
+    """副本设置面板可循环挑选的段落字体：``((显示名, 家族名), ...)``。"""
+    if sys.platform.startswith("darwin"):
+        return _FONT_PLATFORM_CHOICES["darwin"]
+    if sys.platform.startswith("win"):
+        return _FONT_PLATFORM_CHOICES["win32"]
+    return _FONT_PLATFORM_CHOICES["linux"]
+
+
 #: 「缺字形」参考码位：Unicode 非字符，任何字体都不会映射它
 _MISSING_GLYPH_REF = "\U0010FFFE"
 
@@ -300,5 +325,6 @@ __all__ = [
     "TEXT_FONT_SIZE", "UI_FONT_SIZE", "BOLD_FONT_SIZE",
     "FONT_FALLBACK_PATHS", "BOLD_FONT_PATHS", "SERIF_FONT_PATHS",
     "FAMILY_FONT_FILES", "first_existing", "fontconfig_font", "resolve_font",
-    "resolve_font_files", "resolve_serif_font", "font_covers_cjk",
+    "resolve_font_files", "resolve_serif_font", "font_family_choices",
+    "font_covers_cjk",
 ]

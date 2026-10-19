@@ -1354,6 +1354,29 @@ def _check_overlay_service(win):
 _check_overlay_service.__name__ = "overlay-service"
 
 
+def _open_settings_panel(win):
+    """调出副本设置面板（走服务面，不依赖是否有待处理选项）。"""
+    win.toggle_overlay("settings")
+    assert win.overlay_open() == "settings", win.overlay_open()
+
+
+def _check_settings_panel_drawn(win):
+    """面板在真实窗口里渲染了几帧：卡片几何应已由 ``_draw_settings_panel`` 落定。"""
+    assert win.overlay_open() == "settings", win.overlay_open()
+    rect = getattr(win, "_overlay_rect", None)
+    assert rect and rect[2] > 0 and rect[3] > 0, rect
+
+
+def _close_settings_panel(win):
+    win.close_overlay()
+    assert win.overlay_open() is None, win.overlay_open()
+
+
+_open_settings_panel.__name__ = "settings-open"
+_check_settings_panel_drawn.__name__ = "settings-drawn"
+_close_settings_panel.__name__ = "settings-close"
+
+
 def scene_text_components():
     """文本组件家族冒烟：text_card / text_nvl 接管显示 + text_component 字段。"""
     for cid in ("text_card", "text_nvl"):
@@ -1400,6 +1423,18 @@ def scene_text_components():
                           "components": ["attr_bar"],
                           "components_params": {}})
     check("服务面：覆盖层与挂起断言通过",
+          bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
+          win._check_results)
+
+    # 服务面：副本设置面板在真实窗口里调出、渲染若干帧、关闭
+    win, result = _make_window(
+        [("click", 2), ("sleep", 0.4), ("check", _open_settings_panel),
+         ("sleep", 0.4), ("check", _check_settings_panel_drawn),
+         ("check", _close_settings_panel), ("sleep", 0.2), ("close", None)],
+        explore=False,
+        config_overrides={"text_component": "text_card",
+                          "components": [], "components_params": {}})
+    check("服务面：副本设置面板调出/渲染/关闭",
           bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
           win._check_results)
 

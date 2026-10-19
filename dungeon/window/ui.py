@@ -3,7 +3,7 @@
 本文件现覆盖 P1「窗口骨架」/ P2「阅读主循环」/ P3「入口阶段」/ P4「组件包与
 覆盖层」/ P5「视效与平台能力」/ P6「小游戏舞台接线」：
 **建主窗口 + 背景铺满 + 视口尺寸/DPI + 字体两档 + 底部渐变式文本区 +
-上屏游标 + 继续指示 ▼ + 三图标工具条 + 轻通知 + 输入接线 + 入口方案面板 +
+上屏游标 + 继续指示 ▼ + 四图标工具条 + 轻通知 + 输入接线 + 入口方案面板 +
 结局图标轮播 + 窗口视效（闪光/振动/反色/色差）+ F2 截图 + F11 全屏 +
 小游戏覆盖层舞台（帧末顶层窗口）**。
 迁移的最后两阶段 P7（autopilot 改读值快照）与 P8（清场：删 dearpygui /
@@ -42,8 +42,8 @@ DPG 时代                 立即模式
 ``story_history[i]["text"]``，立即模式每帧重画，天然就是"改写即上屏"。
 
 **阅读区与浮层（P2）**：正文区按旧组件 ``text_gradient`` 口径重画成"底部渐变
-衬底 + 最近 N 个显示段落 + 闪烁继续指示 ▼"，并补上三图标工具条（播放 / 截图 /
-过程日志）。入口面板、工具条、选项弹窗这些浮层一律在根窗口 ``end()`` 之后作为
+衬底 + 最近 N 个显示段落 + 闪烁继续指示 ▼"，并补上四图标工具条（播放 / 截图 /
+过程日志 / 副本设置）。入口面板、工具条、选项弹窗这些浮层一律在根窗口 ``end()`` 之后作为
 **顶层窗口**绘制，且必须用 :func:`_panel_flags`（不带
 ``no_bring_to_front_on_focus``）——否则会被铺满客户区的根窗口整个盖住。详见
 :meth:`DungeonWindowUI._draw_frame`。
@@ -144,7 +144,7 @@ _INDICATOR_TEXT = "▼"
 _BLINK_SECONDS = 0.65
 _BLINK_TASK = "text:blink"
 
-# 文本功能工具条：圆角半透明容器 + 三个图标按钮（图标纹理程序化生成）
+# 文本功能工具条：圆角半透明容器 + 四个图标按钮（图标纹理程序化生成）
 _TOOLBAR_MARGIN = 12
 _TOOLBAR_ICON = 16        # 图标边长（px @ dpi=1）
 _TOOLBAR_PAD = 4          # 按钮内边距
@@ -157,6 +157,7 @@ _TOOLBAR_ACTIONS = (
     ("play", "自动播放（A）"),
     ("camera", "截图（F2）"),
     ("log", "过程日志（F12）"),
+    ("settings", "副本设置（O）"),
 )
 
 # ---------- 入口阶段面板（P3：与旧 DPG panel_controls / panel_endings 同口径） ----------
@@ -454,6 +455,9 @@ class DungeonWindowUI:
           才发现；根窗口保留该标志，点背景时不会抢到最前。
         - 小游戏舞台（P6，``minigame/stage.py``）：同样在根窗口 ``end()`` 之后
           绘制，但是**最后**一个顶层窗口，铺满客户区、压在工具条与选项弹窗之上。
+        - 覆盖层（``overlay.py``）：对话记录整块画在根窗口内；副本设置面板的
+          遮罩画在根窗口内、卡片本身经 :meth:`OverlayHandler._draw_overlay_top`
+          在 ``end()`` 之后作为顶层窗口绘制（打开期间工具条与选项弹窗让位）。
         """
         io = imgui.get_io()
         w, h = float(io.display_size.x), float(io.display_size.y)
@@ -498,7 +502,7 @@ class DungeonWindowUI:
                 self._draw_story(w, h)
                 if callable(draw_components):
                     draw_components()
-            draw_overlay = getattr(self, "_draw_log_overlay", None)
+            draw_overlay = getattr(self, "_draw_overlay_root", None)
             if callable(draw_overlay):
                 draw_overlay(w, h)
         self._draw_notification(w, h)
@@ -514,10 +518,16 @@ class DungeonWindowUI:
             self._draw_entry_panel(w, h)
             self._draw_ending_panel(w, h)
         else:
-            # 工具条随文本组件走：组件接管显示时由组件自己画（P4）
-            if not self._text_owned_by_component():
-                self._draw_toolbar(w, h)
-            self._draw_option_dialog(w, h)
+            # 工具条随文本组件走：组件接管显示时由组件自己画（P4）。
+            # 设置面板打开时工具条与选项弹窗让位——遮罩画在根窗口层，
+            # 工具条是更上层的顶层窗口，不让位会浮在遮罩之上显得脏。
+            if self.overlay_open() != "settings":
+                if not self._text_owned_by_component():
+                    self._draw_toolbar(w, h)
+                self._draw_option_dialog(w, h)
+            draw_overlay_top = getattr(self, "_draw_overlay_top", None)
+            if callable(draw_overlay_top):
+                draw_overlay_top(w, h)
 
         # 小游戏舞台（P6）：帧末最后绘制的顶层窗口，铺满客户区，因而压在工具条与
         # 选项弹窗之上（与浮层同一条 z 序规矩，见 50-analysis §4）。无舞台时是空判。
@@ -686,7 +696,7 @@ class DungeonWindowUI:
 
     # ==================== 绘制：会话正文（text 底部渐变式） ====================
     #
-    # P2 阅读主循环：底部渐变衬底 + 最近若干显示段落 + 闪烁继续指示 ▼ + 三图标
+    # P2 阅读主循环：底部渐变衬底 + 最近若干显示段落 + 闪烁继续指示 ▼ + 四图标
     # 工具条。与旧 DPG 组件包 ``text_gradient`` 同口径（渐变占视口底部 45%、
     # 只呈现最近 N 个显示段落）；区别只在实现——立即模式没有控件树，正文每帧
     # 从 ``story_history`` 现画，上屏游标"原地改写 text"天然就是"改写即上屏"。
@@ -859,7 +869,7 @@ class DungeonWindowUI:
         return float(icon + 2 * pad + 2 * frame_y)
 
     def _make_toolbar_textures(self):
-        """``post_init``（GL 就绪）后把三个程序化图标上传成 ``TextureGpu``。"""
+        """``post_init``（GL 就绪）后把四个程序化图标上传成 ``TextureGpu``。"""
         s = self._dpi_scale
         icon = max(6, round(_TOOLBAR_ICON * s))
         textures = {}
@@ -873,9 +883,9 @@ class DungeonWindowUI:
         self._toolbar_textures = textures
 
     def _draw_toolbar(self, w, h):
-        """文本框右下角的三个图标按钮：播放 / 截图 / 过程日志。
+        """文本框右下角的四个图标按钮：播放 / 截图 / 过程日志 / 副本设置。
 
-        只转调窗口同名服务（与 A / F2 / F12 等效），按钮本身不推进剧情；悬停
+        只转调窗口同名服务（与 A / F2 / F12 / O 等效），按钮本身不推进剧情；悬停
         状态写进 ``_toolbar_hovered``，供 ``_component_toolbar_hovered`` 判定
         "点在按钮上"而不是"点屏推进"。
         """
@@ -941,7 +951,8 @@ class DungeonWindowUI:
         """工具条按钮 → 与快捷键等效的窗口服务。"""
         handler = {"play": self.toggle_autoplay,
                    "camera": self.take_screenshot,
-                   "log": self.toggle_proc_log}.get(key)
+                   "log": self.toggle_proc_log,
+                   "settings": self.toggle_settings}.get(key)
         if callable(handler):
             handler()
 
@@ -1251,6 +1262,8 @@ class DungeonWindowUI:
             self._on_log_key()
         if imgui.is_key_pressed(key.a):
             self._on_autoplay_hotkey()
+        if imgui.is_key_pressed(key.o):
+            self._on_settings_key()
         if imgui.is_key_pressed(key.escape):
             self._on_escape_key()
         if (imgui.is_key_pressed(key.space) or imgui.is_key_pressed(key.enter)
@@ -1268,8 +1281,10 @@ class DungeonWindowUI:
         if self._component_toolbar_hovered():
             return
         if self.overlay_open():
-            # 阅读模态：点击只关闭覆盖层，不推进剧情
-            self.close_overlay()
+            # 阅读模态：点击只关闭覆盖层，不推进剧情。设置面板是可交互卡片，
+            # 点在面板内（空白处或控件外）不算「点击外部」，不关闭。
+            if not (self.overlay_open() == "settings" and self._point_in_overlay()):
+                self.close_overlay()
             return
         self._on_next_step()
 

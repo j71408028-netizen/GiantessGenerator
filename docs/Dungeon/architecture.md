@@ -76,7 +76,7 @@
 | AI 客户端 | `self.ai_client`（`engine` 惰性检查，缺失时 `_show_ai_error`） | `window/base.py::create_client`（按 `core/netproxy` 注入代理） |
 | 联网失败说清原因 | `describe_ai_error`（AI）/ `_describe_synth_error`（语音），同口径按 HTTP 状态码分类 | 各暴露点调用（见 §4.5） |
 | 剧情压缩用 AI | `StorySummarizer.maybe_compress(ai_client=...)`，失败回退内部算法 | `window/engine.py` |
-| 副本独占设置（音量 / 字体 / 记忆窗口 / 自动回放 / 帧率） | `dungeon_settings` 字典 + `dungeon_settings_repo`（读 / 写）；缺省空表退回 `dungeon/settings.py` 常量 | `ChildHost` 子进程按数据目录自建（见 §8）；窗口内改走 `base.set_dungeon_settings` |
+| 副本独占设置（音量 / 字体 / 记忆窗口 / 自动回放 / 帧率） | `dungeon_settings` 字典 + `dungeon_settings_repo`（读 / 写）；缺省空表退回 `dungeon/settings.py` 常量 | `ChildHost` 子进程按数据目录自建（见 §8）；窗口内改走 `base.set_dungeon_settings`，入口是覆盖层设置面板（`window/overlay.py`，O / 工具条齿轮） |
 
 ## 4. 领域层模块地图
 
@@ -328,6 +328,11 @@ data/
 一个写者（会话期主窗口隐藏），子进程可直读写；共享的 `settings.json` 有「父进程持有
 整份 dict + 世界包锁键」的语义，子进程直写会竞态。旧键由 `SettingsRepo.load` 一次性
 搬进新文件，旧用户无感。
+
+窗口内的入口是**副本设置面板**（`dungeon/window/overlay.py`，`O` / 工具条齿轮图标）：
+半透明全屏遮罩 + 居中卡片，列出这几项独占设置，直接调 `base.set_dungeon_settings`
+就地生效并落盘（音量 / 帧率立即生效；段落字体需重建字体图集，故写盘后**下次进入副本**
+生效）。拖动滑条只改内存、松手或关面板时落一次盘，避免逐帧写文件。
 
 写盘统一走 `persistence/json_store.py`：**同目录临时文件 → fsync → 覆盖前留一份 `.bak` → `os.replace`**；
 读取用 `load_json_with_backup`（主文件损坏时自愈回退 `.bak`）。禁止再出现 `open(path, 'w')` 直接截断写。
