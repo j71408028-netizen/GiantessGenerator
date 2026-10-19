@@ -41,7 +41,8 @@ def check(cond, message):
 def _assert_roundtrip(kwargs, label):
     """序列化 → JSON 落盘读回 → 反序列化，并返回还原后的 kwargs。"""
     payload = serialize_launch(kwargs)
-    for key in ("parent", "host", "gui"):
+    for key in ("parent", "host", "gui", "scenario_repo", "character_repo",
+                "dungeon_settings_repo"):
         check(key not in payload, f"{label}: 载荷不应含宿主侧参数 {key}")
     try:
         json.dumps(payload, ensure_ascii=False)
@@ -81,7 +82,12 @@ def main():
         "body_parts": {"head": 1.0},
         "character": character, "character_repo": object(),
         "gui": object(),             # 宿主侧：剔除
-        "settings": {"story_recent_count": 20, "net_proxy": ""},
+        "dungeon_settings_repo": object(),   # 宿主侧：剔除
+        "settings": {"net_proxy": "", "info_update_rate": 0.5},
+        "dungeon_settings": {"audio_levels": {"master": 100, "music": 80,
+                                              "voice": 100, "sfx": 100},
+                             "dungeon_font": "", "story_recent_count": 20,
+                             "auto_save_replay": False, "fps_max": 60},
         "mode": "explore",
         "scenario_ids": ["scenario-a", "scenario-b"],
         "host": object(),            # 宿主侧：剔除
@@ -97,8 +103,8 @@ def main():
           "探索模式: 角色演化表还原为记录对象")
     for key in ("name", "height", "greed", "tags", "merged_landmarks",
                 "merged_quips", "detail_pools", "ai_config", "settings",
-                "scenario_ids", "mode", "dungeon_font", "body_parts",
-                "uploaded_image"):
+                "dungeon_settings", "scenario_ids", "mode", "dungeon_font",
+                "body_parts", "uploaded_image"):
         check(restored[key] == kwargs[key], f"探索模式: {key} 往返相等")
 
     # ---------- 形态二：探索模式无角色（参数面板直接进副本） ----------

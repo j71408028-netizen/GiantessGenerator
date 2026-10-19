@@ -506,7 +506,7 @@ AI 生成**（`normalize_fixed_text` 把缺路径的配置归一成空 dict，�
 |---|---|
 | 压缩时机 | 缓冲达到 `block_size`（默认 20 段）压一个块；`_enter_chapter` 离开章节时 `flush_chapter` 强制压本章余量；结局生成前再 flush 一次 |
 | 压缩方式 | 优先用 AI 生成不超过 100 字的第三人称概要；AI 不可用 / 失败时回退内部算法（首句 + 高频词 + 末句）；回放模式无 AI，走内部算法 |
-| 提示词内容 | `build_user_prompt` 注入 `prompt_block()`：**截至此刻的全部压缩概要** + **最近 N 段原文**；N = `settings["story_recent_count"]`，默认 20，设置项「剧情概要保留段数」（1~200） |
+| 提示词内容 | `build_user_prompt` 注入 `prompt_block()`：**截至此刻的全部压缩概要** + **最近 N 段原文**；N = 副本独占设置 `story_recent_count`（`dungeon_settings.json`），默认 20，设置项「剧情概要保留段数」（1~200） |
 | 存放 | 只存内存（`summaries`），不写入回放文件；回放按同样的块大小重新累计，不依赖保存时的概要内容 |
 
 ---
@@ -571,9 +571,10 @@ Solea / Bulla 耦合等级的对话分支会给每句台词标 `@说话人@`（�
 | 合成代理 | `settings["net_proxy"]` → `core/netproxy`（**语音与 AI 共用**）→ `app/shell.py` 与 `window/base.py` 各设一次（子进程独立）；失败原因见 `speech.last_synth_error()` |
 | 触发朗读 | `window/ui.py::_speak_item`（显示单元定稿时，叙述句无 `speaker` 直接返回） |
 
-> **玩家侧还有一层**：设置页的四条总线滑条（`settings["audio_levels"]`，总音量 /
-> 音乐 / 语音 / 音效）在方案档位之外再乘一次，装进混音层见
-> `dungeon/audio/buses.py::set_bus_levels`（副本窗口开局时按 settings 装配）。
+> **玩家侧还有一层**：设置页的四条总线滑条（副本独占设置
+> `audio_levels`，存 `data/user/dungeon_settings.json`；总音量 / 音乐 / 语音 /
+> 音效）在方案档位之外再乘一次，装进混音层见
+> `dungeon/audio/buses.py::set_bus_levels`（副本窗口开局时按副本设置装配）。
 > 于是「她说什么」的响度 = **方案档位 × 总线电平 × 总控电平**。
 >
 > **「不想听语音」就是语音电平拧到 0**——原先独立总开关 `settings["dungeon_voice_enabled"]` 已撤掉。

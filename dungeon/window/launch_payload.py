@@ -11,11 +11,13 @@
 
 规则：
 
-- ``parent`` / ``host`` / ``gui`` / ``scenario_repo`` / ``character_repo``
-  是宿主侧概念：``parent`` 由子进程自行给 ``None``，``host`` 由子进程换成
-  ``ChildHost``，两个仓库由子进程按数据目录自建（与世界包状态一致），
-  ``gui`` 在子进程里没有对应物（其两项实际用途已分别化解——设置改经
-  ``settings`` 参数传入，行动点数扣除走 ``StateService`` 的静态入口）；
+- ``parent`` / ``host`` / ``gui`` / ``scenario_repo`` / ``character_repo`` /
+  ``dungeon_settings_repo`` 是宿主侧概念：``parent`` 由子进程自行给 ``None``，
+  ``host`` 由子进程换成 ``ChildHost``，两个仓库由子进程按数据目录自建（与世界包
+  状态一致），``dungeon_settings_repo`` 同样由子进程自建（副本独占设置文件，
+  见 ``persistence/dungeon_settings_repo.py``），``gui`` 在子进程里没有对应物
+  （其两项实际用途已分别化解——设置改经 ``settings`` 参数传入，行动点数扣除走
+  ``StateService`` 的静态入口）；
 - ``personality`` / ``preset`` / ``character`` 是 dataclass，落成 ``asdict``，
   还原时用各自的 ``from_dict`` / 字段过滤构造（与仓库的存档序列化同一套
   往返，见 ``persistence/character_repo.py``）；
@@ -30,7 +32,8 @@ from dataclasses import asdict, fields
 from core.models import BodyPreset, CharacterSnapshot, Personality
 
 #: 宿主侧概念参数：序列化时剔除，由子进程侧自行提供（host/仓库）或不再需要
-_HOST_SIDE_KEYS = ("parent", "host", "gui", "scenario_repo", "character_repo")
+_HOST_SIDE_KEYS = ("parent", "host", "gui", "scenario_repo", "character_repo",
+                   "dungeon_settings_repo")
 
 #: dataclass 参数 -> 还原构造器
 _DATACLASS_KEYS = {

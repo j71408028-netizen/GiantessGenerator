@@ -778,9 +778,9 @@ def scene_dialogue_voice():
         def _mute(win):
             # 玩家把「音量」里的语音拧到 0（设置里的全局开关已撤掉）：
             # 方案配置不再看，一句都不该念——也不该白合成一次
-            levels = dict(win.settings.get("audio_levels") or {})
+            levels = dict(win.dungeon_settings.get("audio_levels") or {})
             levels[buses_mod.BUS_VOICE] = 0
-            win.settings["audio_levels"] = levels
+            win.dungeon_settings["audio_levels"] = levels
             buses_mod.set_bus_levels(levels)
             calls.clear()
             win._speak_item({"speaker": "自检角色", "text": "调 0 后不该出声"})

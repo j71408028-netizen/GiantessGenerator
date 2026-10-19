@@ -274,43 +274,51 @@ check("describe 用档位中文名",
 
 # ---------------- 11. 设置缺省（公开 load()，不读私有 _defaults） ----------------
 from persistence.settings_repo import SettingsRepo  # noqa: E402
-
-_tmp_dir = tempfile.mkdtemp(prefix="audio_buses_settings_")
-os.makedirs(os.path.join(_tmp_dir, "user"), exist_ok=True)
-_settings_path = os.path.join(_tmp_dir, "user", "settings.json")
+from persistence.dungeon_settings_repo import DungeonSettingsRepo  # noqa: E402
 
 
-def _write_settings(payload):
-    with open(_settings_path, "w", encoding="utf-8") as handle:
+def _fresh_dir():
+    d = tempfile.mkdtemp(prefix="audio_buses_settings_")
+    os.makedirs(os.path.join(d, "user"), exist_ok=True)
+    return d
+
+
+def _write_settings(data_dir, payload):
+    with open(os.path.join(data_dir, "user", "settings.json"), "w",
+              encoding="utf-8") as handle:
         json.dump(payload, handle)
 
 
-# 空数据目录 = 全新安装：load() 补全缺省后返回的就是缺省值本身
-_defaults_loaded = SettingsRepo(data_dir=_tmp_dir).load()
-check("设置缺省含四条总线电平（取自总线单一真相源）",
+# 空数据目录 = 全新安装：副本独占设置补全缺省后返回的就是缺省值本身
+_defaults_loaded = DungeonSettingsRepo(data_dir=_fresh_dir()).load()
+check("副本独占设置缺省含四条总线电平（取自总线单一真相源）",
       _defaults_loaded.get("audio_levels") == buses.DEFAULT_BUS_LEVELS,
       _defaults_loaded.get("audio_levels"))
-check("设置缺省不再有语音总开关（撤掉的选项不该留在缺省里）",
-      "dungeon_voice_enabled" not in _defaults_loaded)
+check("共享设置里不再有音频电平（已搬进 dungeon_settings.json）",
+      "audio_levels" not in SettingsRepo(data_dir=_fresh_dir()).load())
 
-# ---------------- 11b. 旧键 dungeon_voice_enabled → 语音总线电平 ----------------
+# ---------------- 11b. 旧键 dungeon_voice_enabled → 语音总线电平（随迁移搬走） ----------------
 
+_dir = _fresh_dir()
+_write_settings(_dir, {"dungeon_voice_enabled": False,
+                       "audio_levels": {bus: 100 for bus in buses.BUSES}})
+_shared = SettingsRepo(data_dir=_dir).load()
+_dungeon = DungeonSettingsRepo(data_dir=_dir).load()
+check("旧开关关着 → 语音电平折算成 0（其余总线不动），落在副本设置里",
+      _dungeon.get("audio_levels", {}).get(buses.BUS_VOICE) == 0
+      and _dungeon["audio_levels"].get(buses.BUS_MUSIC) == 100
+      and "audio_levels" not in _shared
+      and "dungeon_voice_enabled" not in _shared,
+      (sorted(_shared), _dungeon.get("audio_levels")))
 
-_write_settings({"dungeon_voice_enabled": False,
-                 "audio_levels": {bus: 100 for bus in buses.BUSES}})
-_loaded = SettingsRepo(data_dir=_tmp_dir).load()
-check("旧开关关着 → 语音电平折算成 0（其余总线不动）",
-      _loaded.get("audio_levels", {}).get(buses.BUS_VOICE) == 0
-      and _loaded["audio_levels"].get(buses.BUS_MUSIC) == 100
-      and "dungeon_voice_enabled" not in _loaded,
-      (sorted(_loaded), _loaded.get("audio_levels")))
-
-_write_settings({"dungeon_voice_enabled": True})
-_loaded = SettingsRepo(data_dir=_tmp_dir).load()
+_dir = _fresh_dir()
+_write_settings(_dir, {"dungeon_voice_enabled": True})
+_shared = SettingsRepo(data_dir=_dir).load()
+_dungeon = DungeonSettingsRepo(data_dir=_dir).load()
 check("旧开关开着 → 只删键，不碰电平",
-      _loaded.get("audio_levels") == buses.DEFAULT_BUS_LEVELS
-      and "dungeon_voice_enabled" not in _loaded,
-      _loaded.get("audio_levels"))
+      _dungeon.get("audio_levels") == buses.DEFAULT_BUS_LEVELS
+      and "dungeon_voice_enabled" not in _shared,
+      _dungeon.get("audio_levels"))
 
 # ---------------- 12. 播放路径接线 ----------------
 # 播放侧真的走总线：用假后端实测起播音量——源码里出现某个字符串不算数。

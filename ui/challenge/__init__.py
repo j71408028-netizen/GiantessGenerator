@@ -558,8 +558,6 @@ class ChallengeModePanel(ctk.CTkFrame):
 
         gui_settings = self.gui._settings_repo.load()
         ai_config = resolve_ai_config(gui_settings)
-        from ui.ctk.fonts import dungeon_font_default
-        dungeon_font = gui_settings.get("dungeon_font", dungeon_font_default())
 
         landmark_styles = data.get("landmark_styles", [])
         quip_styles_data = data.get("quip_styles", [])
@@ -590,7 +588,7 @@ class ChallengeModePanel(ctk.CTkFrame):
             detail_pools=self.gui.context.detail_pools, height=height,
             ai_config=ai_config,
             greed=greed, is_replay=False, replay_data=None,
-            scenario_id=scenario_id, dungeon_font=dungeon_font, body_parts=body_parts,
+            scenario_id=scenario_id, body_parts=body_parts,
             character=None, settings=gui_settings, mode="challenge",
         )
 

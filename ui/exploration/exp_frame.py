@@ -567,10 +567,8 @@ class ExplorationPanel(ctk.CTkFrame):
 
     def _launch_dungeon_with_data(self, data: dict):
         from ui.hosting.dungeon_spawner import launch_dungeon_subprocess
-        from ui.ctk.fonts import dungeon_font_default
 
         ai_config = resolve_ai_config(self.app.settings)
-        dungeon_font = self.app.settings.get("dungeon_font", dungeon_font_default())
 
         dungeons = self.app._scenario_repo.list_all()
         if not dungeons:
@@ -600,7 +598,6 @@ class ExplorationPanel(ctk.CTkFrame):
             detail_pools=self.context.detail_pools,
             ai_config=ai_config,
             is_replay=False, replay_data=None,
-            dungeon_font=dungeon_font,
             body_parts=data.get("body_parts", {}),
             character=self.current_state,
             settings=self.app.settings,

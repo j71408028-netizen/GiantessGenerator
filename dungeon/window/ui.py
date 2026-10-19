@@ -94,7 +94,7 @@ from dungeon.window.background import PixelWorker
 from dungeon.window.fonts import (BOLD_FONT_SIZE, TEXT_FONT_SIZE, UI_FONT_SIZE,
                                   resolve_font_files)
 from dungeon.window.glfw_fullscreen import FULLSCREEN
-from dungeon.window.runner import WindowRunner
+from dungeon.window.runner import DEFAULT_FPS_MAX, WindowRunner
 
 # ---------- 颜色（沿用 DPG 时代的 0~255 四元组字面值，经 iu.u32 打包） ----------
 _TEXT_COLOR = (255, 255, 255, 255)
@@ -298,6 +298,8 @@ class DungeonWindowUI:
             min_width=round(800 * self._dpi_scale),
             min_height=round(500 * self._dpi_scale),
             dpi_scale=self._dpi_scale,
+            # 帧率上限来自副本独占设置（窗口内可改，见 base.set_dungeon_settings）
+            fps_max=self.dungeon_settings.get("fps_max", DEFAULT_FPS_MAX),
             on_post_init=self._setup_imgui,
             on_load_fonts=self._load_fonts,
             on_frame_start=self._on_frame_start,
@@ -359,8 +361,8 @@ class DungeonWindowUI:
         退出时会在 ``IM_ASSERT(Pixels != 0)`` 上炸。
         """
         # 家族名 → (常规文件, 粗体文件)：解析规则全在 dungeon/window/fonts.py。
-        # 家族名来自设置的「副本字体」（base.__init__ 存进 self.dungeon_font，
-        # 无设置时是宿主的平台兜底家族名）。
+        # 家族名来自副本独占设置里的「副本字体」（base.__init__ 存进
+        # self.dungeon_font，未设置时是宿主的平台兜底家族名）。
         font_path, bold_path = resolve_font_files(
             getattr(self, "dungeon_font", "") or "")
         if not font_path:

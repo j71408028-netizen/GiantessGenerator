@@ -76,6 +76,7 @@
 | AI 客户端 | `self.ai_client`（`engine` 惰性检查，缺失时 `_show_ai_error`） | `window/base.py::create_client`（按 `core/netproxy` 注入代理） |
 | 联网失败说清原因 | `describe_ai_error`（AI）/ `_describe_synth_error`（语音），同口径按 HTTP 状态码分类 | 各暴露点调用（见 §4.5） |
 | 剧情压缩用 AI | `StorySummarizer.maybe_compress(ai_client=...)`，失败回退内部算法 | `window/engine.py` |
+| 副本独占设置（音量 / 字体 / 记忆窗口 / 自动回放 / 帧率） | `dungeon_settings` 字典 + `dungeon_settings_repo`（读 / 写）；缺省空表退回 `dungeon/settings.py` 常量 | `ChildHost` 子进程按数据目录自建（见 §8）；窗口内改走 `base.set_dungeon_settings` |
 
 ## 4. 领域层模块地图
 
@@ -99,6 +100,7 @@
 | `schema.py` | 方案配置字段**单一真相源** | `SCENARIO_FIELDS` / `CHAPTER_FIELDS` / `TRIGGER_FIELDS` / `FieldSpec` / `empty_scenario_config()` |
 | `validate.py` | 结构化诊断（error / warning / info） | `validate_scenario_config(config, scenario_dir=...)`、`has_errors`、`format_diagnostics` |
 | `terms.py` | 术语与持久化契约常量 | `SCENARIO_ID_KEY`、`DEFAULT_SCENARIO_ID`、旧键迁移与兼容读取 |
+| `settings.py` | 副本独占设置的键名与缺省（单一真相源，见 §8） | `defaults()`、`LEGACY_KEYS`、`DEFAULT_FPS_MAX`、`DEFAULT_STORY_RECENT_COUNT` |
 
 ### 4.1 窗口层 mixin 组装顺序
 
@@ -316,8 +318,16 @@ data/
       报告/<名>_报告_<时间戳>[_未完成].txt
   user/
       endings.json  replays/  reports/  （挑战模式与无角色场景）
-      settings.json  api_keys.json  address_registry.json
+      settings.json  dungeon_settings.json  api_keys.json  address_registry.json
 ```
+
+`settings.json` 只存与主程序**共用**的偏好；副本**独占**的运行时设置（音频总线电平、
+段落字体、记忆窗口大小、自动保存回放、帧率上限）住在 `user/dungeon_settings.json`
+（`persistence/dungeon_settings_repo.py`，键名与缺省见 `dungeon/settings.py`）。
+独立成文件是因为副本会话跑在子进程、又要在窗口内直接改并落盘：独占文件同一时刻只有
+一个写者（会话期主窗口隐藏），子进程可直读写；共享的 `settings.json` 有「父进程持有
+整份 dict + 世界包锁键」的语义，子进程直写会竞态。旧键由 `SettingsRepo.load` 一次性
+搬进新文件，旧用户无感。
 
 写盘统一走 `persistence/json_store.py`：**同目录临时文件 → fsync → 覆盖前留一份 `.bak` → `os.replace`**；
 读取用 `load_json_with_backup`（主文件损坏时自愈回退 `.bak`）。禁止再出现 `open(path, 'w')` 直接截断写。

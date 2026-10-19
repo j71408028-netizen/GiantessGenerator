@@ -34,6 +34,7 @@
 | 显示组件（文本栏 / 属性条 / 过程日志）与组件参数 | [窗口](window.md) §1、`dungeon/window/component_pack/` | `check_component_pack.py`、`dungeon_autopilot.py --scene text-components` |
 | 新增 / 改名标识符（scenario vs dungeon） | [术语表](domain_terms.md) §2 | `check_scenario_naming.py` |
 | 写盘方式（配置 / 回放 / 报告） | [架构](architecture.md) §8、[窗口](window.md) §5-C10 | `check_dungeon_finalize.py` |
+| 副本独占设置（音量 / 段落字体 / 记忆窗口 / 自动回放 / 帧率） | [架构](architecture.md) §8、`dungeon/settings.py` | `check_dungeon_settings.py` |
 | 自动驾驶脚本 / 自检场景 | [调试自动化](window_automation.md) | `dungeon_autopilot.py` |
 | 查「为什么是这样」/ 改造经过 / 历史实测 | [历史档案](history/README.md)（只读、仅供溯源） | — |
 
@@ -46,10 +47,12 @@
 | `dungeon/minigame_pack.py` | 领域层 | 小游戏数据包读取（manifest / 参数声明），validate 与 window/minigame 共用 |
 | `dungeon/scenario_graph.py` | 领域层 | 方案关系图模型：四类关系 + 归属的建图、两条可达性口径、强连通分量（零外部依赖，见 [关系图与图校验](scenario_graph.md)） |
 | `dungeon/graph_lint.py` | 领域层 | 图校验五条规则，产出 `(level, path, message)`；由 `validate.py` 包成诊断 |
+| `dungeon/settings.py` | 领域层 | 副本独占设置的键名与缺省（单一真相源，供 `persistence` 与 `window` 共用） |
 | `dungeon/window/component_pack/` | 组件包 | 官方显示组件（文本栏三选一 / 属性条 / 过程日志），常驻 Python 包，惰性导入 |
 | `dungeon/window/host.py` | 端口 | `HostPort`：window 层向宿主索取能力的唯一出口 |
 | `ui/hosting/tk_host.py` | 宿主适配 | `TkHost`——window 层之外唯一的 Tk 细节所在地 |
 | `persistence/scenario_repo.py` | 持久化 | 方案读写、旧目录迁移、保存即校验 |
+| `persistence/dungeon_settings_repo.py` | 持久化 | 副本独占设置读写（`data/user/dungeon_settings.json`），旧键一次性迁移 |
 | `ui/scenario/*` | 编辑器 | 按 `dungeon/schema.py` 的声明渲染表单；`graph_view.py` 是只读的关系图对话框（见 [关系图与图校验](scenario_graph.md)） |
 | `tests/*` | 离线自检（`tests/run_checks.py` 统一入口）；需显示器的自动驾驶脚本仍在 `scripts/` | 见 §4 |
 
@@ -67,6 +70,7 @@
 | `check_splitter.py` | 内置分句器：断点切分、流式幂等、`@说话人@` 标记解析与落盘净化 | `python tests/check_splitter.py` |
 | `check_component_pack.py` | 显示组件包：加载链（常驻包来源 / 必需 id）、文本家族与 schema 一致、组件契约与服务面（替身 ctx 只实现服务面 + AST 扫 `ctx._x` 越界）、元数据 `label`/`description`、`param_specs` 结构与 `min/max` 夹取、tag 前缀冲突、组件包不 `print` 且类都登记进 `REGISTRY`、外部包覆盖、无 GUI 替身 ctx 的 `build/layout/refresh/destroy` 冒烟与帧任务成对清理 | `python tests/check_component_pack.py` |
 | `check_dungeon_finalize.py` | 原子写 / `.bak` / 损坏回退 + `_finalize` 完成与未完成两条路径 | `python tests/check_dungeon_finalize.py` |
+| `check_dungeon_settings.py` | 副本独占设置：缺省取自 `dungeon/settings.py`、读写与合并、越界夹取、旧值迁移（幂等）与 `save` 清洗、会话侧接线 | `python tests/check_dungeon_settings.py` |
 | `check_scenario_naming.py` | 命名守卫（旧标识符残留）+ 兼容读与迁移行为 | `python tests/check_scenario_naming.py` |
 | `check_scenario_graph.py` | 方案关系图：节点与四类边构造、两条可达性口径、强连通分量与种子判定、五条图校验规则各命中一次、骨架方案不刷可达性诊断、同位置竞争只分组不报红、正常方案零诊断 | `python tests/check_scenario_graph.py` |
 

@@ -2,6 +2,8 @@ import json
 import os
 
 from dungeon.audio.buses import BUS_VOICE, DEFAULT_BUS_LEVELS
+from dungeon.settings import LEGACY_KEYS as _DUNGEON_SETTINGS_KEYS
+from persistence.dungeon_settings_repo import DungeonSettingsRepo
 
 
 class SettingsRepo:
@@ -33,13 +35,9 @@ class SettingsRepo:
             },
             "show_casualties": True,
             "auto_save_report": False,
-            "auto_save_replay": False,
-            "story_recent_count": 20,
-            # 音频总线玩家电平（总音量 / 音乐 / 语音 / 音效），缺省 100 = 不衰减。
-            # 只有四条内容总线是「作者档位 + 玩家电平」两级，见 dungeon/audio/buses.py。
-            # 「不想听对话语音」由语音这一条拧到 0 表达——旧键
-            # ``dungeon_voice_enabled`` 会在 load 时折算到这里。
-            "audio_levels": dict(DEFAULT_BUS_LEVELS),
+            # 副本独占设置（audio_levels / dungeon_font / story_recent_count /
+            # auto_save_replay / fps_max）不在此表：它们住 data/user/dungeon_settings.json，
+            # 见 persistence/dungeon_settings_repo.py。这里只保留与主程序共用的键。
             # 网络代理（可留空）：语音合成与 AI 文本生成**共用**，见 core/netproxy.py。
             # 留空则回退到环境变量（DUNGEON_NET_PROXY / HTTPS_PROXY / HTTP_PROXY）。
             # 旧键 ``voice_proxy`` 会在 load 时迁移到这里。
@@ -73,6 +71,11 @@ class SettingsRepo:
                     levels[BUS_VOICE] = 0
                     data["audio_levels"] = levels
                 data.pop("dungeon_voice_enabled", None)
+            # 副本独占设置搬家：搬往 data/user/dungeon_settings.json。搬完从 settings
+            # 里摘掉（本 dict 不再返回它们）；目标文件已存在的键不被覆盖。
+            moved = {k: data.pop(k) for k in _DUNGEON_SETTINGS_KEYS if k in data}
+            if moved:
+                DungeonSettingsRepo(self._data_dir).absorb_legacy(moved)
             for k, v in self._defaults.items():
                 if k not in data:
                     data[k] = v
@@ -84,6 +87,10 @@ class SettingsRepo:
 
     def save(self, settings: dict):
         data = dict(settings)
+        # 副本独占设置不该再落回 settings.json（迁移后它们的家在 dungeon_settings.json；
+        # 世界包锁键的语义也不适用于它们）。防止旧调用方把整份 dict 原样写回。
+        for key in _DUNGEON_SETTINGS_KEYS:
+            data.pop(key, None)
         if self.world_state is not None:
             locked = self.world_state.locked_keys()
             if locked:

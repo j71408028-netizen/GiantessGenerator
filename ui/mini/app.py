@@ -792,7 +792,6 @@ class MiniApp:
         from ui.hosting.dungeon_spawner import launch_dungeon_subprocess
         from ui.mini.dialogs import MiniDialogs
         ai_config = resolve_ai_config(self.settings)
-        dungeon_font = self.settings.get("dungeon_font") or "Microsoft YaHei"
         # 副本会话在独立子进程里跑：DPG/GLFW 独占子进程，不再与挂件的 Tk 根
         # 同进程共存。收尾弹框用挂件自己的原生弹框（纯 Tk 根下不能拉 CTk）。
         result = launch_dungeon_subprocess(
@@ -813,7 +812,7 @@ class MiniApp:
             selected_quip_styles=self.context.selected_quip_styles,
             detail_pools=self.context.detail_pools,
             ai_config=ai_config, is_replay=False, replay_data=None,
-            scenario_id=scenario_id, dungeon_font=dungeon_font,
+            scenario_id=scenario_id,
             body_parts=payload.get("body_parts", {}),
             character=character, settings=self.settings, mode=mode)
         # 入口阶段失败（配置缺失/行动点数不足/校验错误）：子进程已退出，提示

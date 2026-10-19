@@ -51,9 +51,11 @@
 
 from imgui_bundle import hello_imgui
 
-#: 帧率上限（Hz）。真实节拍仍由 vsync 决定（``vsync_to_monitor``）：这里只是
-#: 高刷屏上的封顶，避免把一整个核跑满——与旧帧循环让位逻辑的意图一致。
-DEFAULT_FPS_MAX = 60.0
+from dungeon.settings import DEFAULT_FPS_MAX
+
+#: 帧率上限（Hz，``dungeon/settings.py`` 的单一真相源，玩家可在副本窗口内改）。
+#: 真实节拍仍由 vsync 决定（``vsync_to_monitor``）：这里只是高刷屏上的封顶，
+#: 避免把一整个核跑满——与旧帧循环让位逻辑的意图一致。
 
 #: 本进程累计进入过多少次 :func:`hello_imgui.run`（起停一次算一次，只增不减）。
 #: 语义等价于迁移前的 ``dungeon.window.dpg_state.was_created()``：给「父进程是否
@@ -249,6 +251,21 @@ class WindowRunner:
     @property
     def exit_requested(self) -> bool:
         return self._exit_requested
+
+    def set_fps_max(self, fps_max) -> None:
+        """运行期改帧率上限（副本窗口内的设置面板用）。
+
+        只改 ``fps_idling.fps_max``；真实节拍仍由 vsync 决定。解析失败时保持原值。
+        """
+        try:
+            value = float(fps_max)
+        except (TypeError, ValueError):
+            return
+        self.fps_max = value
+        try:
+            self.params.fps_idling.fps_max = value
+        except Exception:
+            pass
 
     def set_fullscreen(self, enabled: bool) -> bool:
         """（**已废弃，P5 起不再使用**）按 ``window_geometry.full_screen_mode`` 切换整屏。

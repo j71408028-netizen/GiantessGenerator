@@ -40,7 +40,8 @@ class DungeonPersistence:
 
     # ------------------ 结局结算与保存 ------------------
     def _auto_replay_enabled(self) -> bool:
-        return bool((self.settings or {}).get("auto_save_replay", False))
+        return bool((getattr(self, "dungeon_settings", None) or {}).get(
+            "auto_save_replay", False))
 
     # ------------------ 重要结局索引记录 ------------------
     def _record_ending_achievement(self):

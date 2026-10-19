@@ -1,5 +1,6 @@
 from .json_store import write_json_atomic, write_text_atomic, load_json_with_backup
 from .settings_repo import SettingsRepo
+from .dungeon_settings_repo import DungeonSettingsRepo
 from .landmark_repo import LandmarkRepo
 from .preset_repo import PresetRepo
 from .personality_repo import PersonalityRepo

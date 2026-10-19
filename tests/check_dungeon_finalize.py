@@ -121,6 +121,7 @@ class StubSession(persp.DungeonPersistence):
         self.scenario_id = "unit_test"
         self.name = "测试角色"
         self.settings = {}
+        self.dungeon_settings = {}
         self.height = 100.0
         self.ending_text = ""
         self.ending_effects = {}

@@ -292,7 +292,7 @@ def _run_session(conn, payload) -> dict:
     """构建仓库与窗口，跑完一局，返回结果 dict。"""
     from dungeon.window.launch_payload import (deserialize_launch,
                                                result_to_dict)
-    from persistence import CharacterRepo, ScenarioRepo
+    from persistence import CharacterRepo, DungeonSettingsRepo, ScenarioRepo
     from services.worlds import WorldManager
 
     kwargs = deserialize_launch(payload.get("window") or {})
@@ -313,6 +313,11 @@ def _run_session(conn, payload) -> dict:
         pass
     kwargs["scenario_repo"] = ScenarioRepo(world_state=world_manager.world_state)
     kwargs["character_repo"] = CharacterRepo()
+    # 副本独占设置：本文件由引擎独占，子进程直接读，窗口内改后也直接写
+    # （共享的 settings.json 才需要绕父进程协议）。见 dungeon/settings.py。
+    dungeon_settings_repo = DungeonSettingsRepo()
+    kwargs["dungeon_settings"] = dungeon_settings_repo.load()
+    kwargs["dungeon_settings_repo"] = dungeon_settings_repo
     kwargs.setdefault("parent", None)
 
     from dungeon.window import DungeonSessionWindow

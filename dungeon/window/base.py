@@ -36,6 +36,7 @@ from collections import deque
 from core.ai import create_client
 from core import netproxy
 from dungeon import process_log
+from dungeon import settings as dungeon_settings
 from dungeon.audio import BgmPlayer, buses
 from dungeon.audio.speech import (SpeechDirector, VoiceCaster, normalize_voice,
                                  set_proxy as set_speech_proxy)
@@ -93,7 +94,8 @@ class DungeonWindowBase:
                  ai_config, greed: int,
                  is_replay=False, replay_data=None, scenario_id=None, dungeon_font=None,
                  body_parts=None, character=None, character_repo=None, gui=None,
-                 mode="explore", scenario_ids=None, host=None, settings=None):
+                 mode="explore", scenario_ids=None, host=None, settings=None,
+                 dungeon_settings=None, dungeon_settings_repo=None):
         # 宿主端口（L2）：尺寸/DPI、显隐、事件泵、弹框、活动窗口登记、字体
         # 全部经此取得。未传时用无宿主缺省实现（自检脚本、无人值守）。
         self.host = host if host is not None else HostPort()
@@ -120,7 +122,15 @@ class DungeonWindowBase:
         self.is_replay = is_replay
         self.loaded_replay = replay_data
         self.scenario_id = scenario_id
-        self.dungeon_font = dungeon_font or self.host.default_font()
+        # 副本独占设置（音量 / 段落字体 / 记忆窗口 / 自动保存回放 / 帧率上限）：
+        # 与主程序共用的 settings 分开，由 ``dungeon_settings_repo`` 注入（子进程里
+        # 由 ChildHost 侧按数据目录自建并读取，见 dungeon/settings.py）。缺省空表
+        # 时各处退回缺省常量。
+        self.dungeon_settings = dict(dungeon_settings or {})
+        self.dungeon_settings_repo = dungeon_settings_repo
+        self.dungeon_font = (dungeon_font
+                             or self.dungeon_settings.get("dungeon_font")
+                             or self.host.default_font())
         self.body_parts = body_parts
         # 副本保存/回放相关
         self.character = character
@@ -130,15 +140,17 @@ class DungeonWindowBase:
         self.mode = mode
         # 设置：``settings`` 参数优先（子进程没有 gui 可问，父进程随载荷传入）；
         # 同进程调用未传时回退 gui.settings，两者都缺省为空表（自检替身等）。
+        # 只装与主程序共用的键（net_proxy / info_update_rate / blocked_words …），
+        # 副本独占设置在 self.dungeon_settings 里。
         if settings is not None:
             self.settings = dict(settings)
         elif gui is not None:
             self.settings = getattr(gui, "settings", None) or {}
         else:
             self.settings = {}
-        # 玩家侧音频总线电平（设置页滑条）装进混音层：三条播放路径（BGM /
+        # 玩家侧音频总线电平（副本独占设置）装进混音层：三条播放路径（BGM /
         # 朗读 / 语音效果渲染）都从 buses 取，不必逐处透传。
-        buses.set_bus_levels(buses.levels_from_settings(self.settings))
+        buses.set_bus_levels(buses.levels_from_settings(self.dungeon_settings))
         self.ending_effects = {}
         self.ending_text = ""
         # 当前结局触发器信息（图标路径、触发器下标、已写入的索引记录）
@@ -692,14 +704,38 @@ class DungeonWindowBase:
     def _message_window_size(self) -> int:
         """对话历史保留的消息条数（不含系统提示；可在设置中调整，默认 20）。
 
-        ``story_recent_count``（设置页「副本记忆窗口大小」）原先控制提示词里
-        的最近段落原文数；近期原文改由对话历史携带后，该设置转义为历史窗口
+        ``story_recent_count``（「副本记忆窗口大小」，副本独占设置）原先控制提示词
+        里的最近段落原文数；近期原文改由对话历史携带后，该设置转义为历史窗口
         大小，语义不变——仍决定 AI 能逐字看到多少近期剧情。
         """
         try:
-            return max(2, int((self.settings or {}).get("story_recent_count", 20)))
+            default = dungeon_settings.DEFAULT_STORY_RECENT_COUNT
+            return max(2, int((self.dungeon_settings or {}).get(
+                "story_recent_count", default)))
         except (TypeError, ValueError):
-            return 20
+            return dungeon_settings.DEFAULT_STORY_RECENT_COUNT
+
+    def set_dungeon_settings(self, patch: dict, *, persist: bool = True) -> dict:
+        """副本窗口内改独占设置（音量 / 帧率…）：就地生效并落盘。
+
+        落盘走注入的 ``dungeon_settings_repo``（会话在子进程里，独占文件同一时刻
+        只有一个写者，可直接写）。没有仓库时（自检替身）只改内存。音频电平立即
+        生效；帧率上限同步给运行器。
+        """
+        patch = patch or {}
+        self.dungeon_settings.update(patch)
+        buses.set_bus_levels(buses.levels_from_settings(self.dungeon_settings))
+        if "fps_max" in patch:
+            runner = getattr(self, "_runner", None)
+            if runner is not None and hasattr(runner, "set_fps_max"):
+                runner.set_fps_max(self.dungeon_settings.get("fps_max"))
+        if persist and self.dungeon_settings_repo is not None:
+            try:
+                self.dungeon_settings = self.dungeon_settings_repo.update(
+                    dict(self.dungeon_settings))
+            except Exception as e:
+                process_log.log(f"[Dungeon] 副本设置保存失败: {e}")
+        return self.dungeon_settings
 
     # ---------------- 入口阶段进入（由 dungeon.window.launcher.DungeonLaunchStages 提供） ----------------
     # 子类 mixin 会覆盖 _enter_entry_phase / _init_entry_materials：

@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 from core.logic import ALL_PART_NAMES, normalize_blocked_words
 from core import netproxy
 from core.address_model import world_of
-from persistence import PresetRepo, PersonalityRepo
+from persistence import DungeonSettingsRepo, PresetRepo, PersonalityRepo
 from persistence.name_repo import NameRepo, DEFAULT_NAME_TABLE
 from persistence.world_pack import list_behavior_packs
 from dungeon.terms import is_default_scenario
@@ -70,6 +70,10 @@ class SettingsPanel(ctk.CTkScrollableFrame):
     ):
         super().__init__(parent, fg_color="transparent", **kwargs)
         self.settings_repo = settings_repo
+        # 副本独占设置（音量 / 段落字体 / 记忆窗口 / 自动回放 / 帧率）独立成
+        # data/user/dungeon_settings.json，见 persistence/dungeon_settings_repo.py。
+        self.dungeon_settings_repo = DungeonSettingsRepo()
+        self.dungeon_settings = self.dungeon_settings_repo.load()
         self.landmark_repo = landmark_repo
         self.quip_repo = quip_repo
         self.settings = initial_settings
@@ -112,7 +116,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.info_update_rate = self.settings.get("info_update_rate", 0.5)
         self.blocked_words = normalize_blocked_words(self.settings.get("blocked_words", []))
         # 音频总线玩家电平（总音量 / 音乐 / 语音 / 音效），见 dungeon/audio/buses.py
-        self.audio_levels = buses.levels_from_settings(self.settings)
+        self.audio_levels = buses.levels_from_settings(self.dungeon_settings)
         self._bus_level_vars = {}
         self._bus_level_labels = {}
 
@@ -836,7 +840,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         _, ctrl = self._make_row(self.gen_body, row, "记忆窗口大小")
         row += 1
         self.story_recent_var = tk.StringVar(
-            value=str(self.settings.get("story_recent_count", 20)))
+            value=str(self.dungeon_settings.get("story_recent_count", 20)))
         self.story_recent_entry = self._make_entry(ctrl, self.story_recent_var, width=64)
         self.story_recent_entry.pack(side='left')
 
@@ -917,7 +921,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
 
         _, ctrl = self._make_row(self.disp_body, row, "副本段落")
         row += 1
-        self.dungeon_font_var = tk.StringVar(value=self.settings.get("dungeon_font", ui_fonts.dungeon_font_default()))
+        self.dungeon_font_var = tk.StringVar(value=self.dungeon_settings.get("dungeon_font") or ui_fonts.dungeon_font_default())
         self.dungeon_font_entry = self._make_entry(ctrl, self.dungeon_font_var, width=150)
         self.dungeon_font_entry.pack(side='left')
 
@@ -955,12 +959,27 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             label.configure(text=str(int(float(value))))
 
     def _sync_audio_levels(self):
-        """进入设置页时按持久化设置刷新音频滑条（面板常驻，需显式回读）。"""
-        self.audio_levels = buses.levels_from_settings(self.settings)
+        """按内存里的副本设置刷新音频滑条（面板常驻，需显式回读）。"""
+        self.audio_levels = buses.levels_from_settings(self.dungeon_settings)
         for bus, var in self._bus_level_vars.items():
             level = self.audio_levels.get(bus, buses.MAX_LEVEL)
             var.set(level)
             self._bus_level_labels[bus].configure(text=str(level))
+
+    def _sync_dungeon_settings(self):
+        """进入设置页时回读副本独占设置并刷新相关控件。
+
+        设置页常驻，而副本窗口本身也能改这份设置（``dungeon_settings.json``），
+        所以进页时从仓库重读一次，避免显示陈旧值。
+        """
+        self.dungeon_settings = self.dungeon_settings_repo.load()
+        self.dungeon_font_var.set(self.dungeon_settings.get("dungeon_font")
+                                  or ui_fonts.dungeon_font_default())
+        self.story_recent_var.set(
+            str(self.dungeon_settings.get("story_recent_count", 20)))
+        self.auto_save_replay_var.set(
+            bool(self.dungeon_settings.get("auto_save_replay", False)))
+        self._sync_audio_levels()
 
     def _on_ui_mode_changed(self, value):
         """记录「下次启动用哪套界面」，仅此而已。
@@ -984,7 +1003,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         try:
             value = int(float(self.story_recent_var.get().strip()))
         except (ValueError, AttributeError):
-            return int(self.settings.get("story_recent_count", 20) or 20)
+            return int(self.dungeon_settings.get("story_recent_count", 20) or 20)
         return max(1, min(200, value))
 
     def _build_archive_block(self):
@@ -998,7 +1017,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
 
         _, ctrl = self._make_row(self.archive_body, row, "自动保存副本回放")
         row += 1
-        self.auto_save_replay_var = tk.BooleanVar(value=self.settings.get("auto_save_replay", False))
+        self.auto_save_replay_var = tk.BooleanVar(value=self.dungeon_settings.get("auto_save_replay", False))
         self.auto_save_replay_switch = self._make_switch(ctrl, self.auto_save_replay_var)
 
         _, ctrl = self._make_row(self.archive_body, row, "以低分辨率保存图片")
@@ -1210,7 +1229,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.theme_palette = saved_palette
         # palette_display_names() 是 {配色名: 显示名}，这里要反查显示名
         self.palette_menu.set(palette_display_names().get(saved_palette, saved_palette))
-        self._sync_audio_levels()
+        self._sync_dungeon_settings()
 
     def _on_order_changed(self):
         self.comparison_order = self.order_var.get()
@@ -1399,15 +1418,10 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             "ai_configs": {pid: dict(cfg) for pid, cfg in self.ai_configs.items()},
             "report_font": report_font,
             "desc_font": desc_font,
-            "dungeon_font": dungeon_font,
             "quip_rate_factor": rate_factor,
             "show_casualties": self.show_casualties_var.get(),
             "auto_save_report": self.auto_save_report_var.get(),
-            "auto_save_replay": self.auto_save_replay_var.get(),
-            "story_recent_count": self._story_recent_count_value(),
             "net_proxy": self.net_proxy_var.get().strip(),
-            "audio_levels": {bus: int(self._bus_level_vars[bus].get())
-                             for bus in buses.BUSES},
             "save_low_resolution_image": self.save_low_resolution_var.get(),
             "use_preview_image_as_avatar": self.use_preview_avatar_var.get(),
             "info_update_rate": INFO_UPDATE_OPTIONS.get(self.info_update_var.get(), self.info_update_rate)
@@ -1418,6 +1432,15 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             selected_parts = ALL_PART_NAMES.copy()
         self.settings["selected_parts"] = selected_parts
         self.settings["reverse_details_order"] = self.reverse_details_var.get()
+
+        # 副本独占设置落自己的文件（data/user/dungeon_settings.json）。
+        self.dungeon_settings = self.dungeon_settings_repo.update({
+            "dungeon_font": dungeon_font,
+            "audio_levels": {bus: int(self._bus_level_vars[bus].get())
+                             for bus in buses.BUSES},
+            "story_recent_count": self._story_recent_count_value(),
+            "auto_save_replay": self.auto_save_replay_var.get(),
+        })
 
         # 先保存当前（自由）设置，再应用世界包启用/卸载更改
         self.settings_repo.save(self.settings)
