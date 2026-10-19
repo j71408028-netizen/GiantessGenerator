@@ -2,6 +2,9 @@
 
 > 这个目录放的是**面向非特定读者**的说明文档。
 > 找东西先看下面两节：先按「我是什么身份」找去向，再看四条准入判据决定「新文档该不该放这」。
+>
+> `Dungeon/` 是仓库内的**副本子项目**入口（引擎核心 + 窗口运行时 + 宿主集成），
+> 不是普通功能页；同仓库、同版本，不单独发版。
 
 ## 什么能进这里
 
@@ -24,7 +27,7 @@
 | 玩家 | [`../README.md`](../README.md)「玩家指南」 | [`designs/README.md`](designs/README.md) |
 | 在 Linux 上跑 | [`users/platforms/linux.md`](users/platforms/linux.md) | [`users/platforms/linux-history.md`](users/platforms/linux-history.md) |
 | 做资源包 / 世界包 / 小游戏 | [`designs/README.md`](designs/README.md) | [`designs/world_pack_behaviors.md`](designs/world_pack_behaviors.md) |
-| 写副本方案 | [`Dungeon/README.md`](Dungeon/README.md)（按任务查表） | [`Dungeon/script.md`](Dungeon/script.md) |
+| 写副本方案 / 改副本引擎 | [`Dungeon/README.md`](Dungeon/README.md)（子项目入口，按任务查表） | [`Dungeon/script.md`](Dungeon/script.md)、[`dev/architecture.md`](dev/architecture.md) |
 | 改代码 | [`dev/README.md`](dev/README.md) | [`dev/architecture.md`](dev/architecture.md) |
 | 发版 | [`ops/release.md`](ops/release.md) | [`ops/release.md`](ops/release.md) §9（v1.0.0 后的过渡点） |
 

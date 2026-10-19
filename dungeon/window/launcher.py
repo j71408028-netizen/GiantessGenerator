@@ -1,4 +1,4 @@
-"""副本入口阶段（imgui 立即模式混入）：与正式副本会话窗口共享同一个窗口。
+"""副本入口阶段（imgui 立即模式混入）：与正式运行阶段共享同一个 Session 窗口。
 
 - 动态背景：从副本资源目录随机抽取图片，轻微旋转/高斯模糊后循环交叉淡入淡出；
 - 右下角：副本方案选择 + 开始副本 / 加载回放 / 返回；
@@ -113,14 +113,14 @@ def collect_dungeon_images(scenario_repo) -> list:
 
 
 # ---------------------------------------------------------------------------
-# 入口阶段混入：附着在 DungeonSessionWindow 上，与正式会话共享同一窗口
+# 入口阶段混入：附着在 DungeonSessionWindow 上，与正式运行阶段共享同一 Session 窗口
 # ---------------------------------------------------------------------------
 
 class DungeonLaunchStages:
-    """为副本会话窗口提供“入口阶段 → 会话阶段”的切换能力。
+    """为副本会话窗口提供“入口阶段 → 运行阶段”的切换能力。
 
     base.DungeonWindowBase.__init__ 在 _build_ui() 后调用 self._enter_entry_phase()
-    进入入口阶段；用户选择后由 _enter_dungeon_phase() 切换回会话阶段。
+    进入入口阶段；用户选择后由 _enter_dungeon_phase() 切换到运行阶段。
 
     入口阶段的动态部分（背景轮播、结局图标轮播、Ken Burns 运动）全部挂在窗口的
     帧时钟 ``self._frame`` 上（L3）：它们本质上都只是"每隔 N 秒/每帧动一下"，
@@ -409,7 +409,7 @@ class DungeonLaunchStages:
             self._bg_pil_full = self._bg_pil_original
 
     def _enter_dungeon_phase(self):
-        """由入口阶段切换到正式会话阶段（冻结背景后进入）。"""
+        """由入口阶段切换到正式运行阶段（冻结背景后进入）。"""
         if self._entry_started:
             return
         self._entry_started = True
@@ -433,7 +433,7 @@ class DungeonLaunchStages:
             self._build_components()
             self._relayout()
 
-        # 立即模式下没有"显示正式会话界面"这一步：``_is_entry_phase`` 已置假，
+        # 立即模式下没有"显示正式运行界面"这一步：``_is_entry_phase`` 已置假，
         # ``ui._draw_frame`` 下一帧自然改画 ``_draw_story``（组件接管文本显示时，
         # ``_draw_story`` 内部会跳过）。背景沿用冻结的入口图。
 

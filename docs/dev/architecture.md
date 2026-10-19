@@ -25,12 +25,18 @@
 |---|---|---|---|
 | `infra` | `paths.py` | 路径解析 | 无 |
 | `core` | `core/` | 领域模型与共享基础：`models` `address_model` `logic`（子包） `behavior_runtime` `ai` `appearance` `imaging` `scale_reference` | `infra` |
-| `dungeon` | `dungeon/*.py` | 副本领域定义与规则（schema / terms / chapters / rules / validate …） | `infra` `core` |
+| `dungeon` | `dungeon/*.py` | 副本引擎核心：方案定义、运行规则与 Run 状态（schema / terms / chapters / rules / validate / models …） | `infra` `core` |
 | `persistence` | `persistence/` | 仓库层 | + `dungeon` |
 | `services` | `services/` | 服务层；按子域分包（`exploration` 探索编排 / `chat` 聊天 / `worlds` 世界包 / `challenges` 挑战包 / `character` 角色长时行为 / `news` 近况 / `preview` 剪影渲染），顶层只留行为包契约服务 `creation_service` / `state_service` 与 `ui_mode`（§2.5） | + `persistence` |
-| `dungeon_window` | `dungeon/window/**` | 副本会话窗口（Dear PyGui） | + `services`；**禁** `tkinter` / `ui.*` |
+| `dungeon_window` | `dungeon/window/**` | 副本会话窗口运行时（Session：窗口 / 帧循环 / 宿主端口；imgui-bundle） | + `services`；**禁** `tkinter` / `ui.*` |
 | `ui` | `ui/` | 专业界面（CTk）+ 挂件界面（原生 tkinter）；`ui/hosting/` 是两模式共用的**进程与宿主基础设施**（副本子进程父/子两侧、`tk_host` 宿主桥、`x11` 支持、`mini_game_host`），包规约：不顶层 import CTk 组件，弹框一律注入 | + `dungeon_window` |
 | `app` | `main.py`（字面量入口，留根目录）+ `app/`（`shell` / `window_manager`） | 入口与应用壳 | 全部；**不被任何人依赖** |
+
+`dungeon` 是仓库内一个**逻辑子项目**的引擎核心，不是普通功能目录；`dungeon_window`
+是它的窗口呈现运行时，`persistence.scenario_repo` / `ui/scenario/` / `ui/hosting/` /
+`services` 的副本适配是宿主侧集成。三者同仓库、同版本、不单独发版。术语上
+`Session` 是一次窗口生命周期，最多承载一局 `Run`；详见
+[Dungeon 术语表](../Dungeon/domain_terms.md)。
 
 **根目录已冻结**：只剩 `paths.py` 与字面量入口 `main.py` 两个文件（构建脚本写死了
 `main.py`，不能搬走）。新增根目录 `.py` 会被守卫直接判失败（`ROOT_MODULE_LAYERS`

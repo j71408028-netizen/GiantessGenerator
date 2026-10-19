@@ -757,8 +757,8 @@ class DungeonStoryEngine:
         ``base._request_close()``（§5-C1），契约由
         ``check_dungeon_window_contract.py`` 守住。"""
         self._closing = True
-        # 尚未进入会话阶段（仍在入口选择页）直接关闭窗口时，
-        # 不触发会话退出处理（未触发结局的数据丢失警告只对会话阶段有意义）
+        # 尚未进入运行阶段（仍在入口选择页）直接关闭窗口时，
+        # 不触发退出处理（未触发结局的数据丢失警告只对运行阶段有意义）
         if getattr(self, "_is_entry_phase", False):
             self._exit_from_entry = True
         # 挂起的重采样任务不必再跑：帧时钟会在 _finish_session 里连同其余任务一起丢掉

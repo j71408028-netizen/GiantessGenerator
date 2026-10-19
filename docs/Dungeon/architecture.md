@@ -28,7 +28,7 @@
 
 副本是一台**生成式步进引擎**：每一步由 LLM 产出一段故事文本并给出方向，引擎按
 「段落类型 → 转移概率 → 属性值演化 → 伤亡结算 → 触发器判定」推进，把作者写好的
-**方案定义**跑成**一局玩家会话**。
+**方案定义**跑成一局（Run），并由会话窗口（Session）呈现。
 
 三层边界由脚本强制：
 
@@ -44,11 +44,14 @@
 
 | 概念 | 含义 | 持久化位置 | 命名 |
 |---|---|---|---|
+| **Dungeon / 副本** | 产品/功能名：入口、会话窗口、设置、方案编辑、小游戏 | — | `Dungeon*` / `dungeon_*`（产品 / 历史） |
 | **副本方案 Scenario** | 作者编写的**定义**：章节、触发器、提示词、演化属性、转移矩阵、显示组件、素材 | `data/packs/scenarios/<方案 id>/config.json`（+ `images/`、`components/`） | `scenario_*` |
-| **一局 Run** | 某角色用某方案跑的一次会话：`DungeonState`、回放、结局达成、行动点数消耗 | `data/archives/<角色>/回放\|报告`；挑战模式写 `data/user/replays\|reports` | `dungeon_*` |
+| **一局 Run** | 某角色用某方案**执行的一次游戏**：`DungeonState`、行动点消耗、结局达成、回放；回放模式只重放已有 Run | `data/archives/<角色>/回放\|报告`；挑战模式写 `data/user/replays\|reports` | 目标 `Run*` / `run_*`；现名 `DungeonState` / `dungeon_*` |
+| **会话 Session** | `DungeonSessionWindow` 从构造到 `run()` 返回的一次**窗口生命周期**：入口页、正式运行、关闭与收尾；产品路径一个子进程一个 Session | 不持久化；`SessionResult` 返回给调用方 | `session_*` / `SessionResult`（呈现层） |
 
-编辑器（`ui/scenario/`）编辑的是**方案**，`DungeonSessionWindow` 运行的是**一局**。
-完整规则与兼容读法见 [术语表](domain_terms.md)。
+编辑器（`ui/scenario/`）编辑的是**方案**；`DungeonSessionWindow` 运行的是**会话**，
+其中最多包含一局 Run（入口返回 / 启动失败时没有 Run；回放模式只重放已有 Run）。
+`DungeonState` 是一局的运行态，不是会话本身。完整规则与兼容读法见 [术语表](domain_terms.md)。
 
 ## 3. 分层与依赖规则
 
@@ -269,7 +272,9 @@ _finish_step()
 
 ## 6. 生命周期与统一收尾
 
-入口阶段与会话阶段共享同一次窗口生命周期（同一个 ImGui 上下文 / 视口 / 根窗口，`base.py` + `launcher.py`），详见
+本节的生命周期是 **Session**（窗口会话），不是 **Run**：入口页返回 / 启动失败会结束
+Session 但没有 Run；回放 Session 只重放已有 Run。入口阶段与运行阶段共享同一次 Session
+生命周期（同一个 ImGui 上下文 / 视口 / 根窗口，`base.py` + `launcher.py`），详见
 [窗口文档](window.md) §2。收尾只走一个入口：
 
 ```python
@@ -353,7 +358,7 @@ data/
 | 窗口的 GL / 上下文 / 视口生命周期全交给 `hello_imgui.run()` | 进程内不手动建/毁上下文、不需要保活视口；收尾在 `run()` 返回之后做。**2026-10 起会话在独立子进程里跑**（[宿主边界](window_host.md) §7）：父进程从不加载副本窗口栈，热切换与 GL 生命周期不再相关 | [窗口文档](window.md) §5-C2 |
 | GL 资源句柄只在 GL 存活时丢 | `hello_imgui.TextureGpu` 是 RAII，清空容器 = 丢引用；释放点在 `before_exit`（`ui._release_gpu_textures`），`run()` 返回后的 `_finish_session` 只许 `retire()` 兜底保住引用——否则每局收尾在驱动层段错误（2026-10 Linux 实测） | [窗口文档](window.md) §5-C15、`window/gpu_textures.py`、`tests/check_gpu_texture_lifetime.py` |
 | 写盘必走原子写 | 半截文件不可恢复 | 本文 §8 |
-| 剧本 / 运营术语不混用 | `scenario_*` = 方案，`dungeon_*` = 一局 | [术语表](domain_terms.md) |
+| 剧本 / 运营术语不混用 | `scenario_*` = 方案（定义），`run_*` = 一局（执行），`session_*` = 窗口会话 / 呈现；`dungeon_*` 是产品 / 历史命名，不是精确的 Run 后缀 | [术语表](domain_terms.md) |
 | 组件只读窗口状态 | 组件 ctx 即窗口实例，不反向写状态；**访问只经组件服务面**（`component_viewport` / `schedule*` / `session_waiting_for_input` / `component_top_inset` 等，C13），不读窗口私有属性 | `component_registry.py::DungeonComponent` 契约文档、`components.py::ComponentHandler`、`tests/check_component_pack.py` |
 
 ## 11. 显示组件包

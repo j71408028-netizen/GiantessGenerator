@@ -10,13 +10,14 @@
 | [architecture.md](architecture.md) | 所有改代码的人 | 现状 |
 | [chat_delivery.md](chat_delivery.md) | 改聊天 / 消息投递系统的人 | 现状 |
 | [legacy/refactor-2026-10.md](legacy/refactor-2026-10.md) | 要搞清「某个结构为什么这样」的人 | 历史（只读） |
-| [../Dungeon/README.md](../Dungeon/README.md) | 改副本的人 | 现状 + `history/` |
+| [../Dungeon/README.md](../Dungeon/README.md) | 改副本引擎 / 窗口 / 方案编辑器的人 | 子项目现状 + `history/` |
 
 ## 推荐阅读顺序
 
 1. [architecture.md](architecture.md) §1 现状 —— 先建立分层与守卫的全局观。
 2. [architecture.md](architecture.md) §2 硬约束 —— **改代码前必读**，违反不会报错、只会静默失效。
-3. 要动副本章节 / 窗口：转 [Dungeon/README.md](../Dungeon/README.md) 的「按任务查」表。
+3. 要动副本章节 / 窗口 / 引擎：转 [Dungeon/README.md](../Dungeon/README.md) 的「按任务查」表。
+   副本是仓库内的逻辑子项目，不是普通功能。
 4. [architecture.md](architecture.md) §5 操作手册 + §6 提交规范 —— 动手前过一遍。
 
 ## 相关组

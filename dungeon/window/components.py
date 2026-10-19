@@ -1,7 +1,7 @@
 """副本显示组件生命周期（混入）。
 
 组件包由 dungeon.window.component_registry 提供注册表；本 mixin 负责按副本配置
-（``text_component`` 三选一 + ``components`` 列表）在会话阶段构建组件实例，并把
+（``text_component`` 三选一 + ``components`` 列表）在运行阶段构建组件实例，并把
 这些实例接入窗口现有的更新链：
 - _relayout() → 各组件 layout(ctx)（只算几何，不碰 imgui）
 - _draw_frame() → 各组件 draw(ctx) 每帧立即绘制
@@ -66,7 +66,7 @@ class ComponentHandler:
         return [text_cid or DEFAULT_TEXT_COMPONENT] + others
 
     def _build_components(self):
-        """按配置构建组件实例并调用 build（主线程，会话阶段进入时调用）。"""
+        """按配置构建组件实例并调用 build（主线程，运行阶段进入时调用）。"""
         self._components = []
         if getattr(self, "_closing", False):
             return

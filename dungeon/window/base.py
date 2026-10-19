@@ -1,9 +1,9 @@
 """窗口生命周期与基础属性（imgui-bundle 立即模式）。
 
-进入副本界面与正式副本会话界面共享**同一次窗口生命周期**：切换副本方案发生在
+入口阶段与正式运行阶段（Run）共享**同一次窗口生命周期（Session）**：切换副本方案发生在
 同一窗口内（:class:`dungeon.window.launcher.DungeonLaunchStages` 负责入口阶段），
-选择“开始副本 / 加载回放”后由 ``_enter_dungeon_phase()`` 切到会话阶段，同一生命
-周期内不再重建窗口。两局之间也不再需要"保活视口"之类的怪癖——每次 ``run()`` 都是
+选择“开始副本 / 加载回放”后由 ``_enter_dungeon_phase()`` 切到运行阶段，同一 Session
+内不再重建窗口。两局之间也不再需要"保活视口"之类的怪癖——每次 ``run()`` 都是
 一个独立的 :func:`hello_imgui.run`，返回即全部释放。
 
 **窗口本体由 hello_imgui 托管**（imgui-bundle 1.92.900，见
@@ -12,7 +12,7 @@
 视口 + 显式 ``destroy_context`` + 清残留 ``WM_QUIT``」的收尾（原
 ``dungeon.window.dpg_state``）整体消失，本类因此只剩与后端无关的生命周期：
 
-- ``_start_session``：藏宿主 → 取一次宿主尺寸 → ``_build_ui()`` → 进入口/会话阶段 →
+- ``_start_session``：藏宿主 → 取一次宿主尺寸 → ``_build_ui()`` → 进入口/运行阶段 →
   ``self._runner.run()``（阻塞到窗口关闭）；
 - ``_finish_session``：停帧时钟 → 收组件/覆盖层/背景/音频 → 清残留退出消息 →
   恢复宿主 → 退出处理。
@@ -196,7 +196,7 @@ class DungeonWindowBase:
         # 按方案配置填进去，见 _configure_voice）
         self._speech = SpeechDirector(logger=process_log.log, enabled=False)
 
-        # 入口阶段（dungeon.window.launcher.DungeonLaunchStages）与会话阶段共用同一 DPG 生命周期
+        # 入口阶段（dungeon.window.launcher.DungeonLaunchStages）与运行阶段共用同一 Session 生命周期
         self.scenario_ids = list(scenario_ids) if scenario_ids else []
         self._is_entry_phase = False
 
@@ -269,7 +269,7 @@ class DungeonWindowBase:
         self.coupling_level = normalize_coupling_level(
             (scenario_config or {}).get("coupling_level"))
         # 显示组件（见 component_pack/ 与 dungeon/window/components.py）。
-        # 这里先给入口阶段用的空默认值，会话阶段进入时由 _init_components 复位重建。
+        # 这里先给入口阶段用的空默认值，运行阶段进入时由 _init_components 复位重建。
         self._components = []
         self._components_built = False
 
@@ -364,8 +364,8 @@ class DungeonWindowBase:
 
             self._build_ui()
 
-            # 入口阶段：与正式副本会话界面共享同一个窗口，
-            # 用户在入口页选择副本方案后由 _enter_dungeon_phase() 切换到会话阶段。
+            # 入口阶段：与正式运行阶段共享同一个窗口，
+            # 用户在入口页选择副本方案后由 _enter_dungeon_phase() 切换到运行阶段。
             if self.scenario_ids:
                 self._enter_entry_phase()
             else:
@@ -485,7 +485,7 @@ class DungeonWindowBase:
 
         在探索模式入口页用户点击“开始副本”时由 _enter_dungeon_phase() 调用：
         加载副本配置、扣 AP（经 on_entry_selected 钩子）、初始化 AI 客户端与提示词。
-        返回 False 表示配置不可用，此时不应进入会话阶段。
+        返回 False 表示配置不可用，此时不应进入运行阶段。
         """
         config = None
         if self.scenario_repo is not None:
@@ -530,7 +530,7 @@ class DungeonWindowBase:
     def _on_dungeon_selected(self, scenario_id, config) -> bool:
         """入口阶段选择副本后扣除行动点数（探索模式且有角色时）。
 
-        返回 False 表示行动点数不足或其它原因，不应进入会话阶段。
+        返回 False 表示行动点数不足或其它原因，不应进入运行阶段。
         """
         character = self.character
         if self.mode == "explore" and character is not None:
@@ -776,7 +776,7 @@ class DungeonWindowBase:
         self._background.cancel_pending_refresh()
         self._request_close()
 
-    # ---------- 视口尺寸（与正式副本会话窗口一致） ----------
+    # ---------- 视口尺寸（与正式运行阶段窗口一致） ----------
     def _get_initial_viewport_size(self):
         """返回 (视口初始宽, 高, dpi_scale, 主窗口客户区宽, 高)。
 

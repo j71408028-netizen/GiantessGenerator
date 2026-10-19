@@ -1,7 +1,22 @@
 # 副本（Dungeon）文档索引
 
-> `docs/Dungeon/` 的入口：**五篇现状文档 + `history/` 历史档案（只读）**。
+> `docs/Dungeon/` 的入口：**现状文档 + `history/` 历史档案（只读）**。
 > 查「改哪段代码看哪篇」用 §2，查「跑哪个脚本」用 §4，查「为什么是这样」用 §5。
+
+## 0. 定位
+
+`docs/Dungeon/` 是**副本子项目**的文档入口，不是「巨大娘生成器的一个普通功能页」。
+副本按三层组织：
+
+| 层 | 位置 | 职责 |
+|---|---|---|
+| 引擎核心 | `dungeon/` 包根 | 方案定义、运行规则与 Run 状态；不依赖窗口栈，可被无头脚本直接导入 |
+| 窗口运行时 | `dungeon/window/` | Session 的窗口、帧循环、宿主端口与 imgui 呈现 |
+| 宿主侧集成 | `ui/scenario/`、`persistence/`、`ui/hosting/`、`services/` 的副本适配 | 方案编辑、落盘、子进程拉起、状态/角色能力注入 |
+
+三层同仓库、同发布节奏、共用 `paths.py::APP_VERSION`，**不单独发版**；
+「逻辑子项目」不等于独立仓库或独立版本。术语上 `Dungeon` 是产品/功能名，
+`Scenario` 与 `Run` 平级，`Session` 是窗口呈现生命周期（见 [术语表](domain_terms.md)）。
 
 ## 1. 文档地图
 
@@ -13,7 +28,7 @@
 | [窗口逻辑与开发事项](window.md)        | imgui-bundle 会话窗口的生命周期、帧时钟、约束与坑 | 动 `dungeon/window/` |
 | [宿主边界与可移植性](window_host.md)   | window 层与宿主（Tk）的边界在哪、换 UI 框架能做到哪一步 | 评估可移植性 / 换宿主 |
 | [调试自动化](window_automation.md) | 怎么不手点电脑就回归窗口 | 改窗口后自检 |
-| [领域术语表](domain_terms.md)      | 方案（Scenario）与一局（Run）怎么区分、怎么命名 | 所有人（命名前必读） |
+| [领域术语表](domain_terms.md)      | 方案（Scenario）、一局（Run）与会话（Session）怎么区分、怎么命名 | 所有人（命名前必读） |
 | [小游戏框架](../designs/minigame.md)          | mini_game 触发器运行时、包格式与作者 API | 写小游戏 / 改 `dungeon/window/minigame/` |
 
 ## 2. 按任务查
@@ -26,13 +41,14 @@
 | 关系图界面（章节总览 / 触发器依赖 / 清单） | [关系图与图校验](scenario_graph.md) §4 | `run_checks.py --smoke` |
 | 章节 / 触发器运行时行为 | [数据模型](script.md) §3、§5–§6 | `dungeon_autopilot.py` |
 | 演化、转移矩阵、段落步长 | [架构](architecture.md) §4 | `check_scenario_schema.py`（演化链路守卫） |
-| 窗口生命周期 / 关闭 / 收尾 | [窗口](window.md) §2、§3 | `dungeon_autopilot.py`、`check_dungeon_finalize.py` |
+| 窗口（Session）生命周期 / 关闭 / 收尾 | [窗口](window.md) §2、§3 | `dungeon_autopilot.py`、`check_dungeon_finalize.py` |
 | 帧时钟 / 线程 / 跨线程 UI 更新 | [窗口](window.md) §4 | `dungeon_autopilot.py` |
 | 宿主（Tk）耦合 / 换 UI 框架 | [宿主边界](window_host.md) §3、§4 | `check_dungeon_layering.py` |
 | 分层越界（领域层碰了 GUI） | [架构](architecture.md) §3 | `check_dungeon_layering.py` |
 | 写一个小游戏 / 改小游戏包 | [小游戏框架](../designs/minigame.md) | `check_minigame.py`、`dungeon_autopilot.py --scene mini-game-py` |
 | 显示组件（文本栏 / 属性条 / 过程日志）与组件参数 | [窗口](window.md) §1、`dungeon/window/component_pack/` | `check_component_pack.py`、`dungeon_autopilot.py --scene text-components` |
-| 新增 / 改名标识符（scenario vs dungeon） | [术语表](domain_terms.md) §2 | `check_scenario_naming.py` |
+| 新增 / 改名标识符（scenario / run / session / dungeon） | [术语表](domain_terms.md) §2 | `check_scenario_naming.py` |
+| 入口页 / 会话生命周期与一局的边界 | [术语表](domain_terms.md) §1、[架构](architecture.md) §6、[窗口](window.md) §2 | `check_dungeon_finalize.py` |
 | 写盘方式（配置 / 回放 / 报告） | [架构](architecture.md) §8、[窗口](window.md) §5-C10 | `check_dungeon_finalize.py` |
 | 副本独占设置（音量 / 段落字体 / 记忆窗口 / 自动回放 / 帧率） | [架构](architecture.md) §8、`dungeon/settings.py` | `check_dungeon_settings.py` |
 | 自动驾驶脚本 / 自检场景 | [调试自动化](window_automation.md) | `dungeon_autopilot.py` |
@@ -42,8 +58,8 @@
 
 | 路径 | 层 | 说明 |
 |---|---|---|
-| `dungeon/*.py`（包根） | 领域层 | 纯逻辑；禁 import GUI / 服务层（AST 强制） |
-| `dungeon/window/*.py` | UI 层 | 唯一允许 `imgui_bundle` 的地方；宿主能力一律经 `host.py` |
+| `dungeon/*.py`（包根） | 领域层 | Scenario 定义 + Run 执行；纯逻辑，禁 import GUI / 服务层（AST 强制） |
+| `dungeon/window/*.py` | 会话窗口/呈现层 | Session 生命周期；唯一允许 `imgui_bundle` 的地方；宿主能力一律经 `host.py` |
 | `dungeon/minigame_pack.py` | 领域层 | 小游戏数据包读取（manifest / 参数声明），validate 与 window/minigame 共用 |
 | `dungeon/scenario_graph.py` | 领域层 | 方案关系图模型：四类关系 + 归属的建图、两条可达性口径、强连通分量（零外部依赖，见 [关系图与图校验](scenario_graph.md)） |
 | `dungeon/graph_lint.py` | 领域层 | 图校验五条规则，产出 `(level, path, message)`；由 `validate.py` 包成诊断 |
@@ -114,7 +130,7 @@
 
 ## 6. 新人阅读顺序
 
-1. [术语表](domain_terms.md) —— 先分清方案与一局，否则读代码会混。
+1. [术语表](domain_terms.md) —— 先分清方案、一局与会话，否则读代码会混。
 2. [架构说明](architecture.md) §1–§4 —— 分层、模块地图、一次步进。
 3. [数据模型](script.md) —— 要写方案或改编辑器时看。
 4. [窗口](window.md) —— 只有动 `dungeon/window/` 时才需要，但 §5 约束清单建议先扫一遍。

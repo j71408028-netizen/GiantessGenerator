@@ -1,9 +1,9 @@
 """副本会话窗口（由职责拆分后的 mixin 组装）。
 
-进入副本界面与正式副本会话界面共享同一次窗口生命周期：
+入口阶段与正式运行阶段（Run）共享同一次 Session 生命周期：
 dungeon.window.launcher.DungeonLaunchStages 提供入口阶段（动态背景 + 方案选择），
-在 base.DungeonWindowBase.__init__ 构建正式会话 UI 后进入入口阶段，
-用户选择后由 _enter_dungeon_phase() 切换到会话阶段。
+在 base.DungeonWindowBase.__init__ 构建正式运行 UI 后进入入口阶段，
+用户选择后由 _enter_dungeon_phase() 切换到运行阶段。
 """
 
 from .base import DungeonWindowBase

@@ -1,17 +1,24 @@
 """副本领域术语与持久化契约常量（单一真相源）。
 
-本仓库有两个容易混淆的概念，代码里必须分开命名：
+本仓库的四个名字不是同义词，代码里必须分开命名：
 
+- **Dungeon / 副本**：产品与功能名（入口、会话窗口、设置、方案编辑、小游戏）。
+  ``dungeon/`` 是当前实现包名，不代表领域层级。
 - **副本方案（Scenario）**：作者编写的定义——章节、触发器、提示词、演化属性、
   转移矩阵、显示组件与素材。持久化为
   ``data/packs/scenarios/<方案 id>/config.json``（+ ``images/``、``components/``）。
   编辑器 ``ui/scenario/``（``ScenarioEditor``）编辑的就是它。
-- **一局（Run）**：某个角色用某个方案跑的一次会话——``DungeonState``、回放、
-  结局达成、行动点数消耗。对应 ``DungeonSessionWindow`` 与
-  ``data/archives/<角色>/回放|报告``。
+- **一局（Run）**：某个角色用某个方案执行的一次游戏——``DungeonState``、回放、
+  结局达成、行动点数消耗。``DungeonState`` / ``dungeon_state`` / ``dungeon_ended``
+  是 Run 的现有实现名；新代码的 Run 领域命名用 ``run_*`` / ``Run*``。
+- **会话（Session）**：``DungeonSessionWindow`` 从构造到 ``run()`` 返回的一次窗口
+  生命周期，承载入口页与正式运行。一个 Session 可以包含 0 或 1 个新执行的 Run；
+  ``SessionResult`` 是 Session 的结果，不是 Run 的结果。回放 Session 只重放已有
+  Run，不新增 Run。
 
-因此命名约定：``scenario_*`` 只指「方案（定义）」，``dungeon_*`` 只指「一局（运行）」。
-持久化记录里引用方案 id 的字段一律写 ``scenario_id``；读取时用
+因此命名约定：``scenario_*`` 只指「方案（定义）」；``run_*`` 指「一局（执行）」；
+``session_*`` 指窗口呈现/生命周期；``dungeon_*`` 是产品/功能与历史兼容命名，不是
+精确的领域后缀。持久化记录里引用方案 id 的字段一律写 ``scenario_id``；读取时用
 ``scenario_id_of()`` 兼容改名前的 ``dungeon_id``。
 
 （术语拆分的背景见 ``docs/Dungeon/domain_terms.md``；改名前的 ``DungeonRepo`` 实际持久化的

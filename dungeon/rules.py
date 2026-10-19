@@ -29,7 +29,7 @@ class EvolutionRules:
         （``(personality, step_intrusion, step_destruction, step_intr, step_destr,
         intrusion=..., destruction=...) -> (si, sd)``）。领域层不依赖 services 层：
         副本窗口（``window/base.py``）显式注入；未注入时不做边界衰减
-        （纯数值模拟可忽略，正式会话必须注入）。
+        （纯数值模拟可忽略，正式运行必须注入）。
         """
         self.transition_matrix = {
             key: value.copy() for key, value in self.DEFAULT_TRANSITION_MATRIX.items()

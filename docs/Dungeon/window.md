@@ -15,6 +15,10 @@
 `tkinter` / `ui.*` import；§5 里约束进程内共存的那几条现在只约束**子进程内部**
 （父进程从不 import 副本窗口栈）。
 
+> **术语边界**：本文的「会话（Session）」= `DungeonSessionWindow` 从构造到 `run()` 返回的
+> 一次窗口生命周期；「一局（Run）」= 进入正式运行阶段后的一次游戏。入口页返回 / 启动失败
+> 只结束 Session，不产生 Run；回放 Session 只重放已有 Run。命名见[术语表](domain_terms.md)。
+
 ## 目录
 
 | 节 | 内容 |
@@ -33,7 +37,7 @@
 | 文件 | 职责 |
 |---|---|
 | `dungeon/window/__init__.py` | 用 mixin 组装出 `DungeonSessionWindow` |
-| `dungeon/window/base.py` | 构造（`__init__` 只存参数 + 会话初始化）与运行（`run()` 建 UI、`_runner.run()` 托管帧循环、收尾 `_finish_session`）、入口 / 会话阶段切换、关闭路径、视口尺寸（取自宿主端口） |
+| `dungeon/window/base.py` | 构造（`__init__` 只存参数 + 会话初始化）与运行（`run()` 建 UI、`_runner.run()` 托管帧循环、收尾 `_finish_session`）、入口 / 运行阶段切换、关闭路径、视口尺寸（取自宿主端口） |
 | `dungeon/window/runner.py` | **宿主运行器** `WindowRunner`：把 `RunnerParams` 的回调挂到窗口原有生命周期语义上（`on_post_init` / `on_load_fonts` / `on_frame_start` / `on_draw` / `on_frame_end` / `on_capture` / `on_before_exit`），`request_exit()` 只置位、帧边界落实 `app_shall_exit`（C1） |
 | `dungeon/window/host.py` | **宿主端口** `HostPort`（含无宿主缺省实现）：尺寸/DPI、宿主显隐、事件泵、收尾弹框、活动窗口登记、缺省字体、回放文件选择 |
 | `ui/hosting/tk_host.py` | 宿主端口的 Tk/CTk 适配器 `TkHost`——**window 层唯一的 Tk 细节所在地** |
@@ -124,9 +128,9 @@ run() → SessionResult
 - **输入接线在帧线程**：立即模式没有回调线程，`ui._handle_input` 每帧读
   `imgui.is_key_pressed` / `is_mouse_clicked`，天然与渲染同线程（§4）
 
-### 2.3 入口阶段 → 会话阶段（探索模式）
+### 2.3 入口阶段 → 运行阶段（Run，探索模式）
 
-两者共享同一次窗口生命周期（同一个 ImGui 上下文 / 视口 / 根窗口），切换不重建。
+两者共享同一次 Session 生命周期（同一个 ImGui 上下文 / 视口 / 根窗口），切换不重建。
 
 | 动作 | 路径 |
 |---|---|
@@ -294,7 +298,7 @@ run() → SessionResult
 | **C8** | window 层不许 import `tkinter` / `customtkinter` / `ui`；宿主能力一律经 `HostPort`，见 §5.2 端口表 | 换 UI 框架只需换适配器；自检不再需要打桩 `ui.ctk.dialogs` | `tests/check_dungeon_layering.py` |
 | **C9** | 构造 / 复制 `DungeonState` 只用关键字参数 | 字段顺序会随迭代变化（`chapter_steps` 就是从中间插入的）；`clone()` 曾按位置传参导致伤亡数组被填成步长浮点数，于是**每一步** `_finish_step` 都抛 `'float' object is not iterable`——故事看着还在出字，但总计数不增长、触发器与结局永不触发 | 断言「回放记录是否增长」 |
 | **C10** | 写盘一律用原子写（`persistence/json_store.py`） | 半截文件不可恢复，`.bak` 是唯一回退；回放 / 报告按时间戳命名、本来不会被覆盖，调用时传 `backup=False` | `tests/check_dungeon_finalize.py` |
-| **C11** | 术语不混用：`scenario_*` = 方案，`dungeon_*` = 一局 | 见 [术语表](domain_terms.md) 与 `dungeon/terms.py` | `tests/check_scenario_naming.py` |
+| **C11** | 术语不混用：`scenario_*` = 方案（定义），`run_*` = 一局（执行），`session_*` = 窗口会话 / 呈现；`dungeon_*` 是产品 / 历史命名，不是精确的 Run 后缀 | 见 [术语表](domain_terms.md) 与 `dungeon/terms.py` | `tests/check_scenario_naming.py` |
 | **C12** | 任何 Tk 交互前必须调用 `self._discard_pending_quit()` | 用户通过视口原生关闭键（X）退出时，GLFW 销毁原生窗口会导致 Windows 在本线程队列中留下一条 `WM_QUIT`；它不会被 Tk 消费，却会让 Windows 停止合成 `WM_TIMER`，造成随后的收尾提示模态对话框（`wait_window`）以及主窗口所有 `after` 计时器彻底收不到事件而表现为**弹出提示对话框后主窗口卡死**；收尾时在 `show_window()` / 弹框前由端口抛弃该残留消息 | `python scripts/dungeon_autopilot.py --scene native-close --isolate` |
 | **C13** | 组件只经**组件服务面**访问窗口（`ctx.component_viewport / schedule / schedule_every / cancel_task / session_waiting_for_input / component_autoplay_on / text_font_tag / bold_font_tag / component_top_inset / component`），不得读窗口私有属性（`_dpi_scale` / `_layout_w` / `_frame` / `_autoplay`…） | 组件 ctx 就是窗口实例，摸私有零成本，一旦窗口侧改名即静默 AttributeError；契约的可执行版本是守卫里的**替身 ctx**（只实现服务面）与 AST 越界扫描 | `tests/check_component_pack.py` |
 | **C14** | 会话收尾不许留下本代窗口：`hello_imgui.run()` 返回后，本进程不应再有标题以 `副本模式` / `回放模式` 开头的顶层原生窗口 | 迁移前 DPG 的 `destroy_context()` **不销毁**视口对应的 GLFW 原生窗口（2026-10-07 最小复现：`IsWindow/IsWindowVisible` 在 destroy 之后仍为真，`park_context()` 也不会带走它）。典型 DPG 程序感知不到（destroy 后进程随即退出，窗口由 OS 回收），但本程序收尾后仍跑 Tk 主循环，那个不再响应的副本窗口就**留在屏幕上**——用户报的「启动界面点返回后卡死」，且每局累加一个；当时必须趁 GLFW 有效时显式销毁（那之后 GLFW 的 WndProc 已释放，`DestroyWindow` 会以 0xC0000005 掀掉进程）。imgui 的 runner 自己销毁窗口，本条改为**回归断言**：无论后端怎么实现，收尾都不许留下这一代窗口 | `python scripts/dungeon_autopilot.py --scene entry-cancel` / `--scene session-close`（断言「返回/关闭后不再新增副本视口原生窗口」） |

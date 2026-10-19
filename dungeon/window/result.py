@@ -1,8 +1,10 @@
 """会话结果对象（L4）。
 
-``DungeonSessionWindow.run()`` 的返回值。在此之前调用方要"new 一个类 + 读私有
-属性"（``window._launch_error`` / ``window._launch_choice``）才能知道这一局发生了
-什么——控制流散在 UI 层，既不显眼也难测。现在一律返回 :class:`SessionResult`：
+``DungeonSessionWindow.run()`` 的返回值。这里的 **Session** 是一次窗口生命周期，
+不是 **Run**：入口页返回 / 启动失败时没有产生 Run，但仍然是同一个 Session 的结果。
+在此之前调用方要"new 一个类 + 读私有属性"（``window._launch_error`` /
+``window._launch_choice``）才能知道发生了什么——控制流散在 UI 层，既不显眼也难测。
+现在一律返回 :class:`SessionResult`：
 
 ::
 
@@ -16,19 +18,20 @@
 :attr:`failed` / :attr:`cancelled` 只是它的三组别名，避免到处写字符串比较。
 """
 
-#: 会话真的跑起来了（走到结局 / 中途退出 / 回放播完都算）
+#: 运行阶段真的起来了（走到结局 / 中途退出 / 回放播完都算）
 REASON_SESSION_ENDED = "session-ended"
-#: 入口页点了"返回"（或没选方案就关窗）：没进过会话，不应产生任何内容
+#: 入口页点了"返回"（或没选方案就关窗）：没进入运行阶段，不应产生任何内容
 REASON_ENTRY_CANCELLED = "entry-cancelled"
-#: 进了入口页但没能进入会话：配置加载失败 / 校验有错误 / 行动点数不足
+#: 进了入口页但没能进入运行阶段：配置加载失败 / 校验有错误 / 行动点数不足
 REASON_LAUNCH_FAILED = "launch-failed"
-#: 同进程里已有会话在跑，这次启动被忽略（DPG 上下文是全局单例语义）
+#: 同进程里已有 Session 在跑，这次启动被忽略（窗口 / GL 上下文是进程级资源）
 REASON_ALREADY_RUNNING = "already-running"
 
 
 class SessionResult:
-    """一局副本的结果快照。**只读**：构造完就不再变化。
+    """一次窗口会话的结果快照。**只读**：构造完就不再变化。
 
+    ``reason`` 是 Session 层面的结果；``ended`` / ``is_replay`` 等才是 Run 的细节。
     参数与属性一一对应。只有 ``reason`` 必填，其余都有缺省值，因此新的调用场景
     可以自由扩展字段而不必改动既有代码。
     """
@@ -62,7 +65,7 @@ class SessionResult:
     # ---------------- 便捷判定 ----------------
     @property
     def succeeded(self) -> bool:
-        """会话阶段真的起来了（无论是否走到结局）。"""
+        """运行阶段真的起来了（无论是否走到结局）。"""
         return self.reason == REASON_SESSION_ENDED
 
     @property
@@ -72,7 +75,7 @@ class SessionResult:
 
     @property
     def cancelled(self) -> bool:
-        """入口页直接返回/关窗：没进会话，不该有任何副作用。"""
+        """入口页直接返回/关窗：没进入运行阶段，不该有任何副作用。"""
         return self.reason == REASON_ENTRY_CANCELLED
 
     def __bool__(self) -> bool:
