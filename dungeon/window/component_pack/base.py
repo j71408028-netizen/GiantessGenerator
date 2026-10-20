@@ -80,16 +80,18 @@ class _TextDisplayBase(DungeonComponent):
         """本帧的代管区（``layout`` 里算好；见 dungeon.window.layout）。"""
         return list(self._slots)
 
-    def _draw_slot_chrome(self, slot, s):
+    def _draw_slot_chrome(self, slot, s, dx=0.0):
         """画 ``surface="host"`` 代管区的底纹/边框/分隔线。
 
         子组件的 ``draw`` 在文本组件之后执行，因此这里画的内容天然在子组件
         内容之下；需要压在子组件上的装饰（工具条、指示）仍放在 ``draw`` 末尾。
+        ``dx`` 是宿主让位动画的临时位移，子组件从 ``slot.offset_x`` 读同一个值。
         """
         style = slot.style
         if style.surface != SURFACE_HOST:
             return
         x, y, w, h = slot.rect
+        x += float(dx)
         draw_list = imgui.get_window_draw_list()
         radius = float(style.radius or 0.0)
         if style.bg is not None:

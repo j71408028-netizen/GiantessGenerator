@@ -1377,6 +1377,58 @@ _check_settings_panel_drawn.__name__ = "settings-drawn"
 _close_settings_panel.__name__ = "settings-close"
 
 
+def _open_dock_log(side):
+    """展开过程日志：日志拿到 text_card 的侧边代管区，卡片往另一侧让位。"""
+
+    def _open(win):
+        text = next(c for c in win._components
+                    if getattr(c, "id", "") == "text_card")
+        win._dock_base_x = text._panel_rect[0]
+        win.toggle_proc_log()
+        log = next(c for c in win._components
+                   if getattr(c, "id", "") == "proc_log")
+        assert getattr(log, "_slot_rect", None), "日志未拿到侧边代管区"
+        rect = log._slot_rect
+        assert log._slot_style.side == side, log._slot_style.side
+        vw = win._layout_w
+        if side == "left":
+            assert rect[0] + rect[2] <= text._panel_rect[0] + 0.5, (
+                rect, text._panel_rect)
+            assert text._panel_rect[0] > win._dock_base_x + 1, (
+                win._dock_base_x, text._panel_rect[0])
+        else:
+            assert rect[0] + rect[2] >= vw - 40, (rect, vw)
+            assert (text._panel_rect[0] + text._panel_rect[2]
+                    <= rect[0] + 0.5), (rect, text._panel_rect)
+            assert text._panel_rect[0] < win._dock_base_x - 1, (
+                win._dock_base_x, text._panel_rect[0])
+
+    _open.__name__ = f"dock-open-{side}"
+    return _open
+
+
+def _check_dock_log_drawn(win):
+    """日志在真实窗口里渲染了几帧：入场进度应已推进到就位。"""
+    log = next(c for c in win._components if getattr(c, "id", "") == "proc_log")
+    assert log._open and log._slot_rect, (log._open, log._slot_rect)
+    assert log._enter_progress >= 0.99, log._enter_progress
+
+
+def _close_dock_log(win):
+    """收起日志：代管区释放，卡片回到原位。"""
+    text = next(c for c in win._components if getattr(c, "id", "") == "text_card")
+    win.toggle_proc_log()
+    log = next(c for c in win._components if getattr(c, "id", "") == "proc_log")
+    assert not log._open, log._open
+    assert not getattr(log, "_slot_rect", None), log._slot_rect
+    assert abs(text._panel_rect[0] - win._dock_base_x) < 0.5, (
+        win._dock_base_x, text._panel_rect[0])
+
+
+_check_dock_log_drawn.__name__ = "dock-drawn"
+_close_dock_log.__name__ = "dock-close"
+
+
 def scene_text_components():
     """文本组件家族冒烟：text_card / text_nvl 接管显示 + text_component 字段。"""
     for cid in ("text_card", "text_nvl"):
@@ -1437,6 +1489,22 @@ def scene_text_components():
     check("服务面：副本设置面板调出/渲染/关闭",
           bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
           win._check_results)
+
+    # 侧边代管区：日志展开时从所贴的屏幕边缘滑入，text_card 往另一侧让位
+    for side, overrides in (("left", {}), ("right", {"dock_on_right": True})):
+        win, result = _make_window(
+            [("click", 2), ("check", _open_dock_log(side)), ("sleep", 0.5),
+             ("check", _check_dock_log_drawn),
+             ("check", _close_dock_log), ("close", None)],
+            explore=False,
+            config_overrides={
+                "text_component": "text_card",
+                "components": ["proc_log"],
+                "components_params": {"text_card": overrides},
+            })
+        check(f"代管区[{side}]：日志滑入 / 卡片让位 / 收起归还",
+              bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
+              win._check_results)
 
 
 class _MiniGameHost(ScriptedHost):

@@ -153,9 +153,12 @@ class AttrBarComponent(DungeonComponent):
         s = ctx.component_viewport()[0]
         params = self.params or {}
         outer = self._slot_outer or self._slot_rect
+        # 宿主让位动画的临时位移（卡片右移时 footer 内容跟着走）。
+        dx = float(getattr(self._slot, "offset_x", 0.0) or 0.0)
         if style.surface == SURFACE_OWN:
             pad = round(12 * s)
             x, y, w, h = outer
+            x += dx
             draw_list = imgui.get_window_draw_list()
             radius = round(12 * s)
             draw_list.add_rect_filled(iu.v2(x, y), iu.v2(x + w, y + h),
@@ -168,6 +171,7 @@ class AttrBarComponent(DungeonComponent):
             h = max(1.0, h - 2 * pad)
         else:
             x, y, w, h = self._slot_rect
+            x += dx
         line_h = round((UI_FONT_SIZE + 10) * s)
         y = y + max(0.0, (h - line_h) / 2.0)
         self._draw_row(ctx, x, y,

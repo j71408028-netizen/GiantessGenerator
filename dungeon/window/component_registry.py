@@ -114,6 +114,8 @@ class DungeonComponent:
     - 代管区：``ctx.component_rect(cid)`` → 分配到的内容矩形（未分配为 None）、
       ``ctx.component_slot(cid)`` → 分配到的 ``Slot``（含样式）、
       ``ctx.component_roles()`` → 本会话组件声明的角色集合；
+      子组件按 ``SlotStyle.side`` 从对应屏幕边缘入场，并把宿主的让位位移
+      ``Slot.offset_x`` 叠加到绘制坐标（几何分配不变）；
     - 帧时钟：``ctx.schedule(fn, *args)`` / ``ctx.schedule_every(interval, fn, key)`` /
       ``ctx.cancel_task(key)``（**不得**直接触碰窗口的 ``_frame``）；
     - 状态查询：``ctx.session_waiting_for_input()`` / ``ctx.component_autoplay_on()``；
@@ -137,7 +139,8 @@ class DungeonComponent:
     description = ""  # 编辑器说明文案
     param_specs = []  # 可配置参数声明列表
     # 代管区匹配用：角色（status / log / meta / action / media…）与支持的形状
-    # （dungeon.window.layout.SHAPE_*）。留空表示不参与代管区分配。
+    # （dungeon.window.layout.SHAPE_*）。留空表示不参与代管区分配；``roles``
+    # 可按运行状态变化（例如日志面板只有展开时才占用代管区）。
     roles = ()
     shapes = ()
 

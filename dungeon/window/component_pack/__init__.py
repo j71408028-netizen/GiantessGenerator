@@ -22,7 +22,10 @@
 三者都在 ``layout`` 阶段声明代管区（``dungeon.window.layout.Slot``）：
 ``text_card`` 提供卡片底部状态带、``text`` 提供渐变区状态带、``text_nvl``
 提供顶部状态带；``attr_bar`` 声明 ``roles=("status",)`` 优先落入，没有可用
-代管区时回退左上角独立面板。
+代管区时回退左上角独立面板。``text_card`` 还提供贴视口一侧的 ``card_side``
+（``log`` / ``rail``）：``proc_log`` 仅在展开时声明 ``log`` 角色，按代管区的
+``SlotStyle.side`` 从所贴的屏幕边缘平移进入，卡片同时往另一侧让位；
+``dock_on_right`` 参数可反转左右布局。
 
 三者都声明 ``owns_text_display = True`` 接管窗口文本显示（内置 text_container
 管线被 _update_text_display 的所有权守卫跳过）；仿流式动画仍由窗口帧时钟驱动

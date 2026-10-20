@@ -277,6 +277,81 @@ def check_slots(registry):
         ctx._components.remove(text)
 
 
+def check_side_dock(registry):
+    """text_card 侧边代管区：左右语义、卡片让位方向与日志分配矩形。"""
+    from dungeon.window.layout import (SIDE_LEFT, SIDE_RIGHT, SHAPE_RAIL,
+                                       SlotAssignment)
+
+    def run_case(side):
+        ctx = _FakeCtx()
+        overrides = {"dock_on_right": True} if side == SIDE_RIGHT else {}
+        text = registry.instantiate(
+            ctx, "text_card",
+            config={"components_params": {"text_card": overrides}})
+        log = registry.instantiate(ctx, "proc_log",
+                                   config={"components_params": {}})
+        if text is None or log is None:
+            check(f"侧边代管区[{side}]：组件可创建", False, (text, log))
+            return
+        ctx._components.extend([text, log])
+        text.build(ctx)
+        log.build(ctx)
+        base_x = text._panel_rect[0]
+        check(f"侧边代管区[{side}]：日志收起时不声明",
+              not any(s.id == "card_side" for s in text.slots(ctx)),
+              [(s.id, s.shape) for s in text.slots(ctx)])
+
+        log.toggle(ctx)
+        text.layout(ctx)
+        slots = list(text.slots(ctx))
+        rail = next((s for s in slots
+                     if s.shape == SHAPE_RAIL and "log" in s.roles), None)
+        check(f"侧边代管区[{side}]：日志展开时声明 log rail", rail is not None,
+              [(s.id, s.shape, s.roles) for s in slots])
+        if rail is not None:
+            vw = ctx.viewport[1]
+            inside = (rail.rect[0] >= 0 and rail.rect[1] >= 0
+                      and rail.rect[0] + rail.rect[2] <= vw + 0.5)
+            if side == SIDE_LEFT:
+                edge_ok = rail.rect[0] <= 40
+            else:
+                edge_ok = rail.rect[0] + rail.rect[2] >= vw - 40
+            check(f"侧边代管区[{side}]：贴对应屏幕边缘且在视口内",
+                  inside and edge_ok and rail.style.side == side,
+                  (rail.rect, rail.style.side))
+            rect = rail.take()
+            ctx.assigned["proc_log"] = SlotAssignment(rail, rect)
+            log.layout(ctx)
+            check(f"侧边代管区[{side}]：日志使用分配矩形",
+                  tuple(round(float(v), 2) for v in log._panel_rect)
+                  == tuple(round(float(v), 2) for v in rect),
+                  (log._panel_rect, rect))
+            if side == SIDE_LEFT:
+                shifted = text._panel_rect[0] > base_x + 1
+                disjoint = (rail.rect[0] + rail.rect[2]
+                            <= text._panel_rect[0] + 0.5)
+            else:
+                shifted = text._panel_rect[0] < base_x - 1
+                disjoint = (text._panel_rect[0] + text._panel_rect[2]
+                            <= rail.rect[0] + 0.5)
+            check(f"侧边代管区[{side}]：卡片往另一侧让位", shifted,
+                  (base_x, text._panel_rect[0]))
+            check(f"侧边代管区[{side}]：代管区与卡片不重叠", disjoint,
+                  (rail.rect, text._panel_rect))
+
+        log.toggle(ctx)
+        text.layout(ctx)
+        check(f"侧边代管区[{side}]：日志收起后卡片回到原位",
+              abs(text._panel_rect[0] - base_x) < 0.5,
+              (base_x, text._panel_rect[0]))
+        for comp in (log, text):
+            comp.destroy(ctx)
+            ctx._components.remove(comp)
+
+    for side in (SIDE_LEFT, SIDE_RIGHT):
+        run_case(side)
+
+
 def check_external_pack():
     """外部组件包（显式 pack_dir）覆盖常驻包：来源与类都取自外部目录。"""
     from dungeon.window.component_registry import get_registry
@@ -479,6 +554,7 @@ def main() -> int:
     check_params(registry)
     check_contract(registry)
     check_slots(registry)
+    check_side_dock(registry)
     check_pack_sources(registry)
     check_external_pack()
     check_smoke(registry)

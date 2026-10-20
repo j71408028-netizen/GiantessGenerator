@@ -1378,6 +1378,9 @@ class DungeonWindowUI:
             self._notify("日志查看已禁用")
             return
         comp.toggle(self)   # toggle 是基类声明的可选钩子（见契约）
+        # 展开 / 收起会占用或释放文本卡片的侧边代管区，几何要重新分配。
+        if getattr(self, "_components_built", False):
+            self._relayout_components()
 
     def toggle_proc_log(self):
         """调出 / 收起过程日志面板（文本组件工具条的按钮入口，与 F12 等效）。"""

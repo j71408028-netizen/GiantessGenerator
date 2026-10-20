@@ -12,6 +12,11 @@
 - ``bare``：没有底纹（例如渐变区上半部），子组件只画内容；
 - ``own``：子组件自己画面板，slot 只提供外框。
 
+代管区还可以声明侧向语义（``SlotStyle.side``：``"left"`` / ``"right"``）：
+贴边代管区会从对应屏幕边缘平移进入（时长 ``SlotStyle.enter_seconds``），
+宿主在绘制阶段把自己的让位动画经 ``Slot.offset_x`` 传给子组件，几何分配
+结果本身不变。``ease_out_cubic`` / ``enter_offset`` 是两组共用的纯数学实现。
+
 本模块是纯数据/几何，不导入 imgui；绘制在 ``component_pack/base.py``。
 """
 from dataclasses import dataclass
@@ -20,6 +25,10 @@ from dataclasses import dataclass
 SHAPE_BAND = "band"
 SHAPE_RAIL = "rail"
 SHAPE_TILE = "tile"
+
+# 侧向语义：贴视口哪一侧。空串表示不贴边（例如卡片内部的状态带）。
+SIDE_LEFT = "left"
+SIDE_RIGHT = "right"
 
 # 底纹归属。
 SURFACE_HOST = "host"
@@ -43,6 +52,10 @@ class SlotStyle:
     label_color: tuple | None = None
     text_color: tuple | None = None
     highlight_color: tuple | None = None
+    #: 侧向语义：``"left"`` / ``"right"`` 表示贴视口哪一侧；空串 = 不贴边
+    side: str = ""
+    #: 入场动画时长（秒）；``side`` 为空时不生效
+    enter_seconds: float = 0.28
 
 
 class Slot:
@@ -58,6 +71,8 @@ class Slot:
         self.gap = float(gap)
         self.style = style or SlotStyle()
         self.used = 0
+        #: 宿主在绘制阶段叠加的临时水平位移（让位动画）；不参与几何分配
+        self.offset_x = 0.0
 
     def content_rect(self):
         """扣掉内边距后的内容矩形。"""
@@ -111,8 +126,35 @@ def select_slot(slots, roles, shapes):
     return None
 
 
+def ease_out_cubic(progress):
+    """入场动画缓动：起步快、收尾慢；``progress`` 会先夹到 ``[0, 1]``。"""
+    t = 0.0 if progress < 0.0 else (1.0 if progress > 1.0 else float(progress))
+    return 1.0 - (1.0 - t) ** 3
+
+
+def enter_offset(style, rect, viewport_w, progress):
+    """入场动画的当前水平偏移（0 = 已就位）。
+
+    偏移方向由 ``style.side`` 决定：``left`` 从画面左端进入（起点右缘停在
+    ``x = 0``），``right`` 从画面右端进入（起点左缘停在 ``x = viewport_w``）；
+    没有侧向语义的 slot 恒为 0。子组件在自己的 ``draw`` 里把偏移加到绘制
+    坐标上——几何矩形的分配结果不变，动画纯属呈现层。
+    """
+    side = getattr(style, "side", "") if style is not None else ""
+    if side not in (SIDE_LEFT, SIDE_RIGHT):
+        return 0.0
+    x, _y, w, _h = rect
+    if side == SIDE_LEFT:
+        travel, direction = float(x) + float(w), -1.0
+    else:
+        travel, direction = float(viewport_w) - float(x), 1.0
+    return direction * travel * (1.0 - ease_out_cubic(progress))
+
+
 __all__ = [
     "SHAPE_BAND", "SHAPE_RAIL", "SHAPE_TILE",
+    "SIDE_LEFT", "SIDE_RIGHT",
     "SURFACE_HOST", "SURFACE_BARE", "SURFACE_OWN",
     "SlotStyle", "Slot", "SlotAssignment", "select_slot",
+    "ease_out_cubic", "enter_offset",
 ]
