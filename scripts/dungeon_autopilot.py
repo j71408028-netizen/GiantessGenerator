@@ -1429,6 +1429,53 @@ _check_dock_log_drawn.__name__ = "dock-drawn"
 _close_dock_log.__name__ = "dock-close"
 
 
+def _open_gradient_dock(side):
+    """展开过程日志：日志拿到渐变栏的侧边代管区，从下方升起并淡入。"""
+
+    def _open(win):
+        text = next(c for c in win._components if getattr(c, "id", "") == "text")
+        win._dock_base_panel = tuple(text._panel_rect)
+        win.toggle_proc_log()
+        log = next(c for c in win._components if getattr(c, "id", "") == "proc_log")
+        rect = getattr(log, "_slot_rect", None)
+        assert rect, "日志未拿到渐变栏侧边代管区"
+        style = log._slot_style
+        assert style.side == side, style.side
+        assert style.enter_from == "bottom" and style.enter_fade, (
+            style.enter_from, style.enter_fade)
+        assert log._enter_progress == 0.0, log._enter_progress
+        # 渐变正文全宽：代管区向上占用正文上方空间，不做横向让位。
+        assert rect[1] + rect[3] <= text._panel_rect[1] + 0.5, (
+            rect, text._panel_rect)
+        assert tuple(text._panel_rect) == win._dock_base_panel, (
+            win._dock_base_panel, text._panel_rect)
+
+    _open.__name__ = f"gradient-dock-open-{side}"
+    return _open
+
+
+def _check_gradient_dock_drawn(win):
+    """日志在真实窗口里渲染了几帧：升起 / 淡入进度应已推进到就位。"""
+    log = next(c for c in win._components if getattr(c, "id", "") == "proc_log")
+    assert log._open and log._slot_rect, (log._open, log._slot_rect)
+    assert log._enter_progress >= 0.99, log._enter_progress
+
+
+def _close_gradient_dock(win):
+    """收起日志：代管区释放，正文几何不变。"""
+    text = next(c for c in win._components if getattr(c, "id", "") == "text")
+    win.toggle_proc_log()
+    log = next(c for c in win._components if getattr(c, "id", "") == "proc_log")
+    assert not log._open, log._open
+    assert not getattr(log, "_slot_rect", None), log._slot_rect
+    assert tuple(text._panel_rect) == win._dock_base_panel, (
+        win._dock_base_panel, text._panel_rect)
+
+
+_check_gradient_dock_drawn.__name__ = "gradient-dock-drawn"
+_close_gradient_dock.__name__ = "gradient-dock-close"
+
+
 def scene_text_components():
     """文本组件家族冒烟：text_card / text_nvl 接管显示 + text_component 字段。"""
     for cid in ("text_card", "text_nvl"):
@@ -1503,6 +1550,22 @@ def scene_text_components():
                 "components_params": {"text_card": overrides},
             })
         check(f"代管区[{side}]：日志滑入 / 卡片让位 / 收起归还",
+              bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
+              win._check_results)
+
+    # 渐变栏侧边代管区：日志从下方升起淡入，正文几何不变
+    for side, overrides in (("left", {}), ("right", {"dock_on_right": True})):
+        win, result = _make_window(
+            [("click", 2), ("check", _open_gradient_dock(side)), ("sleep", 0.6),
+             ("check", _check_gradient_dock_drawn),
+             ("check", _close_gradient_dock), ("close", None)],
+            explore=False,
+            config_overrides={
+                "text_component": "text",
+                "components": ["proc_log"],
+                "components_params": {"text": overrides},
+            })
+        check(f"渐变代管区[{side}]：日志升起淡入 / 收起释放",
               bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
               win._check_results)
 

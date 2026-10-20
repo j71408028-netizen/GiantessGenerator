@@ -114,8 +114,9 @@ class DungeonComponent:
     - 代管区：``ctx.component_rect(cid)`` → 分配到的内容矩形（未分配为 None）、
       ``ctx.component_slot(cid)`` → 分配到的 ``Slot``（含样式）、
       ``ctx.component_roles()`` → 本会话组件声明的角色集合；
-      子组件按 ``SlotStyle.side`` 从对应屏幕边缘入场，并把宿主的让位位移
-      ``Slot.offset_x`` 叠加到绘制坐标（几何分配不变）；
+      子组件按 ``SlotStyle`` 的入场契约呈现（``enter_from`` 覆盖方向：``side``
+      水平推入、``bottom`` 从下方升起，``enter_fade`` 再叠加淡入），并把宿主的
+      让位位移 ``Slot.offset_x`` 叠加到绘制坐标（几何分配不变）；
     - 帧时钟：``ctx.schedule(fn, *args)`` / ``ctx.schedule_every(interval, fn, key)`` /
       ``ctx.cancel_task(key)``（**不得**直接触碰窗口的 ``_frame``）；
     - 状态查询：``ctx.session_waiting_for_input()`` / ``ctx.component_autoplay_on()``；

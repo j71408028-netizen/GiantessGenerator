@@ -3,13 +3,21 @@
 from imgui_bundle import imgui
 
 from dungeon.window import imgui_util as iu
-from dungeon.window.layout import SHAPE_BAND, SURFACE_BARE, Slot, SlotStyle
+from dungeon.window.layout import (ENTER_FROM_BOTTOM, SHAPE_BAND, SHAPE_RAIL,
+                                   SIDE_LEFT, SIDE_RIGHT, SURFACE_BARE,
+                                   SURFACE_OWN, Slot, SlotStyle)
 
 from .base import (_DEFAULT_LABEL_COLOR, _DEFAULT_TEXT_COLOR,
                    _HIGHLIGHT_COLOR, _TOOLBAR_MARGIN, _TextDisplayBase)
 
 
 _GRAD_DEFAULT_COLOR = (10, 12, 22, 128)
+# 侧边代管区（log 组件展开时启用）：贴视口一侧，停在渐变区上方。
+_DOCK_MARGIN = 20
+_DOCK_WIDTH = 320
+_DOCK_MIN_HEIGHT = 300
+_DOCK_MIN_USABLE = 160
+_DOCK_GAP = 10
 
 
 class TextComponent(_TextDisplayBase):
@@ -35,6 +43,9 @@ class TextComponent(_TextDisplayBase):
          "note": "highlight 段落的正文颜色"},
         {"key": "show_indicator", "label": "显示继续指示", "type": "bool",
          "default": True},
+        {"key": "dock_on_right", "label": "代管区改到右侧", "type": "bool",
+         "default": False,
+         "note": "日志面板停靠视口右侧、停在渐变区上方"},
     ]
 
     def __init__(self, ctx):
@@ -54,21 +65,47 @@ class TextComponent(_TextDisplayBase):
         box_x = round(40 * s)
         box_y = max(0.0, h - round(20 * s) - text_h)
         # 正文上方的状态带：无底纹（bare），只借用渐变衬底上的文字颜色。
-        has_status = "status" in tuple(ctx.component_roles() or ())
+        roles = tuple(ctx.component_roles() or ())
+        has_status = "status" in roles
         slot_h = round(30 * s) if has_status else 0
         slot_rect = (box_x + pad, max(0.0, box_y - round(8 * s) - slot_h),
                      max(1.0, text_w - 2 * pad), float(slot_h))
+        side = SIDE_RIGHT if bool(params.get("dock_on_right")) else SIDE_LEFT
+        dock_rect = self._dock_rect(s, w, h, grad_h, slot_rect, has_status,
+                                    "log" in roles, side)
         return (s, w, h, grad_h, box_x, box_y, text_w, text_h, pad,
-                slot_rect)
+                slot_rect, dock_rect, side)
+
+    @staticmethod
+    def _dock_rect(s, w, h, grad_h, slot_rect, has_status, has_log, side):
+        """侧边代管区矩形：贴视口一侧，底端停在渐变区（含状态带）上方。
+
+        渐变正文是全宽的，侧边代管区没有「卡片让位」那种横向余量，所以改为
+        向上占用正文上方空间；放不下高度就返回 ``None``，日志回退右上角面板。
+        """
+        if not has_log:
+            return None
+        margin = round(_DOCK_MARGIN * s)
+        dock_w = round(_DOCK_WIDTH * s)
+        top_limit = float(h - grad_h)
+        if has_status:
+            top_limit = min(top_limit, float(slot_rect[1]) - round(_DOCK_GAP * s))
+        available = top_limit - margin
+        if w < dock_w + 2 * margin or available < round(_DOCK_MIN_USABLE * s):
+            return None
+        dock_h = min(round(_DOCK_MIN_HEIGHT * s), available)
+        x = float(margin) if side == SIDE_LEFT else float(w - margin - dock_w)
+        return (x, float(top_limit - dock_h), float(dock_w), float(dock_h))
 
     def layout(self, ctx):
         self._layout = self._geometry(ctx)
-        s, _w, _h, _grad_h, _bx, _by, _tw, _th, _pad, slot_rect = self._layout
+        (s, _w, _h, _grad_h, _bx, _by, _tw, _th, _pad, slot_rect,
+         dock_rect, dock_side) = self._layout
         self._panel_rect = (_bx, _by, _tw, _th)
         params = self.params or {}
         self._slots = []
         if slot_rect[3] > 0:
-            self._slots = [Slot(
+            self._slots.append(Slot(
                 "scrim_band", SHAPE_BAND, slot_rect,
                 roles=("status",),
                 style=SlotStyle(
@@ -79,12 +116,28 @@ class TextComponent(_TextDisplayBase):
                     text_color=_DEFAULT_TEXT_COLOR,
                     highlight_color=params.get("highlight_color") or _HIGHLIGHT_COLOR,
                 ),
-            )]
+            ))
+        if dock_rect is not None:
+            # 日志自带面板（own）；与卡片的侧边代管区不同，它不从屏幕侧边推入，
+            # 而是从代管区下方升起并淡入（见 layout.enter_transform）。
+            self._slots.append(Slot(
+                "scrim_side", SHAPE_RAIL, dock_rect,
+                roles=("log",),
+                style=SlotStyle(
+                    surface=SURFACE_OWN,
+                    padding=(0.0, 0.0, 0.0, 0.0),
+                    side=dock_side,
+                    enter_from=ENTER_FROM_BOTTOM,
+                    enter_fade=True,
+                    enter_seconds=0.34,
+                ),
+            ))
 
     def draw(self, ctx):
         if self._layout is None:
             self.layout(ctx)
-        (s, w, h, grad_h, bx, by, tw, th, pad, _slot_rect) = self._layout
+        (s, w, h, grad_h, bx, by, tw, th, pad, _slot_rect,
+         _dock_rect, _dock_side) = self._layout
         params = self.params or {}
         color = params.get("gradient_color") or _GRAD_DEFAULT_COLOR
         draw_list = imgui.get_window_draw_list()

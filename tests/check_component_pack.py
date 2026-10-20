@@ -280,7 +280,8 @@ def check_slots(registry):
 def check_side_dock(registry):
     """text_card 侧边代管区：左右语义、卡片让位方向与日志分配矩形。"""
     from dungeon.window.layout import (SIDE_LEFT, SIDE_RIGHT, SHAPE_RAIL,
-                                       SlotAssignment)
+                                       SlotAssignment, enter_alpha,
+                                       enter_offset, enter_rise)
 
     def run_case(side):
         ctx = _FakeCtx()
@@ -319,6 +320,11 @@ def check_side_dock(registry):
             check(f"侧边代管区[{side}]：贴对应屏幕边缘且在视口内",
                   inside and edge_ok and rail.style.side == side,
                   (rail.rect, rail.style.side))
+            check(f"侧边代管区[{side}]：入场是水平推入、不淡入",
+                  enter_offset(rail.style, rail.rect, vw, 0.0) != 0
+                  and enter_rise(rail.style, rail.rect, ctx.viewport[2], 0.0) == 0
+                  and enter_alpha(rail.style, 0.0) == 1.0,
+                  (rail.style.enter_from, rail.style.enter_fade))
             rect = rail.take()
             ctx.assigned["proc_log"] = SlotAssignment(rail, rect)
             log.layout(ctx)
@@ -350,6 +356,105 @@ def check_side_dock(registry):
 
     for side in (SIDE_LEFT, SIDE_RIGHT):
         run_case(side)
+
+
+def check_gradient_dock(registry):
+    """text 渐变栏的侧边代管区：贴视口一侧、停在正文上方，组件从下方升起淡入。"""
+    from dungeon.window.layout import (ENTER_FROM_BOTTOM, SIDE_LEFT, SIDE_RIGHT,
+                                       SHAPE_RAIL, SlotAssignment, enter_alpha,
+                                       enter_offset, enter_rise)
+
+    def run_case(side):
+        ctx = _FakeCtx()
+        overrides = {"dock_on_right": True} if side == SIDE_RIGHT else {}
+        text = registry.instantiate(
+            ctx, "text", config={"components_params": {"text": overrides}})
+        log = registry.instantiate(ctx, "proc_log",
+                                   config={"components_params": {}})
+        if text is None or log is None:
+            check(f"渐变代管区[{side}]：组件可创建", False, (text, log))
+            return
+        ctx._components.extend([text, log])
+        text.build(ctx)
+        log.build(ctx)
+        base_panel = tuple(text._panel_rect)
+        check(f"渐变代管区[{side}]：日志收起时不声明",
+              not any(s.id == "scrim_side" for s in text.slots(ctx)),
+              [(s.id, s.shape) for s in text.slots(ctx)])
+
+        log.toggle(ctx)
+        text.layout(ctx)
+        slots = list(text.slots(ctx))
+        rail = next((s for s in slots
+                     if s.shape == SHAPE_RAIL and "log" in s.roles), None)
+        check(f"渐变代管区[{side}]：日志展开时声明 log rail", rail is not None,
+              [(s.id, s.shape, s.roles) for s in slots])
+        if rail is None:
+            return
+        vw, vh = ctx.viewport[1], ctx.viewport[2]
+        inside = (rail.rect[0] >= 0 and rail.rect[1] >= 0
+                  and rail.rect[0] + rail.rect[2] <= vw + 0.5
+                  and rail.rect[1] + rail.rect[3] <= vh + 0.5)
+        edge_ok = (rail.rect[0] <= 40 if side == SIDE_LEFT
+                   else rail.rect[0] + rail.rect[2] >= vw - 40)
+        # 渐变正文是全宽的，侧边代管区改为向上占用正文上方空间，不做横向让位。
+        above_text = rail.rect[1] + rail.rect[3] <= text._panel_rect[1] + 0.5
+        check(f"渐变代管区[{side}]：贴对应边缘且停在正文上方",
+              inside and edge_ok and above_text and rail.style.side == side,
+              (rail.rect, text._panel_rect, rail.style.side))
+        check(f"渐变代管区[{side}]：正文不做横向让位",
+              tuple(text._panel_rect) == base_panel,
+              (base_panel, text._panel_rect))
+        # 呈现契约：从下方升起 + 淡入，而不是水平推入。
+        check(f"渐变代管区[{side}]：入场为下方升起并淡入",
+              rail.style.enter_from == ENTER_FROM_BOTTOM
+              and rail.style.enter_fade
+              and enter_rise(rail.style, rail.rect, vh, 0.0) > 0
+              and abs(enter_rise(rail.style, rail.rect, vh, 1.0)) < 1e-6
+              and enter_offset(rail.style, rail.rect, vw, 0.0) == 0.0
+              and abs(enter_alpha(rail.style, 0.0)) < 1e-6
+              and abs(enter_alpha(rail.style, 1.0) - 1.0) < 1e-6,
+              (rail.style.enter_from, rail.style.enter_fade))
+        rect = rail.take()
+        ctx.assigned["proc_log"] = SlotAssignment(rail, rect)
+        log.layout(ctx)
+        check(f"渐变代管区[{side}]：日志使用分配矩形",
+              tuple(round(float(v), 2) for v in log._panel_rect)
+              == tuple(round(float(v), 2) for v in rect),
+              (log._panel_rect, rect))
+        log.toggle(ctx)
+        text.layout(ctx)
+        check(f"渐变代管区[{side}]：收起即释放",
+              not any(s.id == "scrim_side" for s in text.slots(ctx)),
+              [(s.id, s.shape) for s in text.slots(ctx)])
+        for comp in (log, text):
+            comp.destroy(ctx)
+            ctx._components.remove(comp)
+
+    for side in (SIDE_LEFT, SIDE_RIGHT):
+        run_case(side)
+
+    # 渐变区占满视口（height_percent=80）时放不下侧边代管区，日志回退右上角面板。
+    ctx = _FakeCtx()
+    text = registry.instantiate(
+        ctx, "text",
+        config={"components_params": {"text": {"height_percent": 80}}})
+    log = registry.instantiate(ctx, "proc_log", config={"components_params": {}})
+    ctx._components.extend([text, log])
+    text.build(ctx)
+    log.build(ctx)
+    log.toggle(ctx)
+    text.layout(ctx)
+    log.layout(ctx)
+    check("渐变代管区：渐变区过高时不声明，日志回退面板",
+          not any(s.id == "scrim_side" for s in text.slots(ctx))
+          and log._slot_rect is None
+          and log._panel_rect[2] > 0 and log._panel_rect[3] > 0,
+          ([(s.id, s.shape) for s in text.slots(ctx)], log._slot_rect,
+           log._panel_rect))
+    for comp in (log, text):
+        comp.destroy(ctx)
+        ctx._components.remove(comp)
 
 
 def check_external_pack():
@@ -555,6 +660,7 @@ def main() -> int:
     check_contract(registry)
     check_slots(registry)
     check_side_dock(registry)
+    check_gradient_dock(registry)
     check_pack_sources(registry)
     check_external_pack()
     check_smoke(registry)

@@ -1,28 +1,38 @@
-"""过程日志组件（proc_log）：文本卡片侧边代管区 / 右上角运行消息面板"""
+"""过程日志组件（proc_log）：文本组件侧边代管区 / 右上角运行消息面板"""
 
 from imgui_bundle import imgui
 
 from dungeon import process_log
 from dungeon.window import imgui_util as iu
 from dungeon.window.component_registry import DungeonComponent
-from dungeon.window.layout import SHAPE_RAIL, enter_offset
+from dungeon.window.layout import SHAPE_RAIL, enter_direction, enter_transform
 
 
 _LOG_COLOR = (232, 232, 232, 255)
 _TITLE = "过程日志（F12 收起）"
 
 
-class ProcLogComponent(DungeonComponent):
-    """过程日志：优先停靠文本卡片的侧边代管区，没有时回退右上角面板。
+def _fade(color, alpha):
+    """按入场透明度缩放颜色 alpha；``alpha`` 为 1 时原样返回。"""
+    if alpha >= 0.999:
+        return color
+    factor = max(0.0, min(1.0, float(alpha)))
+    return (color[0], color[1], color[2], int(color[3] * factor))
 
-    只有面板展开时才声明 ``log`` 角色——收起状态不占用代管区，文本卡片也就
-    不会平白偏移。展开后按 ``SlotStyle.side`` 从代管区所贴的屏幕边缘平移进入。
+
+class ProcLogComponent(DungeonComponent):
+    """过程日志：优先停靠文本组件的侧边代管区，没有时回退右上角面板。
+
+    只有面板展开时才声明 ``log`` 角色——收起状态不占用代管区，宿主也就不会
+    平白偏移。展开后的呈现由 ``SlotStyle`` 的入场契约决定：卡片的 ``card_side``
+    从所贴的屏幕边缘平移进入，渐变栏的 ``scrim_side`` 从代管区下方升起并淡入。
     """
 
     id = "proc_log"
     label = "过程日志"
     description = ("显示运行消息（F12 切换展开/收起，默认收起）；展开时优先停靠"
-                   "文本卡片侧边的代管区并从对应屏幕边缘滑入，没有代管区时回退右上角。")
+                   "文本组件的侧边代管区（卡片侧边滑入、渐变栏侧边升起淡入），"
+                   "没有代管区时回退右上角。")
     TAG_PREFIX = "proc_log"
     shapes = (SHAPE_RAIL,)
     param_specs = [
@@ -100,42 +110,45 @@ class ProcLogComponent(DungeonComponent):
         if len(self._lines) > max_lines:
             del self._lines[:-max_lines]
 
-    def _slide_offset(self, rect, viewport_w):
-        """代管区要求的入场位移；没有侧向语义时恒为 0。"""
+    def _enter_state(self, rect, viewport_w, viewport_h):
+        """代管区要求的入场呈现：``(水平位移, 纵向位移, 透明度)``。"""
         style = self._slot_style
-        if style is None or not style.side:
-            return 0.0
+        if style is None or not enter_direction(style):
+            return 0.0, 0.0, 1.0
         dt = min(float(imgui.get_io().delta_time), 0.1)
         seconds = max(1e-3, float(style.enter_seconds or 0.0))
         if self._enter_progress < 1.0:
             self._enter_progress = min(1.0, self._enter_progress + dt / seconds)
-        return enter_offset(style, rect, viewport_w, self._enter_progress)
+        return enter_transform(style, rect, viewport_w, viewport_h,
+                               self._enter_progress)
 
     def draw(self, ctx):
         if not self._open:
             return
         if self._slot_rect is not None:
             x, y, w, h = self._slot_rect
-            viewport_w = ctx.component_viewport()[1]
-            x += self._slide_offset(self._slot_rect, viewport_w)
-            self._draw_panel(ctx, x, y, w, h)
+            _s, viewport_w, viewport_h = ctx.component_viewport()
+            dx, dy, alpha = self._enter_state(self._slot_rect,
+                                              viewport_w, viewport_h)
+            self._draw_panel(ctx, x + dx, y + dy, w, h, alpha)
             return
         if self._layout is None:
             self.layout(ctx)
         _s, x, y, width, panel_h, _scroll_h, _margin, _pad = self._layout
         self._draw_panel(ctx, x, y, width, panel_h)
 
-    def _draw_panel(self, ctx, x, y, w, h):
+    def _draw_panel(self, ctx, x, y, w, h, alpha=1.0):
         s = ctx.component_viewport()[0]
         draw_list = imgui.get_window_draw_list()
         pad = round(8 * s)
         radius = round(10 * s)
         draw_list.add_rect_filled(iu.v2(x, y), iu.v2(x + w, y + h),
-                                  iu.u32(12, 12, 12, 175), radius)
+                                  iu.u32(*_fade((12, 12, 12, 175), alpha)),
+                                  radius)
         draw_list.add_rect(iu.v2(x, y), iu.v2(x + w, y + h),
-                           iu.u32(255, 255, 255, 32), radius)
+                           iu.u32(*_fade((255, 255, 255, 32), alpha)), radius)
         draw_list.add_text(iu.v2(x + pad, y + pad),
-                           iu.u32(200, 205, 215, 255), _TITLE)
+                           iu.u32(*_fade((200, 205, 215, 255), alpha)), _TITLE)
         title_h = float(imgui.calc_text_size(_TITLE).y) + pad
         child_w = max(1.0, w - 2 * pad)
         child_h = max(1.0, h - title_h - pad)
@@ -146,7 +159,8 @@ class ProcLogComponent(DungeonComponent):
                           imgui.WindowFlags_.none.value)
         imgui.push_text_wrap_pos(child_w)
         for line in self._lines:
-            imgui.push_style_color(imgui.Col_.text, iu.u32(*_LOG_COLOR))
+            imgui.push_style_color(imgui.Col_.text,
+                                   iu.u32(*_fade(_LOG_COLOR, alpha)))
             imgui.text_wrapped(line)
             imgui.pop_style_color()
         imgui.pop_text_wrap_pos()

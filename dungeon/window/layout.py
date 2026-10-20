@@ -15,7 +15,10 @@
 代管区还可以声明侧向语义（``SlotStyle.side``：``"left"`` / ``"right"``）：
 贴边代管区会从对应屏幕边缘平移进入（时长 ``SlotStyle.enter_seconds``），
 宿主在绘制阶段把自己的让位动画经 ``Slot.offset_x`` 传给子组件，几何分配
-结果本身不变。``ease_out_cubic`` / ``enter_offset`` 是两组共用的纯数学实现。
+结果本身不变。``SlotStyle.enter_from`` 可覆盖入场方向：默认沿用 ``side``，
+设为 ``"bottom"`` 时子组件从代管区下方升起（``enter_rise``），配合
+``enter_fade`` 做淡入。``ease_out_cubic`` / ``enter_offset`` / ``enter_rise`` /
+``enter_alpha`` 是各组共用的纯数学实现。
 
 本模块是纯数据/几何，不导入 imgui；绘制在 ``component_pack/base.py``。
 """
@@ -29,6 +32,9 @@ SHAPE_TILE = "tile"
 # 侧向语义：贴视口哪一侧。空串表示不贴边（例如卡片内部的状态带）。
 SIDE_LEFT = "left"
 SIDE_RIGHT = "right"
+
+# 入场方向覆盖：从代管区下方升起（配 enter_fade 做淡入）。空串沿用 side。
+ENTER_FROM_BOTTOM = "bottom"
 
 # 底纹归属。
 SURFACE_HOST = "host"
@@ -54,7 +60,11 @@ class SlotStyle:
     highlight_color: tuple | None = None
     #: 侧向语义：``"left"`` / ``"right"`` 表示贴视口哪一侧；空串 = 不贴边
     side: str = ""
-    #: 入场动画时长（秒）；``side`` 为空时不生效
+    #: 入场方向覆盖：空串沿用 ``side``；``"bottom"`` 从代管区下方升起
+    enter_from: str = ""
+    #: 入场时是否从透明淡入
+    enter_fade: bool = False
+    #: 入场动画时长（秒）；没有入场方向时不生效
     enter_seconds: float = 0.28
 
 
@@ -132,29 +142,67 @@ def ease_out_cubic(progress):
     return 1.0 - (1.0 - t) ** 3
 
 
+def enter_direction(style):
+    """实际入场方向：``enter_from`` 优先，空串沿用 ``side``。"""
+    if style is None:
+        return ""
+    return str(getattr(style, "enter_from", "") or getattr(style, "side", "") or "")
+
+
 def enter_offset(style, rect, viewport_w, progress):
     """入场动画的当前水平偏移（0 = 已就位）。
 
-    偏移方向由 ``style.side`` 决定：``left`` 从画面左端进入（起点右缘停在
+    偏移方向由入场方向决定：``left`` 从画面左端进入（起点右缘停在
     ``x = 0``），``right`` 从画面右端进入（起点左缘停在 ``x = viewport_w``）；
-    没有侧向语义的 slot 恒为 0。子组件在自己的 ``draw`` 里把偏移加到绘制
-    坐标上——几何矩形的分配结果不变，动画纯属呈现层。
+    没有水平入场语义（含 ``bottom`` 淡入）的 slot 恒为 0。子组件在自己的
+    ``draw`` 里把偏移加到绘制坐标上——几何矩形的分配结果不变，动画纯属呈现层。
     """
-    side = getattr(style, "side", "") if style is not None else ""
-    if side not in (SIDE_LEFT, SIDE_RIGHT):
+    direction = enter_direction(style)
+    if direction not in (SIDE_LEFT, SIDE_RIGHT):
         return 0.0
     x, _y, w, _h = rect
-    if side == SIDE_LEFT:
-        travel, direction = float(x) + float(w), -1.0
+    if direction == SIDE_LEFT:
+        travel, sign = float(x) + float(w), -1.0
     else:
-        travel, direction = float(viewport_w) - float(x), 1.0
-    return direction * travel * (1.0 - ease_out_cubic(progress))
+        travel, sign = float(viewport_w) - float(x), 1.0
+    return sign * travel * (1.0 - ease_out_cubic(progress))
+
+
+def enter_rise(style, rect, viewport_h, progress):
+    """入场动画的当前纵向偏移（正数 = 起点在最终位置下方）。
+
+    只有入场方向为 ``bottom`` 时生效：起点上缘落在代管区下缘附近（最多再
+    往下补满一屏可见高度），随进度升到最终位置。与 ``enter_offset`` 一样，
+    几何分配结果不变。
+    """
+    if enter_direction(style) != ENTER_FROM_BOTTOM:
+        return 0.0
+    _x, y, _w, h = rect
+    travel = max(0.0, min(float(h), float(viewport_h) - float(y)))
+    return travel * (1.0 - ease_out_cubic(progress))
+
+
+def enter_alpha(style, progress):
+    """入场透明度（1 = 完全不透明）；只对 ``enter_fade`` 的代管区生效。"""
+    if style is None or not getattr(style, "enter_fade", False):
+        return 1.0
+    if not enter_direction(style):
+        return 1.0
+    return ease_out_cubic(progress)
+
+
+def enter_transform(style, rect, viewport_w, viewport_h, progress):
+    """一次取齐入场呈现：``(水平位移, 纵向位移, 透明度)``。"""
+    return (enter_offset(style, rect, viewport_w, progress),
+            enter_rise(style, rect, viewport_h, progress),
+            enter_alpha(style, progress))
 
 
 __all__ = [
     "SHAPE_BAND", "SHAPE_RAIL", "SHAPE_TILE",
-    "SIDE_LEFT", "SIDE_RIGHT",
+    "SIDE_LEFT", "SIDE_RIGHT", "ENTER_FROM_BOTTOM",
     "SURFACE_HOST", "SURFACE_BARE", "SURFACE_OWN",
     "SlotStyle", "Slot", "SlotAssignment", "select_slot",
-    "ease_out_cubic", "enter_offset",
+    "ease_out_cubic", "enter_direction", "enter_offset", "enter_rise",
+    "enter_alpha", "enter_transform",
 ]
