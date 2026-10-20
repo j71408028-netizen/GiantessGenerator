@@ -229,6 +229,54 @@ def check_contract(registry):
     check("attr_bar.top_inset 自报占位高度", inset > 0, inset)
 
 
+def check_slots(registry):
+    """代管区链路：三种文本组件都声明 status band，attr_bar 按分配矩形布局。"""
+    from dungeon.window.layout import SHAPE_BAND, SlotAssignment
+
+    for cid in sorted(TEXT_COMPONENT_IDS):
+        ctx = _FakeCtx()
+        text = registry.instantiate(ctx, cid, config={"components_params": {}})
+        attr = registry.instantiate(ctx, "attr_bar", config={"components_params": {}})
+        if text is None or attr is None:
+            check(f"代管区 {cid}：组件可创建", False, (text, attr))
+            continue
+        # 真实窗口里所有组件先实例化，再逐个 build；文本组件的代管区要
+        # 能看到同会话的 status 组件，所以这里也先挂进 _components。
+        ctx._components.extend([text, attr])
+        text.build(ctx)
+        text.layout(ctx)
+        slots = list(text.slots(ctx))
+        check(f"代管区 {cid}：声明了代管区", bool(slots),
+              [(s.id, s.shape, s.roles) for s in slots])
+        status = next((s for s in slots
+                       if s.shape == SHAPE_BAND and "status" in s.roles), None)
+        check(f"代管区 {cid}：有 status band", status is not None,
+              [(s.id, s.shape, s.roles) for s in slots])
+        vw, vh = ctx.viewport[1], ctx.viewport[2]
+        bad = [s.id for s in slots
+               if not (s.rect[2] > 0 and s.rect[3] > 0
+                       and s.rect[0] >= 0 and s.rect[1] >= 0
+                       and s.rect[0] + s.rect[2] <= vw + 0.5
+                       and s.rect[1] + s.rect[3] <= vh + 0.5)]
+        check(f"代管区 {cid}：矩形在视口内", not bad, bad)
+
+        attr.build(ctx)
+        rect = None
+        if status is not None:
+            rect = status.take()
+            ctx.assigned["attr_bar"] = SlotAssignment(status, rect)
+        attr.layout(ctx)
+        if rect is not None:
+            got = tuple(round(float(v), 2) for v in attr._panel_rect)
+            want = tuple(round(float(v), 2) for v in rect)
+            check(f"代管区 {cid}：attr_bar 使用分配矩形", got == want,
+                  (got, want))
+        for comp in (attr, text):
+            comp.destroy(ctx)
+        ctx._components.remove(attr)
+        ctx._components.remove(text)
+
+
 def check_external_pack():
     """外部组件包（显式 pack_dir）覆盖常驻包：来源与类都取自外部目录。"""
     from dungeon.window.component_registry import get_registry
@@ -297,10 +345,26 @@ class _FakeCtx:
         self.toolbar_calls = []
         self.overlay_calls = []
         self._components = []
+        # 代管区分配（check_slots 直接填；真实窗口由 ComponentHandler 发布）
+        self.assigned = {}
 
     # ---- 几何 / 时钟 ----
     def component_viewport(self):
         return self.viewport
+
+    def component_rect(self, cid):
+        assignment = self.assigned.get(cid)
+        return assignment.rect if assignment else None
+
+    def component_slot(self, cid):
+        assignment = self.assigned.get(cid)
+        return assignment.slot if assignment else None
+
+    def component_roles(self):
+        roles = set()
+        for comp in self._components:
+            roles.update(getattr(comp, "roles", ()) or ())
+        return tuple(sorted(roles))
 
     def schedule(self, fn, *args):
         return fn(*args)
@@ -414,6 +478,7 @@ def main() -> int:
     check_resolution(registry)
     check_params(registry)
     check_contract(registry)
+    check_slots(registry)
     check_pack_sources(registry)
     check_external_pack()
     check_smoke(registry)

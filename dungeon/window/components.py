@@ -3,7 +3,8 @@
 组件包由 dungeon.window.component_registry 提供注册表；本 mixin 负责按副本配置
 （``text_component`` 三选一 + ``components`` 列表）在运行阶段构建组件实例，并把
 这些实例接入窗口现有的更新链：
-- _relayout() → 各组件 layout(ctx)（只算几何，不碰 imgui）
+- _relayout() → 文本主组件 layout 并生成代管区 → 按 roles/shapes 分配 →
+  其余组件 layout（只算几何，不碰 imgui）
 - _draw_frame() → 各组件 draw(ctx) 每帧立即绘制
 - _update_text_display() → 有组件声明 ``owns_text_display`` 时由组件接管显示，
   否则走内置 story 管线
@@ -29,6 +30,7 @@ import traceback
 
 from dungeon import process_log
 from dungeon.window import component_registry as _components_module
+from dungeon.window import layout as _layout_module
 
 
 class ComponentHandler:
@@ -36,6 +38,8 @@ class ComponentHandler:
         """初始化组件实例列表与默认布局样式（在 _load_session_config 后调用）。"""
         self._components = []
         self._components_built = False
+        # 本轮布局的代管区分配：{组件 id: layout.SlotAssignment}
+        self._component_assignments = {}
         # 自动播放开关（ui.toggle_autoplay 切换；帧任务随会话收尾一并丢弃）
         self._autoplay = False
 
@@ -68,6 +72,7 @@ class ComponentHandler:
     def _build_components(self):
         """按配置构建组件实例并调用 build（主线程，运行阶段进入时调用）。"""
         self._components = []
+        self._component_assignments = {}
         if getattr(self, "_closing", False):
             return
         try:
@@ -85,15 +90,63 @@ class ComponentHandler:
         self._components_built = bool(self._components)
         if not self._components:
             process_log.log("[Components] 本次会话未构建任何显示组件，回退内置文本容器")
+        else:
+            # build 里各组件的 layout 只是兜底几何；代管区要先由文本主组件
+            # 生成、分配完，子组件才能拿到自己的内容矩形。
+            self._relayout_components()
 
     def _relayout_components(self):
-        """窗口重排后调用各组件 layout（主线程，只算几何，不碰 imgui）。"""
-        for comp in self._components:
+        """窗口重排：文本主组件先算几何并生成代管区，其余组件再按分配结果算。
+
+        两遍是必要的：代管区的尺寸依赖文本面板几何，子组件的几何又依赖
+        「被分到哪块」。``layout`` 仍是纯几何，不碰 imgui。
+        """
+        self._component_assignments = {}
+        owners = [comp for comp in self._components
+                  if getattr(comp, "owns_text_display", False)]
+        others = [comp for comp in self._components if comp not in owners]
+        for comp in owners:
+            self._layout_component(comp)
+        self._assign_component_slots(owners)
+        for comp in others:
+            self._layout_component(comp)
+
+    def _layout_component(self, comp):
+        try:
+            comp.layout(self)
+        except Exception as exc:
+            process_log.log(f"[Components] 组件 layout 失败 "
+                            f"({getattr(comp, 'id', '?')}): {exc}")
+
+    def _assign_component_slots(self, owners):
+        """收集文本主组件的代管区，按角色/形状分给其余组件（机械匹配）。"""
+        slots = []
+        for owner in owners:
+            hook = getattr(owner, "slots", None)
+            if not callable(hook):
+                continue
             try:
-                comp.layout(self)
+                slots.extend(hook(self) or ())
             except Exception as exc:
-                process_log.log(f"[Components] 组件 layout 失败 "
-                                f"({getattr(comp, 'id', '?')}): {exc}")
+                process_log.log(f"[Components] 组件 slots 失败 "
+                                f"({getattr(owner, 'id', '?')}): {exc}")
+        if not slots:
+            return
+        for comp in self._components:
+            if comp in owners:
+                continue
+            roles = tuple(getattr(comp, "roles", ()) or ())
+            shapes = tuple(getattr(comp, "shapes", ()) or ())
+            if not roles or not shapes:
+                continue
+            slot = _layout_module.select_slot(slots, roles, shapes)
+            if slot is None:
+                continue
+            rect = slot.take()
+            if rect is None:
+                continue
+            self._component_assignments[comp.id] = _layout_module.SlotAssignment(
+                slot, rect)
 
     def _draw_components(self):
         """每帧调用各组件 draw（主线程，在根窗口内绘制）。"""
@@ -124,6 +177,7 @@ class ComponentHandler:
                 process_log.log(f"[Components] 组件 destroy 失败 ({getattr(comp, 'id', '?')}): {exc}")
         self._components = []
         self._components_built = False
+        self._component_assignments = {}
         try:
             _components_module.get_registry().discard(self)
         except Exception:
@@ -140,6 +194,23 @@ class ComponentHandler:
         w = getattr(self, "_layout_w", 0) or 1.0
         h = getattr(self, "_layout_h", 0) or 1.0
         return s, w, h
+
+    def component_rect(self, cid):
+        """组件本帧分配到的代管区内容矩形；没被分配返回 ``None``。"""
+        assignment = getattr(self, "_component_assignments", {}).get(cid)
+        return assignment.rect if assignment else None
+
+    def component_slot(self, cid):
+        """组件本帧分配到的代管区（含样式）；没被分配返回 ``None``。"""
+        assignment = getattr(self, "_component_assignments", {}).get(cid)
+        return assignment.slot if assignment else None
+
+    def component_roles(self):
+        """本会话已构建组件声明的角色集合（文本组件据此决定留不留代管区）。"""
+        roles = set()
+        for comp in getattr(self, "_components", []):
+            roles.update(getattr(comp, "roles", ()) or ())
+        return tuple(sorted(roles))
 
     def component_top_inset(self):
         """返回其它组件已占用的顶部高度（全屏类组件据此让位）。

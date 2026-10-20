@@ -19,6 +19,11 @@
 - ``text_card`` 底部卡片式：底部居中的圆角半透明卡片，浮现最近几句；
 - ``text_nvl``  全屏 NVL 式：全屏半透明覆盖层上堆叠全部历史（阅读模式）。
 
+三者都在 ``layout`` 阶段声明代管区（``dungeon.window.layout.Slot``）：
+``text_card`` 提供卡片底部状态带、``text`` 提供渐变区状态带、``text_nvl``
+提供顶部状态带；``attr_bar`` 声明 ``roles=("status",)`` 优先落入，没有可用
+代管区时回退左上角独立面板。
+
 三者都声明 ``owns_text_display = True`` 接管窗口文本显示（内置 text_container
 管线被 _update_text_display 的所有权守卫跳过）；仿流式动画仍由窗口帧时钟驱动
 （item["text"] 就地增长），组件 refresh 只读取最新值。完整历史一律保留在回放

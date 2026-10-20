@@ -3,6 +3,7 @@
 from imgui_bundle import imgui
 
 from dungeon.window import imgui_util as iu
+from dungeon.window.layout import SHAPE_BAND, SURFACE_HOST, Slot, SlotStyle
 
 from .base import (_DEFAULT_LABEL_COLOR, _DEFAULT_TEXT_COLOR,
                    _HIGHLIGHT_COLOR, _TOOLBAR_MARGIN, _TextDisplayBase)
@@ -37,23 +38,54 @@ class NvlTextComponent(_TextDisplayBase):
     def _geometry(self, ctx):
         s, w, h = ctx.component_viewport()
         pad = round(24 * s)
-        pad_top = max(pad, int(ctx.component_top_inset() or 0))
+        # 顶部代管区取代旧的 top_inset 让位：高度至少覆盖状态条的自报占位，
+        # 正文从这个带的下方开始，滚动内容不会压住它。没有 status 组件时
+        # 完全退回旧行为，不凭空留一条空带。
+        has_status = "status" in tuple(ctx.component_roles() or ())
+        header_h = round(36 * s) if has_status else 0
+        slot_gap = round(10 * s) if has_status else 0
+        pad_top = max(pad + header_h + slot_gap,
+                      int(ctx.component_top_inset() or 0))
+        if has_status:
+            header_h = max(header_h, pad_top - pad - slot_gap)
+        header_rect = (pad, pad, max(1.0, w - 2 * pad), float(header_h))
         wrap = max(1.0, w - 2 * pad - round(14 * s))
-        return s, w, h, pad, pad_top, wrap
+        return s, w, h, pad, pad_top, wrap, header_rect
 
     def layout(self, ctx):
         self._layout = self._geometry(ctx)
-        _s, w, h, _pad, _pad_top, _wrap = self._layout
+        s, w, h, _pad, _pad_top, _wrap, header_rect = self._layout
         self._panel_rect = (0.0, 0.0, w, h)
+        params = self.params or {}
+        self._slots = []
+        if header_rect[3] > 0:
+            self._slots = [Slot(
+                "nvl_header", SHAPE_BAND, header_rect,
+                roles=("status",),
+                style=SlotStyle(
+                    surface=SURFACE_HOST,
+                    bg=(10, 12, 20, 120),
+                    separator=(255, 255, 255, 36),
+                    separator_side="bottom",
+                    radius=round(8 * s),
+                    padding=(round(12 * s), round(8 * s),
+                             round(12 * s), round(8 * s)),
+                    label_color=params.get("label_color") or _DEFAULT_LABEL_COLOR,
+                    text_color=_DEFAULT_TEXT_COLOR,
+                    highlight_color=params.get("highlight_color") or _HIGHLIGHT_COLOR,
+                ),
+            )]
 
     def draw(self, ctx):
         if self._layout is None:
             self.layout(ctx)
-        s, w, h, pad, pad_top, wrap = self._layout
+        s, w, h, pad, pad_top, wrap, _header_rect = self._layout
         params = self.params or {}
         bg = params.get("bg_color") or (8, 10, 18, 190)
         draw_list = imgui.get_window_draw_list()
         draw_list.add_rect_filled(iu.v2(0.0, 0.0), iu.v2(w, h), iu.u32(*bg), 0.0)
+        for slot in self._slots:
+            self._draw_slot_chrome(slot, s)
         imgui.set_cursor_pos(iu.v2(0.0, 0.0))
         imgui.begin_child(self.TAG_PREFIX + "##scroll", iu.v2(w, h),
                           imgui.ChildFlags_.none.value,

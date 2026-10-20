@@ -85,7 +85,10 @@ class DungeonComponent:
     必选钩子（窗口在对应时机调用）：``build / layout / draw / destroy``。
     可选钩子（未覆盖即视为不支持）：
 
-    - ``top_inset(ctx)``：自报在窗口顶部占用的高度，全屏类组件据此让位；
+    - ``slots(ctx)``：文本主组件声明代管区（``dungeon.window.layout.Slot``），
+      窗口按子组件的 ``roles`` / ``shapes`` 做匹配；默认不提供代管区；
+    - ``top_inset(ctx)``：自报在窗口顶部占用的高度，全屏类组件据此让位
+      （未接入代管区的旧组件仍走这条兼容路径）；
     - ``toggle(ctx)``：面板类组件的展开 / 收起（F12 与工具条按钮入口）；
     - ``toolbar_hovered()``：光标是否悬停在组件工具条上，窗口据此不推进剧情。
 
@@ -108,6 +111,9 @@ class DungeonComponent:
     - 只读状态：``ctx.story_history`` / ``ctx.dungeon_state`` /
       ``ctx.evolution_attrs`` / ``ctx.name``；
     - 几何：``ctx.component_viewport()`` → (dpi_scale, 宽, 高)；
+    - 代管区：``ctx.component_rect(cid)`` → 分配到的内容矩形（未分配为 None）、
+      ``ctx.component_slot(cid)`` → 分配到的 ``Slot``（含样式）、
+      ``ctx.component_roles()`` → 本会话组件声明的角色集合；
     - 帧时钟：``ctx.schedule(fn, *args)`` / ``ctx.schedule_every(interval, fn, key)`` /
       ``ctx.cancel_task(key)``（**不得**直接触碰窗口的 ``_frame``）；
     - 状态查询：``ctx.session_waiting_for_input()`` / ``ctx.component_autoplay_on()``；
@@ -130,6 +136,10 @@ class DungeonComponent:
     label = ""  # 编辑器展示名（留空回退为 id）
     description = ""  # 编辑器说明文案
     param_specs = []  # 可配置参数声明列表
+    # 代管区匹配用：角色（status / log / meta / action / media…）与支持的形状
+    # （dungeon.window.layout.SHAPE_*）。留空表示不参与代管区分配。
+    roles = ()
+    shapes = ()
 
     def __init__(self, ctx):
         self.ctx = ctx
@@ -153,6 +163,10 @@ class DungeonComponent:
         """主线程：释放组件资源（纹理句柄、订阅、帧任务）。"""
 
     # ---- 可选钩子（默认不支持） ----
+    def slots(self, ctx):
+        """可选：文本主组件提供的代管区列表（``layout.Slot``）；默认空。"""
+        return []
+
     def top_inset(self, ctx):
         """可选：本组件在窗口顶部占用的高度（px @ dpi=1）；默认 0。"""
         return 0

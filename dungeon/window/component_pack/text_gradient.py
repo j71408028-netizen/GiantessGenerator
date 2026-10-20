@@ -3,6 +3,7 @@
 from imgui_bundle import imgui
 
 from dungeon.window import imgui_util as iu
+from dungeon.window.layout import SHAPE_BAND, SURFACE_BARE, Slot, SlotStyle
 
 from .base import (_DEFAULT_LABEL_COLOR, _DEFAULT_TEXT_COLOR,
                    _HIGHLIGHT_COLOR, _TOOLBAR_MARGIN, _TextDisplayBase)
@@ -52,17 +53,38 @@ class TextComponent(_TextDisplayBase):
         text_h = max(round(80 * s), h - text_top - round(20 * s))
         box_x = round(40 * s)
         box_y = max(0.0, h - round(20 * s) - text_h)
-        return s, w, h, grad_h, box_x, box_y, text_w, text_h, pad
+        # 正文上方的状态带：无底纹（bare），只借用渐变衬底上的文字颜色。
+        has_status = "status" in tuple(ctx.component_roles() or ())
+        slot_h = round(30 * s) if has_status else 0
+        slot_rect = (box_x + pad, max(0.0, box_y - round(8 * s) - slot_h),
+                     max(1.0, text_w - 2 * pad), float(slot_h))
+        return (s, w, h, grad_h, box_x, box_y, text_w, text_h, pad,
+                slot_rect)
 
     def layout(self, ctx):
         self._layout = self._geometry(ctx)
-        _s, _w, _h, _grad_h, bx, by, tw, th, _pad = self._layout
-        self._panel_rect = (bx, by, tw, th)
+        s, _w, _h, _grad_h, _bx, _by, _tw, _th, _pad, slot_rect = self._layout
+        self._panel_rect = (_bx, _by, _tw, _th)
+        params = self.params or {}
+        self._slots = []
+        if slot_rect[3] > 0:
+            self._slots = [Slot(
+                "scrim_band", SHAPE_BAND, slot_rect,
+                roles=("status",),
+                style=SlotStyle(
+                    surface=SURFACE_BARE,
+                    padding=(round(8 * s), round(4 * s),
+                             round(8 * s), round(4 * s)),
+                    label_color=params.get("label_color") or _DEFAULT_LABEL_COLOR,
+                    text_color=_DEFAULT_TEXT_COLOR,
+                    highlight_color=params.get("highlight_color") or _HIGHLIGHT_COLOR,
+                ),
+            )]
 
     def draw(self, ctx):
         if self._layout is None:
             self.layout(ctx)
-        s, w, h, grad_h, bx, by, tw, th, pad = self._layout
+        (s, w, h, grad_h, bx, by, tw, th, pad, _slot_rect) = self._layout
         params = self.params or {}
         color = params.get("gradient_color") or _GRAD_DEFAULT_COLOR
         draw_list = imgui.get_window_draw_list()
@@ -70,6 +92,8 @@ class TextComponent(_TextDisplayBase):
         bottom = iu.u32(*color)
         draw_list.add_rect_filled_multi_color(iu.v2(0.0, h - grad_h), iu.v2(w, h),
                                               top, top, bottom, bottom)
+        for slot in self._slots:
+            self._draw_slot_chrome(slot, s)
         max_lines = max(1, min(5, int(params.get("max_lines") or 1)))
         items = self._visible_items(ctx, max_lines)
         self._draw_text_lines(ctx, bx + pad, by + pad, bx + tw - pad, items,

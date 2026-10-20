@@ -10,6 +10,7 @@ from imgui_bundle import hello_imgui, imgui
 from dungeon.window import imgui_util as iu
 from dungeon.window.component_registry import DungeonComponent
 from dungeon.window.fonts import TEXT_FONT_SIZE
+from dungeon.window.layout import SURFACE_HOST
 
 
 _HIGHLIGHT_COLOR = (255, 200, 60, 255)
@@ -60,6 +61,7 @@ class _TextDisplayBase(DungeonComponent):
         self._toolbar_rect = (0.0, 0.0, 0.0, 0.0)
         self._drawn_line_count = 0
         self._panel_rect = (0.0, 0.0, 0.0, 0.0)
+        self._slots = []
 
     # ---- 生命周期 ----
     def build(self, ctx):
@@ -73,6 +75,33 @@ class _TextDisplayBase(DungeonComponent):
 
     def refresh(self, ctx):
         self.layout(ctx)
+
+    def slots(self, ctx):
+        """本帧的代管区（``layout`` 里算好；见 dungeon.window.layout）。"""
+        return list(self._slots)
+
+    def _draw_slot_chrome(self, slot, s):
+        """画 ``surface="host"`` 代管区的底纹/边框/分隔线。
+
+        子组件的 ``draw`` 在文本组件之后执行，因此这里画的内容天然在子组件
+        内容之下；需要压在子组件上的装饰（工具条、指示）仍放在 ``draw`` 末尾。
+        """
+        style = slot.style
+        if style.surface != SURFACE_HOST:
+            return
+        x, y, w, h = slot.rect
+        draw_list = imgui.get_window_draw_list()
+        radius = float(style.radius or 0.0)
+        if style.bg is not None:
+            draw_list.add_rect_filled(iu.v2(x, y), iu.v2(x + w, y + h),
+                                      iu.u32(*style.bg), radius)
+        if style.border is not None:
+            draw_list.add_rect(iu.v2(x, y), iu.v2(x + w, y + h),
+                               iu.u32(*style.border), radius)
+        if style.separator is not None:
+            sep_y = y if style.separator_side == "top" else y + h
+            draw_list.add_line(iu.v2(x, sep_y), iu.v2(x + w, sep_y),
+                               iu.u32(*style.separator), max(1.0, round(1 * s)))
 
     def _blink(self):
         self._indicator_on = not self._indicator_on
@@ -99,6 +128,7 @@ class _TextDisplayBase(DungeonComponent):
         if self._BLINK_TASK:
             ctx.cancel_task(self._BLINK_TASK)
         self._toolbar_textures = {}
+        self._slots = []
 
     def toolbar_hovered(self):
         return bool(self._toolbar_hovered)

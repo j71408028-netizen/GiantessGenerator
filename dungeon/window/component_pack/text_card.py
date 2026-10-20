@@ -4,6 +4,7 @@ from imgui_bundle import imgui
 
 from dungeon.window import imgui_util as iu
 from dungeon.window.fonts import TEXT_FONT_SIZE
+from dungeon.window.layout import SHAPE_BAND, SURFACE_HOST, Slot, SlotStyle
 
 from .base import (_DEFAULT_LABEL_COLOR, _DEFAULT_TEXT_COLOR,
                    _HIGHLIGHT_COLOR, _TextDisplayBase)
@@ -47,27 +48,57 @@ class CardTextComponent(_TextDisplayBase):
         percent = min(95, max(30, int(params.get("width_percent") or 70)))
         card_w = max(round(320 * s), round(w * percent / 100.0))
         line_h = round((TEXT_FONT_SIZE + 10) * s)
+        # 只有本会话真的有 status 组件时才留底部代管区；否则不凭空长高。
+        has_status = "status" in tuple(ctx.component_roles() or ())
+        slot_h = round(34 * s) if has_status else 0
+        slot_gap = round(10 * s) if has_status else 0
         card_h = min(round(h * 0.6),
-                     2 * pad + max_lines * (3 * line_h + round(8 * s)))
+                     2 * pad + max_lines * (3 * line_h + round(8 * s))
+                     + slot_h + slot_gap)
         card_x = max(0.0, (w - card_w) / 2.0)
         card_y = max(0.0, h - card_h - round(24 * s))
-        return s, pad, card_w, card_h, card_x, card_y, max_lines
+        # 右下角继续指示占用代管区右端，状态行内容宽度相应让位。
+        slot_w = max(1.0, card_w - 2 * pad - (round(34 * s) if has_status else 0))
+        slot_rect = (card_x + pad, card_y + card_h - pad - slot_h,
+                     slot_w, float(slot_h))
+        return s, pad, card_w, card_h, card_x, card_y, max_lines, slot_rect
 
     def layout(self, ctx):
         self._layout = self._geometry(ctx)
-        _s, _pad, card_w, card_h, card_x, card_y, _max_lines = self._layout
+        (s, _pad, card_w, card_h, card_x, card_y, _max_lines,
+         slot_rect) = self._layout
         self._panel_rect = (card_x, card_y, card_w, card_h)
+        params = self.params or {}
+        self._slots = []
+        if slot_rect[3] > 0:
+            self._slots = [Slot(
+                "card_footer", SHAPE_BAND, slot_rect,
+                roles=("status",),
+                style=SlotStyle(
+                    surface=SURFACE_HOST,
+                    separator=(255, 255, 255, 30),
+                    separator_side="top",
+                    padding=(round(10 * s), round(6 * s),
+                             round(10 * s), round(6 * s)),
+                    label_color=params.get("label_color") or _DEFAULT_LABEL_COLOR,
+                    text_color=_DEFAULT_TEXT_COLOR,
+                    highlight_color=params.get("highlight_color") or _HIGHLIGHT_COLOR,
+                ),
+            )]
 
     def draw(self, ctx):
         if self._layout is None:
             self.layout(ctx)
-        s, pad, card_w, card_h, card_x, card_y, max_lines = self._layout
+        (s, pad, card_w, card_h, card_x, card_y, max_lines,
+         _slot_rect) = self._layout
         params = self.params or {}
         pmin, pmax = iu.v2(card_x, card_y), iu.v2(card_x + card_w, card_y + card_h)
         draw_list = imgui.get_window_draw_list()
         radius = round(14 * s)
         draw_list.add_rect_filled(pmin, pmax, iu.u32(*(params.get("bg_color") or (20, 24, 40, 190))), radius)
         draw_list.add_rect(pmin, pmax, iu.u32(*(params.get("border_color") or (255, 255, 255, 45))), radius)
+        for slot in self._slots:
+            self._draw_slot_chrome(slot, s)
         items = self._visible_items(ctx, max_lines)
         self._draw_text_lines(ctx, card_x + pad, card_y + pad,
                               card_x + card_w - pad, items,
@@ -77,6 +108,11 @@ class CardTextComponent(_TextDisplayBase):
         bar_w, bar_h = self._toolbar_size(s)
         self._draw_toolbar(ctx, card_x + card_w - round(10 * s) - bar_w,
                            card_y - bar_h / 2.0)
-        self._draw_indicator(ctx,
-                             card_x + card_w - round(46 * s),
-                             card_y + card_h - round(40 * s))
+        if _slot_rect[3] > 0:
+            self._draw_indicator(ctx,
+                                 card_x + card_w - round(28 * s),
+                                 _slot_rect[1] + round(8 * s))
+        else:
+            self._draw_indicator(ctx,
+                                 card_x + card_w - round(46 * s),
+                                 card_y + card_h - round(40 * s))
