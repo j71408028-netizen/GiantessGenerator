@@ -1,4 +1,5 @@
-"""副本独占设置的仓库（音量 / 段落字体 / 记忆窗口 / 自动保存回放 / 帧率上限）。
+"""副本独占设置的仓库（音量 / 段落字体 / 记忆窗口 / 自动保存回放 / 帧率上限 /
+组件代管区停靠侧）。
 
 这些键只有副本引擎会用，与主程序无关（见 ``dungeon/settings.py`` 的说明），因此
 不再住 ``data/user/settings.json``，而是独立成 ``data/user/dungeon_settings.json``：
@@ -87,6 +88,8 @@ class DungeonSettingsRepo:
         except (TypeError, ValueError):
             fps = float(dungeon_settings.DEFAULT_FPS_MAX)
         data["fps_max"] = max(20.0, min(240.0, fps))
+        data["dock_side"] = dungeon_settings.normalize_dock_side(
+            data.get("dock_side"))
         return data
 
 

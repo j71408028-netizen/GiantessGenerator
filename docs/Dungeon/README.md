@@ -50,7 +50,7 @@
 | 新增 / 改名标识符（scenario / run / session / dungeon） | [术语表](domain_terms.md) §2 | `check_scenario_naming.py` |
 | 入口页 / 会话生命周期与一局的边界 | [术语表](domain_terms.md) §1、[架构](architecture.md) §6、[窗口](window.md) §2 | `check_dungeon_finalize.py` |
 | 写盘方式（配置 / 回放 / 报告） | [架构](architecture.md) §8、[窗口](window.md) §5-C10 | `check_dungeon_finalize.py` |
-| 副本独占设置（音量 / 段落字体 / 记忆窗口 / 自动回放 / 帧率） | [架构](architecture.md) §8、`dungeon/settings.py` | `check_dungeon_settings.py` |
+| 副本独占设置（音量 / 段落字体 / 记忆窗口 / 自动回放 / 帧率 / 组件代管区停靠侧） | [架构](architecture.md) §8、`dungeon/settings.py` | `check_dungeon_settings.py` |
 | 自动驾驶脚本 / 自检场景 | [调试自动化](window_automation.md) | `dungeon_autopilot.py` |
 | 查「为什么是这样」/ 改造经过 / 历史实测 | [历史档案](history/README.md)（只读、仅供溯源） | — |
 

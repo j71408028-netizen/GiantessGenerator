@@ -47,9 +47,6 @@ class CardTextComponent(_TextDisplayBase):
          "note": "highlight 段落的正文颜色"},
         {"key": "show_indicator", "label": "显示继续指示", "type": "bool",
          "default": True},
-        {"key": "dock_on_right", "label": "代管区改到右侧", "type": "bool",
-         "default": False,
-         "note": "反转左右布局：日志面板停靠右侧，卡片改为左移让位"},
     ]
 
     def __init__(self, ctx):
@@ -81,8 +78,8 @@ class CardTextComponent(_TextDisplayBase):
         dock_w = round(_DOCK_WIDTH * s)
         dock_gap = round(_DOCK_GAP * s)
         dock_rect = None
-        # 左右反转：代管区始终贴视口一侧，卡片往另一侧让位。
-        side = SIDE_RIGHT if bool(params.get("dock_on_right")) else SIDE_LEFT
+        # 停靠侧是窗口视觉设置（玩家实时改），代管区始终贴视口一侧，卡片往另一侧让位。
+        side = SIDE_RIGHT if ctx.component_dock_side() == SIDE_RIGHT else SIDE_LEFT
         # 视口放不下贴边代管区时不声明它，日志组件回退自己的右上角面板。
         use_dock = (has_log and w - 2 * margin - dock_w - dock_gap
                     >= round(200 * s))
@@ -139,7 +136,7 @@ class CardTextComponent(_TextDisplayBase):
                 roles=("status",), style=style))
         if dock_rect is not None:
             # log 组件自带面板（own），卡片只提供外框；从代管区所贴的屏幕边缘滑入。
-            side = SIDE_RIGHT if bool(params.get("dock_on_right")) else SIDE_LEFT
+            side = SIDE_RIGHT if ctx.component_dock_side() == SIDE_RIGHT else SIDE_LEFT
             self._slots.append(self._reuse_slot(
                 previous, "card_side", SHAPE_RAIL, dock_rect,
                 roles=("log",),

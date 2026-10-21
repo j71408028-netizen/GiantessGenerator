@@ -43,9 +43,6 @@ class TextComponent(_TextDisplayBase):
          "note": "highlight 段落的正文颜色"},
         {"key": "show_indicator", "label": "显示继续指示", "type": "bool",
          "default": True},
-        {"key": "dock_on_right", "label": "代管区改到右侧", "type": "bool",
-         "default": False,
-         "note": "日志面板停靠视口右侧、停在渐变区上方"},
     ]
 
     def __init__(self, ctx):
@@ -70,7 +67,8 @@ class TextComponent(_TextDisplayBase):
         slot_h = round(30 * s) if has_status else 0
         slot_rect = (box_x + pad, max(0.0, box_y - round(8 * s) - slot_h),
                      max(1.0, text_w - 2 * pad), float(slot_h))
-        side = SIDE_RIGHT if bool(params.get("dock_on_right")) else SIDE_LEFT
+        # 停靠侧是窗口视觉设置（玩家实时改），不是方案参数。
+        side = SIDE_RIGHT if ctx.component_dock_side() == SIDE_RIGHT else SIDE_LEFT
         dock_rect = self._dock_rect(s, w, h, grad_h, slot_rect, has_status,
                                     "log" in roles, side)
         return (s, w, h, grad_h, box_x, box_y, text_w, text_h, pad,

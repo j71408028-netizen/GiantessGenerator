@@ -292,7 +292,8 @@ class OverlayHandler:
         """副本设置面板：半透明全屏遮罩之上的居中卡片（顶层窗口）。
 
         只放副本身份的**独占设置**（音量 / 帧率 / 记忆窗口 / 自动回放 / 段落
-        字体）。整块浮在三种文本组件之上、遮罩压暗正文，卡片是中性的深色，
+        字体 / 组件代管区停靠侧）。整块浮在三种文本组件之上、遮罩压暗正文，
+        卡片是中性的深色，
         因此底部渐变栏 / 卡片 / NVL 三种版式下都不打架：玩家在哪一版里，
         它都只是「当前画面之上的一张设置卡」。
         """
@@ -370,6 +371,24 @@ class OverlayHandler:
         if changed:
             self._apply_settings_live({"auto_save_replay": bool(new_replay)},
                                       persist=True)
+
+        imgui.spacing()
+        # ---- 界面：窗口视觉设置，玩家实时决定，改完立即重排组件 ----
+        self._settings_section("界面")
+        current_side = dungeon_settings.normalize_dock_side(
+            (self.dungeon_settings or {}).get("dock_side"))
+        imgui.push_style_color(imgui.Col_.text, iu.u32(*_SETTINGS_LABEL))
+        imgui.text("组件代管区")
+        imgui.pop_style_color()
+        imgui.same_line(label_w)
+        for index, (value, label) in enumerate((
+                (dungeon_settings.DOCK_SIDE_LEFT, "靠左"),
+                (dungeon_settings.DOCK_SIDE_RIGHT, "靠右"))):
+            if index:
+                imgui.same_line()
+            if imgui.radio_button(f"{label}##dungeon_set_dock_{value}",
+                                  current_side == value):
+                self._apply_settings_live({"dock_side": value}, persist=True)
 
         imgui.spacing()
         # ---- 段落字体（改了下一次进入生效） ----

@@ -1381,6 +1381,8 @@ def _open_dock_log(side):
     """展开过程日志：日志拿到 text_card 的侧边代管区，卡片往另一侧让位。"""
 
     def _open(win):
+        # 停靠侧是窗口视觉设置（玩家实时改），不是方案参数。
+        win.set_dungeon_settings({"dock_side": side}, persist=False)
         text = next(c for c in win._components
                     if getattr(c, "id", "") == "text_card")
         win._dock_base_x = text._panel_rect[0]
@@ -1433,6 +1435,8 @@ def _open_gradient_dock(side):
     """展开过程日志：日志拿到渐变栏的侧边代管区，从下方升起并淡入。"""
 
     def _open(win):
+        # 停靠侧是窗口视觉设置（玩家实时改），不是方案参数。
+        win.set_dungeon_settings({"dock_side": side}, persist=False)
         text = next(c for c in win._components if getattr(c, "id", "") == "text")
         win._dock_base_panel = tuple(text._panel_rect)
         win.toggle_proc_log()
@@ -1474,6 +1478,28 @@ def _close_gradient_dock(win):
 
 _check_gradient_dock_drawn.__name__ = "gradient-dock-drawn"
 _close_gradient_dock.__name__ = "gradient-dock-close"
+
+
+def _flip_gradient_dock(from_side, to_side):
+    """日志开着时改窗口视觉设置：代管区立即换到另一侧，正文几何不变。"""
+
+    def _flip(win):
+        text = next(c for c in win._components if getattr(c, "id", "") == "text")
+        log = next(c for c in win._components if getattr(c, "id", "") == "proc_log")
+        before = getattr(log, "_slot_rect", None)
+        assert before and log._slot_style.side == from_side, (
+            before, log._slot_style.side)
+        win.set_dungeon_settings({"dock_side": to_side}, persist=False)
+        rect = getattr(log, "_slot_rect", None)
+        assert rect and abs(rect[0] - before[0]) > 1, (before, rect)
+        assert log._slot_style.side == to_side, log._slot_style.side
+        assert rect[1] + rect[3] <= text._panel_rect[1] + 0.5, (
+            rect, text._panel_rect)
+        assert tuple(text._panel_rect) == win._dock_base_panel, (
+            win._dock_base_panel, text._panel_rect)
+
+    _flip.__name__ = f"gradient-dock-flip-{from_side}-{to_side}"
+    return _flip
 
 
 def scene_text_components():
@@ -1538,7 +1564,7 @@ def scene_text_components():
           win._check_results)
 
     # 侧边代管区：日志展开时从所贴的屏幕边缘滑入，text_card 往另一侧让位
-    for side, overrides in (("left", {}), ("right", {"dock_on_right": True})):
+    for side in ("left", "right"):
         win, result = _make_window(
             [("click", 2), ("check", _open_dock_log(side)), ("sleep", 0.5),
              ("check", _check_dock_log_drawn),
@@ -1547,25 +1573,26 @@ def scene_text_components():
             config_overrides={
                 "text_component": "text_card",
                 "components": ["proc_log"],
-                "components_params": {"text_card": overrides},
+                "components_params": {},
             })
         check(f"代管区[{side}]：日志滑入 / 卡片让位 / 收起归还",
               bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
               win._check_results)
 
-    # 渐变栏侧边代管区：日志从下方升起淡入，正文几何不变
-    for side, overrides in (("left", {}), ("right", {"dock_on_right": True})):
+    # 渐变栏侧边代管区：日志从下方升起淡入，正文几何不变；改设置立即换边
+    for side, other in (("left", "right"), ("right", "left")):
         win, result = _make_window(
             [("click", 2), ("check", _open_gradient_dock(side)), ("sleep", 0.6),
              ("check", _check_gradient_dock_drawn),
+             ("check", _flip_gradient_dock(side, other)),
              ("check", _close_gradient_dock), ("close", None)],
             explore=False,
             config_overrides={
                 "text_component": "text",
                 "components": ["proc_log"],
-                "components_params": {"text": overrides},
+                "components_params": {},
             })
-        check(f"渐变代管区[{side}]：日志升起淡入 / 收起释放",
+        check(f"渐变代管区[{side}]：日志升起淡入 / 实时换边 / 收起释放",
               bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
               win._check_results)
 

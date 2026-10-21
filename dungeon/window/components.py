@@ -11,9 +11,10 @@
 - 会话退出 _handle_exit() 前 → 各组件 destroy(ctx) + 注册表丢弃
 
 组件的根对象 ctx 即窗口实例；组件**只允许**经本 mixin 提供的组件服务面访问窗口
-（`component_viewport / component_top_inset / session_waiting_for_input /
-component_autoplay_on / text_font_tag / bold_font_tag / schedule / schedule_every /
-cancel_task / component`，另有覆盖层与工具服务的 `toggle_overlay` 等）。
+（`component_viewport / component_top_inset / component_dock_side /
+session_waiting_for_input / component_autoplay_on / text_font_tag / bold_font_tag /
+schedule / schedule_every / cancel_task / component`，另有覆盖层与工具服务的
+`toggle_overlay` 等）。
 组件不得再读窗口私有属性（`_dpi_scale` / `_layout_w` / `_frame` / `_autoplay`…）；
 契约由 ``tests/check_component_pack.py`` 的替身 ctx 强制——替身只实现服务面，
 组件一旦伸手摸私有一律在守卫里报错。
@@ -29,6 +30,7 @@ cancel_task / component`，另有覆盖层与工具服务的 `toggle_overlay` �
 import traceback
 
 from dungeon import process_log
+from dungeon import settings as dungeon_settings
 from dungeon.window import component_registry as _components_module
 from dungeon.window import layout as _layout_module
 
@@ -211,6 +213,16 @@ class ComponentHandler:
         for comp in getattr(self, "_components", []):
             roles.update(getattr(comp, "roles", ()) or ())
         return tuple(sorted(roles))
+
+    def component_dock_side(self):
+        """代管区停靠侧（``"left"`` / ``"right"``）：窗口视觉设置，玩家实时决定。
+
+        住在副本独占设置里（``data/user/dungeon_settings.json`` 的 ``dock_side``），
+        与方案配置无关；文本组件据此决定侧边代管区贴哪一侧，玩家在副本设置面板
+        改完立即重排（见 ``DungeonWindowBase.set_dungeon_settings``）。
+        """
+        settings = getattr(self, "dungeon_settings", None) or {}
+        return dungeon_settings.normalize_dock_side(settings.get("dock_side"))
 
     def component_top_inset(self):
         """返回其它组件已占用的顶部高度（全屏类组件据此让位）。

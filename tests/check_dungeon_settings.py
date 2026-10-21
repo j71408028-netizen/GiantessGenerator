@@ -67,8 +67,16 @@ def _src(*parts):
 _defaults = dungeon_settings.defaults()
 check("缺省含全部副本独占键",
       set(_defaults) == {"audio_levels", "dungeon_font", "story_recent_count",
-                         "auto_save_replay", "fps_max"},
+                         "auto_save_replay", "fps_max", "dock_side"},
       sorted(_defaults))
+check("代管区停靠侧缺省合法、坏值回退缺省",
+      dungeon_settings.normalize_dock_side(_defaults["dock_side"])
+      == dungeon_settings.DEFAULT_DOCK_SIDE
+      and dungeon_settings.normalize_dock_side("上下左右")
+      == dungeon_settings.DEFAULT_DOCK_SIDE
+      and dungeon_settings.normalize_dock_side("RIGHT")
+      == dungeon_settings.DOCK_SIDE_RIGHT,
+      _defaults["dock_side"])
 check("音量缺省取自总线单一真相源",
       _defaults["audio_levels"] == buses.DEFAULT_BUS_LEVELS,
       _defaults["audio_levels"])
@@ -107,6 +115,13 @@ check("音量越界被夹取、坏值回退缺省",
 check("记忆窗口夹取到 1~200", _bad["story_recent_count"] == 200,
       _bad["story_recent_count"])
 check("帧率夹取到 20~240", _bad["fps_max"] == 20.0, _bad["fps_max"])
+check("代管区停靠侧坏值回退缺省",
+      _repo.update({"dock_side": "斜着"})["dock_side"]
+      == dungeon_settings.DEFAULT_DOCK_SIDE)
+check("代管区停靠侧合法值落盘往返",
+      _repo.update({"dock_side": "right"})["dock_side"]
+      == dungeon_settings.DOCK_SIDE_RIGHT
+      and _repo.load()["dock_side"] == dungeon_settings.DOCK_SIDE_RIGHT)
 
 # ---------------- 4. 旧值迁移（settings.json → dungeon_settings.json） ----------------
 _dir = _fresh_dir()
@@ -155,6 +170,15 @@ check("窗口记忆窗口读副本设置",
       'self.dungeon_settings or {}' in _base and "story_recent_count" in _base)
 check("窗口提供窗口内改设置的入口",
       "def set_dungeon_settings" in _base and "dungeon_settings_repo" in _base)
+check("窗口视觉设置变更后立即重排组件",
+      '"dock_side" in patch' in _base and "_relayout_components" in _base)
+
+_components = _src("dungeon", "window", "components.py")
+check("停靠侧经组件服务面发布（组件不读方案参数）",
+      "def component_dock_side" in _components)
+for _pack in ("text_card.py", "text_gradient.py"):
+    check(f"{_pack}：停靠侧取自窗口视觉设置",
+          "component_dock_side" in _src("dungeon", "window", "component_pack", _pack))
 
 _ui = _src("dungeon", "window", "ui.py")
 check("运行器帧率来自副本设置",
@@ -227,6 +251,9 @@ check("覆盖层提供设置面板的根层/顶层绘制入口",
       "def _draw_overlay_root" in _overlay_src
       and "def _draw_overlay_top" in _overlay_src
       and "def _draw_settings_panel" in _overlay_src)
+check("设置面板有组件代管区停靠侧开关（玩家实时决定）",
+      '"dock_side"' in _overlay_src
+      and "normalize_dock_side" in _overlay_src)
 
 _pack_toolbar = _src("dungeon", "window", "component_pack", "base.py")
 check("文本组件工具条也挂了设置入口",

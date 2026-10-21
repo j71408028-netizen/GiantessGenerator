@@ -1,7 +1,7 @@
 """副本独占设置的键名与缺省（引擎侧单一真相源）。
 
 这些设置只有副本引擎会读：音频总线电平、段落字体、记忆窗口大小、自动保存回放、
-帧率上限。它们从主程序的 ``settings.json`` 独立出来，住
+帧率上限、组件代管区停靠侧。它们从主程序的 ``settings.json`` 独立出来，住
 ``persistence/dungeon_settings_repo.py`` 管的 ``data/user/dungeon_settings.json``：
 
 - 副本会话跑在独立子进程里，会话期主窗口隐藏——独占文件同一时刻只有一个写者，
@@ -21,6 +21,19 @@ DEFAULT_FPS_MAX = 60
 #: 对话历史保留的消息条数缺省（设置里可调）。
 DEFAULT_STORY_RECENT_COUNT = 20
 
+#: 组件代管区（日志类组件的贴边区域）停靠侧：窗口视觉设置，玩家在副本设置
+#: 面板里实时改；与文本组件的方案参数无关，换场景也沿用玩家的选择。
+DOCK_SIDE_LEFT = "left"
+DOCK_SIDE_RIGHT = "right"
+DOCK_SIDES = (DOCK_SIDE_LEFT, DOCK_SIDE_RIGHT)
+DEFAULT_DOCK_SIDE = DOCK_SIDE_LEFT
+
+
+def normalize_dock_side(value) -> str:
+    """把任意输入夹到 ``DOCK_SIDES`` 里的合法值（默认靠左）。"""
+    text = str(value or "").strip().lower()
+    return text if text in DOCK_SIDES else DEFAULT_DOCK_SIDE
+
 #: 从 ``settings.json`` 迁往 ``dungeon_settings.json`` 的键（一次性迁移，见
 #: ``SettingsRepo.load``）；``fps_max`` 是新键，无旧值可迁。
 LEGACY_KEYS = ("audio_levels", "dungeon_font", "story_recent_count",
@@ -38,4 +51,5 @@ def defaults() -> dict:
         "story_recent_count": DEFAULT_STORY_RECENT_COUNT,
         "auto_save_replay": False,
         "fps_max": DEFAULT_FPS_MAX,
+        "dock_side": DEFAULT_DOCK_SIDE,
     }

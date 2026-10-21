@@ -24,8 +24,10 @@
 提供顶部状态带；``attr_bar`` 声明 ``roles=("status",)`` 优先落入，没有可用
 代管区时回退左上角独立面板。``text_card`` 与 ``text`` 还各提供一个贴视口
 一侧的代管区（``card_side`` / ``scrim_side``，``log`` / ``rail``）：
-``proc_log`` 仅在展开时声明 ``log`` 角色，收起即释放，``dock_on_right``
-参数可反转左右布局。入场呈现随宿主不同：卡片侧边按 ``SlotStyle.side`` 从
+``proc_log`` 仅在展开时声明 ``log`` 角色，收起即释放。停靠哪一侧是**窗口视觉
+设置**（`dungeon_settings.json` 的 ``dock_side``，玩家在副本设置面板里实时改，
+组件经 ``ctx.component_dock_side()`` 读取），不是组件方案参数。入场呈现随宿主
+不同：卡片侧边按 ``SlotStyle.side`` 从
 所贴的屏幕边缘平移进入、卡片同时往另一侧让位；渐变正文是全宽的，侧边代管区
 停在正文上方（不做横向让位），组件按 ``SlotStyle.enter_from="bottom"`` +
 ``enter_fade`` 从下方升起并淡入。

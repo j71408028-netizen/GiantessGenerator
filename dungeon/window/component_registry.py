@@ -118,7 +118,8 @@ class DungeonComponent:
     - 几何：``ctx.component_viewport()`` → (dpi_scale, 宽, 高)；
     - 代管区：``ctx.component_rect(cid)`` → 分配到的内容矩形（未分配为 None）、
       ``ctx.component_slot(cid)`` → 分配到的 ``Slot``（含样式）、
-      ``ctx.component_roles()`` → 本会话组件声明的角色集合；
+      ``ctx.component_roles()`` → 本会话组件声明的角色集合、
+      ``ctx.component_dock_side()`` → 侧边代管区停靠侧（窗口视觉设置，玩家实时改）；
       子组件按 ``SlotStyle`` 的入场契约呈现（``enter_from`` 覆盖方向：``side``
       水平推入、``bottom`` 从下方升起，``enter_fade`` 再叠加淡入），并把宿主的
       让位位移 ``Slot.offset_x`` 叠加到绘制坐标（几何分配不变）；

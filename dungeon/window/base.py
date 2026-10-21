@@ -716,11 +716,12 @@ class DungeonWindowBase:
             return dungeon_settings.DEFAULT_STORY_RECENT_COUNT
 
     def set_dungeon_settings(self, patch: dict, *, persist: bool = True) -> dict:
-        """副本窗口内改独占设置（音量 / 帧率…）：就地生效并落盘。
+        """副本窗口内改独占设置（音量 / 帧率 / 组件代管区停靠侧…）：就地生效并落盘。
 
         落盘走注入的 ``dungeon_settings_repo``（会话在子进程里，独占文件同一时刻
         只有一个写者，可直接写）。没有仓库时（自检替身）只改内存。音频电平立即
-        生效；帧率上限同步给运行器。
+        生效；帧率上限同步给运行器；窗口视觉设置（如代管区停靠侧）变更后立即重排
+        组件，玩家改完马上看到新布局。
         """
         patch = patch or {}
         self.dungeon_settings.update(patch)
@@ -729,6 +730,10 @@ class DungeonWindowBase:
             runner = getattr(self, "_runner", None)
             if runner is not None and hasattr(runner, "set_fps_max"):
                 runner.set_fps_max(self.dungeon_settings.get("fps_max"))
+        if "dock_side" in patch and getattr(self, "_components_built", False):
+            relayout = getattr(self, "_relayout_components", None)
+            if callable(relayout):
+                relayout()
         if persist and self.dungeon_settings_repo is not None:
             try:
                 self.dungeon_settings = self.dungeon_settings_repo.update(

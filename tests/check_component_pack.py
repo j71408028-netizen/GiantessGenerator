@@ -285,10 +285,10 @@ def check_side_dock(registry):
 
     def run_case(side):
         ctx = _FakeCtx()
-        overrides = {"dock_on_right": True} if side == SIDE_RIGHT else {}
-        text = registry.instantiate(
-            ctx, "text_card",
-            config={"components_params": {"text_card": overrides}})
+        # 停靠侧来自窗口视觉设置（component_dock_side 服务面），不是方案参数。
+        ctx.dock_side = side
+        text = registry.instantiate(ctx, "text_card",
+                                    config={"components_params": {}})
         log = registry.instantiate(ctx, "proc_log",
                                    config={"components_params": {}})
         if text is None or log is None:
@@ -366,9 +366,10 @@ def check_gradient_dock(registry):
 
     def run_case(side):
         ctx = _FakeCtx()
-        overrides = {"dock_on_right": True} if side == SIDE_RIGHT else {}
-        text = registry.instantiate(
-            ctx, "text", config={"components_params": {"text": overrides}})
+        # 停靠侧来自窗口视觉设置（component_dock_side 服务面），不是方案参数。
+        ctx.dock_side = side
+        text = registry.instantiate(ctx, "text",
+                                    config={"components_params": {}})
         log = registry.instantiate(ctx, "proc_log",
                                    config={"components_params": {}})
         if text is None or log is None:
@@ -518,6 +519,7 @@ class _FakeCtx:
         ]
         # ---- 服务面状态（非下划线开头：替身自身状态，不是窗口私有属性）----
         self.viewport = (1.0, 1280, 800)      # (dpi_scale, 宽, 高)
+        self.dock_side = "left"               # component_dock_side 返回值
         self.waiting = True                   # session_waiting_for_input 返回值
         self.autoplay = False                 # component_autoplay_on 返回值
         self.font_tags = {}                   # text/bold 字体 tag（默认无 → 组件自建）
@@ -545,6 +547,9 @@ class _FakeCtx:
         for comp in self._components:
             roles.update(getattr(comp, "roles", ()) or ())
         return tuple(sorted(roles))
+
+    def component_dock_side(self):
+        return self.dock_side
 
     def schedule(self, fn, *args):
         return fn(*args)
