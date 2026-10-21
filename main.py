@@ -286,6 +286,16 @@ def run_professional(boot):
         print(f"[Warning] 应用配色 '{palette}' 失败，回退默认配色: {e}")
         palette = DEFAULT_PALETTE
 
+    # 启动屏跑在独立子进程里，拥有自己的 Tk 事件循环——主进程无论怎么同步
+    # 阻塞构建界面，都不影响它的拖动/放大流畅度。失败时回退到进程内窗口。
+    #
+    # 必须在**创建任何 Tk 窗口之前**拉起：Linux 的 multiprocessing 默认用 fork，
+    # 父进程一旦建立了 X display 连接，子进程会连这条连接的 Xlib/notifier 状态
+    # 一起复制过去，子进程再建第二个 Tk 就有污染这条连接的风险（打包自检里那种
+    # 只有 ``XIO: fatal IO error 22``、没有 Python 栈的日志正是这一路数）。
+    # Windows/macOS 默认 spawn，子进程从干净的解释器起步，本来就没这个问题。
+    splash_conn, splash_proc = _launch_splash(theme_mode, color_theme, palette)
+
     # 真实主窗口先创建但保持隐藏：初始化期间不参与拖动/缩放等窗口事件，界面在“后台”逐步构建，完成后原位替换。
     root = ctk.CTk()
     root.title("巨大娘生成器")
@@ -295,9 +305,6 @@ def run_professional(boot):
     # 磅→像素换算必须与 CTk 的缩放一致，否则同字号在两套链路里大小不同。
     ui_fonts.align_native_scaling(root)
 
-    # 启动屏跑在独立子进程里，拥有自己的 Tk 事件循环——主进程无论怎么同步
-    # 阻塞构建界面，都不影响它的拖动/放大流畅度。失败时回退到进程内窗口。
-    splash_conn, splash_proc = _launch_splash(theme_mode, color_theme, palette)
     fallback_loading = None
     abort = {"requested": False}
 
