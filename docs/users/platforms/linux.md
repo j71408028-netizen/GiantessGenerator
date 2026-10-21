@@ -82,6 +82,24 @@ boot_x11()          # 调 XInitThreads()，全进程一次性生效
 已经调用过时直接返回上次结果。这一切都有开关：`GIANTESS_X11=0` 可整体关掉 Linux 原生
 X11 支持（做有效/无效对比压测用，不是功能开关）。
 
+### 3.1 子进程要在建立 X 连接之前 fork
+
+Linux 的 `multiprocessing` 默认 `fork`：父进程已有的 Tcl/Tk 与 Xlib/notifier 状态会被
+整套复制给子进程。父进程**已经建立 X 连接**之后再 fork，子进程里的第二个 Tk 就可能踩到
+这条连接的状态。这类故障的日志形态就是下面这三行——Xlib 的 IO 错误由它自己 `exit`，
+Python 层拦不到，没有栈可看：
+
+```
+XIO:  fatal IO error 22 (Invalid argument) on X server ":99"
+      after 34 requests (34 known processed) with 2 events remaining.
+```
+
+因此启动屏子进程（`main.py::_launch_splash`）由 `run_professional` 在 `ctk.CTk()`
+**之前**拉起，fork 那一刻父进程还没有任何 X 连接。副本会话子进程
+（`ui/hosting/dungeon_spawner.py`）只能在主窗口活着时拉起，它自己开的是 GL/GLFW 连接；
+这一段若再出现同类现象，第一选择是改用 `multiprocessing.get_context("spawn")`
+（Windows / macOS 默认就是 spawn，子进程从干净的解释器起步）。
+
 ## 4. 窗口置顶（`_NET_WM_STATE_ABOVE`）
 
 Tk 的 `-topmost` 在 **GNOME Shell / XWayland 实测静默失效**：既不写
@@ -177,11 +195,14 @@ PYTHON_BIN=python3.12 bash build/linux/build_linux.sh   # 指定解释器
   然后
   1. 用临时 `XDG_DATA_HOME` 启动发布包（不碰真实用户数据），确认进程存活且
      `data/{packs,static,user,archives}` 引导成功（有 `xwininfo` 时顺带核对主窗口标题）；
+     失败时区分「进程已退出 / 数据目录未就绪」并打印退出码与**完整**的 `app.log`；
   2. 在**打包态**里逐场景真开副本窗口：`entry-start`（探索入口 → 进副本）、
      `session-close`、`text-components`（文本 / 字体组件）、`mini-game`（小游戏触发器
      返回值链）、`mini-game-py`（py 后端小游戏覆盖层舞台）。
 
   退出码 0 才算通过——这是「打包后仍然能进副本、小游戏触发器还能跑」的可复现证据。
+  现场日志统一落在 `dist/selfcheck-logs/`（`start.log` + 每场景一份），每晚 CI 作为
+  `package-selfcheck-logs` 产物上传。
 
 ### 7.1 CI（GitHub Actions）
 

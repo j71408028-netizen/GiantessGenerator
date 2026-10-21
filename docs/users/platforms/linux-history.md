@@ -242,6 +242,19 @@
    仓库的守卫（`check_entrypoints` / `check_import_graph` / `check_platform_compat` /
    `check_scenario_naming`）一律改成**按 `.venv*` 前缀判定**虚拟环境，以后再加平台构建
    venv 不会再犯。改完 `run_checks.py` 回到 15/15。
+5. **打包自检现场留不住（2026-10-21）**：`package-selfcheck` 自 2026-10-07 起每晚 CI 都
+   失败，而本机真实 X 上同一套命令通过。CI 只留下「启动检查失败」和发布包的
+   `XIO: fatal IO error 22 ...`（`:99`）——这类 Xlib IO 错误本身不带 Python 栈，而剩下的
+   线索也留不住：自检把 `app.log` 放进 `mktemp -d` 的 `$WORK`，`trap cleanup EXIT` 直接
+   整目录删掉；失败时又用 `sed -n '1,40p'` 边跑边读，只能拿到当时已写出的几行。改法：
+   - 日志落到 `dist/selfcheck-logs/`（`start.log` + 每场景一份），CI 用
+     `package-selfcheck-logs` 产物上传，失败时先收干净进程再整份打印；
+   - 失败信息区分「进程已退出 / 数据目录未就绪」并带退出码；存活判定改用
+     `ps -o stat=`，`kill -0` 对僵尸仍然成功，会把「启动即崩」看成「进程存活」；
+   - 启动屏子进程挪到 `ctk.CTk()` **之前**拉起（原因见 §3.1）。
+6. **待确认**：上述 XIO 只来自发布包（源码态 GUI 冒烟正常），下一次 CI 的
+   `package-selfcheck-logs` 产物是判断它是否由 fork 顺序引起的依据；若仍旧复现，
+   下一站是把副本子进程与启动屏一起换成 `multiprocessing.get_context("spawn")`。
 
 ---
 
