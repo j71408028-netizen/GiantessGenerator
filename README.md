@@ -72,14 +72,14 @@ python main.py
 ```
 
 ```bash
-# 离线自检（不需要显示器，30 项）
+# 离线自检（不需要显示器，31 项）
 .venv/bin/python tests/run_checks.py
 # GUI 冒烟（需要显示器或 xvfb）
 .venv/bin/python tests/smoke_switch.py
 
 # 打包（PyInstaller onedir → dist/GiantessGenerator + .tar.gz 目录包）
 bash build/linux/build_linux.sh
-# 打包 + 打包自检：在打包态里启动发布包、引导数据目录，并真开副本窗口跑五个场景
+# 打包 + 打包自检：在打包态里启动发布包、引导数据目录，并真开副本窗口跑六个场景
 bash build/linux/build_linux.sh --self-check
 ```
 

@@ -155,7 +155,8 @@ DATA_ROOT="$WORK/xdg/$NAME/data"
 # 60 秒还没齐全说明进程卡住或已经死了（死掉会在下一轮立刻 break）。
 BOOTSTRAPPED=0
 for _ in $(seq 1 120); do
-    if [ -d "$DATA_ROOT/user" ] && [ -d "$DATA_ROOT/packs" ] && [ -d "$DATA_ROOT/static" ]; then
+    if [ -d "$DATA_ROOT/user" ] && [ -d "$DATA_ROOT/packs" ] \
+            && [ -d "$DATA_ROOT/static" ] && [ -d "$DATA_ROOT/archives" ]; then
         BOOTSTRAPPED=1
         break
     fi
@@ -172,8 +173,21 @@ if [ "$BOOTSTRAPPED" = 1 ] && [ "$APP_ALIVE" = 1 ]; then
     START_OK=1
     echo "   数据目录已引导：$DATA_ROOT"
     if command -v xwininfo >/dev/null 2>&1; then
-        xwininfo -root -tree >"$LOG_DIR/xwininfo.txt" 2>&1 || true
-        if grep -q "巨大娘生成器" "$LOG_DIR/xwininfo.txt"; then
+        # 数据目录就绪时主窗口往往还在构建（启动屏之后才 map），立刻查只会
+        # 得到必然的「未找到」。给 40 秒；进程先死就提前退出。
+        WINDOW_FOUND=0
+        for _ in $(seq 1 80); do
+            xwininfo -root -tree >"$LOG_DIR/xwininfo.txt" 2>&1 || true
+            if grep -q "巨大娘生成器" "$LOG_DIR/xwininfo.txt"; then
+                WINDOW_FOUND=1
+                break
+            fi
+            if ! app_alive; then
+                break
+            fi
+            sleep 0.5
+        done
+        if [ "$WINDOW_FOUND" = 1 ]; then
             echo "   主窗口已映射（xwininfo 找到标题「巨大娘生成器」）"
         else
             echo "   警告：xwininfo 未找到主窗口标题，启动检查降级为「进程存活 + 数据目录就绪」"

@@ -255,6 +255,20 @@
 6. **待确认**：上述 XIO 只来自发布包（源码态 GUI 冒烟正常），下一次 CI 的
    `package-selfcheck-logs` 产物是判断它是否由 fork 顺序引起的依据；若仍旧复现，
    下一站是把副本子进程与启动屏一起换成 `multiprocessing.get_context("spawn")`。
+7. **打包版缺整个显示组件包（2026-10-21，已修）**：本机复跑
+   `build_linux.sh --self-check` 时启动检查通过，但 `session-close` 稳定失败
+   （`FAIL 会话：中途快照断言通过 <AssertionError: 默认配置应构建文本主组件>`，
+   源码态同一场景 19/19 全过）。原因是 `component_registry` 用
+   `importlib.import_module("dungeon.window.component_pack")` 导入常驻组件包，
+   PyInstaller 的静态分析看不到字符串模块名，包内 7 个模块一个都没进 PYZ；
+   会话于是静默退回内置文本容器（只写内存过程日志，不打印）。
+   修法是把这一处改成**字面量的函数内 `import`**（仍是惰性导入，外部组件包覆盖
+   逻辑不变），让 PyInstaller / Nuitka 都能收集；同时保留
+   `--collect-all` 体系，无需各平台脚本加参数。验证：重打后 PYZ 里能看到
+   `dungeon.window.component_pack` 及 6 个子模块，`--self-check` 6/6 场景通过。
+   另外把 `check_docs_links` 的虚拟环境排除改成 `.venv*` 前缀——本机新增的
+   `.venv-buildlinux` 里第三方包 README 曾制造 4 处假失效引用（31 项离线守卫
+   因此回到全绿）。
 
 ---
 

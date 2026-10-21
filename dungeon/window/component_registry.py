@@ -42,9 +42,14 @@ def _load_builtin_package():
 
     常驻包随应用分发、位于 Python 包内，因此不受 ``data_dir`` 重定向与打包路径
     影响；导入失败（显式日志）时返回 None，由调用方决定降级行为。
+
+    这里用**字面量的函数内 import**而不是 ``importlib.import_module(字符串)``：
+    后者对 PyInstaller / Nuitka 是隐形的，打包版会缺整个 ``component_pack``，
+    会话静默退回内置文本容器（2026-10-21 打包自检的 session-close 就是这样
+    挂的）。函数内导入仍然保持惰性——首次建会话时才加载组件包。
     """
     try:
-        module = importlib.import_module(_BUILTIN_PACKAGE)
+        from dungeon.window import component_pack as module
     except Exception as exc:
         process_log.log(f"[Components] 常驻组件包导入失败: {_BUILTIN_PACKAGE}: {exc}\n"
                         f"{traceback.format_exc()}")

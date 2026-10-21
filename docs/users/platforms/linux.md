@@ -146,7 +146,7 @@ Xlib 默认处理器会直接 `exit(1)`，表现为冒烟里的 `X Error of fail
 ## 6. 自动化与压测
 
 ```bash
-# 离线守卫（不需要显示器）：30 项
+# 离线守卫（不需要显示器）：31 项
 .venv/bin/python tests/run_checks.py
 .venv/bin/python scripts/scenario_validate.py    # 方案校验，0 error 才退 0
 
@@ -185,6 +185,11 @@ PYTHON_BIN=python3.12 bash build/linux/build_linux.sh   # 指定解释器
 - **依赖收集**：与 Windows / macOS 脚本同一套 `--collect-all`（customtkinter / imgui_bundle /
   PIL / openai / numpy / webview），**不带** `zai`（项目没有该依赖，见
   附录A §2.3）。关系图不再需要 Graphviz 的 `dot` 二进制，打包无外部可选依赖。
+  官方显示组件包 `dungeon.window.component_pack` 由 `component_registry` 以**字面量的
+  函数内 `import`** 加载——不能改回 `importlib.import_module(字符串)`，否则
+  PyInstaller / Nuitka 的静态分析看不到，打包版会缺整个组件包、静默退回内置文本容器
+  （2026-10-21 打包自检的 `session-close` 就是这样挂的，见
+  [linux-history.md](linux-history.md) §8.1-7）。
 - **构建环境**：脚本自建 `.venv-buildlinux` 并 `pip install -r requirements.txt pyinstaller`，
   不污染开发 venv。Python 3.14 下 `pywebview` 会装到 6.2.1（更新的版本声明 `<3.14`），
   web 后端小游戏窗口照常可用。
@@ -196,9 +201,12 @@ PYTHON_BIN=python3.12 bash build/linux/build_linux.sh   # 指定解释器
   1. 用临时 `XDG_DATA_HOME` 启动发布包（不碰真实用户数据），确认进程存活且
      `data/{packs,static,user,archives}` 引导成功（有 `xwininfo` 时顺带核对主窗口标题）；
      失败时区分「进程已退出 / 数据目录未就绪」并打印退出码与**完整**的 `app.log`；
-  2. 在**打包态**里逐场景真开副本窗口：`entry-start`（探索入口 → 进副本）、
-     `session-close`、`text-components`（文本 / 字体组件）、`mini-game`（小游戏触发器
-     返回值链）、`mini-game-py`（py 后端小游戏覆盖层舞台）。
+  2. 在**打包态**里逐场景真开副本窗口（6 个）：`entry-start`（探索入口 → 进副本）、
+     `session-close`（中途快照 + 收尾落盘）、`entry-replay`（入口回放）、
+     `chapter-bgm`（章节背景音乐）、`mini-game`（小游戏触发器返回值链）、
+     `mini-game-py`（py 后端小游戏覆盖层舞台）。`text-components` 不在其中：
+     它在 Linux/X11 上曾触发 DPG/GLFW 段错误，组件覆盖由 `smoke_switch` /
+     `smoke_mini` 与离线 `check_component_pack` 兜底。
 
   退出码 0 才算通过——这是「打包后仍然能进副本、小游戏触发器还能跑」的可复现证据。
   现场日志统一落在 `dist/selfcheck-logs/`（`start.log` + 每场景一份），每晚 CI 作为

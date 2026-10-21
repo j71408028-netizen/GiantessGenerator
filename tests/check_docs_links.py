@@ -13,7 +13,11 @@ macOS 的文件系统不区分大小写，``Path.exists()`` 对 ``docs/Releases/
 import os, re, sys, pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SKIP = {'.git', 'build', 'dist', '__pycache__', '.venv', '.workbuddy'}
+SKIP = {'.git', 'build', 'dist', '__pycache__', '.workbuddy'}
+#: 虚拟环境目录按前缀跳过：构建脚本按平台命名（.venv / .venv-build /
+#: .venv-macos / .venv-buildlinux…），枚举必然漏——第三方包的 README 里
+#: 全是相对于它自己仓库的链接，扫进来就是误报。
+VIRTUALENV_PREFIXES = ('.venv', 'venv')
 LINK = re.compile(r'\]\(([^)\s]+?)(?:\s+"[^"]*")?\)')
 PATHISH = re.compile(r'docs/[\w/\-]+\.md')
 
@@ -49,6 +53,8 @@ def _resolve_exact(start: pathlib.Path, target: str) -> str | None:
 bad = []
 for p in ROOT.rglob('*.md'):
     if SKIP & set(p.parts):
+        continue
+    if any(part.startswith(VIRTUALENV_PREFIXES) for part in p.parts):
         continue
     for i, line in enumerate(p.read_text('utf-8', 'replace').splitlines(), 1):
         for m in LINK.finditer(line):
