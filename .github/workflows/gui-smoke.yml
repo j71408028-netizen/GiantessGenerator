@@ -92,12 +92,22 @@ jobs:
 
       # 打包 + 打包自检：PyInstaller onedir，然后在**打包态**里启动发布包、
       # 引导 XDG 数据目录、真开副本窗口跑 entry-start / session-close /
-      # text-components / mini-game / mini-game-py 五个场景。
+      # entry-replay / chapter-bgm / mini-game / mini-game-py 六个场景。
       - name: 打包 + 打包自检
         run: |
           xvfb-run -a -s "-screen 0 1600x1000x24" \
             env LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe \
             bash build/linux/build_linux.sh --self-check
+
+      # 自检现场：发布包的完整 stdout/stderr（app.log）、xwininfo 树、每个副本
+      # 场景的输出。自检失败时这是唯一能看清「为什么起不来」的东西，必须带出来。
+      - name: 上传打包自检日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-selfcheck-logs
+          path: dist/selfcheck-logs/
+          if-no-files-found: ignore
 
       - name: 上传 Linux 目录包
         if: always()

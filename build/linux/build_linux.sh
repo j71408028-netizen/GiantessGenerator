@@ -99,8 +99,45 @@ echo "== 打包自检：构建 $SELF_CHECK_NAME =="
 "$VENV/bin/pyinstaller" "${PYINSTALLER_ARGS[@]}" --name "$SELF_CHECK_NAME" "$SELF_CHECK_ENTRY"
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/giantess-selfcheck-XXXXXX")"
+# 日志留在 dist/ 下（不随 WORK 删除），CI 失败时由工作流原样上传：
+# 启动失败的现场只有 app.log，把它扔进 mktemp 目录等于把证据一起删掉。
+LOG_DIR="$ROOT/dist/selfcheck-logs"
+rm -rf "$LOG_DIR"
+mkdir -p "$LOG_DIR"
+
+APP_PID=""
+APP_RC=""
+# 应用是否还活着。``kill -0`` 对僵尸进程同样成功，而 bash 未必已经回收它——
+# 只看 kill 会把「启动即崩」误判成「进程存活」。
+app_alive() {
+    [ -n "$APP_PID" ] || return 1
+    kill -0 "$APP_PID" 2>/dev/null || return 1
+    if command -v ps >/dev/null 2>&1; then
+        local state
+        state="$(ps -o stat= -p "$APP_PID" 2>/dev/null | tr -d ' ' || true)"
+        case "$state" in
+            ""|Z*) return 1 ;;
+        esac
+    fi
+    return 0
+}
+# 收掉应用及它 fork 出来的子进程（启动屏）。父进程被 SIGTERM 时子进程不会自己
+# 退出，会一直占着 X 连接，xvfb 关闭时刷出 XIO 噪声，掩盖真正的失败现场。
+stop_app() {
+    [ -n "$APP_PID" ] || return 0
+    if command -v pkill >/dev/null 2>&1; then
+        pkill -TERM -P "$APP_PID" 2>/dev/null || true
+    fi
+    kill -TERM "$APP_PID" 2>/dev/null || true
+    APP_RC=0
+    wait "$APP_PID" 2>/dev/null || APP_RC=$?
+    if command -v pkill >/dev/null 2>&1; then
+        pkill -KILL -P "$APP_PID" 2>/dev/null || true
+    fi
+    APP_PID=""
+}
 cleanup() {
-    if [ -n "${APP_PID:-}" ]; then kill "$APP_PID" 2>/dev/null || true; fi
+    stop_app
     rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -109,28 +146,34 @@ trap cleanup EXIT
 echo
 echo "-- 启动检查：$NAME（XDG_DATA_HOME=$WORK/xdg）--"
 APP="$BUNDLE/$NAME"
-APP_LOG="$WORK/app.log"
+APP_LOG="$LOG_DIR/start.log"
 XDG_DATA_HOME="$WORK/xdg" "$APP" >"$APP_LOG" 2>&1 &
 APP_PID=$!
 DATA_ROOT="$WORK/xdg/$NAME/data"
+
+# 数据目录由 ensure_cwd() 在第一条 X 连接之前建好，正常一两秒内就位；
+# 60 秒还没齐全说明进程卡住或已经死了（死掉会在下一轮立刻 break）。
 BOOTSTRAPPED=0
-for _ in $(seq 1 60); do
+for _ in $(seq 1 120); do
     if [ -d "$DATA_ROOT/user" ] && [ -d "$DATA_ROOT/packs" ] && [ -d "$DATA_ROOT/static" ]; then
         BOOTSTRAPPED=1
         break
     fi
-    if ! kill -0 "$APP_PID" 2>/dev/null; then
+    if ! app_alive; then
         break
     fi
-    sleep 1
+    sleep 0.5
 done
+APP_ALIVE=0
+if app_alive; then APP_ALIVE=1; fi
 
 START_OK=0
-if [ "$BOOTSTRAPPED" = 1 ] && kill -0 "$APP_PID" 2>/dev/null; then
+if [ "$BOOTSTRAPPED" = 1 ] && [ "$APP_ALIVE" = 1 ]; then
     START_OK=1
     echo "   数据目录已引导：$DATA_ROOT"
     if command -v xwininfo >/dev/null 2>&1; then
-        if xwininfo -root -tree 2>/dev/null | grep -q "巨大娘生成器"; then
+        xwininfo -root -tree >"$LOG_DIR/xwininfo.txt" 2>&1 || true
+        if grep -q "巨大娘生成器" "$LOG_DIR/xwininfo.txt"; then
             echo "   主窗口已映射（xwininfo 找到标题「巨大娘生成器」）"
         else
             echo "   警告：xwininfo 未找到主窗口标题，启动检查降级为「进程存活 + 数据目录就绪」"
@@ -138,13 +181,19 @@ if [ "$BOOTSTRAPPED" = 1 ] && kill -0 "$APP_PID" 2>/dev/null; then
     else
         echo "   （没有 xwininfo，跳过窗口标题检查）"
     fi
-else
-    echo "   启动检查失败：见日志 $APP_LOG" >&2
-    sed -n '1,40p' "$APP_LOG" >&2 || true
 fi
-kill "$APP_PID" 2>/dev/null || true
-wait "$APP_PID" 2>/dev/null || true
-unset APP_PID
+
+# 先整树收干净，日志才是完整的（sed 边跑边读只能拿到当时已写出的几行）。
+stop_app
+if [ "$START_OK" != 1 ]; then
+    echo "   启动检查失败：进程存活=$APP_ALIVE 数据目录就绪=$BOOTSTRAPPED 退出码=${APP_RC:-未取到}" >&2
+    echo "   完整日志（$APP_LOG）：" >&2
+    cat "$APP_LOG" >&2 || true
+    echo "   ---- app.log 结束 ----" >&2
+    if command -v ps >/dev/null 2>&1; then
+        ps -eo pid,ppid,stat,cmd | grep -F "$NAME" | grep -v grep >&2 || true
+    fi
+fi
 
 # 2) 副本窗口场景：打包态里真开副本窗口（imgui/GLFW）
 # 场景都验证过能在打包态跑通。不含 text-components：它在 Linux/X11 上曾踩
@@ -157,10 +206,14 @@ FAILED=0
 for scene in "${SCENES[@]}"; do
     echo
     echo "-- 场景 $scene --"
-    if XDG_DATA_HOME="$WORK/xdg-sc" timeout 180 "$SELF_CHECK_BIN" --scene "$scene"; then
+    scene_log="$LOG_DIR/scene-$scene.log"
+    if XDG_DATA_HOME="$WORK/xdg-sc" timeout 180 "$SELF_CHECK_BIN" --scene "$scene" \
+            >"$scene_log" 2>&1; then
         echo "   场景 $scene：通过"
     else
-        echo "   场景 $scene：失败（rc=$?）" >&2
+        scene_rc=$?
+        echo "   场景 $scene：失败（rc=$scene_rc），日志 $scene_log" >&2
+        tail -n 40 "$scene_log" >&2 || true
         FAILED=$((FAILED + 1))
     fi
 done
@@ -168,10 +221,12 @@ done
 echo
 if [ "$START_OK" != 1 ]; then
     echo "打包自检失败：发布包未能启动并引导数据目录" >&2
+    echo "现场日志：$LOG_DIR/（start.log 为发布包的完整输出）" >&2
     exit 1
 fi
 if [ "$FAILED" != 0 ]; then
     echo "打包自检失败：$FAILED/${#SCENES[@]} 个副本场景未通过" >&2
+    echo "现场日志：$LOG_DIR/" >&2
     exit 1
 fi
 echo "打包自检通过：发布包启动引导 OK，副本场景 ${#SCENES[@]}/${#SCENES[@]}（${SCENES[*]}）"
