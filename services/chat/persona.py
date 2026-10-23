@@ -6,6 +6,7 @@ intro 面板、副本提示词、探索上下文等各处自行拼接。本模�
 自行决定（如 tag_hints 提示词保留在 intro 面板，供行为包覆写）。
 """
 
+from core.address_model import format_addr_compact
 from core.logic import format_size
 from core.models import CharacterSnapshot
 from core.scale_reference import (destruction_level_text,
@@ -42,7 +43,7 @@ def build_character_persona(state: CharacterSnapshot,
     lines.append(f"介入度（{state.intrusion:.1f}/4）：{intrusion_level_text(state.intrusion)}")
     lines.append(f"破坏性（{state.destruction:.1f}/4）：{destruction_level_text(state.destruction)}")
     if state.position:
-        lines.append(f"当前位置：{state.position}")
+        lines.append(f"当前位置：{format_addr_compact(state.position)}")
     measured = [(part, desc) for part, desc in state.size_unlocks.items()
                 if desc and desc != "MEASURED"]
     if measured:

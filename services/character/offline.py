@@ -105,7 +105,12 @@ class OfflineService:
         return bins
 
     def _simulate_address_env_factor(self, position: str) -> float:
-        """模拟地址环境因子（尚无该字段，用位置哈希模拟）。"""
+        """地址环境因子的模拟实现（按位置哈希取 0.2~0.8 的稳定值）。
+
+        真实环境因子尚未落地：信源存在冲突——由地址推导（如按最小单元
+        边长判定开阔 / 密集）会与描述 / 段落内容给出的环境叙事互相矛盾，
+        两个信源的优先级与合并方式需要统一裁决，留待后续单独设计。
+        """
         if not position:
             return 0.4
         h = abs(hash(position)) % 1000

@@ -137,14 +137,33 @@ class AddressPlanner:
             return set()
         return {world_of(r) for r in regs.values() if world_of(r)}
 
+    @staticmethod
+    def _prefer_activity_regions(usable, activity_regions, addr_of):
+        """活动区域软偏好：注册地址覆盖地标地址的候选稳定前移。
+
+        只调整顺序、不改变可选集；区域为空或全部无法解析时无任何影响。
+        排序稳定，未命中的候选保持原有顺序。
+        """
+        regions = [r for r in (activity_regions or [])
+                   if isinstance(r, str) and r.strip()]
+        if not regions:
+            return
+
+        def rank(cand) -> int:
+            addr = addr_of(cand)
+            return 0 if addr and any(covers(r, addr) for r in regions) else 1
+
+        usable.sort(key=rank)
+
     def plan_address_comparisons(self, candidates, position, height, skip_base_prob,
-                                 durability):
+                                 durability, activity_regions=None):
         """地址规则规划：返回 dict(engaged, stuck, position, comparisons, invalid)。
 
         首地标锚定（无位置时不受距离限制），随后只取与角色位置距离
-        < 10×身高 且私有名约束互相满足 的地标地址。全部地标都够不着 /
-        范围内独特地标耐久均 <0.5 时给出 stuck 原因，由调用方决定切换
-        地址 / 世界观或放弃。
+        < 10×身高 且私有名约束互相满足 的地标地址；``activity_regions``
+        （完整地址文本列表）为软偏好，区域内地标在选取顺序上优先。
+        全部地标都够不着 / 范围内独特地标耐久均 <0.5 时给出 stuck 原因，
+        由调用方决定切换地址 / 世界观或放弃。
         未注册地址的内容（含旧数据）保持原行为；地址存在但无法组合时不再
         退化为“无地址”，而是排除并记入 ``invalid``。
         """
@@ -226,6 +245,8 @@ class AddressPlanner:
         usable = [c for c in candidates
                   if id(c["landmark"]) not in invalid_ids
                   and self._durable_ok(c, durability, engaged=True, key=cand_key(c))]
+        # 活动区域软偏好（含锚定优先级）：在推导 pick_order 之前生效
+        self._prefer_activity_regions(usable, activity_regions, cand_addr)
         usable_addrs = [c for c in usable if cand_addr(c)]
 
         reach = 10.0 * height

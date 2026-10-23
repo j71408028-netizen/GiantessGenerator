@@ -26,6 +26,7 @@ from persistence.world_pack import (
     validate_archive,
     worlds_dir,
 )
+from persistence.style_addr import save_address as _save_style_addr
 from dungeon.terms import (LEGACY_SCENARIO_RESOURCE_KEY, SCENARIO_RESOURCE_KEY,
                            is_default_scenario)
 from core.behavior_runtime import get_runtime, resolve_behavior_source
@@ -467,8 +468,8 @@ class WorldManager:
                            [asdict(lm) for lm in landmark_repo.load(style)])
                 style_addr = landmark_repo.load_style_address(style)
                 if style_addr:
-                    _save_json(os.path.join(target, "landmarks", f"{style}.addr.json"),
-                               {"address": style_addr})
+                    _save_style_addr(os.path.join(target, "landmarks"),
+                                     style, style_addr)
             resources["landmarks"] = styles
         styles = [s for s in selected.get("quips", [])
                   if quip_repo is not None and s in quip_repo.get_styles()]
@@ -484,8 +485,8 @@ class WorldManager:
                            serializable)
                 style_addr = quip_repo.load_style_address(style)
                 if style_addr:
-                    _save_json(os.path.join(target, "quips", f"{style}.addr.json"),
-                               {"address": style_addr})
+                    _save_style_addr(os.path.join(target, "quips"),
+                                     style, style_addr)
             resources["quips"] = styles
         tables = [t for t in selected.get("presets", [])
                   if preset_repo is not None and t in preset_repo.get_tables()]

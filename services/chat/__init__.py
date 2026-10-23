@@ -50,6 +50,7 @@ import uuid
 from contextlib import contextmanager
 from typing import Optional
 
+from core.address_model import format_addr_compact
 from core.ai import get_ai_client, describe_ai_error
 from core.models import (ChatMessage, ChatParams, ChatState, CharacterSnapshot,
                     Topic)
@@ -826,7 +827,8 @@ class ChatService:
                     context_lines.append(
                         f"最近关于你的新闻：{state.last_news[:120]}")
                 if state.position:
-                    context_lines.append(f"你目前在：{state.position}")
+                    context_lines.append(
+                        f"你目前在：{format_addr_compact(state.position)}")
                 context = ("\n".join(context_lines) + "\n") if context_lines else ""
                 parts.append(
                     "你隔了一段时间拿起手机，没有新消息。\n" + context +

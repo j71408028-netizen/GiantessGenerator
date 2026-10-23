@@ -691,6 +691,24 @@ def format_addr_verbose(text: str) -> str:
     return " / ".join(segs) if segs else "（无地址）"
 
 
+def format_addr_compact(text: str) -> str:
+    """单行紧凑地址描述（聊天提示词等 AI 语境用），带定位精度提示。
+
+    例：``世界观 RW ／ 一级地域 CN1（定位精度：约 10 千米范围内）``。
+    纯世界观地址无精度段；无法解析时原样返回文本。
+    """
+    addr = parse_full(text)
+    if addr is None:
+        return (text or "").strip()
+    labels = ("世界观", "一级地域", "二级地域", "三级地域")
+    segs = [f"{label} {seg}"
+            for label, seg in zip(labels, (addr.world,) + addr.regions) if seg]
+    width = cell_width_m(text)
+    if width > 0:
+        segs.append(f"（定位精度：约 {_fmt_size_m(width)} 范围内）")
+    return " ／ ".join(segs)
+
+
 def describe_scale(full_addr_text: str) -> str:
     w = cell_width_m(full_addr_text)
     return _fmt_size_m(w) if w > 0 else "无单元"

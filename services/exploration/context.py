@@ -293,6 +293,7 @@ class ExplorationContext:
                 "landmark_durability": state.landmark_durability.copy(),
                 "landmark_addresses": dict(state.landmark_addresses or {}),
                 "position": state.position or "",
+                "activity_regions": list(state.activity_regions or []),
             }
             if consume_points:
                 self.character_repo.save(state)

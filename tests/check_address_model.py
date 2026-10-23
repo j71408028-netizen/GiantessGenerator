@@ -31,9 +31,9 @@ def check(name, ok, extra=""):
 from core.address_model import (  # noqa: E402
     REL_CONTAINS, REL_DIVERGENT, REL_INSIDE, REL_INVALID, REL_SAME,
     REL_WORLD_MISMATCH, canonical_key, compose_address_ex, covers,
-    distance_interval_m, distance_m, distance_uncertain, parse_address,
-    parse_address_ex, parse_full, relate, resolve_full_address,
-    resolve_full_address_ex,
+    distance_interval_m, distance_m, distance_uncertain, format_addr_compact,
+    parse_address, parse_address_ex, parse_full, relate,
+    resolve_full_address, resolve_full_address_ex,
 )
 
 # ---------------- 1. 解析 ----------------
@@ -179,6 +179,20 @@ check("relate 跨世界观 world_mismatch 且不可达",
       and relate("1e4_1e3_1e2@RW-A", "1e4_1e3_1e2@TH-A").interval is None)
 check("relate 坏地址 invalid",
       relate("坏地址", "RW").kind == REL_INVALID)
+
+# ---------------- 6. 紧凑地址描述 ----------------
+_compact = format_addr_compact("1e4_1e3_1e2@RW-CN1")
+check("紧凑描述含级别标签与定位精度",
+      "世界观 RW" in _compact and "一级地域 CN1" in _compact
+      and "二级地域" not in _compact and "定位精度" in _compact)
+_compact_full = format_addr_compact("1e4_1e3_1e2@RW-CN1-East-3")
+check("三级地址紧凑描述逐级列出",
+      all(s in _compact_full for s in ("世界观 RW", "一级地域 CN1",
+                                       "二级地域 East", "三级地域 3")))
+_pure_world = format_addr_compact("RW")
+check("纯世界观紧凑描述无精度段",
+      "世界观 RW" in _pure_world and "定位精度" not in _pure_world)
+check("坏地址紧凑描述回退原文", format_addr_compact("坏地址") == "坏地址")
 
 # ---------------- 结论 ----------------
 _log.flush()

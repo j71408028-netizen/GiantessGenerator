@@ -215,6 +215,9 @@ class CharacterSnapshot:
     # 注册地址系统：角色当前位置（完整地址，含世界观段）。首次生成报告时由
     # 第一个地标锚定并持久化；空表示尚无位置（新角色或当前内容未注册地址）。
     position: str = ""
+    # 活动区域（完整地址文本列表，软约束）：报告选取时区域内地标优先，让角色
+    # 的空间行为有惯性；空 = 无偏好。不做合法性校验，坏文本使用时不命中。
+    activity_regions: List[str] = field(default_factory=list)
     # 离线恢复期间的2小时精度步进与伤亡明细，由 recover_evolution 计算填充。
     offline_details: List[OfflineDetail] = field(default_factory=list)
 

@@ -234,6 +234,32 @@ _plan = _planner.plan_address_comparisons(
 check("私有名冲突的地标不阻断 all_damaged",
       _plan["comparisons"] and _plan["stuck"]["reason"] == "all_damaged")
 
+# ---------------- 9. 活动区域软偏好 ----------------
+_lm_east = Landmark("East1", 100, "vertical", "unique", address="B-1")
+_lm_east._style = "S"
+_lm_west = Landmark("West1", 100, "vertical", "unique", address="C-1")
+_lm_west._style = "S"
+_catalog = FakeCatalog([_lm_east, _lm_west], {"S": "1e5_1e3_1e2@W-A"}, styles=["S"])
+_planner = AddressPlanner(_catalog)
+_pos_west_hub = "1e5_1e3_1e2@W-A-M"
+_plan = _planner.plan_address_comparisons(
+    [_cand(_lm_east), _cand(_lm_west)], _pos_west_hub, height=1000.0,
+    skip_base_prob=0.0, durability={})
+check("无活动区域时保持原顺序",
+      [c["landmark"].name for c in _plan["comparisons"]] == ["East1", "West1"])
+_plan = _planner.plan_address_comparisons(
+    [_cand(_lm_east), _cand(_lm_west)], _pos_west_hub, height=1000.0,
+    skip_base_prob=0.0, durability={},
+    activity_regions=["1e5_1e3_1e2@W-A-C"])
+check("活动区域内地标稳定前移",
+      [c["landmark"].name for c in _plan["comparisons"]] == ["West1", "East1"])
+_plan = _planner.plan_address_comparisons(
+    [_cand(_lm_east), _cand(_lm_west)], _pos_west_hub, height=1000.0,
+    skip_base_prob=0.0, durability={},
+    activity_regions=["坏地址", ""])
+check("活动区域全部无法解析时不影响顺序",
+      [c["landmark"].name for c in _plan["comparisons"]] == ["East1", "West1"])
+
 # ---------------- 结论 ----------------
 _log.flush()
 sys.stdout = sys.__stdout__

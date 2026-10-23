@@ -3,11 +3,14 @@ from dataclasses import asdict
 
 from core.models import Landmark
 from .json_store import load_json_with_backup, write_json_atomic
+from .style_addr import (ADDR_SUFFIX, addr_path as _addr_path,
+                         delete_address as _delete_addr,
+                         load_address as _load_addr,
+                         rename_address as _rename_addr,
+                         save_address as _save_addr)
 
 
 DEFAULT_LANDMARK_STYLE = "ChineseMix"
-# 风格“注册地址”companion 文件后缀（记录世界观及风格注册的若干级）
-ADDR_SUFFIX = ".addr.json"
 
 
 class LandmarkRepo:
@@ -61,18 +64,16 @@ class LandmarkRepo:
         write_json_atomic(self._free_filepath(style_name),
                           [asdict(l) for l in landmarks])
 
-    # ---------- 风格注册地址（companion 文件） ----------
+    # ---------- 风格注册地址（companion 文件，读写见 persistence.style_addr） ----------
     def addr_path(self, style_name: str) -> str:
-        return os.path.join(self._free_dir, f"{style_name}{ADDR_SUFFIX}")
+        return _addr_path(self._free_dir, style_name)
 
     def load_style_address(self, style_name: str) -> str:
         """读取风格注册地址文本（世界观 + 该风格注册的若干上级级）。空 = 未注册。"""
-        data = load_json_with_backup(
-            os.path.join(self._read_dir(), f"{style_name}{ADDR_SUFFIX}"))
-        return data.get("address", "") if isinstance(data, dict) else ""
+        return _load_addr(self._read_dir(), style_name)
 
     def save_style_address(self, style_name: str, address_text: str):
-        write_json_atomic(self.addr_path(style_name), {"address": address_text or ""})
+        _save_addr(self._free_dir, style_name, address_text)
 
     def load_style_registers(self, style_names: list) -> dict:
         """{风格名: 注册地址文本}。"""
@@ -98,9 +99,7 @@ class LandmarkRepo:
         filepath = self._free_filepath(style_name)
         if os.path.exists(filepath):
             os.remove(filepath)
-        addr = self.addr_path(style_name)
-        if os.path.exists(addr):
-            os.remove(addr)
+        _delete_addr(self._free_dir, style_name)
 
     def rename_style(self, old_name: str, new_name: str):
         if new_name in self.get_styles():
@@ -109,9 +108,7 @@ class LandmarkRepo:
         new_path = self._free_filepath(new_name)
         if os.path.exists(old_path):
             os.rename(old_path, new_path)
-        old_addr = self.addr_path(old_name)
-        if os.path.exists(old_addr):
-            os.rename(old_addr, self.addr_path(new_name))
+        _rename_addr(self._free_dir, old_name, new_name)
 
     def _filepath(self, style_name: str) -> str:
         return os.path.join(self._read_dir(), f"{style_name}.json")

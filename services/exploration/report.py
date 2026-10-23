@@ -75,13 +75,14 @@ class ReportEngine:
 
         landmark_durability = core_state.get("landmark_durability", {})
         landmark_addresses = dict(core_state.get("landmark_addresses") or {})
-        # 地址规划：锚定、10 倍身高可达筛选、无路可走判定
+        # 地址规划：锚定、10 倍身高可达筛选、活动区域偏好、无路可走判定
         plan = self.addresses.plan_address_comparisons(
             candidates,
             core_state.get("position") or "",
             height,
             personality_obj.skip_base_prob,
             landmark_durability,
+            activity_regions=core_state.get("activity_regions"),
         )
         position_now = plan["position"] or core_state.get("position") or ""
         stuck = plan["stuck"]
