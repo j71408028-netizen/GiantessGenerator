@@ -11,8 +11,8 @@
 判定口径：
 
 - 角色**没有可用地址**（``position`` 为空或无法解析）时，地址条件自动跳过；
-- 角色有地址时，两者必须在同一世界观。距离按 ``core.address_model.distance_m``
-  计算，超过上限即拒绝；
+- 角色有地址时，两者必须在同一世界观。距离按 ``core.address_model.distance_interval_m``
+  计算，并用区间上界保守判定（位置越粗，上界越大），超过上限即拒绝；
 - 身高条件只看角色身高，落在区间外即拒绝；
 - 方案地址本身写坏时按「未配置地址」处理（校验器会给出诊断），避免一个笔误
   把所有人都拦在门外。
@@ -22,7 +22,7 @@
 
 from typing import Optional
 
-from core.address_model import distance_m, format_addr_verbose, parse_full
+from core.address_model import distance_interval_m, format_addr_verbose, parse_full
 from core.logic import format_size
 
 #: 方案配置里的准入字段（编辑器、持久化迁移与校验器共用同一份键名）
@@ -87,15 +87,21 @@ def check_entry_requirements(config, *, position: str = "",
     position = (position or "").strip() if isinstance(position, str) else ""
     if address and max_distance is not None and position:
         if parse_full(position) is not None:
-            distance = distance_m(position, address)
-            if distance is None:
+            interval = distance_interval_m(position, address)
+            if interval is None:
                 return (f"该副本要求角色位于地址「{format_addr_verbose(address)}」附近，"
                         f"但角色当前地址「{format_addr_verbose(position)}」"
                         f"与方案地址不在同一世界观，无法进入。")
-            if distance > max_distance:
+            nearest, farthest = interval
+            if farthest > max_distance:
+                if nearest == farthest:
+                    distance_text = f"角色当前距离为 {format_size(nearest)}"
+                else:
+                    distance_text = (f"角色当前距离在 {format_size(nearest)} 到 "
+                                     f"{format_size(farthest)} 之间（位置精度不足）")
                 return (f"该副本要求角色与方案地址「{format_addr_verbose(address)}」"
                         f"的距离不超过 {format_size(max_distance)}，"
-                        f"角色当前距离为 {format_size(distance)}，无法进入。")
+                        f"{distance_text}，无法进入。")
 
     if height is not None:
         try:

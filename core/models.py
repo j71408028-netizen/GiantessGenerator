@@ -11,8 +11,12 @@ class Landmark:
     frequency: str  # 'unique' 或 'common'
     horizontal_type: Optional[str] = None
     # 注册地址：独特地标补在其“风格注册地址”之下的剩余级数（纯文本，
-    # 无世界观时需自带世界观）。空表示未注册（到处可用 / 不参与地址规则）。
+    # 无世界观时需自带世界观）。空：独特地标继承风格地址，均值地标不参与。
     address: str = ""
+    # 地址参与方式："" = 自动（独特地标继承风格、均值地标仅显式地址参与）、
+    # "inherit" = 继承风格、 "portable" = 不参与地址规则、
+    # "exact"/"relative" = 使用 address 字段。
+    address_mode: str = ""
 
     def __post_init__(self):
         if self.dimension == "horizontal" and self.horizontal_type is None:

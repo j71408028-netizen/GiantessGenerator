@@ -26,7 +26,7 @@ from ui.ctk.theme import (
 from ui.ctk import fonts as ui_fonts
 from core.models import CharacterSnapshot
 from services.exploration.context import ExplorationContext
-from core.address_model import world_of, distance_m, format_addr_verbose
+from core.address_model import world_of, distance_interval_m, format_addr_verbose
 
 
 class ExplorationPanel(ctk.CTkFrame):
@@ -724,6 +724,8 @@ class _StuckRelocateDialog(BaseDialog):
                               "需要接入当前世界观或前往其它地标。",
             "no_reachable": "角色当前位置（10×身高可达范围）内没有可对比的已注册地标地址。",
             "all_damaged": "角色所在范围（50×身高×个性强度）内的独特建筑耐久均已低于 0.5。",
+            "invalid_position": "角色保存的位置地址无法解析。请清除位置或选择一个有效地标地址。",
+            "invalid_address": "当前地标地址都无法与风格注册地址组合（世界观不同、分支分叉或层级过深）。",
         }.get(reason, "角色目前没有可去的地标地址。")
         ctk.CTkLabel(self, text=f"📡 {reason_text}", font=ui_fonts.ui_font(12),
                      text_color=EXP_TEXT_SOFT, justify='left', wraplength=520).pack(
@@ -779,11 +781,18 @@ class _StuckRelocateDialog(BaseDialog):
         verbose = format_addr_verbose(addr)
         base = f"{name}　{verbose}"
         if self.state.position:
-            d = distance_m(self.state.position, addr)
-            if d is None:
+            interval = distance_interval_m(self.state.position, addr)
+            if interval is None:
                 return f"{base}　（跨世界观，请用「切换世界观」）"
-            cost = self._move_cost(d)
-            dist_text = f"{d / 1000:.1f} 千米" if d >= 10000 else f"{d:.0f} 米"
+            nearest, farthest = interval
+            cost = self._move_cost(farthest)
+            if nearest == farthest:
+                dist_text = (f"{nearest / 1000:.1f} 千米" if nearest >= 10000
+                             else f"{nearest:.0f} 米")
+            else:
+                hi = (f"{farthest / 1000:.1f} 千米" if farthest >= 10000
+                      else f"{farthest:.0f} 米")
+                dist_text = f"0–{hi}（定位精度）"
             return f"{base}　距离 {dist_text}　-{cost} AP"
         return f"{base}　（锚定位置，0 AP）"
 
@@ -797,11 +806,12 @@ class _StuckRelocateDialog(BaseDialog):
         it = self._entries.get(self.combo.get())
         if it is None:
             return
-        d = distance_m(self.state.position, it["address"]) if self.state.position else None
-        if d is None:
+        interval = (distance_interval_m(self.state.position, it["address"])
+                    if self.state.position else None)
+        if interval is None:
             ui.ctk.dialogs.showerror("无法直接前往", "该地址与角色位置不在同一世界观，请使用「切换世界观」。")
             return
-        cost = self._move_cost(d)
+        cost = self._move_cost(interval[1])
         if not self.state_service.consume_action_points(self.state, cost):
             ui.ctk.dialogs.showerror(
                 "行动点数不足",

@@ -17,11 +17,23 @@
 
 距离规则
 --------
-- 两地址相同、或一个完全包含另一个 → 距离 0。
+- 两地址相同 → 距离 0。
+- 一方包含另一方 → 距离是区间：若被查询的一方（第一个参数）更粗，
+  距离在 ``0`` 到该方最小单元边长之间；若目标更粗，距离为 ``0``。
+  ``distance_m`` 返回区间下界（兼容旧调用），``distance_interval_m``
+  返回完整区间，供需要“定位精度”判断的调用方使用。
 - 其余情况（同一世界观）：以"共同前缀之后编号首次不同"的那一级作为分歧级，
   距离 = 双方在该级边长的**平均值**（允许不同分支申领不同规模；同一分支内
   的规模一致性由注册表的地址树保证）。
 - 世界观不同 → 距离未知（不可达）。
+
+相对地址
+--------
+地标可以只写风格注册地址之下的剩余级（如风格注册到 ``RW-CN1``，地标写
+``East-3``）。``parse_full`` 只接受完整地址；``parse_address(text, base)``
+在给出 ``base`` 时把无 ``@``、含 ``-`` 的文本解析为相对后缀。组合时
+``compose_address_ex`` 会拒绝跨世界观、分支分叉、层级超过三级和私有名冲突，
+不再“尽量拼接”。
 
 配对规则
 --------
@@ -60,6 +72,7 @@ class Addr:
     scale_raw: str                  # 原始规模字符串，如 "1e5_5e3_1e2"
     chunk: str                      # 约束段私有名，"" 或 "*" 表示不指定；其他为具体名
     has_mark: bool                  # 是否带有 @...! 段（带则要求规模组/私有名匹配）
+    relative: bool = False          # 是否由相对后缀 + base 组合而来（仅 parse_address 会置位）
 
     @property
     def depth(self) -> int:
@@ -169,6 +182,67 @@ def parse_full(text: str) -> Optional[Addr]:
                     has_mark=has_mark)
 
 
+def _parse_relative_ex(text: str, base: Addr):
+    """把 ``East-3`` 这类剩余级解析为 base 之下的相对地址。"""
+    s = (text or "").strip()
+    parts = [p.strip() for p in s.split("-") if p.strip()]
+    if not parts:
+        return None, "相对地址为空"
+    if len(parts) > 3:
+        return None, "地址层级超过三级"
+    for seg in parts:
+        if not _REGION_RE.match(seg):
+            return None, f"地域段 '{seg}' 应为字母/数字/下划线"
+    base_regions = [p for p in base.regions if p]
+    combined = base_regions + parts
+    if len(combined) > 3:
+        return None, "地址层级超过三级"
+    if not base.scale_raw:
+        return None, "相对地址需要风格注册地址提供绝对规模"
+    regions = (combined + ["", "", ""])[:3]
+    return Addr(world=base.world,
+                regions=(regions[0], regions[1], regions[2]),
+                scale=base.scale,
+                scale_raw=base.scale_raw,
+                chunk=base.chunk,
+                has_mark=base.has_mark,
+                relative=True), ""
+
+
+def parse_address_ex(text: str, base=None):
+    """解析地址，支持相对写法。返回 ``(Addr, 错误文本)``。
+
+    - 有 ``@``：按完整地址解析；
+    - 无 ``@``、无 ``-``：有 ``base`` 时按剩余一级解析，否则按纯世界观解析；
+    - 无 ``@``、有 ``-``：需要 ``base``（风格注册地址），按剩余级解析。
+    """
+    s = (text or "").strip()
+    if not s:
+        return None, ""
+    if "@" in s:
+        addr = parse_full(s)
+        return addr, "" if addr is not None else "地址格式不正确"
+    if "-" not in s and base is None:
+        addr = parse_full(s)
+        return addr, "" if addr is not None else "世界观格式不正确"
+
+    if base is None:
+        return None, "相对地址需要风格注册地址作为基准"
+    base_addr = parse_full(base) if isinstance(base, str) else base
+    if not isinstance(base_addr, Addr) or not base_addr.world:
+        return None, "风格注册地址无法解析，不能使用相对地址"
+    parts = [p.strip() for p in s.split("-") if p.strip()]
+    # 以 base 的世界观开头却缺少规模，通常是“完整地址漏了 @”，不要误当成相对后缀
+    if len(parts) > 1 and parts[0] == base_addr.world:
+        return None, "包含地域段时必须提供绝对规模（...@...）"
+    return _parse_relative_ex(s, base_addr)
+
+
+def parse_address(text: str, base=None) -> Optional[Addr]:
+    """解析地址（支持相对写法）；非法/空返回 None。"""
+    return parse_address_ex(text, base)[0]
+
+
 def split_address(text: str) -> List[str]:
     """返回地址的地域 id 段列表（不含前缀）。"""
     addr = parse_full(text)
@@ -262,6 +336,30 @@ def touches(a_text: str, b_text: str) -> bool:
     return True
 
 
+def covers(a_text: str, b_text: str) -> bool:
+    """a 的作用域是否覆盖 b（a 是 b 的同一地址或祖先）。
+
+    与 ``touches`` 的对称包含不同：描述风格必须覆盖事件地址，而不是反过来。
+    """
+    a = parse_full(a_text)
+    b = parse_full(b_text)
+    if a is None or b is None:
+        return False
+    if not a.world or a.world != b.world:
+        return False
+    if not (_chunk_requirement_ok(a, b) and _chunk_requirement_ok(b, a)):
+        return False
+    for level in range(3):
+        sa, sb = a.regions[level], b.regions[level]
+        if sa and not sb:
+            return False          # a 更细，覆盖不了更粗的 b
+        if not sa and sb:
+            return True           # a 更粗，无更深约束，覆盖 b
+        if sa and sb and sa != sb:
+            return False
+    return True
+
+
 def can_pair(a_text: str, b_text: str) -> bool:
     """两个地址能否配对：地域序列同址 / 互相包含，且私有名约束互相满足。"""
     if not touches(a_text, b_text):
@@ -269,11 +367,13 @@ def can_pair(a_text: str, b_text: str) -> bool:
     return chunk_compatible(a_text, b_text)
 
 
-def distance_m(a_text: str, b_text: str) -> Optional[float]:
-    """返回两地址的距离（米）；若不可达返回 None。
+def distance_interval_m(a_text: str, b_text: str):
+    """返回 ``(最短, 最长)`` 距离（米）；不可达返回 None。
 
-    地域序列同址 / 包含 → 0；首个分歧级的距离 = 双方该级边长的平均值
-    （允许不同分支申领不同规模）。
+    第一个参数是查询方（通常是角色位置），第二个是目标：
+    - 目标包含查询方 → ``(0, 0)``，目标区域内的距离按 0 计；
+    - 查询方包含目标 → ``(0, 查询方最小单元边长)``，因为位置只精确到该单元；
+    - 分歧 → 双方在该级边长的平均值（单点估计）。
     """
     a = parse_full(a_text)
     b = parse_full(b_text)
@@ -289,11 +389,47 @@ def distance_m(a_text: str, b_text: str) -> Optional[float]:
                 continue
             wa = a.scale[level] if a.scale else 0.0
             wb = b.scale[level] if b.scale else 0.0
-            return (wa + wb) / 2.0
-        if not sa and not sb:
-            continue
-        return 0.0   # 包含
-    return 0.0
+            d = (wa + wb) / 2.0
+            return (d, d)
+        if sa and not sb:
+            return (0.0, 0.0)      # 目标更粗，包含查询方
+        if not sa and sb:
+            width = cell_width_m(a_text)
+            if width <= 0 and b.scale:
+                width = b.scale[level]      # 纯世界观位置：用目标在该级的边长兜底
+            return (0.0, max(0.0, width))
+    return (0.0, 0.0)
+
+
+def distance_m(a_text: str, b_text: str) -> Optional[float]:
+    """返回距离区间下界（米）；不可达返回 None。
+
+    旧调用方沿用这个值；需要定位精度时用 ``distance_interval_m``。
+    """
+    interval = distance_interval_m(a_text, b_text)
+    return None if interval is None else interval[0]
+
+
+def distance_max_m(a_text: str, b_text: str) -> Optional[float]:
+    """返回距离区间上界（米）；不可达返回 None。"""
+    interval = distance_interval_m(a_text, b_text)
+    return None if interval is None else interval[1]
+
+
+def distance_uncertain(a_text: str, b_text: str) -> bool:
+    """两个地址的距离是否因定位精度而存在区间。"""
+    interval = distance_interval_m(a_text, b_text)
+    return bool(interval is not None and interval[0] < interval[1])
+
+
+def canonical_key(text: str, base=None):
+    """地址的规范化键（规模按数值归一）；非法/空返回 None。"""
+    addr = parse_address(text, base)
+    if addr is None:
+        return None
+    scale = tuple(float(x) for x in (addr.scale or (0.0, 0.0, 0.0)))
+    chunk = addr.chunk if addr.has_mark and addr.chunk not in ("", "*") else ""
+    return (addr.world, addr.regions, scale, chunk)
 
 
 def reachable(position_text: str, landmark_full_text: str, height: float) -> bool:
@@ -328,47 +464,71 @@ def _join_addr_text(addr: Addr) -> str:
     return f"{prefix}{ids}" if prefix else ids
 
 
-def resolve_full_address(style_reg: str, landmark_addr: str) -> str:
+def compose_address_ex(style_reg: str, landmark_addr: str):
     """组合风格注册地址与地标地址为完整地标地址。
 
-    风格必须有世界观；规模取"更细一方胜出"（地标带绝对规模时覆写风格的）；
-    约束（私有名）取先声明的一方（风格在前）。
+    返回 ``(地址文本, 错误文本)``。空错误表示成功。组合规则：
+
+    - 地标为空 → 继承风格注册地址；
+    - 地标可写相对后缀（如 ``East-3``），也可写完整地址；
+    - 世界观不同、地域分支分叉、层级超过三级、私有名冲突 → 报错，不拼接；
+    - 规模取更细一方；私有名取先声明的一方（风格在前）。
     """
     style_reg = (style_reg or "").strip()
     landmark_addr = (landmark_addr or "").strip()
     if not style_reg and not landmark_addr:
-        return ""
+        return "", ""
 
     s = parse_full(style_reg)
-    l = parse_full(landmark_addr)
-
-    # 风格不存在或风格无世界观：直接返回地标地址（必须有效）
     if s is None or not s.world:
-        return _join_addr_text(l) if l is not None else ""
+        if style_reg:
+            return "", "风格注册地址无法解析"
+        if not landmark_addr:
+            return "", ""
+        l = parse_full(landmark_addr)
+        if l is None:
+            return "", "地标地址无法解析"
+        return _join_addr_text(l), ""
 
-    # 风格有效，地标无效：只返回风格（无地域扩展）
-    if l is None or not l.world:
-        return _join_addr_text(s)
+    if not landmark_addr:
+        return _join_addr_text(s), ""
 
-    # 两者都有世界观：用风格的地域前缀 + 地标多余的地域后缀
+    l = parse_address(landmark_addr, base=s)
+    if l is None:
+        _, err = parse_address_ex(landmark_addr, base=s)
+        return "", err or "地标地址无法解析"
+    if l.world != s.world:
+        return "", "地标地址与风格注册地址不在同一世界观"
+
     s_parts = [p for p in (s.world,) + s.regions if p]
     l_parts = [p for p in (l.world,) + l.regions if p]
 
-    # 如果地标前缀与风格前缀相同，去重
     common = 0
-    if l_parts[0] == s_parts[0]:
-        n = min(len(s_parts), len(l_parts))
-        while common < n and s_parts[common] == l_parts[common]:
-            common += 1
-    extra = l_parts[common:]
-    combined = s_parts + extra
+    n = min(len(s_parts), len(l_parts))
+    while common < n and s_parts[common] == l_parts[common]:
+        common += 1
+    if common < n:
+        return "", "地标地址不在风格注册地址之内"
+
+    combined = s_parts + l_parts[common:]
+    if len(combined) > MAX_PARTS:
+        return "", "地址层级超过三级"
+
+    s_chunk = s.chunk if s.has_mark and s.chunk not in ("", "*") else ""
+    l_chunk = l.chunk if l.has_mark and l.chunk not in ("", "*") else ""
+    if s_chunk and l_chunk and s_chunk != l_chunk:
+        return "", "私有名冲突"
 
     # 规模：更细的一方（通常为地标）有绝对规模则覆写风格的
-    if l.scale_raw:
+    if l.scale_raw and len(l_parts) > len(s_parts):
+        merged_scale, merged_scale_raw = l.scale, l.scale_raw
+    elif s.scale_raw:
+        merged_scale, merged_scale_raw = s.scale, s.scale_raw
+    elif l.scale_raw:
         merged_scale, merged_scale_raw = l.scale, l.scale_raw
     else:
-        merged_scale, merged_scale_raw = s.scale, s.scale_raw
-    # 约束：按读取顺序取第一次声明的值（风格在前，子地址覆写无效）
+        merged_scale, merged_scale_raw = (0.0, 0.0, 0.0), ""
+
     if s.has_mark:
         merged_chunk, merged_mark = s.chunk, True
     elif l.has_mark:
@@ -386,7 +546,17 @@ def resolve_full_address(style_reg: str, landmark_addr: str) -> str:
         chunk=merged_chunk,
         has_mark=merged_mark
     )
-    return _join_addr_text(merged)
+    return _join_addr_text(merged), ""
+
+
+def resolve_full_address_ex(style_reg: str, landmark_addr: str):
+    """``compose_address_ex`` 的显式别名。"""
+    return compose_address_ex(style_reg, landmark_addr)
+
+
+def resolve_full_address(style_reg: str, landmark_addr: str) -> str:
+    """组合地址；失败返回空串（错误详情用 ``resolve_full_address_ex``）。"""
+    return compose_address_ex(style_reg, landmark_addr)[0]
 
 
 def jitter_address_cell(full_addr_text: str, reach: float, rng=None) -> str:

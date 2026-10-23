@@ -33,6 +33,7 @@ from persistence.preset_repo import PresetRepo
 from persistence.personality_repo import PersonalityRepo
 from persistence.character_repo import CharacterRepo
 from persistence.settings_repo import SettingsRepo
+from core.address_model import parse_full
 from core.models import CharacterSnapshot, ReportData
 from services.exploration.address_plan import AddressPlanner
 from services.exploration.catalog import ExplorationCatalog
@@ -352,7 +353,10 @@ class ExplorationContext:
                                                        dict(state.landmark_addresses or {}))
             new_position = report_data.get("position") or ""
             if new_position and new_position != (state.position or ""):
-                state.position = new_position
+                if parse_full(new_position) is not None:
+                    state.position = new_position
+                else:
+                    print(f"⚠️ 位置地址无法解析，保留原位置：{new_position}")
             self.character_repo.save(state)
 
         return ReportData(

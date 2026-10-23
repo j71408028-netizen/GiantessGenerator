@@ -144,7 +144,7 @@ class ReportEngine:
                 suffix = "高" if lm.dimension == "vertical" else (
                     "长" if lm.horizontal_type == "length" else "宽")
                 size_str = format_size(comp['size'], base_size=height)
-                lm_addr = self.addresses.landmark_full_address(lm, landmark_registers)
+                lm_addr = self.addresses.landmark_address(lm, landmark_registers)
                 lm_key = f"{lm.name}@{lm_addr}" if lm_addr else lm.name
                 if lm_addr:
                     landmark_addresses[lm_key] = lm_addr
@@ -165,11 +165,9 @@ class ReportEngine:
             actual_step = 0
 
             if has_quips:
-                # 地址规则：地标对比后只接“地址为空或距离为0”的描述风格
-                lm_addr = ""
-                if comp["landmark"].frequency == "unique":
-                    lm_addr = self.addresses.landmark_full_address(
-                        comp["landmark"], landmark_registers)
+                # 地址规则：描述风格必须覆盖该地标地址（portable 地标不限制）
+                lm_addr = self.addresses.landmark_address(
+                    comp["landmark"], landmark_registers)
                 allowed_styles = self.addresses.quip_allowed_styles(lm_addr, quip_registers)
                 if allowed_styles != _quip_pruned_styles:
                     self.addresses.prune_quips_by_styles(quips_working, allowed_styles)

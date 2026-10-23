@@ -609,7 +609,7 @@ Solea / Bulla 耦合等级的对话分支会给每句台词标 `@说话人@`（�
 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---|---|
 | `entry_address` | str | `""` | 方案地址（完整地址文本，格式见 `core/address_model.py`）；留空 = 不限制地址 |
-| `entry_address_max_distance_m` | float | `None` | 角色地址与方案地址的最大距离（米）；留空 = 不限，`0` = 必须同址 |
+| `entry_address_max_distance_m` | float | `None` | 角色地址与方案地址的最大距离（米）；留空 = 不限，`0` = 必须同址。角色位置只精确到某级时按距离区间上界保守判定 |
 | `entry_height_min_m` | float | `None` | 允许的最小身高（米）；留空 = 不限 |
 | `entry_height_max_m` | float | `None` | 允许的最大身高（米）；留空 = 不限 |
 

@@ -90,6 +90,24 @@ check("只配地址不配距离 = 不限制",
           {admission.FIELD_ADDRESS: _ADDR_1},
           position=_FAR_WORLD) == "")
 
+_COARSE = "1e4_1e3_1e2@TEST-A"
+_FINE = "1e4_1e3_1e2@TEST-A-B"
+check("位置比方案粗时用距离上界保守拒绝",
+      "精度" in admission.check_entry_requirements(
+          {admission.FIELD_ADDRESS: _FINE,
+           admission.FIELD_MAX_DISTANCE: 50},
+          position=_COARSE))
+check("位置粗但上界仍在上限内时允许",
+      admission.check_entry_requirements(
+          {admission.FIELD_ADDRESS: _FINE,
+           admission.FIELD_MAX_DISTANCE: 20000},
+          position=_COARSE) == "")
+check("位置比方案细时目标区域按 0 距离计",
+      admission.check_entry_requirements(
+          {admission.FIELD_ADDRESS: _COARSE,
+           admission.FIELD_MAX_DISTANCE: 0},
+          position=_FINE) == "")
+
 # ---------------- 3. 身高区间 ----------------
 _height_config = {
     admission.FIELD_HEIGHT_MIN: 50,
