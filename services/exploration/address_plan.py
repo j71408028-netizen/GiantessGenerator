@@ -11,9 +11,8 @@
 import random
 
 from core.address_model import (
-    compose_address_ex, covers, world_of, depth_of, distance_interval_m,
-    distance_m, touches, cell_width_m, parse_full, jitter_address_cell,
-    resolve_full_address,
+    REL_INSIDE, compose_address_ex, covers, world_of, depth_of, relate,
+    cell_width_m, parse_full, jitter_address_cell, resolve_full_address,
 )
 
 
@@ -143,8 +142,9 @@ class AddressPlanner:
         """地址规则规划：返回 dict(engaged, stuck, position, comparisons, invalid)。
 
         首地标锚定（无位置时不受距离限制），随后只取与角色位置距离
-        < 10×身高 的地标地址。全部地标都够不着 / 范围内独特地标耐久
-        均 <0.5 时给出 stuck 原因，由调用方决定切换地址 / 世界观或放弃。
+        < 10×身高 且私有名约束互相满足 的地标地址。全部地标都够不着 /
+        范围内独特地标耐久均 <0.5 时给出 stuck 原因，由调用方决定切换
+        地址 / 世界观或放弃。
         未注册地址的内容（含旧数据）保持原行为；地址存在但无法组合时不再
         退化为“无地址”，而是排除并记入 ``invalid``。
         """
@@ -259,9 +259,11 @@ class AddressPlanner:
             if len(chosen) >= limit:
                 break
             addr = cand_addr(cand)
-            if addr and pos_now:
-                interval = distance_interval_m(pos_now, addr)
-                if interval is None or interval[0] >= reach:
+            rel = relate(pos_now, addr) if addr and pos_now else None
+            if rel is not None:
+                interval = rel.interval
+                # 私有名约束互相满足才能配对（与文档口径一致）
+                if not rel.chunk_ok or interval is None or interval[0] >= reach:
                     continue
                 # 位置比目标粗时，真实距离可能超出 reach；保留可选性但标记不确定。
                 if interval[1] > interval[0] and interval[1] >= reach:
@@ -275,7 +277,7 @@ class AddressPlanner:
             if engaged and addr and pos_now:
                 if depth_of(addr) >= depth_of(pos_now):
                     pos_now = addr
-                elif touches(pos_now, addr) and \
+                elif rel.kind == REL_INSIDE and \
                         random.random() < min(1.0, reach / max(1.0, cell_width_m(pos_now))):
                     pos_now = self._shift_position_cell(pos_now, reach)
 
@@ -294,8 +296,11 @@ class AddressPlanner:
                 addr = cand_addr(cand)
                 if not addr:
                     continue
-                d = distance_m(pos_now, addr)
-                if d is not None and d < scan_radius:
+                rel = relate(pos_now, addr)
+                # 私有名冲突的地标不可配对，不算“附近可用”
+                if not rel.chunk_ok or rel.interval is None:
+                    continue
+                if rel.interval[0] < scan_radius:
                     near.append(cand)
             if near and all(durability.get(cand_key(c), 1.0) < 0.5
                             for c in near):

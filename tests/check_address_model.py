@@ -29,9 +29,11 @@ def check(name, ok, extra=""):
 
 
 from core.address_model import (  # noqa: E402
-    canonical_key, compose_address_ex, covers, distance_interval_m,
-    distance_m, distance_uncertain, parse_address, parse_address_ex,
-    parse_full, resolve_full_address, resolve_full_address_ex,
+    REL_CONTAINS, REL_DIVERGENT, REL_INSIDE, REL_INVALID, REL_SAME,
+    REL_WORLD_MISMATCH, canonical_key, compose_address_ex, covers,
+    distance_interval_m, distance_m, distance_uncertain, parse_address,
+    parse_address_ex, parse_full, relate, resolve_full_address,
+    resolve_full_address_ex,
 )
 
 # ---------------- 1. 解析 ----------------
@@ -151,6 +153,32 @@ check("相对地址规范键等价于完整地址",
       canonical_key("A-B", "1e4_1e3_1e2@RW")
       == canonical_key("1e4_1e3_1e2@RW-A-B"))
 check("非法地址规范键为空", canonical_key("坏地址") is None)
+
+# ---------------- 5. 关系代数（配对/距离的统一入口） ----------------
+_rel = relate("1e4_1e3_1e2@RW-A", "1e4_1e3_1e2@RW-A-B-1")
+check("relate 查询方更粗为 contains 且带区间上界",
+      _rel.kind == REL_CONTAINS and _rel.interval == (0.0, 1e4)
+      and _rel.lcp_depth == 2 and _rel.chunk_ok)
+_rel_in = relate("1e4_1e3_1e2@RW-A-B", "1e4_1e3_1e2@RW-A")
+check("relate 查询方更细为 inside 且目标区域按 0 计",
+      _rel_in.kind == REL_INSIDE and _rel_in.interval == (0.0, 0.0))
+check("relate 同址为 same",
+      relate("1e4_1e3_1e2@RW-A-B", "1e4_1e3_1e2@RW-A-B").kind == REL_SAME)
+_rel_div = relate("1e4_1e3_1e2@RW-A-B-1", "1e4_1e3_1e2@RW-A-B-2")
+check("relate 分歧级给出层级与平均边长",
+      _rel_div.kind == REL_DIVERGENT and _rel_div.diverge_level == 2
+      and _rel_div.interval == (100.0, 100.0) and _rel_div.lcp_depth == 3)
+check("relate 私有名冲突 chunk_ok 为 False",
+      not relate("1e4_1e3_1e2@A!RW-A", "1e4_1e3_1e2@B!RW-A").chunk_ok)
+check("relate 带私有名对未声明方不兼容",
+      not relate("1e4_1e3_1e2@A!RW-A", "1e4_1e3_1e2@RW-A").chunk_ok)
+check("relate 相同私有名兼容",
+      relate("1e4_1e3_1e2@A!RW-A", "1e4_1e3_1e2@A!RW-A-B").chunk_ok)
+check("relate 跨世界观 world_mismatch 且不可达",
+      relate("1e4_1e3_1e2@RW-A", "1e4_1e3_1e2@TH-A").kind == REL_WORLD_MISMATCH
+      and relate("1e4_1e3_1e2@RW-A", "1e4_1e3_1e2@TH-A").interval is None)
+check("relate 坏地址 invalid",
+      relate("坏地址", "RW").kind == REL_INVALID)
 
 # ---------------- 结论 ----------------
 _log.flush()

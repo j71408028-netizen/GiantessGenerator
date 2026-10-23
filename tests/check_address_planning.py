@@ -200,6 +200,40 @@ check("stuck_options 过滤当前世界并保留其它世界",
       _options["worlds"] == ["V"]
       and {x["name"] for x in _options["addresses"]} == {"U1", "U2"})
 
+# ---------------- 8. 私有名约束参与可达与损毁判定 ----------------
+_chunked = Landmark("Chunked", 100, "vertical", "unique", address="B-1")
+_chunked._style = "S"
+_catalog = FakeCatalog([_chunked], {"S": "1e5_1e3_1e2@A!W-A"}, styles=["S"])
+_planner = AddressPlanner(_catalog)
+_plan = _planner.plan_address_comparisons(
+    [_cand(_chunked)], "1e5_1e3_1e2@B!W-A", height=1.0,
+    skip_base_prob=0.0, durability={})
+check("私有名冲突的地标视为不可达",
+      _plan["engaged"] and not _plan["comparisons"]
+      and _plan["stuck"]["reason"] == "no_reachable")
+_plan = _planner.plan_address_comparisons(
+    [_cand(_chunked)], "1e5_1e3_1e2@A!W-A", height=1.0,
+    skip_base_prob=0.0, durability={})
+check("私有名一致时正常可达", bool(_plan["comparisons"]))
+
+# 附近存在私有名冲突的地标时不算“可用”，不应阻断 all_damaged 判定
+_damaged = Landmark("NearDmg", 100, "vertical", "unique", address="B-2")
+_damaged._style = "S"
+_shuttle = Landmark("Shuttle", 100, "vertical", "common", address="B-2")
+_shuttle._style = "S"
+_other_chunk = Landmark("OtherChunk", 100, "vertical", "unique", address="B-2")
+_other_chunk._style = "T"
+_catalog = FakeCatalog([_damaged, _shuttle, _other_chunk],
+                       {"S": "1e4_1e3_6e1@A!W-A", "T": "1e4_1e3_6e1@B!W-A"},
+                       styles=["S", "T"])
+_planner = AddressPlanner(_catalog)
+_plan = _planner.plan_address_comparisons(
+    [_cand(_damaged), _cand(_shuttle), _cand(_other_chunk)],
+    "1e4_1e3_6e1@A!W-A-B-1", height=10.0, skip_base_prob=0.1,
+    durability={"NearDmg@1e4_1e3_6e1@A!W-A-B-2": 0.3})
+check("私有名冲突的地标不阻断 all_damaged",
+      _plan["comparisons"] and _plan["stuck"]["reason"] == "all_damaged")
+
 # ---------------- 结论 ----------------
 _log.flush()
 sys.stdout = sys.__stdout__

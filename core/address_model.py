@@ -37,6 +37,9 @@
 
 配对规则
 --------
+- 判定统一经 ``relate`` 一次算清（``AddressRelation``：空间关系 / 距离区间 /
+  私有名约束）；``touches`` / ``covers`` / ``can_pair`` / ``distance_interval_m``
+  等为兼容保留的薄封装，消费端不要再各自拼装规则。
 - 地域序列同址 / 互相包含即可配对（不再要求规模三元组相等）；
 - 私有名约束仍然有效：一方声明了私有名时，另一方必须声明相同私有名。
 - 私有名取"最先声明的值"：地址树中子地址的私有名覆写无效（想在其他私有名
@@ -302,13 +305,88 @@ def _chunk_requirement_ok(this: Addr, other: Addr) -> bool:
     return True
 
 
-def chunk_compatible(a_text: str, b_text: str) -> bool:
-    """检查双方声明的私有名约束是否互相满足。"""
+# ==================== 关系代数：配对 / 距离的单一事实来源 ====================
+
+#: 任一地址无法解析
+REL_INVALID = "invalid"
+#: 不在同一世界观，距离不可达
+REL_WORLD_MISMATCH = "world_mismatch"
+#: 地域序列完全一致
+REL_SAME = "same"
+#: 查询方更粗：查询方的作用域包含目标
+REL_CONTAINS = "contains"
+#: 查询方更细：查询方落在目标的作用域内
+REL_INSIDE = "inside"
+#: 同世界观，但在某一级地域分叉
+REL_DIVERGENT = "divergent"
+
+
+@dataclass
+class AddressRelation:
+    """``relate`` 的判定结果：空间关系、距离区间与私有名约束一次算清。
+
+    消费端（地址规划、描述配对、副本准入）从这里取关系结果，不再各自
+    组合 ``touches`` / ``covers`` / ``distance_*`` 原语。
+    """
+
+    kind: str                                # REL_* 之一
+    diverge_level: int                       # 首个分歧级（0=一级…2=三级）；无分歧为 -1
+    interval: Optional[Tuple[float, float]]  # 距离区间（米）；不可达为 None
+    chunk_ok: bool                           # 私有名约束是否互相满足
+    lcp_depth: int                           # 最长公共前缀深度（世界观计 1；跨世界观为 0）
+
+    def same_branch(self) -> bool:
+        """地域序列是否同址或互相包含（不含私有名约束）。"""
+        return self.kind in (REL_SAME, REL_INSIDE, REL_CONTAINS)
+
+    def pairable(self) -> bool:
+        """能否配对：同址 / 互相包含，且私有名约束互相满足。"""
+        return self.same_branch() and self.chunk_ok
+
+
+def relate(a_text: str, b_text: str) -> AddressRelation:
+    """一次算清两个地址的关系。
+
+    ``a_text`` 是查询方（通常是角色位置），``b_text`` 是目标（地标 / 方案
+    地址）。距离口径：
+
+    - 目标包含查询方（INSIDE）→ ``(0, 0)``，目标区域内的距离按 0 计；
+    - 查询方包含目标（CONTAINS）→ ``(0, 查询方最小单元边长)``，
+      因为位置只精确到该单元；纯世界观位置用目标在该级的边长兜底；
+    - 分歧（DIVERGENT）→ 双方在分歧级边长的平均值（单点估计）。
+    """
     a = parse_full(a_text)
     b = parse_full(b_text)
     if a is None or b is None:
-        return False
-    return _chunk_requirement_ok(a, b) and _chunk_requirement_ok(b, a)
+        return AddressRelation(REL_INVALID, -1, None, False, 0)
+    chunk_ok = _chunk_requirement_ok(a, b) and _chunk_requirement_ok(b, a)
+    if not a.world or a.world != b.world:
+        return AddressRelation(REL_WORLD_MISMATCH, -1, None, chunk_ok, 0)
+    lcp = 1   # 世界观一致即公共前缀第 1 级
+    for level in range(3):
+        sa, sb = a.regions[level], b.regions[level]
+        if sa and sb:
+            if sa == sb:
+                lcp += 1
+                continue
+            wa = a.scale[level] if a.scale else 0.0
+            wb = b.scale[level] if b.scale else 0.0
+            d = (wa + wb) / 2.0
+            return AddressRelation(REL_DIVERGENT, level, (d, d), chunk_ok, lcp)
+        if sa and not sb:
+            return AddressRelation(REL_INSIDE, level, (0.0, 0.0), chunk_ok, lcp)
+        if not sa and sb:
+            width = cell_width_m(a_text)
+            if width <= 0 and b.scale:
+                width = b.scale[level]
+            return AddressRelation(REL_CONTAINS, level,
+                                   (0.0, max(0.0, width)), chunk_ok, lcp)
+    return AddressRelation(REL_SAME, -1, (0.0, 0.0), chunk_ok, lcp)
+
+
+def chunk_compatible(a_text: str, b_text: str) -> bool:
+    """检查双方声明的私有名约束是否互相满足。"""
+    return relate(a_text, b_text).chunk_ok
 
 
 def scale_compatible(a_text: str, b_text: str) -> bool:
@@ -318,22 +396,7 @@ def scale_compatible(a_text: str, b_text: str) -> bool:
 
 def touches(a_text: str, b_text: str) -> bool:
     """两个地址在地域 id 上是否同一或互相包含（不校验约束）。"""
-    a = parse_full(a_text)
-    b = parse_full(b_text)
-    if a is None or b is None:
-        return False
-    if not a.world or a.world != b.world:
-        return False
-    for level in range(3):
-        sa, sb = a.regions[level], b.regions[level]
-        if sa and sb:
-            if sa == sb:
-                continue
-            return False
-        if not sa and not sb:
-            continue
-        return True   # 一方更粗，包含
-    return True
+    return relate(a_text, b_text).same_branch()
 
 
 def covers(a_text: str, b_text: str) -> bool:
@@ -341,64 +404,21 @@ def covers(a_text: str, b_text: str) -> bool:
 
     与 ``touches`` 的对称包含不同：描述风格必须覆盖事件地址，而不是反过来。
     """
-    a = parse_full(a_text)
-    b = parse_full(b_text)
-    if a is None or b is None:
-        return False
-    if not a.world or a.world != b.world:
-        return False
-    if not (_chunk_requirement_ok(a, b) and _chunk_requirement_ok(b, a)):
-        return False
-    for level in range(3):
-        sa, sb = a.regions[level], b.regions[level]
-        if sa and not sb:
-            return False          # a 更细，覆盖不了更粗的 b
-        if not sa and sb:
-            return True           # a 更粗，无更深约束，覆盖 b
-        if sa and sb and sa != sb:
-            return False
-    return True
+    rel = relate(a_text, b_text)
+    return rel.chunk_ok and rel.kind in (REL_SAME, REL_CONTAINS)
 
 
 def can_pair(a_text: str, b_text: str) -> bool:
     """两个地址能否配对：地域序列同址 / 互相包含，且私有名约束互相满足。"""
-    if not touches(a_text, b_text):
-        return False
-    return chunk_compatible(a_text, b_text)
+    return relate(a_text, b_text).pairable()
 
 
 def distance_interval_m(a_text: str, b_text: str):
     """返回 ``(最短, 最长)`` 距离（米）；不可达返回 None。
 
-    第一个参数是查询方（通常是角色位置），第二个是目标：
-    - 目标包含查询方 → ``(0, 0)``，目标区域内的距离按 0 计；
-    - 查询方包含目标 → ``(0, 查询方最小单元边长)``，因为位置只精确到该单元；
-    - 分歧 → 双方在该级边长的平均值（单点估计）。
+    语义详见 ``relate``（本函数是其 ``interval`` 字段的薄封装）。
     """
-    a = parse_full(a_text)
-    b = parse_full(b_text)
-    if a is None or b is None:
-        return None
-    if not a.world or a.world != b.world:
-        return None
-
-    for level in range(3):
-        sa, sb = a.regions[level], b.regions[level]
-        if sa and sb:
-            if sa == sb:
-                continue
-            wa = a.scale[level] if a.scale else 0.0
-            wb = b.scale[level] if b.scale else 0.0
-            d = (wa + wb) / 2.0
-            return (d, d)
-        if sa and not sb:
-            return (0.0, 0.0)      # 目标更粗，包含查询方
-        if not sa and sb:
-            width = cell_width_m(a_text)
-            if width <= 0 and b.scale:
-                width = b.scale[level]      # 纯世界观位置：用目标在该级的边长兜底
-            return (0.0, max(0.0, width))
-    return (0.0, 0.0)
+    return relate(a_text, b_text).interval
 
 
 def distance_m(a_text: str, b_text: str) -> Optional[float]:
