@@ -147,6 +147,10 @@ class EvolutionRecord:
     destruction: float
     casualties: float
     source: str = ""   # 更改标签：产生本行的方法名（如 apply_negative_evolution）
+    # 到访地址（完整地址文本）：本行发生时角色所在位置，供空间档案学习区域
+    # 权重（services/character/spatial.py）。空 = 该行不作为到访证据（旧档
+    # 与非故事性行）；仅报告收尾与副本出口等有明确位置的行会填写。
+    position: str = ""
 
 
 @dataclass
@@ -274,11 +278,13 @@ class CharacterSnapshot:
     def record_change(self, step: float = 0.0, intrusion: Optional[float] = None,
                       destruction: Optional[float] = None,
                       casualties: Optional[float] = None,
-                      source: str = "") -> EvolutionRecord:
+                      source: str = "",
+                      position: str = "") -> EvolutionRecord:
         """更改介入度/破坏性/累计伤亡，并向演化表追加一条完整的新行。
 
         未给出的数值沿用当前值；step 为本次的故事步进权重，默认 0.0；
-        source 为更改标签，标注该条更改来源于哪一方法。
+        source 为更改标签，标注该条更改来源于哪一方法；
+        position 为本行到访地址（空 = 不作为到访证据）。
         """
         record = EvolutionRecord(
             changed_at=datetime.datetime.now().isoformat(),
@@ -287,6 +293,7 @@ class CharacterSnapshot:
             destruction=self.destruction if destruction is None else float(destruction),
             casualties=self.total_casualties if casualties is None else float(casualties),
             source=source,
+            position=position or "",
         )
         self.evolution.append(record)
         return record
