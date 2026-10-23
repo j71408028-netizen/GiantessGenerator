@@ -267,6 +267,11 @@ def world_of(text: str) -> str:
     return addr.world if addr else ""
 
 
+def valid_world_id(text: str) -> bool:
+    """世界观段（地址第一段）是否合法：字母/数字/下划线，1~48 位。"""
+    return bool(text) and bool(_WORLD_RE.match(text))
+
+
 def depth_of(text: str) -> int:
     addr = parse_full(text)
     return addr.depth if addr else 0

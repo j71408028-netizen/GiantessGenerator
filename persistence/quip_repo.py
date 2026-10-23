@@ -3,11 +3,13 @@ import os
 from typing import Dict, List
 
 from .json_store import load_json_with_backup, write_json_atomic
-from .style_addr import (ADDR_SUFFIX, addr_path as _addr_path,
+from .style_addr import (addr_path as _addr_path,
                          delete_address as _delete_addr,
                          load_address as _load_addr,
                          rename_address as _rename_addr,
                          save_address as _save_addr)
+from .style_universe import merged_styles as _merged_styles
+from .style_universe import style_read_dir as _style_read_dir
 
 DEFAULT_QUIP_STYLE = "Events"
 
@@ -19,14 +21,12 @@ class QuipRepo:
         self._free_dir = os.path.join(data_dir, "packs", "quips")
         os.makedirs(self._free_dir, exist_ok=True)
 
-    def _read_dir(self) -> str:
-        if self._world_state is not None and self._world_state.owns("quips"):
-            return self._world_state.pack_path("quips")
-        return self._free_dir
+    def _owns_pack(self) -> bool:
+        return self._world_state is not None and self._world_state.owns("quips")
 
     @property
     def default_style(self) -> str:
-        if self._world_state is not None and self._world_state.owns("quips"):
+        if self._owns_pack():
             styles = self._world_state.manifest.resources.get("quips") or []
             if styles:
                 return styles[0]
@@ -43,16 +43,12 @@ class QuipRepo:
         return matrix[destruction - 1][intrusion - 1]
 
     def get_styles(self) -> list:
-        styles = []
-        read_dir = self._read_dir()
-        if os.path.exists(read_dir):
-            for f in os.listdir(read_dir):
-                if f.endswith(".json") and not f.endswith(ADDR_SUFFIX):
-                    styles.append(f[:-5])
-        if not styles and read_dir == self._free_dir:
+        # 世界包声明 worlds 时合并自由目录素材（见 style_universe 模块说明）
+        styles = _merged_styles(self._world_state, "quips", self._free_dir)
+        if not styles and not self._owns_pack():
             self._create_defaults()
             styles = [DEFAULT_QUIP_STYLE]
-        return sorted(styles)
+        return styles
 
     def load(self, style_name: str = None) -> dict:
         if style_name is None:
@@ -161,8 +157,10 @@ class QuipRepo:
         return _addr_path(self._free_dir, style_name)
 
     def load_style_address(self, style_name: str) -> str:
-        """读取描述风格注册地址文本（世界观 + 风格注册的若干级）。空 = 未注册。"""
-        return _load_addr(self._read_dir(), style_name)
+        """描述风格注册地址文本（世界观 + 风格注册的若干级）。空 = 未注册。"""
+        read_dir = _style_read_dir(self._world_state, "quips",
+                                   self._free_dir, style_name)
+        return _load_addr(read_dir, style_name)
 
     def save_style_address(self, style_name: str, address_text: str):
         _save_addr(self._free_dir, style_name, address_text)
@@ -186,7 +184,9 @@ class QuipRepo:
         write_json_atomic(filepath, data)
 
     def _filepath(self, style_name: str) -> str:
-        return os.path.join(self._read_dir(), f"{style_name}.json")
+        read_dir = _style_read_dir(self._world_state, "quips",
+                                   self._free_dir, style_name)
+        return os.path.join(read_dir, f"{style_name}.json")
 
     def _free_filepath(self, style_name: str) -> str:
         return os.path.join(self._free_dir, f"{style_name}.json")

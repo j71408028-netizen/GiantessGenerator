@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
 from dungeon.terms import LEGACY_SCENARIO_RESOURCE_KEY, SCENARIO_RESOURCE_KEY
+from core.address_model import valid_world_id
 from .json_store import write_json_atomic
 
 WORLD_PACK_EXT = ".world.zip"
@@ -117,6 +118,10 @@ class WorldPackManifest:
     app_min_version: str = ""
     created_at: str = field(
         default_factory=lambda: datetime.datetime.now().isoformat(timespec="seconds"))
+    # 声明包素材所属的地址世界观命名空间（core.address_model 世界观段）。
+    # 空 = 未声明：包整类型接管资源（旧行为）；非空 = 包只接管这些世界观，
+    # 自由目录中其它世界观的同名类型素材保持可用（按世界观合并）。
+    worlds: List[str] = field(default_factory=list)
     settings: Dict[str, Any] = field(default_factory=dict)
     resources: Dict[str, Any] = field(default_factory=dict)
 
@@ -132,6 +137,7 @@ class WorldPackManifest:
             "description": self.description,
             "app_min_version": self.app_min_version,
             "created_at": self.created_at,
+            "worlds": list(self.worlds),
             "settings": dict(self.settings),
             "resources": dict(self.resources),
         }
@@ -154,6 +160,7 @@ class WorldPackManifest:
             description=data.get("description", ""),
             app_min_version=data.get("app_min_version", ""),
             created_at=data.get("created_at", ""),
+            worlds=data.get("worlds", []),
             settings=dict(data.get("settings") or {}),
             resources=resources,
         )
@@ -188,6 +195,19 @@ class WorldPackManifest:
             value = self.settings.get(key)
             if value is not None and (not isinstance(value, str) or not value.strip()):
                 errors.append(f"{key} 必须为非空字符串")
+        if not isinstance(self.worlds, list):
+            errors.append(f"worlds 必须为字符串列表（实际: {self.worlds!r}）")
+        else:
+            seen_worlds = set()
+            for w in self.worlds:
+                if not isinstance(w, str) or not valid_world_id(w):
+                    errors.append(
+                        f"worlds 含非法世界观名 {w!r}"
+                        "（应为字母/数字/下划线，1-48 位，与地址世界观段同口径）")
+                elif w in seen_worlds:
+                    errors.append(f"worlds 重复声明 '{w}'")
+                else:
+                    seen_worlds.add(w)
         for rtype, value in self.resources.items():
             if rtype not in PACK_RESOURCE_PATHS:
                 errors.append(
@@ -363,6 +383,19 @@ class WorldState:
     def set_active(self, manifest: Optional[WorldPackManifest]) -> None:
         """激活或停用世界包（传入 None 表示停用）。"""
         self._manifest = manifest
+
+    def declared_worlds(self) -> Set[str]:
+        """包声明的地址世界观命名空间；未激活 / 未声明返回空集。
+
+        非空时，拥有着的资源类型（目前只有地标与描述风格有意义）按世界
+        观合并自由目录素材；空集保持整类型接管的旧行为。
+        """
+        if not self._manifest:
+            return set()
+        worlds = getattr(self._manifest, "worlds", None)
+        if not isinstance(worlds, list):
+            return set()
+        return {w for w in worlds if isinstance(w, str)}
 
     # ---------- 路径 ----------
 

@@ -26,9 +26,11 @@ from persistence.world_pack import (
     validate_archive,
     worlds_dir,
 )
+from persistence.style_addr import load_address as _load_style_addr
 from persistence.style_addr import save_address as _save_style_addr
 from dungeon.terms import (LEGACY_SCENARIO_RESOURCE_KEY, SCENARIO_RESOURCE_KEY,
                            is_default_scenario)
+from core.address_model import world_of
 from core.behavior_runtime import get_runtime, resolve_behavior_source
 from persistence.json_store import write_json_atomic
 
@@ -54,6 +56,31 @@ def _load_json(path: str) -> Any:
 
 def _save_json(path: str, data: Any) -> None:
     write_json_atomic(path, data)
+
+
+def pack_worlds_warnings(manifest: WorldPackManifest, pack_root: str) -> List[str]:
+    """声明 worlds 与包内风格注册地址（.addr.json）的一致性检查（P3b 先 warning）。
+
+    检查地标 / 描述风格的注册地址世界观是否都落在声明 worlds 内；注册
+    地址无法解析、或世界观不在声明内，都给出警告。未声明 worlds 的包
+    不检查（保持整类型接管口径）。何时转 error 另行裁决（Q2）。
+    """
+    if not manifest.worlds:
+        return []
+    declared = set(manifest.worlds)
+    warnings = []
+    for rtype in ("landmarks", "quips"):
+        folder = os.path.join(pack_root, rtype)
+        for style in manifest.resources.get(rtype, []):
+            addr = _load_style_addr(folder, style)
+            if not addr:
+                continue
+            w = world_of(addr)
+            if w not in declared:
+                warnings.append(
+                    f"{rtype}/{style} 的注册地址世界观 "
+                    f"{w or '（无法解析）'} 不在声明 worlds 内")
+    return warnings
 
 
 class WorldManager:
@@ -100,6 +127,8 @@ class WorldManager:
                 "version": manifest.version,
                 "description": manifest.description,
                 "owned_types": sorted(manifest.owned_types()),
+                "worlds": list(manifest.worlds),
+                "warnings": pack_worlds_warnings(manifest, entry_path),
                 "error": None,
                 "active": self.world_state.active
                            and self.world_state.world_id == manifest.world_id,
@@ -175,9 +204,15 @@ class WorldManager:
         manifest = self.world_state.manifest
         settings.update(self.world_state.effective_settings(settings))
         if manifest.owns("landmarks"):
-            settings["selected_styles"] = list(manifest.resources.get("landmarks", []))
+            styles = list(manifest.resources.get("landmarks", []))
+            styles += self._keep_free_styles(
+                "landmarks", set(styles), settings.get("selected_styles"))
+            settings["selected_styles"] = styles
         if manifest.owns("quips"):
-            settings["selected_quip_styles"] = list(manifest.resources.get("quips", []))
+            styles = list(manifest.resources.get("quips", []))
+            styles += self._keep_free_styles(
+                "quips", set(styles), settings.get("selected_quip_styles"))
+            settings["selected_quip_styles"] = styles
         if manifest.owns("names"):
             tables = list(manifest.resources.get("names", []))
             if settings.get("name_table") not in tables and tables:
@@ -194,6 +229,29 @@ class WorldManager:
             tables = list(manifest.resources.get("personalities", []))
             if settings.get("personality_table") not in tables and tables:
                 settings["personality_table"] = tables[0]
+
+    def _keep_free_styles(self, rtype: str, pack_styles: set, selected) -> List[str]:
+        """命名空间合并下保留在选取中的自由风格。
+
+        仅限玩家此前已选、且未被激活包遮蔽（不在包内同名、注册地址不在包
+        声明世界观内）的自由风格——包内容全选 + 玩家旧选择中仍可用的部分。
+        未声明 worlds 时返回空（整类型接管，旧行为）。
+        """
+        declared = self.world_state.declared_worlds()
+        if not declared or not selected:
+            return []
+        free_dir = os.path.join(self.data_dir, "packs", rtype)
+        kept = []
+        for style in selected:
+            if not isinstance(style, str) or not style or style in pack_styles:
+                continue
+            if not os.path.isfile(os.path.join(free_dir, f"{style}.json")):
+                continue
+            reg_world = world_of(_load_style_addr(free_dir, style))
+            if reg_world and reg_world in declared:
+                continue
+            kept.append(style)
+        return kept
 
     def activate(self, world_id: str, settings: Dict[str, Any],
                  settings_repo=None) -> WorldPackManifest:
@@ -562,6 +620,17 @@ class WorldManager:
                 self._copy_behavior_pack(
                     src, os.path.join(target, "behaviors", name))
                 resources["behaviors"] = [name]
+        # 派生 worlds：从收集到的地标 / 描述风格注册地址取世界观并集。
+        # 全部未注册地址时保持空（未声明 → 整类型接管旧行为）。
+        worlds = set()
+        for rtype, repo in (("landmarks", landmark_repo), ("quips", quip_repo)):
+            if repo is None:
+                continue
+            for style in resources.get(rtype, []):
+                w = world_of(repo.load_style_address(style))
+                if w:
+                    worlds.add(w)
+        manifest.worlds = sorted(worlds)
         manifest.resources = resources
 
     @staticmethod
