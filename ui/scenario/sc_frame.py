@@ -4,6 +4,9 @@ import re
 import copy
 import os
 from dungeon.audio.chapters import normalize_chapters
+from dungeon.admission import (FIELD_ADDRESS, FIELD_HEIGHT_MAX, FIELD_HEIGHT_MIN,
+                               FIELD_MAX_DISTANCE, coerce_distance,
+                               normalize_fields as normalize_admission_fields)
 from dungeon.coupling import (COUPLING_LEVELS, DEFAULT_COUPLING_LEVEL, VELUM,
                               coupling_initial_prompt,
                               coupling_label, normalize_coupling_level)
@@ -17,6 +20,7 @@ from dungeon.audio.speech import (DEFAULT_OTHER_VOICES, DEFAULT_RATE, DEFAULT_VO
                             voice_level)
 from ui.ctk.widgets import (CTkScrollableDropdownFrame, CTkSegmentedControl,
                                OptionButton)
+from ui.ctk.address_dlg import AddressTextDialog
 from ui.ctk.dialogs import (BaseDialog, InputDialog, DLG_BORDER_STRONG,
                                DLG_PANEL_BG, DLG_TEXT, DLG_TEXT_SOFT)
 from ui.scenario.chapter_trigger_mgr import ChapterTriggerManager
@@ -84,6 +88,13 @@ class VoicePickDialog(BaseDialog):
         self._close()
 
 
+def _format_optional_number(value):
+    """准入输入框显示：None → 空串，数字去掉多余小数位。"""
+    if value is None:
+        return ""
+    return f"{float(value):g}"
+
+
 # ==================== 副本编辑器 ====================
 class ScenarioEditor(ctk.CTkFrame):
     """副本编辑器：通用区域 + 两个 TreeviewManager 子面板（属性/触发器）"""
@@ -116,6 +127,11 @@ class ScenarioEditor(ctk.CTkFrame):
 
         # 进入副本所需行动点数（0 表示免费）
         self.entry_action_cost = 0
+        # 进入准入：方案地址 / 距离上限（None=不限）/ 身高区间（None=不限）
+        self.entry_address = ""
+        self.entry_address_max_distance = None
+        self.entry_height_min = None
+        self.entry_height_max = None
 
         self._build_ui()
         self._refresh_scenario_list()
@@ -288,12 +304,11 @@ class ScenarioEditor(ctk.CTkFrame):
 
     # ------------------ 新版通用面板 ------------------
     def _build_prompt_ui(self, parent):
-        """通用面板：耦合等级/消耗（左栏） + 初始提示（右栏） + 段落分类提示"""
+        """通用面板：2×2 四张大卡片——基础设置 / 对话语音 / 初始提示 / 段落分类提示"""
         for child in parent.winfo_children():
             child.destroy()
 
         # 与其他管理页面保持一致的配色
-        _CARD_BORDER = SC_BORDER
         _CARD_BG = SC_PANEL_BG
         _TITLE = SC_TITLE
         _MUTED = SC_TEXT_SOFT
@@ -301,16 +316,6 @@ class ScenarioEditor(ctk.CTkFrame):
         _F_TITLE = 14
         _F_BIG = 14     # 表单标签与正文输入
         _F_SMALL = 13   # 次要说明
-
-        def _section_card(master, expand=False):
-            card = ctk.CTkFrame(master, fg_color=_CARD_BG,
-                                border_width=0, corner_radius=10)
-            card.pack(fill='both' if expand else 'x',
-                      expand=expand, pady=10)
-            inner = ctk.CTkFrame(card, fg_color="transparent")
-            inner.pack(fill='both' if expand else 'x',
-                       expand=expand, padx=12, pady=10)
-            return inner
 
         # ---------- 底部按钮 ----------
         bottom_frame = ctk.CTkFrame(parent, fg_color="transparent")
@@ -323,17 +328,25 @@ class ScenarioEditor(ctk.CTkFrame):
                       font=ui_fonts.ui_font(_F_BIG, "bold"),
                       command=self._save_prompts).pack(fill='x')
 
-        # ---------- 左右两栏：左=耦合等级/点数消耗/等级初始提示，右=初始提示 ----------
+        # ---------- 2×2 四张大卡片 ----------
         columns = ctk.CTkFrame(parent, fg_color="transparent")
-        columns.pack(fill='x', pady=(0, 5))
-        columns.grid_columnconfigure(0, weight=0)   # 左栏按内容宽度
-        columns.grid_columnconfigure(1, weight=1)   # 右栏占满剩余
+        columns.pack(fill='both', expand=True, pady=(0, 5))
+        columns.grid_columnconfigure(0, weight=1, uniform='col')
+        columns.grid_columnconfigure(1, weight=1, uniform='col')
+        columns.grid_rowconfigure(0, weight=0)   # 上排按内容高度
+        columns.grid_rowconfigure(1, weight=1)   # 下排吃掉剩余高度
 
-        # ---- 左栏 ----
-        left_card = ctk.CTkFrame(columns, fg_color=_CARD_BG, border_width=0, corner_radius=10)
-        left_card.grid(row=0, column=0, sticky='nsew', padx=(0, 8))
-        left_inner = ctk.CTkFrame(left_card, fg_color="transparent")
-        left_inner.pack(fill='both', expand=True, padx=12, pady=10)
+        def _card(row, column, padx):
+            card = ctk.CTkFrame(columns, fg_color=_CARD_BG,
+                                border_width=0, corner_radius=10)
+            card.grid(row=row, column=column, sticky='nsew', padx=padx,
+                      pady=(0, 8) if row == 0 else 0)
+            inner = ctk.CTkFrame(card, fg_color="transparent")
+            inner.pack(fill='both', expand=True, padx=12, pady=10)
+            return card, inner
+
+        # ---- 左上：基础设置（耦合等级 / AP 消耗 / 主角称呼 / 进入准入 / 系统初始提示） ----
+        basic_card, left_inner = _card(0, 0, (0, 8))
 
         head_row = ctk.CTkFrame(left_inner, fg_color="transparent")
         head_row.pack(fill='x', padx=(0, 20))
@@ -360,9 +373,9 @@ class ScenarioEditor(ctk.CTkFrame):
         ctk.CTkLabel(head_row, text="AP 消耗量", font=ui_fonts.ui_font(_F_BIG),
                      text_color=_TITLE).pack(side='right', padx=(12, 6))
 
-        # 左栏子元素显式定宽：CTkLabel 的自然请求宽度不受 wraplength
-        # 约束，不钉住会把左栏撑得很宽，挤掉右栏的初始提示输入框
-        _LEFT_WIDTH = 365
+        # 卡片宽度随窗口均分，文本按固定宽度折行即可（CTkLabel 的自然宽度
+        # 不受 wraplength 约束，这里只用于排版）
+        _TEXT_W = 520
 
         # 主角称呼：Solea/Bulla 对话分支里主角台词的说话人标注（Velum 不适用）
         protagonist_row = ctk.CTkFrame(left_inner, fg_color="transparent")
@@ -379,14 +392,73 @@ class ScenarioEditor(ctk.CTkFrame):
             fg_color=SC_PANEL_BG, border_color=SC_BORDER_STRONG)
         self.protagonist_entry.pack(side='right')
 
-        # ---- 对话语音：Solea/Bulla 的台词朗读（仅带说话人的对话句） ----
-        ctk.CTkLabel(left_inner, text="对话语音",
-                     font=ui_fonts.ui_font(_F_SMALL, "bold"),
-                     text_color=_MUTED, anchor='w').pack(fill='x', pady=(10, 0))
-        voice_card = ctk.CTkFrame(left_inner, fg_color=SC_PANEL_BG,
-                                  border_width=1, border_color=SC_BORDER,
-                                  corner_radius=8)
-        voice_card.pack(fill='x', padx=(0, 20), pady=(4, 0))
+        # ---- 进入准入：方案地址（距离上限）与身高区间 ----
+        admission_card = ctk.CTkFrame(left_inner, fg_color=SC_PANEL_BG,
+                                      border_width=1, border_color=SC_BORDER,
+                                      corner_radius=8)
+        admission_card.pack(fill='x', padx=(0, 20), pady=(4, 0))
+
+        addr_row = ctk.CTkFrame(admission_card, fg_color="transparent")
+        addr_row.pack(fill='x', padx=8, pady=(6, 2))
+        ctk.CTkLabel(addr_row, text="方案地址", font=ui_fonts.ui_font(_F_SMALL),
+                     text_color=_TITLE, width=64, anchor='w').pack(side='left')
+        self.entry_address_var = ctk.StringVar()
+        self.entry_address_entry = ctk.CTkEntry(
+            addr_row, textvariable=self.entry_address_var, height=26,
+            font=ui_fonts.ui_font(_F_SMALL), text_color=_DARK,
+            placeholder_text="（不限）", state="readonly",
+            fg_color=SC_BG, border_color=SC_BORDER_STRONG)
+        self.entry_address_entry.pack(side='left', fill='x', expand=True,
+                                      padx=(6, 4))
+        ctk.CTkButton(addr_row, text="选", width=28, height=26,
+                      font=ui_fonts.ui_font(_F_SMALL),
+                      fg_color="transparent", border_width=1,
+                      border_color=SC_BORDER_STRONG, text_color=SC_LINK,
+                      hover_color=SC_HOVER, corner_radius=6,
+                      command=self._pick_entry_address).pack(side='left')
+
+        dist_row = ctk.CTkFrame(admission_card, fg_color="transparent")
+        dist_row.pack(fill='x', padx=8, pady=2)
+        ctk.CTkLabel(dist_row, text="距离上限", font=ui_fonts.ui_font(_F_SMALL),
+                     text_color=_TITLE, width=64, anchor='w').pack(side='left')
+        self.entry_distance_var = ctk.StringVar()
+        ctk.CTkEntry(dist_row, textvariable=self.entry_distance_var, width=64,
+                     height=26, font=ui_fonts.ui_font(_F_SMALL),
+                     text_color=_DARK, placeholder_text="不限",
+                     fg_color=SC_BG, border_color=SC_BORDER_STRONG).pack(
+            side='left', padx=(6, 4))
+        ctk.CTkLabel(dist_row, text="米（0 = 必须同址）",
+                     font=ui_fonts.ui_font(_F_SMALL), text_color=_MUTED).pack(
+            side='left')
+
+        height_row = ctk.CTkFrame(admission_card, fg_color="transparent")
+        height_row.pack(fill='x', padx=8, pady=(2, 4))
+        ctk.CTkLabel(height_row, text="身高区间", font=ui_fonts.ui_font(_F_SMALL),
+                     text_color=_TITLE, width=64, anchor='w').pack(side='left')
+        self.entry_height_min_var = ctk.StringVar()
+        ctk.CTkEntry(height_row, textvariable=self.entry_height_min_var, width=56,
+                     height=26, font=ui_fonts.ui_font(_F_SMALL),
+                     text_color=_DARK, placeholder_text="不限",
+                     fg_color=SC_BG, border_color=SC_BORDER_STRONG).pack(
+            side='left', padx=(6, 3))
+        ctk.CTkLabel(height_row, text="~", font=ui_fonts.ui_font(_F_SMALL),
+                     text_color=_MUTED).pack(side='left')
+        self.entry_height_max_var = ctk.StringVar()
+        ctk.CTkEntry(height_row, textvariable=self.entry_height_max_var, width=56,
+                     height=26, font=ui_fonts.ui_font(_F_SMALL),
+                     text_color=_DARK, placeholder_text="不限",
+                     fg_color=SC_BG, border_color=SC_BORDER_STRONG).pack(
+            side='left', padx=(3, 4))
+        ctk.CTkLabel(height_row, text="米", font=ui_fonts.ui_font(_F_SMALL),
+                     text_color=_MUTED).pack(side='left')
+
+        # ---- 右上：对话语音（Solea/Bulla 的台词朗读，仅带说话人的对话句） ----
+        voice_outer, voice_inner = _card(0, 1, (8, 0))
+        ctk.CTkLabel(voice_inner, text="对话语音",
+                     font=ui_fonts.ui_font(_F_TITLE, "bold"),
+                     text_color=_TITLE, anchor='w').pack(fill='x')
+        voice_card = ctk.CTkFrame(voice_inner, fg_color="transparent")
+        voice_card.pack(fill='both', expand=True, pady=(4, 0))
 
         voice_head = ctk.CTkFrame(voice_card, fg_color="transparent")
         voice_head.pack(fill='x', padx=8, pady=(6, 2))
@@ -400,7 +472,7 @@ class ScenarioEditor(ctk.CTkFrame):
         self.voice_hint_label = ctk.CTkLabel(
             voice_card, text="", font=ui_fonts.ui_font(_F_SMALL),
             text_color=_MUTED, anchor='w', justify='left',
-            wraplength=_LEFT_WIDTH - 40)
+            wraplength=_TEXT_W)
         self.voice_hint_label.pack(fill='x', padx=8, pady=(0, 4))
 
         # 音色：她 / 主角 / 其他角色（其他角色是音色池，按名字稳定分配）
@@ -467,7 +539,7 @@ class ScenarioEditor(ctk.CTkFrame):
         self._preview_status = ctk.CTkLabel(
             voice_card, text="", font=ui_fonts.ui_font(_F_SMALL),
             text_color=_MUTED, anchor='w', justify='left',
-            wraplength=_LEFT_WIDTH - 40)
+            wraplength=_TEXT_W)
         self._preview_status.pack(fill='x', padx=8, pady=(0, 4))
 
         ctk.CTkLabel(left_inner, text="系统初始提示",
@@ -476,20 +548,17 @@ class ScenarioEditor(ctk.CTkFrame):
         # 标签展示：直接读取 coupling.py 中该等级的 initial_prompt（只读）
         self.coupling_prompt_label = ctk.CTkLabel(
             left_inner, text=coupling_initial_prompt(self.coupling_level),
-            width=_LEFT_WIDTH, wraplength=_LEFT_WIDTH - 6,
+            width=_TEXT_W, wraplength=_TEXT_W,
             font=ui_fonts.ui_font(_F_SMALL), text_color=_MUTED,
             anchor='w', justify='left')
         self.coupling_prompt_label.pack(fill='x', pady=(4, 0))
 
-        # ---- 右栏：初始提示 ----
-        right_card = ctk.CTkFrame(columns, fg_color=_CARD_BG, border_width=0, corner_radius=10)
-        right_card.grid(row=0, column=1, sticky='nsew', padx=(8, 0))
-        right_inner = ctk.CTkFrame(right_card, fg_color="transparent")
-        right_inner.pack(fill='both', expand=True, padx=12, pady=10)
-        ctk.CTkLabel(right_inner, text="初始提示（角色设定/世界背景）",
+        # ---- 左下：初始提示 ----
+        prompt_card, prompt_inner = _card(1, 0, (0, 8))
+        ctk.CTkLabel(prompt_inner, text="初始提示（角色设定/世界背景）",
                      font=ui_fonts.ui_font(_F_TITLE, "bold"),
                      text_color=_TITLE).pack(anchor='w')
-        self.initial_prompt_text = ctk.CTkTextbox(right_inner, height=150, wrap='word',
+        self.initial_prompt_text = ctk.CTkTextbox(prompt_inner, height=140, wrap='word',
                                                   font=ui_fonts.ui_font(_F_BIG),
                                                   text_color=_DARK,
                                                   fg_color=SC_PANEL_BG,
@@ -497,8 +566,8 @@ class ScenarioEditor(ctk.CTkFrame):
                                                   border_color=SC_BORDER_STRONG)
         self.initial_prompt_text.pack(fill='both', expand=True, pady=(6, 0))
 
-        # ---------- 段落分类提示（横向可滚动卡片） ----------
-        sections_inner = _section_card(parent, expand=True)
+        # ---------- 右下：段落分类提示（横向可滚动卡片） ----------
+        sections_card, sections_inner = _card(1, 1, (8, 0))
         title_row = ctk.CTkFrame(sections_inner, fg_color="transparent")
         title_row.pack(fill='x')
         ctk.CTkLabel(title_row, text="段落分类提示（针对不同文本类型）", font=ui_fonts.ui_font(_F_TITLE, "bold"),
@@ -522,7 +591,7 @@ class ScenarioEditor(ctk.CTkFrame):
             ("interaction", "互动", "她与其他人的身体互动"),
             ("action", "行动", "她独自做出的行动描写"),
         ]
-        _CARD_WIDTH = 300
+        _CARD_WIDTH = 240
 
         strip = ctk.CTkScrollableFrame(sections_inner, orientation="horizontal",
                                        height=300, corner_radius=0,
@@ -664,6 +733,11 @@ class ScenarioEditor(ctk.CTkFrame):
         self.initial_prompt_text.insert("1.0", self.initial_prompt)
         self._refresh_coupling_widgets()
         self.entry_cost_var.set(str(int(self.entry_action_cost)))
+        self.entry_address_var.set(self.entry_address)
+        self.entry_distance_var.set(_format_optional_number(
+            self.entry_address_max_distance))
+        self.entry_height_min_var.set(_format_optional_number(self.entry_height_min))
+        self.entry_height_max_var.set(_format_optional_number(self.entry_height_max))
         self.protagonist_var.set(self.protagonist_title)
         self.voice_enabled_var.set(bool(self.voice.get("enabled", True)))
         self.voice_her_var.set(self.voice.get("voice_her", DEFAULT_VOICE_HER))
@@ -702,6 +776,11 @@ class ScenarioEditor(ctk.CTkFrame):
         self.chapters = normalize_chapters(config.get("chapters", []))
         self.triggers = config.get("triggers", [])
         self.entry_action_cost = max(0, int(config.get("entry_action_cost", 0) or 0))
+        admission = normalize_admission_fields(config)
+        self.entry_address = admission[FIELD_ADDRESS]
+        self.entry_address_max_distance = admission[FIELD_MAX_DISTANCE]
+        self.entry_height_min = admission[FIELD_HEIGHT_MIN]
+        self.entry_height_max = admission[FIELD_HEIGHT_MAX]
         self.text_component = normalize_text_component(config.get("text_component"))
         self.voice = normalize_voice(config.get("voice"))
         self.components = [c for c in config.get("components", [])
@@ -743,6 +822,13 @@ class ScenarioEditor(ctk.CTkFrame):
             "section_steps": {key: var.get() for key, var in self.section_step_vars.items()},
             "transition_matrix": self.transition_matrix,
             "entry_action_cost": entry_cost,
+            "entry_address": self.entry_address,
+            "entry_address_max_distance_m": self._optional_number(
+                self.entry_distance_var, self.entry_address_max_distance),
+            "entry_height_min_m": self._optional_number(
+                self.entry_height_min_var, self.entry_height_min),
+            "entry_height_max_m": self._optional_number(
+                self.entry_height_max_var, self.entry_height_max),
             "voice": self._voice_from_ui()
         }
 
@@ -757,6 +843,27 @@ class ScenarioEditor(ctk.CTkFrame):
             "rate": self.voice_rate_var.get().strip(),
             "level": buses.step_from_display(self.voice_level_var.get()),
         })
+
+    def _pick_entry_address(self):
+        """选择方案地址（复用地址注册表对话框；消除 = 不做地址准入）。"""
+        dialog = AddressTextDialog(
+            self, "副本方案地址",
+            description=("角色有地址时，进入副本需要与这里选择的地址满足距离上限，"
+                         "只能选择已申领的地址（详见 docs/designs/address_system.md）；"
+                         "点「消除」表示不做地址准入。"),
+            initial=self.entry_address, allow_empty=True)
+        if dialog.result is None:
+            return
+        self.entry_address = dialog.result
+        self.entry_address_var.set(self.entry_address)
+
+    def _optional_number(self, var, fallback):
+        """准入输入的归一化：空白 = None，非法输入保留上一次的值。"""
+        text = var.get().strip()
+        if not text:
+            return None
+        value = coerce_distance(text)
+        return fallback if value is None else value
 
     def _pick_voice(self, var, append: bool = False):
         """打开音色选择器；``append`` 为真时把结果追加进已有的音色池。"""
@@ -874,6 +981,15 @@ class ScenarioEditor(ctk.CTkFrame):
         config["section_steps"] = prompt_data["section_steps"]
         config["transition_matrix"] = prompt_data["transition_matrix"]
         config["entry_action_cost"] = prompt_data["entry_action_cost"]
+        config["entry_address"] = prompt_data["entry_address"]
+        config["entry_address_max_distance_m"] = prompt_data[
+            "entry_address_max_distance_m"]
+        config["entry_height_min_m"] = prompt_data["entry_height_min_m"]
+        config["entry_height_max_m"] = prompt_data["entry_height_max_m"]
+        self.entry_address_max_distance = prompt_data[
+            "entry_address_max_distance_m"]
+        self.entry_height_min = prompt_data["entry_height_min_m"]
+        self.entry_height_max = prompt_data["entry_height_max_m"]
         # 保留组件选择与参数（组件面板独立保存，这里不覆盖已保存值）
         if "text_component" in config:
             config["text_component"] = self.text_component
@@ -970,6 +1086,10 @@ class ScenarioEditor(ctk.CTkFrame):
             "chapters": [],
             "triggers": [],
             "entry_action_cost": 0,
+            "entry_address": "",
+            "entry_address_max_distance_m": None,
+            "entry_height_min_m": None,
+            "entry_height_max_m": None,
             "components": ["attr_bar"],
             "components_params": {},
         }
