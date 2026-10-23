@@ -458,6 +458,162 @@ def check_gradient_dock(registry):
         ctx._components.remove(comp)
 
 
+def check_nvl_dock(registry):
+    """NVL 覆盖层：百分比边距、侧边代管区贴组件边、缺省与正文背景融合。"""
+    from dungeon.window.layout import (SHAPE_BAND, SHAPE_RAIL, SIDE_LEFT,
+                                       SIDE_RIGHT, SURFACE_HOST, SURFACE_OWN,
+                                       SlotAssignment)
+
+    def make_nvl(ctx, **params):
+        return registry.instantiate(
+            ctx, "text_nvl",
+            config={"components_params": {"text_nvl": dict(params)}})
+
+    # 边距：0% 仍是旧版全屏；10% 按视口对应边长向内收。
+    ctx = _FakeCtx()
+    text = make_nvl(ctx)
+    ctx._components.append(text)
+    text.build(ctx)
+    vw, vh = ctx.viewport[1], ctx.viewport[2]
+    check("NVL 边距：0% 仍是全屏",
+          tuple(text._panel_rect) == (0.0, 0.0, float(vw), float(vh)),
+          text._panel_rect)
+
+    ctx = _FakeCtx()
+    attr = registry.instantiate(ctx, "attr_bar",
+                                config={"components_params": {}})
+    text = make_nvl(ctx, margin_percent=10)
+    ctx._components.extend([text, attr])
+    text.build(ctx)
+    attr.build(ctx)
+    text.layout(ctx)
+    px, py, pw, ph = text._panel_rect
+    margin_x, margin_y = round(vw * 0.1), round(vh * 0.1)
+    check("NVL 边距：10% 按视口边长内缩",
+          abs(px - margin_x) < 0.5 and abs(py - margin_y) < 0.5
+          and abs(pw - (vw - 2 * margin_x)) < 0.5
+          and abs(ph - (vh - 2 * margin_y)) < 0.5,
+          (text._panel_rect,
+           (margin_x, margin_y, vw - 2 * margin_x, vh - 2 * margin_y)))
+    band = next((s for s in text.slots(ctx)
+                 if s.shape == SHAPE_BAND and "status" in s.roles), None)
+    check("NVL 边距：状态带落在覆盖层内",
+          band is not None and band.rect[0] >= px - 0.5
+          and band.rect[1] >= py - 0.5
+          and band.rect[0] + band.rect[2] <= px + pw + 0.5
+          and band.rect[1] + band.rect[3] <= py + ph + 0.5,
+          (None if band is None else band.rect, text._panel_rect))
+    for comp in (attr, text):
+        comp.destroy(ctx)
+        ctx._components.remove(comp)
+
+    def run_case(side):
+        ctx = _FakeCtx()
+        ctx.dock_side = side
+        text = make_nvl(ctx, margin_percent=8)
+        log = registry.instantiate(ctx, "proc_log",
+                                   config={"components_params": {}})
+        ctx._components.extend([text, log])
+        text.build(ctx)
+        log.build(ctx)
+        base_panel = tuple(text._panel_rect)
+        check(f"NVL 代管区[{side}]：日志收起时不声明",
+              not any(s.id == "nvl_side" for s in text.slots(ctx)),
+              [(s.id, s.shape) for s in text.slots(ctx)])
+
+        log.toggle(ctx)
+        text.layout(ctx)
+        slots = list(text.slots(ctx))
+        rail = next((s for s in slots
+                     if s.shape == SHAPE_RAIL and "log" in s.roles), None)
+        check(f"NVL 代管区[{side}]：日志展开时声明 log rail", rail is not None,
+              [(s.id, s.shape, s.roles) for s in slots])
+        if rail is None:
+            for comp in (log, text):
+                comp.destroy(ctx)
+                ctx._components.remove(comp)
+            return
+        px, py, pw, ph = text._panel_rect
+        flush = (abs(rail.rect[1] - py) < 0.5
+                 and abs(rail.rect[3] - ph) < 0.5
+                 and (abs(rail.rect[0] - px) < 0.5 if side == SIDE_LEFT
+                      else abs(rail.rect[0] + rail.rect[2] - (px + pw)) < 0.5))
+        check(f"NVL 代管区[{side}]：贴覆盖层内侧边缘且占满高度",
+              flush and rail.style.side == side, (rail.rect, text._panel_rect))
+        merged = (rail.style.surface == SURFACE_HOST
+                  and rail.style.bg is None and rail.style.border is None
+                  and rail.style.separator is None)
+        check(f"NVL 代管区[{side}]：缺省不画底纹（与正文背景融合）", merged,
+              (rail.style.surface, rail.style.bg, rail.style.border,
+               rail.style.separator))
+        text_x, text_w = text._layout[-2], text._layout[-1]
+        if side == SIDE_LEFT:
+            disjoint = text_x >= rail.rect[0] + rail.rect[2] - 0.5
+        else:
+            disjoint = text_x + text_w <= rail.rect[0] + 0.5
+        check(f"NVL 代管区[{side}]：正文列让出日志列", disjoint,
+              (text_x, text_w, rail.rect))
+
+        rect = rail.take()
+        ctx.assigned["proc_log"] = SlotAssignment(rail, rect)
+        log.layout(ctx)
+        check(f"NVL 代管区[{side}]：日志使用分配矩形",
+              tuple(round(float(v), 2) for v in log._panel_rect)
+              == tuple(round(float(v), 2) for v in rect),
+              (log._panel_rect, rect))
+        check(f"NVL 代管区[{side}]：日志跟随宿主底纹、不自绘",
+              log._slot_style is not None
+              and log._slot_style.surface == SURFACE_HOST,
+              None if log._slot_style is None else log._slot_style.surface)
+        check(f"NVL 代管区[{side}]：日志不改变覆盖层几何",
+              tuple(text._panel_rect) == base_panel,
+              (base_panel, text._panel_rect))
+
+        # 子组件仍可否决宿主底纹，改成自绘独立面板。
+        log.params["draw_own_surface"] = True
+        log.layout(ctx)
+        check(f"NVL 代管区[{side}]：日志可自绘底纹",
+              log._slot_style is not None
+              and log._slot_style.surface == SURFACE_OWN,
+              None if log._slot_style is None else log._slot_style.surface)
+        log.params["draw_own_surface"] = False
+        log.layout(ctx)
+
+        log.toggle(ctx)
+        text.layout(ctx)
+        check(f"NVL 代管区[{side}]：收起即释放",
+              not any(s.id == "nvl_side" for s in text.slots(ctx)),
+              [(s.id, s.shape) for s in text.slots(ctx)])
+        for comp in (log, text):
+            comp.destroy(ctx)
+            ctx._components.remove(comp)
+
+    for side in (SIDE_LEFT, SIDE_RIGHT):
+        run_case(side)
+
+    # 覆盖层太窄（边距挤掉宽度）时放不下日志列，回退右上角面板。
+    ctx = _FakeCtx()
+    ctx.viewport = (1.0, 480, 760)
+    text = make_nvl(ctx, margin_percent=10)
+    log = registry.instantiate(ctx, "proc_log",
+                               config={"components_params": {}})
+    ctx._components.extend([text, log])
+    text.build(ctx)
+    log.build(ctx)
+    log.toggle(ctx)
+    text.layout(ctx)
+    log.layout(ctx)
+    check("NVL 代管区：覆盖层太窄时不声明，日志回退面板",
+          not any(s.id == "nvl_side" for s in text.slots(ctx))
+          and log._slot_rect is None
+          and log._panel_rect[2] > 0 and log._panel_rect[3] > 0,
+          ([(s.id, s.shape) for s in text.slots(ctx)], log._slot_rect,
+           log._panel_rect))
+    for comp in (log, text):
+        comp.destroy(ctx)
+        ctx._components.remove(comp)
+
+
 def check_external_pack():
     """外部组件包（显式 pack_dir）覆盖常驻包：来源与类都取自外部目录。"""
     from dungeon.window.component_registry import get_registry
@@ -666,6 +822,7 @@ def main() -> int:
     check_slots(registry)
     check_side_dock(registry)
     check_gradient_dock(registry)
+    check_nvl_dock(registry)
     check_pack_sources(registry)
     check_external_pack()
     check_smoke(registry)

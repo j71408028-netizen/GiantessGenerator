@@ -22,15 +22,16 @@
 三者都在 ``layout`` 阶段声明代管区（``dungeon.window.layout.Slot``）：
 ``text_card`` 提供卡片底部状态带、``text`` 提供渐变区状态带、``text_nvl``
 提供顶部状态带；``attr_bar`` 声明 ``roles=("status",)`` 优先落入，没有可用
-代管区时回退左上角独立面板。``text_card`` 与 ``text`` 还各提供一个贴视口
-一侧的代管区（``card_side`` / ``scrim_side``，``log`` / ``rail``）：
-``proc_log`` 仅在展开时声明 ``log`` 角色，收起即释放。停靠哪一侧是**窗口视觉
-设置**（`dungeon_settings.json` 的 ``dock_side``，玩家在副本设置面板里实时改，
+代管区时回退左上角独立面板。三者还各提供一个贴边代管区（``card_side`` /
+``scrim_side`` / ``nvl_side``，``log`` / ``rail``）：``proc_log`` 仅在展开时
+声明 ``log`` 角色，收起即释放。停靠哪一侧是**窗口视觉设置**
+（`dungeon_settings.json` 的 ``dock_side``，玩家在副本设置面板里实时改，
 组件经 ``ctx.component_dock_side()`` 读取），不是组件方案参数。入场呈现随宿主
 不同：卡片侧边按 ``SlotStyle.side`` 从
 所贴的屏幕边缘平移进入、卡片同时往另一侧让位；渐变正文是全宽的，侧边代管区
 停在正文上方（不做横向让位），组件按 ``SlotStyle.enter_from="bottom"`` +
-``enter_fade`` 从下方升起并淡入。
+``enter_fade`` 从下方升起并淡入；NVL 覆盖层可留百分比边距，侧边代管区贴
+覆盖层内侧边缘、占满高度，正文列让出同一列。
 
 三者都声明 ``owns_text_display = True`` 接管窗口文本显示（内置 text_container
 管线被 _update_text_display 的所有权守卫跳过）；仿流式动画仍由窗口帧时钟驱动

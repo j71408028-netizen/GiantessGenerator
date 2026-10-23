@@ -1,11 +1,14 @@
 """过程日志组件（proc_log）：文本组件侧边代管区 / 右上角运行消息面板"""
 
+from dataclasses import replace
+
 from imgui_bundle import imgui
 
 from dungeon import process_log
 from dungeon.window import imgui_util as iu
 from dungeon.window.component_registry import DungeonComponent
-from dungeon.window.layout import SHAPE_RAIL, enter_direction, enter_transform
+from dungeon.window.layout import (SHAPE_RAIL, SURFACE_OWN, enter_direction,
+                                   enter_transform)
 
 
 _LOG_COLOR = (232, 232, 232, 255)
@@ -20,19 +23,27 @@ def _fade(color, alpha):
     return (color[0], color[1], color[2], int(color[3] * factor))
 
 
+def _dim(color, factor):
+    """压暗颜色（缩放 alpha）；融合模式下的标题用它和正文区分层次。"""
+    return (color[0], color[1], color[2], max(0, int(color[3] * factor)))
+
+
 class ProcLogComponent(DungeonComponent):
     """过程日志：优先停靠文本组件的侧边代管区，没有时回退右上角面板。
 
     只有面板展开时才声明 ``log`` 角色——收起状态不占用代管区，宿主也就不会
     平白偏移。展开后的呈现由 ``SlotStyle`` 的入场契约决定：卡片的 ``card_side``
-    从所贴的屏幕边缘平移进入，渐变栏的 ``scrim_side`` 从代管区下方升起并淡入。
+    从所贴的屏幕边缘平移进入，渐变栏的 ``scrim_side`` 从代管区下方升起并淡入，
+    NVL 的 ``nvl_side`` 贴覆盖层内侧边缘水平进入。底纹缺省跟随宿主
+    （``draw_own_surface`` 可改成自绘面板）：宿主不画底纹时日志区与正文区
+    背景完全融合。
     """
 
     id = "proc_log"
     label = "过程日志"
     description = ("显示运行消息（F12 切换展开/收起，默认收起）；展开时优先停靠"
-                   "文本组件的侧边代管区（卡片侧边滑入、渐变栏侧边升起淡入），"
-                   "没有代管区时回退右上角。")
+                   "文本组件的侧边代管区（卡片侧边滑入、渐变栏侧边升起淡入、"
+                   "NVL 覆盖层内侧边缘），没有代管区时回退右上角。")
     TAG_PREFIX = "proc_log"
     shapes = (SHAPE_RAIL,)
     param_specs = [
@@ -42,6 +53,10 @@ class ProcLogComponent(DungeonComponent):
          "default": 300, "min": 60, "max": 800},
         {"key": "max_lines", "label": "最大行数", "type": "int",
          "default": 300, "min": 50, "max": 2000},
+        {"key": "draw_own_surface", "label": "自绘底纹", "type": "bool",
+         "default": False,
+         "note": "关闭时跟随文本组件的代管区底纹（宿主不画底纹时与正文背景融合）；"
+                 "开启时自己画面板"},
     ]
 
     def __init__(self, ctx):
@@ -50,6 +65,7 @@ class ProcLogComponent(DungeonComponent):
         self._open = False
         self._layout = None
         self._slot_rect = None
+        self._slot_outer = None
         self._slot_style = None
         self._enter_progress = 1.0
 
@@ -68,6 +84,7 @@ class ProcLogComponent(DungeonComponent):
         self._lines = []
         self._open = False
         self._slot_rect = None
+        self._slot_outer = None
         self._slot_style = None
         self._enter_progress = 1.0
         self.layout(ctx)
@@ -83,11 +100,17 @@ class ProcLogComponent(DungeonComponent):
                 # 首次拿到代管区（含从回退面板切过来）：从头播放入场动画。
                 self._enter_progress = 0.0
             self._slot_rect = tuple(rect)
-            self._slot_style = slot.style
+            self._slot_outer = tuple(slot.rect)
+            style = slot.style
+            # 子组件可以否决宿主的缺省底纹，改成自己画独立面板。
+            if bool((self.params or {}).get("draw_own_surface", False)):
+                style = replace(style, surface=SURFACE_OWN)
+            self._slot_style = style
             self._layout = None
             self._panel_rect = tuple(rect)
             return
         self._slot_rect = None
+        self._slot_outer = None
         self._slot_style = None
         s, w, width, scroll_h, margin, pad = self._geometry(ctx)
         x = max(0.0, w - width - margin)
@@ -130,25 +153,46 @@ class ProcLogComponent(DungeonComponent):
             _s, viewport_w, viewport_h = ctx.component_viewport()
             dx, dy, alpha = self._enter_state(self._slot_rect,
                                               viewport_w, viewport_h)
-            self._draw_panel(ctx, x + dx, y + dy, w, h, alpha)
+            style = self._slot_style
+            if style is not None and style.surface == SURFACE_OWN:
+                # 自绘：面板铺满外框（内容矩形只是扣过内边距的可用区）。
+                ox, oy, ow, oh = self._slot_outer or self._slot_rect
+                self._draw_panel(ctx, ox + dx, oy + dy, ow, oh, alpha)
+            else:
+                # 跟随宿主：宿主不画底纹时，这里也不画——日志区与正文区
+                # 共用同一层背景，两区完全融合。
+                self._draw_panel(ctx, x + dx, y + dy, w, h, alpha, style)
             return
         if self._layout is None:
             self.layout(ctx)
         _s, x, y, width, panel_h, _scroll_h, _margin, _pad = self._layout
         self._draw_panel(ctx, x, y, width, panel_h)
 
-    def _draw_panel(self, ctx, x, y, w, h, alpha=1.0):
+    def _draw_panel(self, ctx, x, y, w, h, alpha=1.0, style=None):
+        """画日志面板；``style`` 非空且不是 ``own`` 时只画内容（融合模式）。
+
+        回退面板与 ``surface=own`` 的代管区由本组件自绘底纹 / 边框 / 标题；
+        其它代管区（``host`` / ``bare``）继承宿主背景，这里不再叠加任何
+        面板色，标题与正文的颜色也取自 ``SlotStyle``。
+        """
         s = ctx.component_viewport()[0]
         draw_list = imgui.get_window_draw_list()
         pad = round(8 * s)
-        radius = round(10 * s)
-        draw_list.add_rect_filled(iu.v2(x, y), iu.v2(x + w, y + h),
-                                  iu.u32(*_fade((12, 12, 12, 175), alpha)),
-                                  radius)
-        draw_list.add_rect(iu.v2(x, y), iu.v2(x + w, y + h),
-                           iu.u32(*_fade((255, 255, 255, 32), alpha)), radius)
-        draw_list.add_text(iu.v2(x + pad, y + pad),
-                           iu.u32(*_fade((200, 205, 215, 255), alpha)), _TITLE)
+        own = style is None or style.surface == SURFACE_OWN
+        if own:
+            radius = round(10 * s)
+            draw_list.add_rect_filled(iu.v2(x, y), iu.v2(x + w, y + h),
+                                      iu.u32(*_fade((12, 12, 12, 175), alpha)),
+                                      radius)
+            draw_list.add_rect(iu.v2(x, y), iu.v2(x + w, y + h),
+                               iu.u32(*_fade((255, 255, 255, 32), alpha)), radius)
+            title_color = _fade((200, 205, 215, 255), alpha)
+            line_color = _fade(_LOG_COLOR, alpha)
+        else:
+            base = style.text_color or _LOG_COLOR
+            title_color = _fade(_dim(base, 0.72), alpha)
+            line_color = _fade(base, alpha)
+        draw_list.add_text(iu.v2(x + pad, y + pad), iu.u32(*title_color), _TITLE)
         title_h = float(imgui.calc_text_size(_TITLE).y) + pad
         child_w = max(1.0, w - 2 * pad)
         child_h = max(1.0, h - title_h - pad)
@@ -159,8 +203,7 @@ class ProcLogComponent(DungeonComponent):
                           imgui.WindowFlags_.none.value)
         imgui.push_text_wrap_pos(child_w)
         for line in self._lines:
-            imgui.push_style_color(imgui.Col_.text,
-                                   iu.u32(*_fade(_LOG_COLOR, alpha)))
+            imgui.push_style_color(imgui.Col_.text, iu.u32(*line_color))
             imgui.text_wrapped(line)
             imgui.pop_style_color()
         imgui.pop_text_wrap_pos()
@@ -175,5 +218,6 @@ class ProcLogComponent(DungeonComponent):
         self._lines = []
         self._layout = None
         self._slot_rect = None
+        self._slot_outer = None
         self._slot_style = None
         self._enter_progress = 1.0

@@ -1,23 +1,35 @@
-"""全屏 NVL（text_nvl）：全屏半透明覆盖层上堆叠全部历史（阅读模式）"""
+"""全屏 NVL（text_nvl）：半透明阅读覆盖层，可留百分比边距、可停靠侧边代管区"""
 
 from imgui_bundle import imgui
 
 from dungeon.window import imgui_util as iu
-from dungeon.window.layout import SHAPE_BAND, SURFACE_HOST, Slot, SlotStyle
+from dungeon.window.layout import (SHAPE_BAND, SHAPE_RAIL, SIDE_LEFT,
+                                   SIDE_RIGHT, SURFACE_HOST, Slot, SlotStyle)
 
 from .base import (_DEFAULT_LABEL_COLOR, _DEFAULT_TEXT_COLOR,
                    _HIGHLIGHT_COLOR, _TOOLBAR_MARGIN, _TextDisplayBase)
 
+# 侧边代管区（log 组件展开时启用）：贴覆盖层内侧边缘、占满覆盖层高度，
+# 正文让出这一列；两区共用覆盖层底纹（融合），或由日志自绘面板。
+_DOCK_WIDTH = 320
+_DOCK_GAP = 18
+_DOCK_MIN_TEXT = 240
+#: 覆盖层边距允许的最大百分比（再大就只剩一条缝，正文没地方放）
+_MARGIN_MAX = 30
+
 
 class NvlTextComponent(_TextDisplayBase):
-    """全屏 NVL 式文本栏：全屏半透明覆盖层上堆叠显示全部历史段落。"""
+    """全屏 NVL 式文本栏：半透明覆盖层上堆叠显示全部历史段落。"""
 
     id = "text_nvl"
     label = "全屏 NVL 文本栏"
-    description = "全屏半透明覆盖层上堆叠全部历史段落，可滚轮回看（阅读模式）。"
+    description = "半透明覆盖层上堆叠全部历史段落，可滚轮回看（阅读模式）。"
     _BLINK_TASK = "text_nvl:blink"
     TAG_PREFIX = "text_nvl"
     param_specs = [
+        {"key": "margin_percent", "label": "窗口边距%", "type": "int",
+         "default": 0, "min": 0, "max": _MARGIN_MAX,
+         "note": "覆盖层四周留白占视口对应边长的百分比，0 = 全屏"},
         {"key": "bg_color", "label": "覆盖层底色", "type": "color",
          "default": (8, 10, 18, 190)},
         {"key": "label_color", "label": "标签颜色", "type": "color",
@@ -35,31 +47,65 @@ class NvlTextComponent(_TextDisplayBase):
         super().__init__(ctx)
         self._layout = None
 
+    def _overlay_rect(self, w, h):
+        """覆盖层矩形：按窗口边长百分比向内收；0% 与旧版全屏完全一致。"""
+        percent = int((self.params or {}).get("margin_percent") or 0)
+        percent = max(0, min(_MARGIN_MAX, percent))
+        margin_x = round(w * percent / 100.0)
+        margin_y = round(h * percent / 100.0)
+        return (float(margin_x), float(margin_y),
+                max(1.0, float(w - 2 * margin_x)),
+                max(1.0, float(h - 2 * margin_y))), percent
+
     def _geometry(self, ctx):
         s, w, h = ctx.component_viewport()
+        panel, _percent = self._overlay_rect(w, h)
+        px, py, pw, ph = panel
         pad = round(24 * s)
         # 顶部代管区取代旧的 top_inset 让位：高度至少覆盖状态条的自报占位，
         # 正文从这个带的下方开始，滚动内容不会压住它。没有 status 组件时
         # 完全退回旧行为，不凭空留一条空带。
-        has_status = "status" in tuple(ctx.component_roles() or ())
+        roles = tuple(ctx.component_roles() or ())
+        has_status = "status" in roles
         header_h = round(36 * s) if has_status else 0
         slot_gap = round(10 * s) if has_status else 0
-        pad_top = max(pad + header_h + slot_gap,
-                      int(ctx.component_top_inset() or 0))
+        # top_inset 是相对视口顶端的值；覆盖层有上边距时只补差额。
+        inset = max(0, int(ctx.component_top_inset() or 0) - round(py))
+        pad_top = max(pad + header_h + slot_gap, inset)
         if has_status:
             header_h = max(header_h, pad_top - pad - slot_gap)
-        header_rect = (pad, pad, max(1.0, w - 2 * pad), float(header_h))
-        wrap = max(1.0, w - 2 * pad - round(14 * s))
-        return s, w, h, pad, pad_top, wrap, header_rect
+
+        # 侧边代管区：贴覆盖层内侧边缘（不是视口边缘），占满覆盖层高度；
+        # 正文让出同一列，两区背景由同一次底纹绘制提供。
+        side = SIDE_RIGHT if ctx.component_dock_side() == SIDE_RIGHT else SIDE_LEFT
+        dock_w = round(_DOCK_WIDTH * s)
+        dock_gap = round(_DOCK_GAP * s)
+        text_x, text_w = px, pw
+        dock_rect = None
+        if ("log" in roles and pw >= dock_w + dock_gap
+                + round(_DOCK_MIN_TEXT * s)):
+            if side == SIDE_LEFT:
+                dock_rect = (px, py, float(dock_w), ph)
+                text_x = px + dock_w + dock_gap
+            else:
+                dock_rect = (px + pw - dock_w, py, float(dock_w), ph)
+            text_w = pw - dock_w - dock_gap
+
+        header_rect = (text_x + pad, py + pad,
+                       max(1.0, text_w - 2 * pad), float(header_h))
+        wrap = max(1.0, text_w - 2 * pad - round(14 * s))
+        return (s, w, h, panel, pad, pad_top, wrap, header_rect,
+                dock_rect, side, text_x, text_w)
 
     def layout(self, ctx):
         self._layout = self._geometry(ctx)
-        s, w, h, _pad, _pad_top, _wrap, header_rect = self._layout
-        self._panel_rect = (0.0, 0.0, w, h)
+        (s, _w, _h, panel, _pad, _pad_top, _wrap, header_rect,
+         dock_rect, side, _text_x, _text_w) = self._layout
+        self._panel_rect = panel
         params = self.params or {}
         self._slots = []
         if header_rect[3] > 0:
-            self._slots = [Slot(
+            self._slots.append(Slot(
                 "nvl_header", SHAPE_BAND, header_rect,
                 roles=("status",),
                 style=SlotStyle(
@@ -74,24 +120,49 @@ class NvlTextComponent(_TextDisplayBase):
                     text_color=_DEFAULT_TEXT_COLOR,
                     highlight_color=params.get("highlight_color") or _HIGHLIGHT_COLOR,
                 ),
-            )]
+            ))
+        if dock_rect is not None:
+            # surface=host 但不给底纹 / 边框 / 分隔线：日志区与正文区共用
+            # 覆盖层那一层半透明底纹，两区背景完全融合（日志仍可经自己的
+            # draw_own_surface 否决，自绘独立面板）。
+            self._slots.append(Slot(
+                "nvl_side", SHAPE_RAIL, dock_rect,
+                roles=("log",),
+                style=SlotStyle(
+                    surface=SURFACE_HOST,
+                    padding=(round(12 * s), round(10 * s),
+                             round(12 * s), round(10 * s)),
+                    text_color=_DEFAULT_TEXT_COLOR,
+                    highlight_color=params.get("highlight_color") or _HIGHLIGHT_COLOR,
+                    side=side,
+                ),
+            ))
 
     def draw(self, ctx):
         if self._layout is None:
             self.layout(ctx)
-        s, w, h, pad, pad_top, wrap, _header_rect = self._layout
+        (s, _w, _h, panel, pad, pad_top, _wrap, _header_rect,
+         _dock_rect, _side, text_x, text_w) = self._layout
+        px, py, pw, ph = panel
         params = self.params or {}
         bg = params.get("bg_color") or (8, 10, 18, 190)
         draw_list = imgui.get_window_draw_list()
-        draw_list.add_rect_filled(iu.v2(0.0, 0.0), iu.v2(w, h), iu.u32(*bg), 0.0)
+        # 全屏时不描圆角（贴边没有意义），留边距后给覆盖层一点圆角。
+        radius = round(12 * s) if (px > 0.5 or py > 0.5) else 0.0
+        draw_list.add_rect_filled(iu.v2(px, py), iu.v2(px + pw, py + ph),
+                                  iu.u32(*bg), radius)
         for slot in self._slots:
             self._draw_slot_chrome(slot, s)
-        imgui.set_cursor_pos(iu.v2(0.0, 0.0))
-        imgui.begin_child(self.TAG_PREFIX + "##scroll", iu.v2(w, h),
+        imgui.set_cursor_pos(iu.v2(px, py))
+        imgui.begin_child(self.TAG_PREFIX + "##scroll", iu.v2(pw, ph),
                           imgui.ChildFlags_.none.value,
                           imgui.WindowFlags_.none.value)
         items = self._visible_items(ctx)
-        self._draw_text_lines(ctx, pad, pad_top, w - pad - round(14 * s), items,
+        # 滚动子窗口的局部原点就是覆盖层左上角，正文坐标要扣掉面板偏移。
+        text_local_x = text_x - px
+        self._draw_text_lines(ctx, text_local_x + pad, pad_top,
+                              text_local_x + text_w - pad - round(14 * s),
+                              items,
                               params.get("label_color") or _DEFAULT_LABEL_COLOR,
                               _DEFAULT_TEXT_COLOR,
                               params.get("highlight_color") or _HIGHLIGHT_COLOR,
@@ -99,6 +170,8 @@ class NvlTextComponent(_TextDisplayBase):
         imgui.set_scroll_here_y(1.0)
         imgui.end_child()
         bar_w, _bar_h = self._toolbar_size(s)
-        self._draw_toolbar(ctx, w / 2.0 - bar_w / 2.0, _TOOLBAR_MARGIN * s)
-        self._draw_indicator(ctx, round(w / 2.0 - 80 * s), h - round(44 * s),
-                             "▼ 点击继续 ▼")
+        # 工具条与继续指示都居中在正文区（有侧边代管区时自动避开日志列）。
+        self._draw_toolbar(ctx, text_x + text_w / 2.0 - bar_w / 2.0,
+                           py + _TOOLBAR_MARGIN * s)
+        self._draw_indicator(ctx, text_x + text_w / 2.0 - 80 * s,
+                             py + ph - round(44 * s), "▼ 点击继续 ▼")

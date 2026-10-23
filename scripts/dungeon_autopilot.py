@@ -1480,6 +1480,101 @@ _check_gradient_dock_drawn.__name__ = "gradient-dock-drawn"
 _close_gradient_dock.__name__ = "gradient-dock-close"
 
 
+def _open_nvl_dock(side):
+    """展开过程日志：NVL 留边距后，日志贴覆盖层内边缘、占满高度。"""
+
+    def _open(win):
+        win.set_dungeon_settings({"dock_side": side}, persist=False)
+        text = next(c for c in win._components
+                    if getattr(c, "id", "") == "text_nvl")
+        panel = tuple(text._panel_rect)
+        win._nvl_base_panel = panel
+        vw, vh = win._layout_w, win._layout_h
+        px, py, pw, ph = panel
+        assert px > 1 and py > 1 and px + pw < vw - 1 and py + ph < vh - 1, panel
+        win.toggle_proc_log()
+        log = next(c for c in win._components
+                   if getattr(c, "id", "") == "proc_log")
+        rect = getattr(log, "_slot_rect", None)
+        assert rect, "日志未拿到 NVL 侧边代管区"
+        outer = tuple(getattr(log, "_slot_outer", None) or rect)
+        style = log._slot_style
+        assert style.side == side, style.side
+        # 缺省跟随宿主底纹：日志不自绘面板，两区背景融合。
+        assert style.surface == "host", style.surface
+        assert style.bg is None and style.border is None, (style.bg, style.border)
+        if side == "left":
+            assert abs(outer[0] - px) <= 1, (outer, panel)
+        else:
+            assert abs(outer[0] + outer[2] - (px + pw)) <= 1, (outer, panel)
+        assert abs(outer[1] - py) <= 1 and abs(outer[3] - ph) <= 1, (outer, panel)
+        text_x, text_w = text._layout[-2], text._layout[-1]
+        if side == "left":
+            assert text_x >= outer[0] + outer[2] - 1, (text_x, outer)
+        else:
+            assert text_x + text_w <= outer[0] + 1, (text_x, text_w, outer)
+        assert tuple(text._panel_rect) == win._nvl_base_panel, (
+            win._nvl_base_panel, text._panel_rect)
+
+    _open.__name__ = f"nvl-dock-open-{side}"
+    return _open
+
+
+def _check_nvl_dock_drawn(win):
+    """日志在真实窗口里渲染了几帧：入场进度到位，覆盖层几何不变。"""
+    log = next(c for c in win._components if getattr(c, "id", "") == "proc_log")
+    assert log._open and log._slot_rect, (log._open, log._slot_rect)
+    assert log._enter_progress >= 0.99, log._enter_progress
+    text = next(c for c in win._components
+                if getattr(c, "id", "") == "text_nvl")
+    assert tuple(text._panel_rect) == win._nvl_base_panel, (
+        win._nvl_base_panel, text._panel_rect)
+
+
+def _flip_nvl_dock(from_side, to_side):
+    """日志开着时改窗口视觉设置：NVL 的日志列立即换到覆盖层另一侧。"""
+
+    def _flip(win):
+        log = next(c for c in win._components
+                   if getattr(c, "id", "") == "proc_log")
+        text = next(c for c in win._components
+                    if getattr(c, "id", "") == "text_nvl")
+        before = tuple(log._slot_rect)
+        assert log._slot_style.side == from_side, log._slot_style.side
+        win.set_dungeon_settings({"dock_side": to_side}, persist=False)
+        rect = tuple(log._slot_rect)
+        assert abs(rect[0] - before[0]) > 1, (before, rect)
+        assert log._slot_style.side == to_side, log._slot_style.side
+        px, _py, pw, _ph = text._panel_rect
+        outer = tuple(getattr(log, "_slot_outer", None) or rect)
+        if to_side == "left":
+            assert abs(outer[0] - px) <= 1, (outer, text._panel_rect)
+        else:
+            assert abs(outer[0] + outer[2] - (px + pw)) <= 1, (
+                outer, text._panel_rect)
+        assert tuple(text._panel_rect) == win._nvl_base_panel, (
+            win._nvl_base_panel, text._panel_rect)
+
+    _flip.__name__ = f"nvl-dock-flip-{from_side}-{to_side}"
+    return _flip
+
+
+def _close_nvl_dock(win):
+    """收起日志：代管区释放，覆盖层几何不变。"""
+    text = next(c for c in win._components
+                if getattr(c, "id", "") == "text_nvl")
+    win.toggle_proc_log()
+    log = next(c for c in win._components if getattr(c, "id", "") == "proc_log")
+    assert not log._open, log._open
+    assert not getattr(log, "_slot_rect", None), log._slot_rect
+    assert tuple(text._panel_rect) == win._nvl_base_panel, (
+        win._nvl_base_panel, text._panel_rect)
+
+
+_check_nvl_dock_drawn.__name__ = "nvl-dock-drawn"
+_close_nvl_dock.__name__ = "nvl-dock-close"
+
+
 def _flip_gradient_dock(from_side, to_side):
     """日志开着时改窗口视觉设置：代管区立即换到另一侧，正文几何不变。"""
 
@@ -1593,6 +1688,24 @@ def scene_text_components():
                 "components_params": {},
             })
         check(f"渐变代管区[{side}]：日志升起淡入 / 实时换边 / 收起释放",
+              bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
+              win._check_results)
+
+    # NVL 侧边代管区：覆盖层留百分比边距，日志贴覆盖层内边缘、占满高度；
+    # 缺省不画底纹，日志区与正文区背景融合；改设置立即换边
+    for side, other in (("left", "right"), ("right", "left")):
+        win, result = _make_window(
+            [("click", 2), ("check", _open_nvl_dock(side)), ("sleep", 0.6),
+             ("check", _check_nvl_dock_drawn),
+             ("check", _flip_nvl_dock(side, other)),
+             ("check", _close_nvl_dock), ("close", None)],
+            explore=False,
+            config_overrides={
+                "text_component": "text_nvl",
+                "components": ["proc_log"],
+                "components_params": {"text_nvl": {"margin_percent": 8}},
+            })
+        check(f"NVL 代管区[{side}]：边距 / 贴边融合 / 实时换边 / 收起释放",
               bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
               win._check_results)
 
