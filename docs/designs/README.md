@@ -9,6 +9,7 @@
 | 文档 | 主要读者 | 性质 |
 |---|---|---|
 | [address_system.md](address_system.md) | 资源开发者（地标 / 描述风格作者） | 现状 |
+| [report_selection.md](report_selection.md) | 玩家 + 资源开发者（地标 / 描述风格作者） | 现状 |
 | [character_evolution.md](character_evolution.md) | 核心开发者 + 行为包作者 | 现状 |
 | [world_pack_behaviors.md](world_pack_behaviors.md) | 世界包 / 行为包作者 | 现状 |
 | [minigame.md](minigame.md) | 小游戏作者 | 现状 |
@@ -16,10 +17,12 @@
 ## 推荐阅读顺序
 
 1. 想改**地标 / 地址**：读 [address_system.md](address_system.md)。
-2. 想改**角色数值演化**：先读 [character_evolution.md](character_evolution.md)（全景），
+2. 想理解或调整**报告里地标与描述的选取 / 配对**：读
+   [report_selection.md](report_selection.md)。
+3. 想改**角色数值演化**：先读 [character_evolution.md](character_evolution.md)（全景），
    再读 [world_pack_behaviors.md](world_pack_behaviors.md)（可覆盖的代码入口）。
-3. 想**扩展程序行为**而不改主程序：读 [world_pack_behaviors.md](world_pack_behaviors.md)。
-4. 想做**小游戏**：读 [minigame.md](minigame.md)。
+4. 想**扩展程序行为**而不改主程序：读 [world_pack_behaviors.md](world_pack_behaviors.md)。
+5. 想做**小游戏**：读 [minigame.md](minigame.md)。
 
 ## 本组文档的写法：前半全景，后半开发事项
 
@@ -28,6 +31,7 @@
 | 文档 | 全景（读到哪够） | 开发事项（从哪继续） | 谁能改 |
 |---|---|---|---|
 | [address_system.md](address_system.md) | §操作规程 | 附录 A–C：地址格式与距离规则 | 资源开发者 |
+| [report_selection.md](report_selection.md) | §1–§4：选取链条与车道 | 附录 A–C：代码地图与参数 | 玩家反馈 → 开发者调参 |
 | [character_evolution.md](character_evolution.md) | §1–§2：参与的量与分工 | §3–§6：公式、模拟工具 | 核心开发者 + 行为包作者 |
 | [world_pack_behaviors.md](world_pack_behaviors.md) | §开发流程 | 附录 A–C：注册 API 与示例 | 资源开发者 |
 | [minigame.md](minigame.md) | §1：两种后端 | §2+：包格式与作者 API | 小游戏作者 |
