@@ -52,8 +52,9 @@ from dungeon.validate import (  # noqa: E402
 # 多了才该红。默认值的行为由下面的 normalize / 校验器覆盖。
 _GOLDEN_EMPTY_KEYS = {
     "initial_prompt", "coupling_level", "protagonist_title", "text_component",
-    "entry_action_cost", "ending_policy", "section_prompts", "evolution_attrs",
-    "chapters", "triggers", "voice",
+    "entry_action_cost", "entry_address", "entry_address_max_distance_m",
+    "entry_height_min_m", "entry_height_max_m", "ending_policy",
+    "section_prompts", "evolution_attrs", "chapters", "triggers", "voice",
 }
 _empty = schema.empty_scenario_config()
 check("空方案模板的顶层键集合稳定",

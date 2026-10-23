@@ -20,6 +20,10 @@ from dataclasses import dataclass
 
 from dungeon import schema
 from dungeon import script_text
+from dungeon.admission import (FIELD_ADDRESS, FIELD_HEIGHT_MAX,
+                               FIELD_HEIGHT_MIN, FIELD_MAX_DISTANCE,
+                               coerce_distance, coerce_height)
+from core.address_model import format_addr_verbose, validate_address_text
 from dungeon.actions import (VISUAL_FILTER_KEYS, WINDOW_FX_KEYS,
                              normalize_action_type)
 from dungeon.graph_lint import lint_graph
@@ -266,6 +270,7 @@ def _validate_top_level(config: dict, add) -> None:
     cost = config.get("entry_action_cost", 0)
     if not _is_number(cost) or cost < 0:
         add("warning", "entry_action_cost", "进入所需行动点数必须是非负数字")
+    _validate_admission(config, add)
     if config.get("text_component", schema.DEFAULT_TEXT_COMPONENT) not in schema.TEXT_COMPONENT_IDS:
         add("warning", "text_component",
             f"文本组件「{config.get('text_component')}」无效"
@@ -292,6 +297,52 @@ def _validate_top_level(config: dict, add) -> None:
     if not isinstance(config.get("triggers"), list):
         add("error", "triggers", "触发器列表必须是数组")
     _validate_voice(config.get("voice"), config.get("coupling_level"), add)
+
+
+def _validate_admission(config: dict, add) -> None:
+    """进入准入：地址格式 / 距离上限 / 身高区间。
+
+    运行时把「写坏的地址」当作未配置（否则一个笔误会把所有角色拦下），
+    所以这里必须把作者能改的地方报出来，而不是静默放过。
+    """
+    raw_address = config.get(FIELD_ADDRESS)
+    address = ""
+    if raw_address is not None:
+        if not isinstance(raw_address, str):
+            add("warning", FIELD_ADDRESS, "进入地址必须是字符串")
+        else:
+            address = raw_address.strip()
+            if address:
+                error = validate_address_text(address)
+                if error:
+                    add("warning", FIELD_ADDRESS,
+                        f"进入地址无法解析：{error}（进入时按未配置地址处理）")
+                else:
+                    add("info", FIELD_ADDRESS,
+                        f"进入地址：{format_addr_verbose(address)}")
+
+    raw_distance = config.get(FIELD_MAX_DISTANCE)
+    max_distance = coerce_distance(raw_distance)
+    if raw_distance not in (None, "") and max_distance is None:
+        add("warning", FIELD_MAX_DISTANCE,
+            "地址距离上限必须是非负数字（留空表示不限）")
+    if address and max_distance is None:
+        add("info", FIELD_MAX_DISTANCE,
+            "已配置进入地址但未设距离上限：地址准入不会生效")
+    elif max_distance is not None and not address:
+        add("warning", FIELD_MAX_DISTANCE,
+            "未配置进入地址，地址距离上限不会生效")
+
+    minimum = coerce_height(config.get(FIELD_HEIGHT_MIN))
+    maximum = coerce_height(config.get(FIELD_HEIGHT_MAX))
+    for key, label in ((FIELD_HEIGHT_MIN, "身高下限"),
+                       (FIELD_HEIGHT_MAX, "身高上限")):
+        raw = config.get(key)
+        if raw not in (None, "") and coerce_height(raw) is None:
+            add("warning", key, f"{label}必须是非负数字（留空表示不限）")
+    if minimum is not None and maximum is not None and minimum > maximum:
+        add("warning", FIELD_HEIGHT_MIN,
+            "身高下限大于上限：所有角色都会被拒之门外")
 
 
 def _validate_voice(voice_raw, coupling_level, add) -> None:

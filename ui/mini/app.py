@@ -689,6 +689,18 @@ class MiniApp:
         if payload is None:
             return
 
+        # 进入准入：角色有地址时检查与方案地址的距离，同时检查身高区间。
+        from dungeon.admission import check_entry_requirements
+        admission_error = check_entry_requirements(
+            config,
+            position=(getattr(character, "position", "") if character else ""),
+            height=(getattr(character, "height", None) if character else
+                    payload.get("height")),
+        )
+        if admission_error:
+            self.notify(admission_error, tone="danger", title="无法进入")
+            return
+
         # 进入消耗：探索模式且已加载角色时按副本配置扣除行动点数
         if character is not None:
             try:
@@ -744,6 +756,14 @@ class MiniApp:
 
         payload, config, scenario_id = self.challenge_payload(data)
         if payload is None:
+            return
+
+        # 挑战模式没有角色地址，只按挑战角色身高检查体型准入。
+        from dungeon.admission import check_entry_requirements
+        admission_error = check_entry_requirements(
+            config, position="", height=payload.get("height"))
+        if admission_error:
+            self.notify(admission_error, tone="danger", title="无法进入")
             return
 
         # 挑战包自带地标 / 描述数据，临时接管风格选择，副本窗口返回后还原。

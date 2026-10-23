@@ -556,6 +556,14 @@ class ChallengeModePanel(ctk.CTkFrame):
         scenario_config = scenario_config_of(data)
         scenario_id = scenario_id_of(data)
 
+        # 挑战模式没有角色地址，只按挑战角色身高检查体型准入。
+        from dungeon.admission import check_entry_requirements
+        admission_error = check_entry_requirements(
+            scenario_config, position="", height=height)
+        if admission_error:
+            ui.ctk.dialogs.showerror("无法进入", admission_error)
+            return
+
         gui_settings = self.gui._settings_repo.load()
         ai_config = resolve_ai_config(gui_settings)
 

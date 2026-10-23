@@ -64,6 +64,7 @@
 | `dungeon/scenario_graph.py` | 领域层 | 方案关系图模型：四类关系 + 归属的建图、两条可达性口径、强连通分量（零外部依赖，见 [关系图与图校验](scenario_graph.md)） |
 | `dungeon/graph_lint.py` | 领域层 | 图校验五条规则，产出 `(level, path, message)`；由 `validate.py` 包成诊断 |
 | `dungeon/settings.py` | 领域层 | 副本独占设置的键名与缺省（单一真相源，供 `persistence` 与 `window` 共用） |
+| `dungeon/admission.py` | 领域层 | 进入准入：方案地址距离与身高区间（窗口、挂件、挑战模式共用） |
 | `dungeon/window/component_pack/` | 组件包 | 官方显示组件（文本栏三选一 / 属性条 / 过程日志），常驻 Python 包，惰性导入 |
 | `dungeon/window/host.py` | 端口 | `HostPort`：window 层向宿主索取能力的唯一出口 |
 | `ui/hosting/tk_host.py` | 宿主适配 | `TkHost`——window 层之外唯一的 Tk 细节所在地 |
@@ -82,6 +83,7 @@
 | `check_dungeon_window_contract.py` | 窗口契约守卫：`window/` 内禁 `threading.Timer`、禁无超时 `join`；禁 `dearpygui` 回归（import / `dpg.*`）；`hello_imgui.run` 与给 `app_shall_exit` 赋值只允许出现在 `runner.py`；禁 `sys.exit` / `os._exit` | `python tests/check_dungeon_window_contract.py` |
 | `check_gpu_texture_lifetime.py` | GPU 纹理句柄生命周期（C15）：`hello_imgui.TextureGpu` 是 RAII 句柄，六处容器（背景 / 窗口工具条 / 结局图标 / 视效覆盖层 / 组件工具条 / 小游戏贴图）经 `_drain_gpu_textures()` 一次收干净；`release`（GL 存活时释放）/ `retire`（GL 已失效时保住引用）两条口径；AST 断言 `_finish_session` 的退役兜底排在 `_destroy_components` / `_destroy_overlays` 之前、`_on_before_exit` 真调了 `_release_gpu_textures` | `python tests/check_gpu_texture_lifetime.py` |
 | `check_scenario_schema.py` | schema 单一真相源（空模板键集合、字段漂移）+ 校验器规则 + 演化配置链路 | `python tests/check_scenario_schema.py` |
+| `check_scenario_admission.py` | 进入准入：地址距离 / 身高区间 / 校验器诊断 / 仓库迁移与入口接线 | `python tests/check_scenario_admission.py` |
 | `check_audio_chain.py` | 方案音频端到端链：说话人分音色 / 队列 / 两档效果 / 三条引擎路径 / 降级 / BGM 缺坏文件收尾（假合成器 + 替身后端，不出声不联网） | `python tests/check_audio_chain.py` |
 | `check_splitter.py` | 内置分句器：断点切分、流式幂等、`@说话人@` 标记解析与落盘净化 | `python tests/check_splitter.py` |
 | `check_component_pack.py` | 显示组件包：加载链（常驻包来源 / 必需 id）、文本家族与 schema 一致、组件契约与服务面（替身 ctx 只实现服务面 + AST 扫 `ctx._x` 越界）、元数据 `label`/`description`、`param_specs` 结构与 `min/max` 夹取、tag 前缀冲突、组件包不 `print` 且类都登记进 `REGISTRY`、外部包覆盖、无 GUI 替身 ctx 的 `build/layout/refresh/destroy` 冒烟与帧任务成对清理 | `python tests/check_component_pack.py` |

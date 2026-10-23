@@ -53,6 +53,7 @@ from dungeon.models import DungeonTextType, DungeonState
 from dungeon.prompts import DungeonPromptBuilder
 from dungeon.rules import EvolutionRules
 from dungeon.summary import StorySummarizer
+from dungeon.admission import check_entry_requirements
 from dungeon.validate import format_diagnostics, has_errors, validate_scenario_config
 from core.logic import get_size_category
 from services.state_service import StateService
@@ -510,6 +511,19 @@ class DungeonWindowBase:
             if self.scenario_diagnostics:
                 process_log.log(f"[Scenario] 方案「{scenario_id}」校验提示：\n"
                       + format_diagnostics(self.scenario_diagnostics))
+
+        # 进入准入：地址（有地址时）与身高。放在扣点之前——被拦下不应消耗行动点。
+        character = self.character
+        admission_error = check_entry_requirements(
+            config,
+            position=getattr(character, "position", "") or "",
+            height=(getattr(character, "height", None) if character is not None
+                    else self.height),
+        )
+        if admission_error:
+            self._launch_error = (
+                f"无法进入副本方案「{scenario_id}」：\n\n{admission_error}")
+            return False
 
         # 扣 AP / 状态刷新：探索模式且有角色时按副本配置扣除行动点数
         on_selected = getattr(self, "_on_dungeon_selected", None)
