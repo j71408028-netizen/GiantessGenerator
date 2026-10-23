@@ -35,7 +35,9 @@ from persistence.character_repo import CharacterRepo
 from persistence.settings_repo import SettingsRepo
 from core.address_model import parse_full
 from core.models import CharacterSnapshot, ReportData
+from services.character.spatial import build_spatial_profile
 from services.exploration.address_plan import AddressPlanner
+from services.exploration.arbiter import SelectionArbiter
 from services.exploration.catalog import ExplorationCatalog
 from services.exploration.character import CharacterAssembler
 from services.exploration.report import ReportEngine
@@ -74,7 +76,8 @@ class ExplorationContext:
             world_state=world_state,
         )
         self._addresses = AddressPlanner(self.catalog)
-        self._reports = ReportEngine(self.catalog, self._addresses)
+        self._arbiter = SelectionArbiter(self.catalog, self._addresses)
+        self._reports = ReportEngine(self.catalog, self._addresses, self._arbiter)
         self._character = CharacterAssembler(character_repo, settings)
 
     # ==================== 目录/配置属性透传 ====================
@@ -294,6 +297,9 @@ class ExplorationContext:
                 "landmark_addresses": dict(state.landmark_addresses or {}),
                 "position": state.position or "",
                 "activity_regions": list(state.activity_regions or []),
+                # 角色空间档案（P3a）：到访学习 + TAG 先验 + 活动区域覆盖层，
+                # 供选取仲裁器加权（旧档无历史时全中性）
+                "spatial_profile": build_spatial_profile(state),
             }
             if consume_points:
                 self.character_repo.save(state)

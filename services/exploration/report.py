@@ -16,19 +16,23 @@ import random
 import re
 from typing import List
 
+from core.behavior_runtime import get_runtime
 from core.logic import (
     ALL_PART_NAMES, format_size, get_size_category, replace_quip_tags,
     get_comparisons, compute_casualty, compute_environment_factor,
     select_quip_with_budget, comparison_lines,
 )
+from services.character.spatial import SpatialProfile, priors_for_tags
+from services.exploration.arbiter import hook_supports_lanes
 
 
 class ReportEngine:
     """报告生成引擎（无编排、无持久化）。"""
 
-    def __init__(self, catalog, addresses):
+    def __init__(self, catalog, addresses, arbiter=None):
         self.catalog = catalog
         self.addresses = addresses
+        self.arbiter = arbiter
 
     def generate(self, core_state: dict, selected_quip_styles: List[str]) -> dict:
         settings = self.catalog.settings
@@ -75,17 +79,22 @@ class ReportEngine:
 
         landmark_durability = core_state.get("landmark_durability", {})
         landmark_addresses = dict(core_state.get("landmark_addresses") or {})
-        # 地址规划：锚定、10 倍身高可达筛选、活动区域偏好、无路可走判定
-        plan = self.addresses.plan_address_comparisons(
+        # 选取仲裁：车道窗口 / 近匹配提拔 / 档案权重（硬闸口径同原规划器）
+        profile = core_state.get("spatial_profile") or SpatialProfile(
+            priors=priors_for_tags(selected_tags or []))
+        size_cat = get_size_category(height)
+        arbitration = self.arbiter.arbitrate(
             candidates,
             core_state.get("position") or "",
             height,
-            personality_obj.skip_base_prob,
             landmark_durability,
-            activity_regions=core_state.get("activity_regions"),
+            profile=profile,
+            skip_base_prob=personality_obj.skip_base_prob,
+            coords=(curr_intrusion, curr_destruction),
+            size_cat=size_cat,
         )
-        position_now = plan["position"] or core_state.get("position") or ""
-        stuck = plan["stuck"]
+        position_now = arbitration["position"] or core_state.get("position") or ""
+        stuck = arbitration["stuck"]
         if stuck is not None:
             return {
                 **core_state,
@@ -96,19 +105,20 @@ class ReportEngine:
                 "curr_destruction": curr_destruction,
                 "step_intrusion": curr_step_intrusion,
                 "step_destruction": curr_step_destruction,
-                "size_cat": get_size_category(height),
+                "size_cat": size_cat,
                 "position": position_now,
-                "engaged": plan["engaged"],
+                "engaged": arbitration["engaged"],
                 "stuck": stuck,
+                "coverage": arbitration["coverage"],
             }
-        comparisons = plan["comparisons"]
+        chosen = arbitration["chosen"]
+        comparisons = [r.cand for r in chosen]
 
         quips_working = copy.deepcopy(quips)
         locked_coords = {(4, 4)}
         breakthrough_attempts = 0
         previous_frequency = None   # 上一次匹配地标的风貌（unique/common）；首次匹配视为切换
 
-        size_cat = get_size_category(height)
         enable_confusion = settings.get("enable_confusion", False)
         rate_factor = settings.get("quip_rate_factor", 1.0)
         cumulative_actual = 0.0
@@ -117,15 +127,19 @@ class ReportEngine:
         style_meta_cache = {}
         for st in selected_quip_styles:
             style_meta_cache[st] = quip_repo.load_meta(st)
-        quip_registers = quip_repo.load_style_registers(selected_quip_styles)
-        _quip_pruned_styles = None  # 记录上次剪枝的允许集，避免重复无谓剪枝
+        # 行为包覆盖 select 且不支持 lanes（**kwargs 也算支持）时，退回旧
+        # 全局剪枝兜底——旧包钉住旧语义（F2 缩池缺陷随之保留在该路径）。
+        _compat_prune = not hook_supports_lanes(
+            get_runtime().resolve("logic.select_quip_with_budget"))
+        _pruned_styles = None
 
         quip_results = []
         total_casualties = 0.0
         has_quips = bool(quips)
         landmark_registers = landmark_repo.load_style_registers(selected_styles)
 
-        for idx, comp in enumerate(comparisons):
+        for idx, ruling in enumerate(chosen):
+            comp = ruling.cand
             if curr_intrusion == 0:
                 curr_intrusion = random.randint(1, 4)
             if curr_destruction == 0:
@@ -166,14 +180,17 @@ class ReportEngine:
             actual_step = 0
 
             if has_quips:
-                # 地址规则：描述风格必须覆盖该地标地址（portable 地标不限制）
-                lm_addr = self.addresses.landmark_address(
-                    comp["landmark"], landmark_registers)
-                allowed_styles = self.addresses.quip_allowed_styles(lm_addr, quip_registers)
-                if allowed_styles != _quip_pruned_styles:
-                    self.addresses.prune_quips_by_styles(quips_working, allowed_styles)
-                    _quip_pruned_styles = allowed_styles
+                if _compat_prune:
+                    # 兼容兜底：全局剪枝（allowed=None 表示不限，同旧口径）
+                    allowed_styles = ([s for s, _w in ruling.lanes]
+                                      if ruling.addr else None)
+                    if allowed_styles != _pruned_styles:
+                        self.addresses.prune_quips_by_styles(quips_working,
+                                                             allowed_styles)
+                        _pruned_styles = allowed_styles
 
+                # 兼容模式下不能传 lanes 关键字（旧签名覆盖不接受）
+                _lane_kwargs = {} if _compat_prune else {"lanes": ruling.lanes}
                 quip_text, quip_style, coord, actual_step, cumulative_actual, cumulative_base = select_quip_with_budget(
                     size_cat, curr_intrusion, curr_destruction,
                     quips_working, locked_coords,
@@ -183,11 +200,15 @@ class ReportEngine:
                     skip_base_prob=personality_obj.skip_base_prob,
                     posture_list=comp["posture"],
                     blocked_words=blocked_words,
+                    **_lane_kwargs
                 )
                 if quip_text is None:
                     quip_text = "尺寸通过远程测量取得，尚未收集到事件记录。"
                     quip_style = ""
                 else:
+                    if quip_style:
+                        arbitration["coverage"].setdefault(
+                            "fired_styles", []).append(quip_style)
                     quip_text = quip_text.replace('{name}', name).replace('{nick}', nick)
                     allow_confusion_map = {}
                     if quip_style and quip_style in style_meta_cache:
@@ -264,6 +285,9 @@ class ReportEngine:
             "landmark_durability": landmark_durability,
             "landmark_addresses": landmark_addresses,
             "position": position_now,
-            "engaged": plan["engaged"],
+            "engaged": arbitration["engaged"],
             "stuck": None,
+            # 仲裁可解释性数据（P4a 只落数据不落 UI）
+            "coverage": arbitration["coverage"],
+            "promotions": arbitration["promotions"],
         }

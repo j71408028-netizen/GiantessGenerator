@@ -222,17 +222,8 @@ def get_comparisons(
             if should_skip_by_part_tags(cand["part"], selected_tags, P):
                 skip = True
 
-        if not skip:
-            if "旅行" in selected_tags and "地理测量" in selected_tags:
-                pass
-            else:
-                lm = cand["landmark"]
-                if "旅行" in selected_tags and lm.frequency != "unique":
-                    if random.random() < P:
-                        skip = True
-                if not skip and "地理测量" in selected_tags and lm.frequency == "average":
-                    if random.random() < 0.5 * P:
-                        skip = True
+        # 旅行 / 地理测量的地标风貌偏好已迁入选取仲裁器（anchored_bias，
+        # services/exploration/arbiter.py）：无地址内容时不产生相对倾斜。
 
         if not skip:
             collected.append(cand)
@@ -260,7 +251,18 @@ def select_quip_with_budget(
         skip_base_prob: float = 0.0,
         posture_list: Optional[List[int]] = None,
         blocked_words: Optional[List[str]] = None,
+        lanes: Optional[List] = None,
 ) -> Tuple[Optional[str], Optional[str], Optional[Tuple[int, int]], float, float, float]:
+    """按坐标邻域与步进预算选一条描述。
+
+    lanes：选取仲裁器的资格窗口 ``[(风格, 车道权重)]``（裁定级）。None =
+    不分层（兼容旧调用与不支持该参数的行为包覆盖）。窗口外风格不参与
+    选取；窗口内风格按车道权重获得排序加分（只影响优先序，不排除低权
+    重者）。消费语义不变：选中的条目仍从 ``quips_working`` 中移除。
+    """
+    lane_weights = None
+    if lanes is not None:
+        lane_weights = {s: w for s, w in lanes}
     matrix = quips_working.get(size_cat, {})
     if not matrix:
         return None, None, None, 0.0, cumulative_actual, cumulative_base
@@ -275,6 +277,8 @@ def select_quip_with_budget(
 
     def _is_usable_quip(q) -> bool:
         if not isinstance(q, dict):
+            return False
+        if lane_weights is not None and q.get("style", "") not in lane_weights:
             return False
         return not contains_blocked_word(q.get("text", ""), blocked_words)
 
@@ -364,14 +368,18 @@ def select_quip_with_budget(
     for coord, q, dist in candidates:
         step_diff = abs(q['step'] - target_step)
         step_score = step_diff / 1.0
-        score = dist * 2.0 + step_score
+        # 车道加分：exact > cover > free（仲裁分层），只在同池内调整优先序
+        lane_bonus = lane_weights.get(q.get("style", ""), 0.0) if lane_weights else 0.0
+        score = dist * 2.0 + step_score - lane_bonus
         scored.append((score, coord, q, dist))
 
     scored.sort(key=lambda x: x[0])
     top_n = scored[:5]
 
     min_score = top_n[0][0]
-    weights = [min_score - s[0] + 1e-6 for s in top_n]
+    # 车道加分可能把分数拉成负值，权重一律夹取非负——否则总权重 ≤ 0 时
+    # 会落入 random.choice 分支，加权的确定性失效
+    weights = [max(0.0, min_score - s[0] + 1e-6) for s in top_n]
     total_weight = sum(weights)
     if total_weight <= 0:
         chosen = random.choice(top_n)

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """角色空间档案：TAG 先验 + 到访日志学习的区域权重树（P3a）。
 
-三层结构（优先级从高到低，全景设计见 .workbuddy/address-scheduler-panorama.md §2.1）：
+三层结构（优先级从高到低，消费方见 docs/designs/report_selection.md §3）：
 
 1. 手工覆盖层：``CharacterSnapshot.activity_regions`` 原样透传，命中判定用
    ``covers``（与地址规划器现行口径一致）；

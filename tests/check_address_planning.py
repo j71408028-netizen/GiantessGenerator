@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
 """地址规划自检：地标参与方式、世界集合、可达性与 stuck 选项。
 
+P4a 起选点循环由选取仲裁器（services/exploration/arbiter.py）承担，
+本锁随之重定向；断言口径不变（comparisons 兼容键）。
+旧档回归锚点：中性档案（无到访历史 / 无 TAG / 无活动区域）下，
+纯地址行为与原规划器逐项一致。
+
 用法：``python tests/check_address_planning.py``
 只覆盖纯逻辑，不建窗口、不联网。
 """
@@ -31,7 +36,11 @@ def check(name, ok, extra=""):
 
 from core.address_model import resolve_full_address  # noqa: E402
 from core.models import Landmark  # noqa: E402
+from services.character.spatial import SpatialProfile  # noqa: E402
 from services.exploration.address_plan import AddressPlanner  # noqa: E402
+from services.exploration.arbiter import (  # noqa: E402
+    LANE_COVER, LANE_EXACT, LANE_FREE, LANE_WEIGHTS, SelectionArbiter,
+)
 
 
 class FakeLandmarkRepo:
@@ -62,10 +71,15 @@ class FakeCatalog:
         self.selected_quip_styles = list(quip_styles or [])
         self.landmark_repo = FakeLandmarkRepo(registers or {})
         self.quip_repo = FakeQuipRepo(quip_registers or {})
+        self.quips = {}
         self._landmark_styles = {
             id(lm): style for lm, style in
             ((x, getattr(x, "_style", "")) for x in landmarks) if style
         }
+
+
+def _arbiter(catalog):
+    return SelectionArbiter(catalog, AddressPlanner(catalog))
 
 
 def _cand(lm):
@@ -110,10 +124,9 @@ _far_common = Landmark("FarCommon", 100, "vertical", "common",
                        address="1e5_1e3_1e2@W-A-B-1")
 _far_common._style = "S"
 _catalog = FakeCatalog([_far_common], {"S": _STYLE}, styles=["S"])
-_planner = AddressPlanner(_catalog)
-_plan = _planner.plan_address_comparisons(
+_plan = _arbiter(_catalog).arbitrate(
     [_cand(_far_common)], "1e5_1e3_1e2@W-A-C", height=1.0,
-    skip_base_prob=0.0, durability={})
+    durability={}, skip_base_prob=0.0)
 check("均值地标显式地址参与距离筛选",
       _plan["engaged"] and not _plan["comparisons"]
       and _plan["stuck"]["reason"] == "no_reachable")
@@ -121,10 +134,9 @@ check("均值地标显式地址参与距离筛选",
 _portable_common = Landmark("Portable", 100, "vertical", "common")
 _portable_common._style = "S"
 _catalog = FakeCatalog([_portable_common], {"S": _STYLE}, styles=["S"])
-_planner = AddressPlanner(_catalog)
-_plan = _planner.plan_address_comparisons(
+_plan = _arbiter(_catalog).arbitrate(
     [_cand(_portable_common)], "1e5_1e3_1e2@W-A-C", height=1.0,
-    skip_base_prob=0.0, durability={})
+    durability={}, skip_base_prob=0.0)
 check("均值地标空地址仍 portable",
       not _plan["engaged"] and _plan["comparisons"])
 
@@ -132,10 +144,9 @@ check("均值地标空地址仍 portable",
 _other = Landmark("Other", 100, "vertical", "unique",
                   address="1e3_1e2_1e1@V-X")
 _catalog = FakeCatalog([_other], {}, styles=[])
-_planner = AddressPlanner(_catalog)
-_plan = _planner.plan_address_comparisons(
+_plan = _arbiter(_catalog).arbitrate(
     [_cand(_other)], "1e3_1e2_1e1@W-Y", height=1.0,
-    skip_base_prob=0.0, durability={})
+    durability={}, skip_base_prob=0.0)
 check("未注册风格的地标也能触发世界观不匹配",
       _plan["stuck"]["reason"] == "world_mismatch"
       and "V" in _plan["stuck"]["worlds"])
@@ -144,9 +155,8 @@ check("未注册风格的地标也能触发世界观不匹配",
 _bad_pos = Landmark("U", 100, "vertical", "unique")
 _bad_pos._style = "S"
 _catalog = FakeCatalog([_bad_pos], {"S": _STYLE}, styles=["S"])
-_planner = AddressPlanner(_catalog)
-_plan = _planner.plan_address_comparisons(
-    [_cand(_bad_pos)], "W-A", height=1.0, skip_base_prob=0.0, durability={})
+_plan = _arbiter(_catalog).arbitrate(
+    [_cand(_bad_pos)], "W-A", height=1.0, durability={}, skip_base_prob=0.0)
 check("坏位置给出 invalid_position",
       _plan["stuck"]["reason"] == "invalid_position")
 
@@ -154,9 +164,8 @@ _bad_addr = Landmark("Bad", 100, "vertical", "unique",
                      address="1e3_1e2_1e1@V-X")
 _bad_addr._style = "S"
 _catalog = FakeCatalog([_bad_addr], {"S": _STYLE}, styles=["S"])
-_planner = AddressPlanner(_catalog)
-_plan = _planner.plan_address_comparisons(
-    [_cand(_bad_addr)], "", height=1.0, skip_base_prob=0.0, durability={})
+_plan = _arbiter(_catalog).arbitrate(
+    [_cand(_bad_addr)], "", height=1.0, durability={}, skip_base_prob=0.0)
 check("无法组合的地标地址不再退化为 portable",
       not _plan["engaged"] and not _plan["comparisons"]
       and _plan["stuck"]["reason"] == "invalid_address"
@@ -166,25 +175,35 @@ check("无法组合的地标地址不再退化为 portable",
 _uncertain = Landmark("Uncertain", 100, "vertical", "unique", address="B-1")
 _uncertain._style = "S"
 _catalog = FakeCatalog([_uncertain], {"S": _STYLE}, styles=["S"])
-_planner = AddressPlanner(_catalog)
-_plan = _planner.plan_address_comparisons(
+_plan = _arbiter(_catalog).arbitrate(
     [_cand(_uncertain)], "1e5_1e3_1e2@W-A", height=10.0,
-    skip_base_prob=0.0, durability={})
+    durability={}, skip_base_prob=0.0)
 check("粗定位仍可选但标记 address_uncertain",
       _plan["comparisons"]
       and _plan["comparisons"][0].get("address_uncertain") is True)
 
-# ---------------- 6. 描述风格必须覆盖地标 ----------------
+# ---------------- 6. 描述车道分层（Q4） ----------------
 _qregs = {
+    "exact": "1e5_1e3_1e2@W-A-B-1",
     "coarse": "1e5_1e3_1e2@W-A",
-    "fine": "1e5_1e3_1e2@W-A-B-1",
     "other": "1e5_1e3_1e2@V-A",
     "portable": "",
 }
-_allowed = _planner.quip_allowed_styles("1e5_1e3_1e2@W-A-B", _qregs)
-check("粗风格覆盖细地标，细风格不反向覆盖",
-      "coarse" in _allowed and "portable" in _allowed
-      and "fine" not in _allowed and "other" not in _allowed)
+_catalog = FakeCatalog([], {"S": _STYLE}, quip_registers=_qregs,
+                       styles=["S"], quip_styles=list(_qregs))
+_lanes = dict(_arbiter(_catalog).quip_lanes("1e5_1e3_1e2@W-A-B-1", _qregs))
+check("同址车道为 exact、覆盖为 cover、未注册为 free",
+      _lanes["exact"] == LANE_WEIGHTS[LANE_EXACT]
+      and _lanes["coarse"] == LANE_WEIGHTS[LANE_COVER]
+      and _lanes["portable"] == LANE_WEIGHTS[LANE_FREE])
+check("不覆盖的世界观与反向细地址不入窗口",
+      "other" not in _lanes)
+check("无地址地标全部风格 free",
+      dict(_arbiter(_catalog).quip_lanes("", _qregs))
+      == {s: LANE_WEIGHTS[LANE_FREE] for s in _qregs})
+_chunk_regs = {"ck": "1e5_1e3_1e2@A!W-A"}
+check("私有名冲突的风格不入窗口",
+      _arbiter(_catalog).quip_lanes("1e5_1e3_1e2@B!W-A-B-1", _chunk_regs) == [])
 
 # ---------------- 7. stuck_options 只给出可落地的其它世界观 ----------------
 _u1 = Landmark("U1", 100, "vertical", "unique")
@@ -204,16 +223,15 @@ check("stuck_options 过滤当前世界并保留其它世界",
 _chunked = Landmark("Chunked", 100, "vertical", "unique", address="B-1")
 _chunked._style = "S"
 _catalog = FakeCatalog([_chunked], {"S": "1e5_1e3_1e2@A!W-A"}, styles=["S"])
-_planner = AddressPlanner(_catalog)
-_plan = _planner.plan_address_comparisons(
+_plan = _arbiter(_catalog).arbitrate(
     [_cand(_chunked)], "1e5_1e3_1e2@B!W-A", height=1.0,
-    skip_base_prob=0.0, durability={})
+    durability={}, skip_base_prob=0.0)
 check("私有名冲突的地标视为不可达",
       _plan["engaged"] and not _plan["comparisons"]
       and _plan["stuck"]["reason"] == "no_reachable")
-_plan = _planner.plan_address_comparisons(
+_plan = _arbiter(_catalog).arbitrate(
     [_cand(_chunked)], "1e5_1e3_1e2@A!W-A", height=1.0,
-    skip_base_prob=0.0, durability={})
+    durability={}, skip_base_prob=0.0)
 check("私有名一致时正常可达", bool(_plan["comparisons"]))
 
 # 附近存在私有名冲突的地标时不算“可用”，不应阻断 all_damaged 判定
@@ -226,39 +244,46 @@ _other_chunk._style = "T"
 _catalog = FakeCatalog([_damaged, _shuttle, _other_chunk],
                        {"S": "1e4_1e3_6e1@A!W-A", "T": "1e4_1e3_6e1@B!W-A"},
                        styles=["S", "T"])
-_planner = AddressPlanner(_catalog)
-_plan = _planner.plan_address_comparisons(
+_plan = _arbiter(_catalog).arbitrate(
     [_cand(_damaged), _cand(_shuttle), _cand(_other_chunk)],
-    "1e4_1e3_6e1@A!W-A-B-1", height=10.0, skip_base_prob=0.1,
-    durability={"NearDmg@1e4_1e3_6e1@A!W-A-B-2": 0.3})
+    "1e4_1e3_6e1@A!W-A-B-1", height=10.0,
+    durability={"NearDmg@1e4_1e3_6e1@A!W-A-B-2": 0.3}, skip_base_prob=0.1)
 check("私有名冲突的地标不阻断 all_damaged",
       _plan["comparisons"] and _plan["stuck"]["reason"] == "all_damaged")
 
-# ---------------- 9. 活动区域软偏好 ----------------
+# ---------------- 9. 活动区域软偏好（经空间档案） ----------------
 _lm_east = Landmark("East1", 100, "vertical", "unique", address="B-1")
 _lm_east._style = "S"
 _lm_west = Landmark("West1", 100, "vertical", "unique", address="C-1")
 _lm_west._style = "S"
 _catalog = FakeCatalog([_lm_east, _lm_west], {"S": "1e5_1e3_1e2@W-A"}, styles=["S"])
-_planner = AddressPlanner(_catalog)
+_arb = _arbiter(_catalog)
 _pos_west_hub = "1e5_1e3_1e2@W-A-M"
-_plan = _planner.plan_address_comparisons(
+_plan = _arb.arbitrate(
     [_cand(_lm_east), _cand(_lm_west)], _pos_west_hub, height=1000.0,
-    skip_base_prob=0.0, durability={})
+    durability={}, skip_base_prob=0.0)
 check("无活动区域时保持原顺序",
       [c["landmark"].name for c in _plan["comparisons"]] == ["East1", "West1"])
-_plan = _planner.plan_address_comparisons(
+_plan = _arb.arbitrate(
     [_cand(_lm_east), _cand(_lm_west)], _pos_west_hub, height=1000.0,
-    skip_base_prob=0.0, durability={},
-    activity_regions=["1e5_1e3_1e2@W-A-C"])
-check("活动区域内地标稳定前移",
+    durability={}, skip_base_prob=0.0,
+    profile=SpatialProfile(activity_regions=["1e5_1e3_1e2@W-A-C"]))
+check("活动区域内地标前移（联合分增益）",
       [c["landmark"].name for c in _plan["comparisons"]] == ["West1", "East1"])
-_plan = _planner.plan_address_comparisons(
+_plan = _arb.arbitrate(
     [_cand(_lm_east), _cand(_lm_west)], _pos_west_hub, height=1000.0,
-    skip_base_prob=0.0, durability={},
-    activity_regions=["坏地址", ""])
+    durability={}, skip_base_prob=0.0,
+    profile=SpatialProfile(activity_regions=["坏地址", ""]))
 check("活动区域全部无法解析时不影响顺序",
       [c["landmark"].name for c in _plan["comparisons"]] == ["East1", "West1"])
+
+# ---------------- 10. 仲裁扩展字段 ----------------
+check("仲裁结果携带覆盖报告与提拔记录",
+      isinstance(_plan.get("coverage"), dict)
+      and isinstance(_plan.get("promotions"), list)
+      and isinstance(_plan.get("chosen"), list))
+check("chosen 槽位与 comparisons 对齐",
+      [r.cand for r in _plan["chosen"]] == _plan["comparisons"])
 
 # ---------------- 结论 ----------------
 _log.flush()

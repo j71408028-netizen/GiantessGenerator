@@ -10,7 +10,8 @@
 ===================  ==================================================
 ``catalog``          目录与配置聚合（``ExplorationCatalog``）
 ``report``           报告引擎：产出结构化报告数据（``ReportEngine``）
-``address_plan``     注册地址系统的规划与筛选（``AddressPlanner``）
+``address_plan``     地址解析与 stuck 选项（``AddressPlanner``）
+``arbiter``          选取仲裁器：地标×描述配对资格与近匹配提拔（P4a）
 ``report_text``      报告正文/详情文本拼装（模块级纯函数）
 ``character``        角色装配、尺寸解锁、头像兜底（``CharacterAssembler``）
 ``export``           角色卡导出数据（模块级函数）
