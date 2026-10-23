@@ -258,6 +258,10 @@ class DungeonWindowUI:
         # 背景纹理句柄（hello_imgui.TextureGpu）。持有 Python 引用即持有 GPU
         # 资源；换图时先建新句柄再丢旧句柄，避免中间帧采样到已释放纹理。
         self._bg_texture = None
+        #: 背景的缩小模糊副本（毛玻璃卡片采样用）；同样随背景一起换新。
+        self._bg_blur_texture = None
+        #: 最近一帧背景铺满的矩形 ``(x, y, w, h)``：毛玻璃按它算 UV。
+        self._bg_quad = None
         #: GL/ImGui 上下文是否已就绪（``post_init`` 之后为真）。在此之前创建
         #: GPU 资源会直接 0xC0000005——入口/章节背景可能在 ``_start_session``
         #: 里、窗口创建之前就被设置，因此背景先暂存，首帧再上传（见
@@ -574,6 +578,7 @@ class DungeonWindowUI:
         位置                  说明
         ====================  ==============================================
         ``_bg_texture``       背景铺满图（每换一次图先建后丢，只剩最后一张）
+        ``_bg_blur_texture``  背景缩小模糊副本（毛玻璃卡片采样，随背景一起换）
         ``_toolbar_textures`` 窗口自绘工具条的三张图标
         ``_ending_textures``  入口页结局图标轮播
         ``_window_fx``        反色 / 色差覆盖层
@@ -589,6 +594,10 @@ class DungeonWindowUI:
         texture, self._bg_texture = getattr(self, "_bg_texture", None), None
         if texture is not None:
             handles.append(texture)
+
+        blur, self._bg_blur_texture = getattr(self, "_bg_blur_texture", None), None
+        if blur is not None:
+            handles.append(blur)
 
         toolbar = getattr(self, "_toolbar_textures", None)
         if isinstance(toolbar, dict):
@@ -645,6 +654,7 @@ class DungeonWindowUI:
         draw_list = imgui.get_window_draw_list()
         texture = getattr(self, "_bg_texture", None)
         if texture is None:
+            self._bg_quad = None
             # 首帧或没有背景素材：铺纯色。这里要盖住**整个加宽后的窗口**，
             # 否则振动时屏幕边缘会闪出底色（根窗口是 no_background 的）。
             bleed_x, bleed_y = abs(shake_x), abs(shake_y)
@@ -658,6 +668,9 @@ class DungeonWindowUI:
             # 入口阶段的 Ken Burns 运动接管几何（launcher._kb_tick 提供矩形）
             pmin = iu.v2(rect[0][0] + shake_x, rect[0][1] + shake_y)
             pmax = iu.v2(rect[1][0] + shake_x, rect[1][1] + shake_y)
+        # 毛玻璃组件按这个矩形把模糊副本对位到背景上（含振动 / KB 偏移）。
+        self._bg_quad = (float(pmin.x), float(pmin.y),
+                         float(pmax.x - pmin.x), float(pmax.y - pmin.y))
         ref = imgui.ImTextureRef(int(texture.texture_id()))
         draw_list.add_image(ref, pmin, pmax, iu.v2(0.0, 0.0), iu.v2(1.0, 1.0))
 
@@ -1786,6 +1799,36 @@ class DungeonWindowUI:
     def _finish_bg_fade(self, pil_img, w, h, revision):
         if revision == self._bg_revision and (w, h) == (self._layout_w, self._layout_h):
             self._bg_pil_original = pil_img
+            self._update_bg_blur(pil_img)
+
+    #: 毛玻璃背景副本的缩小倍率：倍数越大越糊，纹理也越小。
+    _BG_BLUR_DIVISOR = 8
+
+    def _update_bg_blur(self, pil_img):
+        """从背景图生成缩小模糊副本（``text_card`` 的毛玻璃底层）。
+
+        只留约 1/8 边长的纹理：卡片按 UV 采样时它天然被放大成柔和的大半径
+        模糊，显存与生成开销都可以忽略。没有缩略图时保持上一张，不闪。
+        """
+        if pil_img is None or not getattr(self, "_gl_ready", False):
+            return
+        try:
+            import numpy as np
+            from PIL import Image, ImageFilter
+
+            small = pil_img.convert("RGBA")
+            width = max(1, small.size[0] // self._BG_BLUR_DIVISOR)
+            height = max(1, small.size[1] // self._BG_BLUR_DIVISOR)
+            small = small.resize((width, height), Image.Resampling.BOX)
+            small = small.filter(ImageFilter.GaussianBlur(1.0))
+            rgba = np.frombuffer(small.tobytes(), dtype=np.uint8).reshape(
+                height, width, 4)
+            texture = hello_imgui.create_texture_gpu_from_rgba_data(rgba)
+        except Exception as exc:
+            process_log.log(f"背景模糊副本生成失败: {exc}")
+            return
+        # 先建后丢：旧副本的句柄在 GL 仍存活时析构，不会留下野引用。
+        self._bg_blur_texture = texture
 
     def _apply_bg_data(self, pil_img, rgba, width, height):
         """把 ``width × height`` 的 RGBA 数据上到背景纹理（仅帧线程）。
@@ -1815,6 +1858,7 @@ class DungeonWindowUI:
         if pil_img is not None:
             # 只有终帧才更新"当前原始图"（淡入淡出的中间帧传 None）
             self._bg_pil_original = pil_img
+            self._update_bg_blur(pil_img)
 
     # ==================== 结局图标（P4 占位） ====================
     def _update_ending_icon(self):

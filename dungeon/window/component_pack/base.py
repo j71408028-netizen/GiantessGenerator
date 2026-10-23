@@ -18,6 +18,8 @@ _OLD_LINE_ALPHA = 0.55
 _DEFAULT_LABEL_COLOR = (255, 170, 210, 255)
 _DEFAULT_TEXT_COLOR = (240, 240, 245, 255)
 _BLINK_SECONDS = 0.65
+#: 正文 / 底部卡片的最大可读宽度（逻辑点）：大屏上不再随窗口无限拉长。
+_MAX_TEXT_WIDTH = 1280
 
 # 文本组件共享的悬浮工具条（自动播放 / 截图 / 日志面板 / 副本设置）。
 _TOOLBAR_ACTIONS = (

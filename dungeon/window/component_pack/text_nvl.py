@@ -7,10 +7,11 @@ from dungeon.window.layout import (SHAPE_BAND, SHAPE_RAIL, SIDE_LEFT,
                                    SIDE_RIGHT, SURFACE_HOST, Slot, SlotStyle)
 
 from .base import (_DEFAULT_LABEL_COLOR, _DEFAULT_TEXT_COLOR,
-                   _HIGHLIGHT_COLOR, _TOOLBAR_MARGIN, _TextDisplayBase)
+                   _HIGHLIGHT_COLOR, _MAX_TEXT_WIDTH, _TOOLBAR_MARGIN,
+                   _TextDisplayBase)
 
-# 侧边代管区（log 组件展开时启用）：贴覆盖层内侧边缘、占满覆盖层高度，
-# 正文让出这一列；两区共用覆盖层底纹（融合），或由日志自绘面板。
+# 侧边代管区（log 组件展开时启用）：贴着正文列的一侧、占满覆盖层高度，
+# 正文列有可读宽度上限；两区共用覆盖层底纹（融合），或由日志自绘面板。
 _DOCK_WIDTH = 320
 _DOCK_GAP = 18
 _DOCK_MIN_TEXT = 240
@@ -75,21 +76,26 @@ class NvlTextComponent(_TextDisplayBase):
         if has_status:
             header_h = max(header_h, pad_top - pad - slot_gap)
 
-        # 侧边代管区：贴覆盖层内侧边缘（不是视口边缘），占满覆盖层高度；
-        # 正文让出同一列，两区背景由同一次底纹绘制提供。
+        # 侧边代管区：占满覆盖层高度，横向贴着正文列；正文列有可读宽度上限，
+        # 有日志时「日志 + 正文」作为一组在覆盖层里居中（大屏上不会分居两端）。
         side = SIDE_RIGHT if ctx.component_dock_side() == SIDE_RIGHT else SIDE_LEFT
         dock_w = round(_DOCK_WIDTH * s)
         dock_gap = round(_DOCK_GAP * s)
-        text_x, text_w = px, pw
+        text_w = float(min(pw, round(_MAX_TEXT_WIDTH * s)))
+        text_x = px + (pw - text_w) / 2.0
         dock_rect = None
         if ("log" in roles and pw >= dock_w + dock_gap
                 + round(_DOCK_MIN_TEXT * s)):
+            text_w = float(min(round(_MAX_TEXT_WIDTH * s),
+                               pw - dock_w - dock_gap))
+            group_x = px + (pw - (dock_w + dock_gap + text_w)) / 2.0
             if side == SIDE_LEFT:
-                dock_rect = (px, py, float(dock_w), ph)
-                text_x = px + dock_w + dock_gap
+                dock_rect = (group_x, py, float(dock_w), ph)
+                text_x = group_x + dock_w + dock_gap
             else:
-                dock_rect = (px + pw - dock_w, py, float(dock_w), ph)
-            text_w = pw - dock_w - dock_gap
+                text_x = group_x
+                dock_rect = (group_x + text_w + dock_gap, py,
+                             float(dock_w), ph)
 
         header_rect = (text_x + pad, py + pad,
                        max(1.0, text_w - 2 * pad), float(header_h))

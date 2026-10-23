@@ -1392,14 +1392,21 @@ def _open_dock_log(side):
         assert getattr(log, "_slot_rect", None), "日志未拿到侧边代管区"
         rect = log._slot_rect
         assert log._slot_style.side == side, log._slot_style.side
-        vw = win._layout_w
+        # 侧边拆成两区：日志占上区（停在卡片顶端之上），下区与卡片同高。
+        assert rect[1] + rect[3] <= text._panel_rect[1] + 0.5, (
+            rect, text._panel_rect)
+        low = next((s for s in text._slots if s.id == "card_side_low"), None)
+        assert low is not None, [(s.id, s.rect) for s in text._slots]
+        assert abs(low.rect[1] - text._panel_rect[1]) < 0.5, (
+            low.rect, text._panel_rect)
+        assert abs(low.rect[3] - text._panel_rect[3]) < 0.5, (
+            low.rect, text._panel_rect)
         if side == "left":
             assert rect[0] + rect[2] <= text._panel_rect[0] + 0.5, (
                 rect, text._panel_rect)
             assert text._panel_rect[0] > win._dock_base_x + 1, (
                 win._dock_base_x, text._panel_rect[0])
         else:
-            assert rect[0] + rect[2] >= vw - 40, (rect, vw)
             assert (text._panel_rect[0] + text._panel_rect[2]
                     <= rect[0] + 0.5), (rect, text._panel_rect)
             assert text._panel_rect[0] < win._dock_base_x - 1, (
@@ -1481,7 +1488,7 @@ _close_gradient_dock.__name__ = "gradient-dock-close"
 
 
 def _open_nvl_dock(side):
-    """展开过程日志：NVL 留边距后，日志贴覆盖层内边缘、占满高度。"""
+    """展开过程日志：NVL 留边距后，日志贴正文列、占满高度。"""
 
     def _open(win):
         win.set_dungeon_settings({"dock_side": side}, persist=False)
@@ -1503,14 +1510,10 @@ def _open_nvl_dock(side):
         # 缺省跟随宿主底纹：日志不自绘面板，两区背景融合。
         assert style.surface == "host", style.surface
         assert style.bg is None and style.border is None, (style.bg, style.border)
-        if side == "left":
-            assert abs(outer[0] - px) <= 1, (outer, panel)
-        else:
-            assert abs(outer[0] + outer[2] - (px + pw)) <= 1, (outer, panel)
         assert abs(outer[1] - py) <= 1 and abs(outer[3] - ph) <= 1, (outer, panel)
         text_x, text_w = text._layout[-2], text._layout[-1]
         if side == "left":
-            assert text_x >= outer[0] + outer[2] - 1, (text_x, outer)
+            assert outer[0] + outer[2] <= text_x + 1, (outer, text_x)
         else:
             assert text_x + text_w <= outer[0] + 1, (text_x, text_w, outer)
         assert tuple(text._panel_rect) == win._nvl_base_panel, (
@@ -1532,7 +1535,7 @@ def _check_nvl_dock_drawn(win):
 
 
 def _flip_nvl_dock(from_side, to_side):
-    """日志开着时改窗口视觉设置：NVL 的日志列立即换到覆盖层另一侧。"""
+    """日志开着时改窗口视觉设置：NVL 的日志列立即换到正文列另一侧。"""
 
     def _flip(win):
         log = next(c for c in win._components
@@ -1545,13 +1548,12 @@ def _flip_nvl_dock(from_side, to_side):
         rect = tuple(log._slot_rect)
         assert abs(rect[0] - before[0]) > 1, (before, rect)
         assert log._slot_style.side == to_side, log._slot_style.side
-        px, _py, pw, _ph = text._panel_rect
+        text_x, text_w = text._layout[-2], text._layout[-1]
         outer = tuple(getattr(log, "_slot_outer", None) or rect)
         if to_side == "left":
-            assert abs(outer[0] - px) <= 1, (outer, text._panel_rect)
+            assert outer[0] + outer[2] <= text_x + 1, (outer, text_x)
         else:
-            assert abs(outer[0] + outer[2] - (px + pw)) <= 1, (
-                outer, text._panel_rect)
+            assert text_x + text_w <= outer[0] + 1, (text_x, text_w, outer)
         assert tuple(text._panel_rect) == win._nvl_base_panel, (
             win._nvl_base_panel, text._panel_rect)
 
@@ -1658,7 +1660,7 @@ def scene_text_components():
           bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
           win._check_results)
 
-    # 侧边代管区：日志展开时从所贴的屏幕边缘滑入，text_card 往另一侧让位
+    # 侧边代管区：日志展开时从所在侧的屏幕边缘滑入，text_card 往另一侧让位
     for side in ("left", "right"):
         win, result = _make_window(
             [("click", 2), ("check", _open_dock_log(side)), ("sleep", 0.5),
@@ -1691,7 +1693,7 @@ def scene_text_components():
               bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
               win._check_results)
 
-    # NVL 侧边代管区：覆盖层留百分比边距，日志贴覆盖层内边缘、占满高度；
+    # NVL 侧边代管区：覆盖层留百分比边距，日志贴正文列、占满高度；
     # 缺省不画底纹，日志区与正文区背景融合；改设置立即换边
     for side, other in (("left", "right"), ("right", "left")):
         win, result = _make_window(
@@ -1705,7 +1707,7 @@ def scene_text_components():
                 "components": ["proc_log"],
                 "components_params": {"text_nvl": {"margin_percent": 8}},
             })
-        check(f"NVL 代管区[{side}]：边距 / 贴边融合 / 实时换边 / 收起释放",
+        check(f"NVL 代管区[{side}]：边距 / 贴正文列融合 / 实时换边 / 收起释放",
               bool(win._check_results) and all(s == "ok" for s, _ in win._check_results),
               win._check_results)
 

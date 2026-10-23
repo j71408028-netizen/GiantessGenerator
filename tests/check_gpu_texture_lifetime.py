@@ -82,6 +82,7 @@ class _Window:
 def _sample_window():
     win = _Window()
     win._bg_texture = "bg"
+    win._bg_blur_texture = "bgblur"
     win._toolbar_textures = {"play": "t1", "shot": "t2", "log": "t3"}
     win._ending_textures = ["e1", "e2"]
     fx = _Fx()
@@ -99,14 +100,17 @@ def _sample_window():
 
 win, fx, stage, comp = _sample_window()
 handles = win._drain_gpu_textures()
-check("窗口句柄清单一次收全（背景1 + 工具条3 + 结局2 + 视效1 + 小游戏1 + 组件1）",
-      sorted(handles) == ["bg", "c1", "e1", "e2", "fx", "m1", "t1", "t2", "t3"],
+check("窗口句柄清单一次收全（背景1 + 模糊副本1 + 工具条3 + 结局2 + 视效1 + 小游戏1 + 组件1）",
+      sorted(handles) == ["bg", "bgblur", "c1", "e1", "e2", "fx", "m1",
+                          "t1", "t2", "t3"],
       str(sorted(handles)))
 check("收完之后容器全空（清空容器 = 丢引用）",
-      win._bg_texture is None and win._toolbar_textures == {}
+      win._bg_texture is None and win._bg_blur_texture is None
+      and win._toolbar_textures == {}
       and win._ending_textures == [] and fx._pixel_texture is None
       and stage._textures == {} and comp._toolbar_textures == {},
-      f"{win._bg_texture} {win._toolbar_textures} {win._ending_textures} "
+      f"{win._bg_texture} {win._bg_blur_texture} {win._toolbar_textures} "
+      f"{win._ending_textures} "
       f"{fx._pixel_texture} {stage._textures} {comp._toolbar_textures}")
 check("再收一次是空表（幂等，兜底钩子重复调用安全）",
       win._drain_gpu_textures() == [])

@@ -13,9 +13,9 @@
 - ``own``：子组件自己画面板，slot 只提供外框。
 
 代管区还可以声明侧向语义（``SlotStyle.side``：``"left"`` / ``"right"``）：
-贴边代管区会从对应屏幕边缘平移进入（时长 ``SlotStyle.enter_seconds``），
-宿主在绘制阶段把自己的让位动画经 ``Slot.offset_x`` 传给子组件，几何分配
-结果本身不变。``SlotStyle.enter_from`` 可覆盖入场方向：默认沿用 ``side``，
+声明了 ``side`` 的代管区会从对应屏幕边缘平移进入（时长
+``SlotStyle.enter_seconds``），宿主在绘制阶段把自己的让位动画经
+``Slot.offset_x`` 传给子组件，几何分配结果本身不变。``SlotStyle.enter_from`` 可覆盖入场方向：默认沿用 ``side``，
 设为 ``"bottom"`` 时子组件从代管区下方升起（``enter_rise``），配合
 ``enter_fade`` 做淡入。``ease_out_cubic`` / ``enter_offset`` / ``enter_rise`` /
 ``enter_alpha`` 是各组共用的纯数学实现。
@@ -29,7 +29,8 @@ SHAPE_BAND = "band"
 SHAPE_RAIL = "rail"
 SHAPE_TILE = "tile"
 
-# 侧向语义：贴视口哪一侧。空串表示不贴边（例如卡片内部的状态带）。
+# 侧向语义：代管区朝哪一侧（入场来向 / 对齐侧）。空串表示没有侧向语义
+# （例如卡片内部的状态带）。
 SIDE_LEFT = "left"
 SIDE_RIGHT = "right"
 
@@ -58,7 +59,8 @@ class SlotStyle:
     label_color: tuple | None = None
     text_color: tuple | None = None
     highlight_color: tuple | None = None
-    #: 侧向语义：``"left"`` / ``"right"`` 表示贴视口哪一侧；空串 = 不贴边
+    #: 侧向语义：``"left"`` / ``"right"`` 表示朝哪一侧（入场来向 / 对齐侧）；
+    #: 空串 = 没有侧向语义
     side: str = ""
     #: 入场方向覆盖：空串沿用 ``side``；``"bottom"`` 从代管区下方升起
     enter_from: str = ""

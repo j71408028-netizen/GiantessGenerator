@@ -12,9 +12,9 @@
 
 组件的根对象 ctx 即窗口实例；组件**只允许**经本 mixin 提供的组件服务面访问窗口
 （`component_viewport / component_top_inset / component_dock_side /
-session_waiting_for_input / component_autoplay_on / text_font_tag / bold_font_tag /
-schedule / schedule_every / cancel_task / component`，另有覆盖层与工具服务的
-`toggle_overlay` 等）。
+component_backdrop_blur / session_waiting_for_input / component_autoplay_on /
+text_font_tag / bold_font_tag / schedule / schedule_every / cancel_task /
+component`，另有覆盖层与工具服务的 `toggle_overlay` 等）。
 组件不得再读窗口私有属性（`_dpi_scale` / `_layout_w` / `_frame` / `_autoplay`…）；
 契约由 ``tests/check_component_pack.py`` 的替身 ctx 强制——替身只实现服务面，
 组件一旦伸手摸私有一律在守卫里报错。
@@ -223,6 +223,19 @@ class ComponentHandler:
         """
         settings = getattr(self, "dungeon_settings", None) or {}
         return dungeon_settings.normalize_dock_side(settings.get("dock_side"))
+
+    def component_backdrop_blur(self):
+        """背景的缩小模糊副本（毛玻璃卡片采样用）：``(texture, (x, y, w, h))``。
+
+        ``texture`` 是窗口持有的 ``TextureGpu``（生命周期归窗口，组件只读
+        ``texture_id()``）；矩形是最近一帧背景铺满的位置（含振动 / 入口运动），
+        组件按它把模糊副本的 UV 对位到背景上。没有背景图时返回 ``None``。
+        """
+        texture = getattr(self, "_bg_blur_texture", None)
+        quad = getattr(self, "_bg_quad", None)
+        if texture is None or not quad:
+            return None
+        return texture, tuple(quad)
 
     def component_top_inset(self):
         """返回其它组件已占用的顶部高度（全屏类组件据此让位）。

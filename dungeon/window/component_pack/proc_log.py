@@ -33,8 +33,8 @@ class ProcLogComponent(DungeonComponent):
 
     只有面板展开时才声明 ``log`` 角色——收起状态不占用代管区，宿主也就不会
     平白偏移。展开后的呈现由 ``SlotStyle`` 的入场契约决定：卡片的 ``card_side``
-    从所贴的屏幕边缘平移进入，渐变栏的 ``scrim_side`` 从代管区下方升起并淡入，
-    NVL 的 ``nvl_side`` 贴覆盖层内侧边缘水平进入。底纹缺省跟随宿主
+    从所在侧的屏幕边缘平移进入，渐变栏的 ``scrim_side`` 从代管区下方升起并淡入，
+    NVL 的 ``nvl_side`` 贴着正文列水平进入。底纹缺省跟随宿主
     （``draw_own_surface`` 可改成自绘面板）：宿主不画底纹时日志区与正文区
     背景完全融合。
     """
@@ -43,7 +43,7 @@ class ProcLogComponent(DungeonComponent):
     label = "过程日志"
     description = ("显示运行消息（F12 切换展开/收起，默认收起）；展开时优先停靠"
                    "文本组件的侧边代管区（卡片侧边滑入、渐变栏侧边升起淡入、"
-                   "NVL 覆盖层内侧边缘），没有代管区时回退右上角。")
+                   "NVL 正文列侧边），没有代管区时回退右上角。")
     TAG_PREFIX = "proc_log"
     shapes = (SHAPE_RAIL,)
     param_specs = [

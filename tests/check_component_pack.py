@@ -281,7 +281,7 @@ def check_side_dock(registry):
     """text_card 侧边代管区：左右语义、卡片让位方向与日志分配矩形。"""
     from dungeon.window.layout import (SIDE_LEFT, SIDE_RIGHT, SHAPE_RAIL,
                                        SlotAssignment, enter_alpha,
-                                       enter_offset, enter_rise)
+                                       enter_offset, enter_rise, select_slot)
 
     def run_case(side):
         ctx = _FakeCtx()
@@ -299,27 +299,46 @@ def check_side_dock(registry):
         log.build(ctx)
         base_x = text._panel_rect[0]
         check(f"侧边代管区[{side}]：日志收起时不声明",
-              not any(s.id == "card_side" for s in text.slots(ctx)),
+              not any(s.id in ("card_side", "card_side_low")
+                      for s in text.slots(ctx)),
               [(s.id, s.shape) for s in text.slots(ctx)])
 
         log.toggle(ctx)
         text.layout(ctx)
         slots = list(text.slots(ctx))
-        rail = next((s for s in slots
-                     if s.shape == SHAPE_RAIL and "log" in s.roles), None)
+        rails = [s for s in slots if s.shape == SHAPE_RAIL]
+        rail = next((s for s in rails if "log" in s.roles), None)
         check(f"侧边代管区[{side}]：日志展开时声明 log rail", rail is not None,
               [(s.id, s.shape, s.roles) for s in slots])
+        low = next((s for s in rails if s.id == "card_side_low"), None)
+        check(f"侧边代管区[{side}]：拆成上区 + 与卡片对齐的下区",
+              len(rails) == 2 and low is not None and rail is not None
+              and rail.rect[1] + rail.rect[3] <= low.rect[1] - 0.5,
+              [(s.id, s.rect) for s in rails])
+        if low is not None:
+            panel = text._panel_rect
+            check(f"侧边代管区[{side}]：下区与卡片同高、底端对齐",
+                  abs(low.rect[1] - panel[1]) < 0.5
+                  and abs(low.rect[3] - panel[3]) < 0.5,
+                  (low.rect, panel))
+            if rail is not None:
+                check(f"侧边代管区[{side}]：上区高于卡片且只接 log，下区接纳其它贴边组件",
+                      rail.rect[3] >= panel[3] - 0.5
+                      and select_slot(slots, ("portrait",), (SHAPE_RAIL,)) is low,
+                      (rail.rect, low.rect, panel))
         if rail is not None:
             vw = ctx.viewport[1]
             inside = (rail.rect[0] >= 0 and rail.rect[1] >= 0
                       and rail.rect[0] + rail.rect[2] <= vw + 0.5)
             if side == SIDE_LEFT:
-                edge_ok = rail.rect[0] <= 40
+                adjacent = (rail.rect[0] + rail.rect[2]
+                            <= text._panel_rect[0] + 0.5)
             else:
-                edge_ok = rail.rect[0] + rail.rect[2] >= vw - 40
-            check(f"侧边代管区[{side}]：贴对应屏幕边缘且在视口内",
-                  inside and edge_ok and rail.style.side == side,
-                  (rail.rect, rail.style.side))
+                adjacent = (text._panel_rect[0] + text._panel_rect[2]
+                            <= rail.rect[0] + 0.5)
+            check(f"侧边代管区[{side}]：紧贴卡片一侧且在视口内",
+                  inside and adjacent and rail.style.side == side,
+                  (rail.rect, text._panel_rect))
             check(f"侧边代管区[{side}]：入场是水平推入、不淡入",
                   enter_offset(rail.style, rail.rect, vw, 0.0) != 0
                   and enter_rise(rail.style, rail.rect, ctx.viewport[2], 0.0) == 0
@@ -357,9 +376,61 @@ def check_side_dock(registry):
     for side in (SIDE_LEFT, SIDE_RIGHT):
         run_case(side)
 
+    # 大屏：卡片宽度有可读上限，卡片 + 代管区整体居中，两者仍相邻。
+    ctx = _FakeCtx()
+    ctx.viewport = (1.0, 3200, 1600)
+    ctx.dock_side = SIDE_LEFT
+    text = registry.instantiate(ctx, "text_card",
+                                config={"components_params": {}})
+    log = registry.instantiate(ctx, "proc_log", config={"components_params": {}})
+    ctx._components.extend([text, log])
+    text.build(ctx)
+    log.build(ctx)
+    log.toggle(ctx)
+    text.layout(ctx)
+    rail = next((s for s in text.slots(ctx) if "log" in s.roles), None)
+    panel = text._panel_rect
+    vw = ctx.viewport[1]
+    if rail is None:
+        check("侧边代管区：大屏上仍声明上区", False, panel)
+    else:
+        group_left = min(panel[0], rail.rect[0])
+        group_right = max(panel[0] + panel[2], rail.rect[0] + rail.rect[2])
+        check("侧边代管区：大屏上卡片宽度不超过可读上限",
+              panel[2] < round(vw * 0.7) - 1, (panel, vw))
+        check("侧边代管区：大屏上卡片与代管区整体居中且相邻",
+              abs((group_left + group_right) / 2.0 - vw / 2.0) < 2
+              and rail.rect[0] + rail.rect[2] <= panel[0] + 0.5,
+              (panel, rail.rect, vw))
+    for comp in (log, text):
+        comp.destroy(ctx)
+        ctx._components.remove(comp)
+
+    # 视口太矮：上区放不下时整列都不声明，日志回退自己的右上角面板。
+    ctx = _FakeCtx()
+    ctx.viewport = (1.0, 1280, 320)
+    text = registry.instantiate(ctx, "text_card",
+                                config={"components_params": {}})
+    log = registry.instantiate(ctx, "proc_log", config={"components_params": {}})
+    ctx._components.extend([text, log])
+    text.build(ctx)
+    log.build(ctx)
+    log.toggle(ctx)
+    text.layout(ctx)
+    log.layout(ctx)
+    check("侧边代管区：视口太矮时不声明上区 / 下区，日志回退面板",
+          not any(s.shape == SHAPE_RAIL for s in text.slots(ctx))
+          and log._slot_rect is None
+          and log._panel_rect[2] > 0 and log._panel_rect[3] > 0,
+          ([(s.id, s.rect) for s in text.slots(ctx)], log._slot_rect,
+           log._panel_rect))
+    for comp in (log, text):
+        comp.destroy(ctx)
+        ctx._components.remove(comp)
+
 
 def check_gradient_dock(registry):
-    """text 渐变栏的侧边代管区：贴视口一侧、停在正文上方，组件从下方升起淡入。"""
+    """text 渐变栏的侧边代管区：对齐正文列一侧、停在正文上方，组件从下方升起淡入。"""
     from dungeon.window.layout import (ENTER_FROM_BOTTOM, SIDE_LEFT, SIDE_RIGHT,
                                        SHAPE_RAIL, SlotAssignment, enter_alpha,
                                        enter_offset, enter_rise)
@@ -396,12 +467,16 @@ def check_gradient_dock(registry):
         inside = (rail.rect[0] >= 0 and rail.rect[1] >= 0
                   and rail.rect[0] + rail.rect[2] <= vw + 0.5
                   and rail.rect[1] + rail.rect[3] <= vh + 0.5)
-        edge_ok = (rail.rect[0] <= 40 if side == SIDE_LEFT
-                   else rail.rect[0] + rail.rect[2] >= vw - 40)
-        # 渐变正文是全宽的，侧边代管区改为向上占用正文上方空间，不做横向让位。
+        panel_x, panel_w = text._panel_rect[0], text._panel_rect[2]
+        if side == SIDE_LEFT:
+            aligned = abs(rail.rect[0] - panel_x) < 0.5
+        else:
+            aligned = abs(rail.rect[0] + rail.rect[2]
+                          - (panel_x + panel_w)) < 0.5
+        # 渐变栏不做横向让位，侧边代管区向上占用正文上方空间。
         above_text = rail.rect[1] + rail.rect[3] <= text._panel_rect[1] + 0.5
-        check(f"渐变代管区[{side}]：贴对应边缘且停在正文上方",
-              inside and edge_ok and above_text and rail.style.side == side,
+        check(f"渐变代管区[{side}]：与正文列同侧对齐且停在正文上方",
+              inside and aligned and above_text and rail.style.side == side,
               (rail.rect, text._panel_rect, rail.style.side))
         check(f"渐变代管区[{side}]：正文不做横向让位",
               tuple(text._panel_rect) == base_panel,
@@ -435,6 +510,35 @@ def check_gradient_dock(registry):
     for side in (SIDE_LEFT, SIDE_RIGHT):
         run_case(side)
 
+    # 大屏：正文列有可读宽度上限并居中，代管区对齐正文列一侧，不贴窗口角落。
+    ctx = _FakeCtx()
+    ctx.viewport = (1.0, 3200, 1600)
+    ctx.dock_side = SIDE_RIGHT
+    text = registry.instantiate(ctx, "text", config={"components_params": {}})
+    log = registry.instantiate(ctx, "proc_log", config={"components_params": {}})
+    ctx._components.extend([text, log])
+    text.build(ctx)
+    log.build(ctx)
+    log.toggle(ctx)
+    text.layout(ctx)
+    rail = next((s for s in text.slots(ctx) if "log" in s.roles), None)
+    panel = text._panel_rect
+    vw = ctx.viewport[1]
+    if rail is None:
+        check("渐变代管区：大屏上仍声明", False, panel)
+    else:
+        check("渐变代管区：大屏上正文列居中且有可读宽度上限",
+              panel[2] < vw - 2 * 40
+              and abs(panel[0] + panel[2] / 2.0 - vw / 2.0) < 2,
+              (panel, vw))
+        check("渐变代管区：大屏上对齐正文列一侧（不贴窗口角落）",
+              abs(rail.rect[0] + rail.rect[2]
+                  - (panel[0] + panel[2])) < 0.5,
+              (rail.rect, panel))
+    for comp in (log, text):
+        comp.destroy(ctx)
+        ctx._components.remove(comp)
+
     # 渐变区占满视口（height_percent=80）时放不下侧边代管区，日志回退右上角面板。
     ctx = _FakeCtx()
     text = registry.instantiate(
@@ -459,7 +563,8 @@ def check_gradient_dock(registry):
 
 
 def check_nvl_dock(registry):
-    """NVL 覆盖层：百分比边距、侧边代管区贴组件边、缺省与正文背景融合。"""
+    """NVL 覆盖层：百分比边距、正文列可读宽度、侧边代管区贴正文列、背景融合。"""
+    from dungeon.window.component_pack.text_nvl import _DOCK_GAP
     from dungeon.window.layout import (SHAPE_BAND, SHAPE_RAIL, SIDE_LEFT,
                                        SIDE_RIGHT, SURFACE_HOST, SURFACE_OWN,
                                        SlotAssignment)
@@ -533,12 +638,16 @@ def check_nvl_dock(registry):
                 comp.destroy(ctx)
                 ctx._components.remove(comp)
             return
-        px, py, pw, ph = text._panel_rect
+        _px, py, _pw, ph = text._panel_rect
+        text_x, text_w = text._layout[-2], text._layout[-1]
+        if side == SIDE_LEFT:
+            gap = text_x - (rail.rect[0] + rail.rect[2])
+        else:
+            gap = rail.rect[0] - (text_x + text_w)
         flush = (abs(rail.rect[1] - py) < 0.5
                  and abs(rail.rect[3] - ph) < 0.5
-                 and (abs(rail.rect[0] - px) < 0.5 if side == SIDE_LEFT
-                      else abs(rail.rect[0] + rail.rect[2] - (px + pw)) < 0.5))
-        check(f"NVL 代管区[{side}]：贴覆盖层内侧边缘且占满高度",
+                 and abs(gap - _DOCK_GAP * ctx.viewport[0]) < 0.5)
+        check(f"NVL 代管区[{side}]：紧贴正文列且占满高度",
               flush and rail.style.side == side, (rail.rect, text._panel_rect))
         merged = (rail.style.surface == SURFACE_HOST
                   and rail.style.bg is None and rail.style.border is None
@@ -546,7 +655,6 @@ def check_nvl_dock(registry):
         check(f"NVL 代管区[{side}]：缺省不画底纹（与正文背景融合）", merged,
               (rail.style.surface, rail.style.bg, rail.style.border,
                rail.style.separator))
-        text_x, text_w = text._layout[-2], text._layout[-1]
         if side == SIDE_LEFT:
             disjoint = text_x >= rail.rect[0] + rail.rect[2] - 0.5
         else:
@@ -590,6 +698,37 @@ def check_nvl_dock(registry):
 
     for side in (SIDE_LEFT, SIDE_RIGHT):
         run_case(side)
+
+    # 大屏：正文列有可读上限，日志 + 正文整体居中，两者仍相邻。
+    ctx = _FakeCtx()
+    ctx.viewport = (1.0, 3200, 1600)
+    ctx.dock_side = SIDE_RIGHT
+    text = make_nvl(ctx)
+    log = registry.instantiate(ctx, "proc_log",
+                               config={"components_params": {}})
+    ctx._components.extend([text, log])
+    text.build(ctx)
+    log.build(ctx)
+    log.toggle(ctx)
+    text.layout(ctx)
+    rail = next((s for s in text.slots(ctx) if s.id == "nvl_side"), None)
+    px, _py, pw, _ph = text._panel_rect
+    text_x, text_w = text._layout[-2], text._layout[-1]
+    if rail is None:
+        check("NVL 代管区：大屏上仍声明", False, text._panel_rect)
+    else:
+        group_left = min(rail.rect[0], text_x)
+        group_right = max(rail.rect[0] + rail.rect[2], text_x + text_w)
+        check("NVL 代管区：大屏上正文列不超过可读宽度",
+              text_w < pw, (text_x, text_w, pw))
+        check("NVL 代管区：大屏上日志与正文相邻且整体居中",
+              text_x + text_w <= rail.rect[0] + 0.5
+              and abs((group_left + group_right) / 2.0
+                      - (px + pw / 2.0)) < 2,
+              (rail.rect, text_x, text_w, text._panel_rect))
+    for comp in (log, text):
+        comp.destroy(ctx)
+        ctx._components.remove(comp)
 
     # 覆盖层太窄（边距挤掉宽度）时放不下日志列，回退右上角面板。
     ctx = _FakeCtx()
@@ -706,6 +845,10 @@ class _FakeCtx:
 
     def component_dock_side(self):
         return self.dock_side
+
+    def component_backdrop_blur(self):
+        # 离屏自检没有 GL / 背景纹理：毛玻璃走"无副本"回退路径。
+        return None
 
     def schedule(self, fn, *args):
         return fn(*args)

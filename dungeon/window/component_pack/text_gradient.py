@@ -8,11 +8,12 @@ from dungeon.window.layout import (ENTER_FROM_BOTTOM, SHAPE_BAND, SHAPE_RAIL,
                                    SURFACE_OWN, Slot, SlotStyle)
 
 from .base import (_DEFAULT_LABEL_COLOR, _DEFAULT_TEXT_COLOR,
-                   _HIGHLIGHT_COLOR, _TOOLBAR_MARGIN, _TextDisplayBase)
+                   _HIGHLIGHT_COLOR, _MAX_TEXT_WIDTH, _TOOLBAR_MARGIN,
+                   _TextDisplayBase)
 
 
 _GRAD_DEFAULT_COLOR = (10, 12, 22, 128)
-# 侧边代管区（log 组件展开时启用）：贴视口一侧，停在渐变区上方。
+# 侧边代管区（log 组件展开时启用）：对齐正文列的一侧，停在渐变区上方。
 _DOCK_MARGIN = 20
 _DOCK_WIDTH = 320
 _DOCK_MIN_HEIGHT = 300
@@ -56,10 +57,12 @@ class TextComponent(_TextDisplayBase):
         percent = min(80, max(15, percent))
         grad_h = max(round(h * 0.15), round(h * percent / 100.0))
         pad = round(15 * s)
-        text_w = max(round(300 * s), w - 2 * round(40 * s))
+        # 正文列有可读宽度上限，大屏上居中而不是铺满整条窗口。
+        text_w = min(max(round(300 * s), w - 2 * round(40 * s)),
+                     round(_MAX_TEXT_WIDTH * s))
         text_top = h - grad_h + round(grad_h * 0.25)
         text_h = max(round(80 * s), h - text_top - round(20 * s))
-        box_x = round(40 * s)
+        box_x = round((w - text_w) / 2.0)
         box_y = max(0.0, h - round(20 * s) - text_h)
         # 正文上方的状态带：无底纹（bare），只借用渐变衬底上的文字颜色。
         roles = tuple(ctx.component_roles() or ())
@@ -70,16 +73,17 @@ class TextComponent(_TextDisplayBase):
         # 停靠侧是窗口视觉设置（玩家实时改），不是方案参数。
         side = SIDE_RIGHT if ctx.component_dock_side() == SIDE_RIGHT else SIDE_LEFT
         dock_rect = self._dock_rect(s, w, h, grad_h, slot_rect, has_status,
-                                    "log" in roles, side)
+                                    "log" in roles, side, box_x, text_w)
         return (s, w, h, grad_h, box_x, box_y, text_w, text_h, pad,
                 slot_rect, dock_rect, side)
 
     @staticmethod
-    def _dock_rect(s, w, h, grad_h, slot_rect, has_status, has_log, side):
-        """侧边代管区矩形：贴视口一侧，底端停在渐变区（含状态带）上方。
+    def _dock_rect(s, w, h, grad_h, slot_rect, has_status, has_log, side,
+                   box_x, text_w):
+        """侧边代管区矩形：对齐正文列一侧，底端停在渐变区（含状态带）上方。
 
-        渐变正文是全宽的，侧边代管区没有「卡片让位」那种横向余量，所以改为
-        向上占用正文上方空间；放不下高度就返回 ``None``，日志回退右上角面板。
+        渐变正文没有「卡片让位」那种横向余量，代管区改为向上占用正文上方
+        空间，横向与正文列同侧对齐；放不下就返回 ``None``，日志回退右上角面板。
         """
         if not has_log:
             return None
@@ -89,10 +93,14 @@ class TextComponent(_TextDisplayBase):
         if has_status:
             top_limit = min(top_limit, float(slot_rect[1]) - round(_DOCK_GAP * s))
         available = top_limit - margin
-        if w < dock_w + 2 * margin or available < round(_DOCK_MIN_USABLE * s):
+        if side == SIDE_LEFT:
+            x = float(box_x)
+        else:
+            x = float(box_x + text_w - dock_w)
+        if (text_w < dock_w or x < 0 or x + dock_w > w + 0.5
+                or available < round(_DOCK_MIN_USABLE * s)):
             return None
         dock_h = min(round(_DOCK_MIN_HEIGHT * s), available)
-        x = float(margin) if side == SIDE_LEFT else float(w - margin - dock_w)
         return (x, float(top_limit - dock_h), float(dock_w), float(dock_h))
 
     def layout(self, ctx):
@@ -152,7 +160,7 @@ class TextComponent(_TextDisplayBase):
                               _DEFAULT_TEXT_COLOR,
                               params.get("highlight_color") or _HIGHLIGHT_COLOR)
         bar_w, bar_h = self._toolbar_size(s)
-        self._draw_toolbar(ctx, w - bar_w - round(_TOOLBAR_MARGIN * s),
+        self._draw_toolbar(ctx, bx + tw - bar_w - round(_TOOLBAR_MARGIN * s),
                            h - bar_h - round(10 * s))
         self._draw_indicator(ctx,
                              bx + tw - round(46 * s) - bar_w - round(16 * s),
