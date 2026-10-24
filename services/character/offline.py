@@ -19,10 +19,9 @@ import random
 from typing import Optional
 
 from core.models import CharacterSnapshot, OfflineDetail
-from core.address_model import cell_width_m, relate
 from core.logic import compute_casualty
 from services.character.rhythm import RhythmService
-from services.character.spatial import HALF_LIFE_DAYS
+from services.character.spatial import EnvironmentProfile
 
 
 # 离线恢复参数
@@ -32,38 +31,8 @@ _OFFLINE_STEP_PER_HOUR = 0.01    # 白昼闲逛基础步进率（步/小时）
 _OFFLINE_EXIT_AMP = 0.05         # 退出后残留活动的初始幅值（步/小时）
 _OFFLINE_EXIT_TAU = 0.9          # 退出后残留活动的快速衰减时间常数（小时）
 
-# 环境因子统一口径：两信源按可信度分治
-#   env = trust × 沉淀聚合(展开半径) + (1 - trust) × [沉淀聚合(所在处) ↔ 默认值]
-#   trust = 几何可信度（位置最小单元边长）；聚合内部按样本量向默认值收缩
-#   （证据越少/越旧越贴近默认值），邻域参与度随步进增长
-_MIN_ENV, _MAX_ENV = 0.1, 1.5                    # 统一值域（与明细夹取一致）
-_EVIDENCE_SMOOTHING = 1.0                        # 证据收缩伪计数：≈1 行近期证据达半信
-_MAX_EVIDENCE_ROWS = 500                         # 参与聚合的最近沉淀行数上限
-_REACH_CELL_WIDTHS = 10.0                        # 邻域半径上限 = 10×身高（reach 口径）
-_STEP_SATURATION = 1.5                           # 步进达到此值时步进调制饱和（p=1）
-_SPREAD_STEP_MAX = 3.0                           # 饱和时邻域半径 = 当前单元边长×此值
-_SWEEP_CAP = 0.5                                 # 饱和时不可信侧默认值的最大权重
-
-
-def _default_env_by_precision(position: str) -> float:
-    """按位置精确度给环境因子默认值：越细 → 越可能有人烟，默认值越高。
-
-    有细分申领 ≈ 有人烟，但三级也可以是无人区，故先验差值压窄
-    （0.32~0.60），把分辨力留给文本环境沉淀。无法解析/纯世界观取下限。
-    """
-    width = cell_width_m(position)
-    if width <= 0:
-        return 0.32
-    unit = max(0.0, min(1.0, (4.7 - math.log10(width)) / 3.0))
-    return 0.32 + 0.28 * unit
-
-
-def _geo_trust(position: str) -> float:
-    """几何可信度：位置最小单元边长越细，地址值越可信（0.3~1.0）。"""
-    width = cell_width_m(position)
-    if width <= 0:
-        return 0.3
-    return max(0.3, min(1.0, 1.2 - 0.18 * math.log10(width)))
+# 环境因子统一口径与聚合实现见 services/character/spatial.py::EnvironmentProfile
+# （环境轴唯一事实来源）：离线按地址聚合沉淀，无沉淀回落精确度默认值。
 
 
 class OfflineService:
@@ -72,7 +41,7 @@ class OfflineService:
     实例形态：时钟/噪声参数（随机种子、窗口、步进率等）在实例上可配置，
     便于测试；``recover_evolution`` 的静态入口由 :class:`StateService`
     委托进来，行为包覆盖键保持不变。环境因子取角色演化表中的在线沉淀
-    （按地址聚合，见 ``_environment_factor``），无沉淀时按位置精确度兜底。
+    （``EnvironmentProfile`` 按地址聚合），无沉淀时按位置精确度兜底。
     """
 
     def __init__(self, window_hours: float = _OFFLINE_WINDOW_HOURS,
@@ -140,95 +109,20 @@ class OfflineService:
             cursor = edge
         return bins
 
-    def _evidence_samples(self, state) -> list:
-        """从演化表收集环境沉淀样本 [(距离下界, env, 时间权重)]。
-
-        带 position 且带 env_factor 的行是到访环境证据（在线报告收尾写入）；
-        距离取样本地址对当前位置 ``relate`` 距离区间的下界（最乐观可达），
-        世界观不一致 / 无法解析的行跳过。时间权重与空间档案同用 EWMA
-        半衰期（HALF_LIFE_DAYS），老到访的证据逐渐淡出。
-        """
-        position = (getattr(state, "position", "") or "").strip()
-        if not position:
-            return []
-        rows = [ev for ev in (getattr(state, "evolution", None) or [])
-                if (getattr(ev, "position", "") or "").strip()
-                and getattr(ev, "env_factor", None) is not None]
-        now = datetime.datetime.now()
-        samples = []
-        for ev in rows[-_MAX_EVIDENCE_ROWS:]:
-            rel = relate((ev.position or "").strip(), position)
-            if rel.interval is None:
-                continue
-            try:
-                ts = datetime.datetime.fromisoformat(str(ev.changed_at))
-            except (TypeError, ValueError):
-                continue
-            env = float(ev.env_factor)
-            if not math.isfinite(env):
-                continue
-            age_days = max(0.0, (now - ts).total_seconds() / 86400.0)
-            samples.append((rel.interval[0],
-                            max(_MIN_ENV, min(_MAX_ENV, env)),
-                            0.5 ** (age_days / HALF_LIFE_DAYS)))
-        return samples
-
-    @staticmethod
-    def _settled_env(default: float, samples: list, spread_m: float) -> float:
-        """沉淀样本的核加权均值，并按样本总量向默认值收缩。
-
-        距离越近权重越高，展开半径外的样本淡出；证据越少（或越旧）越
-        贴近精确度默认值（狄利赫里收缩，与空间档案同构）。无样本时即
-        默认值。
-        """
-        if not samples:
-            return default
-        weight_sum = env_sum = 0.0
-        for dist, env, age_w in samples:
-            w = age_w * math.exp(-dist / spread_m)
-            weight_sum += w
-            env_sum += w * env
-        if weight_sum <= 0:
-            return default
-        mean = env_sum / weight_sum
-        shrink = weight_sum / (weight_sum + _EVIDENCE_SMOOTHING)
-        return shrink * mean + (1.0 - shrink) * default
-
     def _environment_factor(self, state, step: float,
-                            samples: Optional[list] = None) -> float:
-        """本次结算的环境因子（统一口径，参数见模块头注释）。
+                            profile: Optional[EnvironmentProfile] = None
+                            ) -> float:
+        """本次结算的环境因子（统一口径见 ``EnvironmentProfile``）。
 
-        - 可信地址（trust 高）：沉淀聚合按 ``spread(步进)`` 展开，步进越高
-          附近地址的沉淀参与越多；
-        - 不可信地址（trust 低）：文本沉淀仍是基础量，但只取角色所在处
-          （最小展开）的沉淀；步进越高，按当前位置单元边长折算的扫掠占比
-          越大，精确度默认值加权越多。
-        无任何沉淀时两条路都只剩精确度默认值。
+        ``profile`` 由调用方学习一次后传入（离线结算的多个明细桶复用
+        同一份样本与距离），缺省时现场学习。
         """
+        if profile is None:
+            profile = EnvironmentProfile().learn_from_evolution(
+                getattr(state, "evolution", None) or [])
         position = (getattr(state, "position", "") or "").strip()
-        if samples is None:
-            samples = self._evidence_samples(state)
-        default = _default_env_by_precision(position)
-        if not samples:
-            return default
-        trust = _geo_trust(position)
         height = max(1.0, getattr(state, "height", None) or 1.0)
-        # 步进调制 p∈[0,1]：步进越高扫掠范围越大，同时驱动邻域半径展开与
-        # 不可信侧默认值权重；半径以当前单元边长为基底（reach 只作上限），
-        # 否则大体型角色低步进时也会把邻址全权重卷进来，步进失去分辨力
-        p = min(1.0, max(0.0, step) / _STEP_SATURATION)
-        cell = max(1.0, cell_width_m(position))
-        spread = min(_REACH_CELL_WIDTHS * height,
-                     cell * (1.0 + p * (_SPREAD_STEP_MAX - 1.0)))
-        trusted = self._settled_env(default, samples, spread)
-        env = trusted
-        if trust < 1.0:
-            # 不可信侧：文本沉淀只取所在处，默认值按扫掠占比加权
-            core = self._settled_env(default, samples, cell)
-            sweep = _SWEEP_CAP * p
-            env = trust * trusted + (1.0 - trust) * ((1.0 - sweep) * core
-                                                     + sweep * default)
-        return max(_MIN_ENV, min(_MAX_ENV, env))
+        return profile.env_factor(position, step=step, height=height)
 
     def _offline_noise_std(self, height: float) -> float:
         """环境噪声标准差：与角色身高对数成正比。"""
@@ -285,7 +179,8 @@ class OfflineService:
         height = max(1.0, state.height or 1.0)
         window_start = now - datetime.timedelta(hours=self.window_hours)
         detail_begin = max(updated, window_start)
-        env_samples = self._evidence_samples(state)
+        env_profile = EnvironmentProfile().learn_from_evolution(
+            state.evolution)
         noise_std = self._offline_noise_std(height)
 
         # 作息学习：从演化表学到 (星期×2h桶) 的归一化调制因子，
@@ -305,7 +200,7 @@ class OfflineService:
             step = rate * (e - s).total_seconds() / 3600.0
             env_factor = max(0.1, min(1.5,
                                       self._environment_factor(
-                                          state, step, env_samples)
+                                          state, step, env_profile)
                                       + random.gauss(0, noise_std)))
             casualty = compute_casualty(
                 height, step, destruction, "", env_factor=env_factor)
@@ -327,7 +222,7 @@ class OfflineService:
             old_casualty = compute_casualty(
                 height, old_step, destruction, "",
                 env_factor=self._environment_factor(
-                    state, old_step / max(old_days, 1e-9), env_samples))
+                    state, old_step / max(old_days, 1e-9), env_profile))
         else:
             old_step = 0.0
             old_casualty = 0.0

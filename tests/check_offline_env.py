@@ -32,9 +32,8 @@ def check(name, ok, extra=""):
 
 
 from core.models import CharacterSnapshot, EvolutionRecord  # noqa: E402
-from services.character.offline import (  # noqa: E402
-    OfflineService, _default_env_by_precision,
-)
+from services.character.offline import OfflineService  # noqa: E402
+from services.character.spatial import _default_env_by_precision  # noqa: E402
 
 _NOW = datetime.datetime(2026, 10, 24, 12, 0, 0)
 _FINE = "1e4_2e3_1e2@*!TH-GSK1-East-3"    # 三级单元 100m

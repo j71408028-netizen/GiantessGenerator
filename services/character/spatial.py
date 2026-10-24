@@ -12,6 +12,9 @@
 3. 先验层：TAG → 空间参数向量（``TAG_SPATIAL_PRIORS`` 数据表）。只有纯
    空间语义的标签入表，姿态/内容类标签留在内容层。
 
+模块同时承载环境轴（``EnvironmentProfile``）：在线报告沉淀的环境证据行
+按距离核聚合成地址环境估计，是环境因子的唯一事实来源（离线结算消费）。
+
 与 ``rhythm.py`` 同构（先验 + 借力收缩），差异在特征空间：作息是 7×12
 平面网格、用全局均值收缩；地址是层级树、用父节点 + 均匀先验收缩
 （n-gram 回退式）。本模块只做学习与装配，不参与选取决策——消费方是
@@ -19,13 +22,14 @@ P4a 的角色调度器。
 """
 
 import datetime
+import math
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional
 
-from core.address_model import covers, parse_full
+from core.address_model import cell_width_m, covers, parse_full, relate
 
 # EWMA 半衰期（天）：到访/环境证据权重随时间减半的周期，承担区域偏好与
-# 地址环境沉淀的时间衰减（离线结算同用此口径，见 services/character/offline.py）
+# 地址环境沉淀的时间衰减（离线结算同用此口径）
 HALF_LIFE_DAYS = 14.0
 # 狄利赫里平滑伪计数：越大越向均匀分布收缩（样本越少收缩越强）
 _SMOOTHING_K = 6.0
@@ -243,3 +247,157 @@ def build_spatial_profile(state, now: Optional[datetime.datetime] = None
                           if isinstance(r, str) and r.strip()],
         learned=learned,
     )
+
+
+# ==================== 环境轴：沉淀聚合（EnvironmentProfile） ====================
+
+# 环境因子统一口径：两信源按可信度分治
+#   env = trust × 沉淀聚合(展开半径) + (1 - trust) × [沉淀聚合(所在处) ↔ 默认值]
+#   trust = 几何可信度（位置最小单元边长）；聚合内部按样本量向默认值收缩
+#   （证据越少/越旧越贴近默认值），邻域参与度随步进增长
+_MIN_ENV, _MAX_ENV = 0.1, 1.5                    # 统一值域（与明细夹取一致）
+_EVIDENCE_SMOOTHING = 1.0                        # 证据收缩伪计数：≈1 行近期证据达半信
+_MAX_EVIDENCE_ROWS = 500                         # 参与聚合的最近沉淀行数上限
+_REACH_CELL_WIDTHS = 10.0                        # 邻域半径上限 = 10×身高（reach 口径）
+_STEP_SATURATION = 1.5                           # 步进达到此值时步进调制饱和（p=1）
+_SPREAD_STEP_MAX = 3.0                           # 饱和时邻域半径 = 当前单元边长×此值
+_SWEEP_CAP = 0.5                                 # 饱和时不可信侧默认值的最大权重
+
+
+def _default_env_by_precision(position: str) -> float:
+    """按位置精确度给环境因子默认值：越细 → 越可能有人烟，默认值越高。
+
+    有细分申领 ≈ 有人烟，但三级也可以是无人区，故先验差值压窄
+    （0.32~0.60），把分辨力留给文本环境沉淀。无法解析/纯世界观取下限。
+    """
+    width = cell_width_m(position)
+    if width <= 0:
+        return 0.32
+    unit = max(0.0, min(1.0, (4.7 - math.log10(width)) / 3.0))
+    return 0.32 + 0.28 * unit
+
+
+def _geo_trust(position: str) -> float:
+    """几何可信度：位置最小单元边长越细，地址值越可信（0.3~1.0）。"""
+    width = cell_width_m(position)
+    if width <= 0:
+        return 0.3
+    return max(0.3, min(1.0, 1.2 - 0.18 * math.log10(width)))
+
+
+class EnvironmentProfile:
+    """环境轴学习器：在线沉淀行的距离核聚合（环境因子的唯一事实来源）。
+
+        env = EnvironmentProfile().learn_from_evolution(state.evolution)
+        factor = env.env_factor("1e5_5e3_1e2@*!TH-GSK1-East", 0.05, 100.0)
+
+    数据源是演化表中带 ``position`` 且带 ``env_factor`` 的行（在线报告
+    收尾写入的到访环境证据）；查询按样本地址对目标地址 relate 距离下界
+    做核加权，按证据总量向精确度默认值收缩（狄利赫里，与区域权重树
+    同构）。时间权重与区域权重树同用 EWMA 半衰期（``HALF_LIFE_DAYS``），
+    老到访的证据逐渐淡出。``learn_from_evolution`` 一次、``env_factor``
+    多次：距离在单次查询内只算一遍。
+    """
+
+    def __init__(self):
+        self._samples: List[tuple] = []   # [(样本地址文本, env, 时间权重)]
+
+    def learn_from_evolution(self, evolution: list,
+                             now: Optional[datetime.datetime] = None
+                             ) -> "EnvironmentProfile":
+        """收集环境沉淀样本。超值域/非有限的沉淀行按统一值域夹取，
+        坏时间戳的行整行跳过；只取最近 ``_MAX_EVIDENCE_ROWS`` 行。"""
+        now = now or datetime.datetime.now()
+        self._samples = []
+        rows = [ev for ev in evolution or []
+                if (getattr(ev, "position", "") or "").strip()
+                and getattr(ev, "env_factor", None) is not None]
+        for ev in rows[-_MAX_EVIDENCE_ROWS:]:
+            try:
+                env = float(ev.env_factor)
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(env):
+                continue
+            try:
+                ts = datetime.datetime.fromisoformat(str(ev.changed_at))
+            except (TypeError, ValueError):
+                continue
+            age_days = max(0.0, (now - ts).total_seconds() / 86400.0)
+            self._samples.append((
+                (getattr(ev, "position", "") or "").strip(),
+                max(_MIN_ENV, min(_MAX_ENV, env)),
+                0.5 ** (age_days / HALF_LIFE_DAYS)))
+        return self
+
+    def has_data(self) -> bool:
+        return bool(self._samples)
+
+    def _distances(self, query: str) -> List[tuple]:
+        """样本到查询地址的距离下界列表 [(距离, env, 时间权重)]，
+        世界观不一致 / 无法解析的样本跳过。"""
+        out = []
+        for addr, env, age_w in self._samples:
+            rel = relate(addr, query)
+            if rel.interval is None:
+                continue
+            out.append((rel.interval[0], env, age_w))
+        return out
+
+    @staticmethod
+    def _settled(default: float, distances: List[tuple],
+                 spread_m: float) -> float:
+        """沉淀样本的核加权均值，并按样本总量向默认值收缩。
+
+        距离越近权重越高，展开半径外的样本淡出；证据越少（或越旧）越
+        贴近精确度默认值。无有效样本时即默认值。
+        """
+        if not distances:
+            return default
+        weight_sum = env_sum = 0.0
+        for dist, env, age_w in distances:
+            w = age_w * math.exp(-dist / spread_m)
+            weight_sum += w
+            env_sum += w * env
+        if weight_sum <= 0:
+            return default
+        mean = env_sum / weight_sum
+        shrink = weight_sum / (weight_sum + _EVIDENCE_SMOOTHING)
+        return shrink * mean + (1.0 - shrink) * default
+
+    def env_factor(self, address_text: str, step: float = 0.0,
+                   height: float = 1.0) -> float:
+        """目标地址的环境因子（统一口径，参数见模块内常量注释）。
+
+        - 可信地址（trust 高）：沉淀聚合按 ``spread(步进)`` 展开，步进越高
+          附近地址的沉淀参与越多；
+        - 不可信地址（trust 低）：文本沉淀仍是基础量，但只取目标处
+          （最小展开）的沉淀；步进越高，按目标单元边长折算的扫掠占比
+          越大，精确度默认值加权越多。
+        无任何沉淀时两条路都只剩精确度默认值。
+        """
+        address_text = (address_text or "").strip()
+        default = _default_env_by_precision(address_text)
+        if not self._samples:
+            return default
+        distances = self._distances(address_text)
+        if not distances:
+            return default
+        trust = _geo_trust(address_text)
+        height = max(1.0, height or 1.0)
+        # 步进调制 p∈[0,1]：步进越高扫掠范围越大，同时驱动邻域半径展开与
+        # 不可信侧默认值权重；半径以当前单元边长为基底（reach 只作上限），
+        # 否则大体型角色低步进时也会把邻址全权重卷进来，步进失去分辨力
+        p = min(1.0, max(0.0, step) / _STEP_SATURATION)
+        cell = max(1.0, cell_width_m(address_text))
+        spread = min(_REACH_CELL_WIDTHS * height,
+                     cell * (1.0 + p * (_SPREAD_STEP_MAX - 1.0)))
+        trusted = self._settled(default, distances, spread)
+        env = trusted
+        if trust < 1.0:
+            # 不可信侧：文本沉淀只取所在处，默认值按扫掠占比加权
+            core = self._settled(default, distances, cell)
+            sweep = _SWEEP_CAP * p
+            env = trust * trusted + (1.0 - trust) * ((1.0 - sweep) * core
+                                                     + sweep * default)
+        return max(_MIN_ENV, min(_MAX_ENV, env))
