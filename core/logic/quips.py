@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from core.behavior_runtime import behavior_hook, get_runtime
 from core.models import Landmark
+from core.logic.simulation import compute_environment_factor
 from core.logic.text import contains_blocked_word, should_skip_by_part_tags
 
 PREDEFINED_TAGS = [
@@ -236,6 +237,13 @@ def get_comparisons(
     return collected
 
 
+# 环境一致性软权重（选取仲裁器传入槽位估计，Q1 剩余①）：
+#   加分 = W_ENV × (1 - |文本因子 - 槽位估计| / 值域全宽)，偏差越大越趋零；
+#   零证据时槽位估计为 None，软权重整体缺席（零证据零权重）
+W_ENV_CONSISTENCY = 0.5
+_ENV_DEV_RANGE = 1.4        # 因子值域 [0.1, 1.5] 的全宽（偏差归一分母）
+
+
 @behavior_hook("logic", "select_quip_with_budget")
 def select_quip_with_budget(
         size_cat: str,
@@ -252,6 +260,7 @@ def select_quip_with_budget(
         posture_list: Optional[List[int]] = None,
         blocked_words: Optional[List[str]] = None,
         lanes: Optional[List] = None,
+        env_estimate: Optional[float] = None,
 ) -> Tuple[Optional[str], Optional[str], Optional[Tuple[int, int]], float, float, float]:
     """按坐标邻域与步进预算选一条描述。
 
@@ -259,6 +268,11 @@ def select_quip_with_budget(
     不分层（兼容旧调用与不支持该参数的行为包覆盖）。窗口外风格不参与
     选取；窗口内风格按车道权重获得排序加分（只影响优先序，不排除低权
     重者）。消费语义不变：选中的条目仍从 ``quips_working`` 中移除。
+
+    env_estimate：槽位地址的环境估计（档案环境轴）。None = 零证据/旧包，
+    软权重中性缺席；非空时对每条候选文本单次采样 ``compute_environment_
+    factor``，与估计偏差越小排序加分越高——软权重，不做硬闸，矛盾文本
+    仍可被选（池耗尽降级不受影响）。
     """
     lane_weights = None
     if lanes is not None:
@@ -370,7 +384,13 @@ def select_quip_with_budget(
         step_score = step_diff / 1.0
         # 车道加分：exact > cover > free（仲裁分层），只在同池内调整优先序
         lane_bonus = lane_weights.get(q.get("style", ""), 0.0) if lane_weights else 0.0
-        score = dist * 2.0 + step_score - lane_bonus
+        # 环境一致性加分：文本因子与槽位估计偏差越小加分越高（单次采样，
+        # 容忍 hook 随机性）；与车道加分同走减分-夹取非负路径
+        env_bonus = 0.0
+        if env_estimate is not None:
+            dev = abs(compute_environment_factor(q.get("text", "")) - env_estimate)
+            env_bonus = W_ENV_CONSISTENCY * max(0.0, 1.0 - dev / _ENV_DEV_RANGE)
+        score = dist * 2.0 + step_score - lane_bonus - env_bonus
         scored.append((score, coord, q, dist))
 
     scored.sort(key=lambda x: x[0])

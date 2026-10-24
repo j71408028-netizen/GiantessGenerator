@@ -206,11 +206,12 @@ class SpatialProfile:
     ``region_factor`` 只合并学习层与先验层（粘性放大偏离、新颖加成未到访
     分支）；手工覆盖层不并入数值——命中与否（``in_activity_region``）的
     权重语义留给消费方（P4a 调度器），与现行规划器"只调顺序不改可选集"
-    的软偏好兼容。
+    的软偏好兼容。``env`` 是环境轴（沉淀聚合，见 ``EnvironmentProfile``）。
     """
     priors: SpatialPriors = field(default_factory=SpatialPriors)
     activity_regions: List[str] = field(default_factory=list)
     learned: Optional[SpatialProfileService] = None
+    env: Optional["EnvironmentProfile"] = None
 
     def region_factor(self, address_text: str) -> float:
         svc = self.learned
@@ -222,6 +223,16 @@ class SpatialProfile:
         if self.priors.novelty_bonus > 0 and svc.visit_weight(address_text) <= 0.0:
             base *= 1.0 + self.priors.novelty_bonus
         return max(_MIN_FACTOR, min(_MAX_FACTOR, base))
+
+    def env_estimate(self, address_text: str) -> Optional[float]:
+        """候选地址的环境估计（最小展开，无步进/体型调制）。
+
+        返回 ``None`` 表示零证据——选取侧据此零权重（环境软权重中性
+        缺席），而不是拿精确度默认值制造伪偏差。
+        """
+        if not address_text or self.env is None or not self.env.has_data():
+            return None
+        return self.env.env_factor(address_text)
 
     def in_activity_region(self, address_text: str) -> bool:
         """手工活动区域是否覆盖候选地址（软偏好最高层，坏文本不命中）。"""
@@ -239,13 +250,15 @@ def build_spatial_profile(state, now: Optional[datetime.datetime] = None
     属性（``CharacterSnapshot`` 或等价鸭子类型均可）；``now`` 透传给
     学习层（缺省用系统当前时间，测试可注入固定时钟）。
     """
-    learned = SpatialProfileService().learn_from_evolution(
-        getattr(state, "evolution", None) or [], now=now)
+    evolution = getattr(state, "evolution", None) or []
+    learned = SpatialProfileService().learn_from_evolution(evolution, now=now)
+    env = EnvironmentProfile().learn_from_evolution(evolution, now=now)
     return SpatialProfile(
         priors=priors_for_tags(getattr(state, "selected_tags", None) or []),
         activity_regions=[r for r in (getattr(state, "activity_regions", None) or [])
                           if isinstance(r, str) and r.strip()],
         learned=learned,
+        env=env,
     )
 
 

@@ -46,6 +46,8 @@ class SlotRuling:
     全部风格 FREE（继承旧 quip_allowed_styles 的 None 语义，均匀权重不
     改变同池相对顺序）；无描述内容时为空表。``starved`` 仅在有描述内容
     但充裕度为 0 时置位（纯地址内容不参与仲裁）。
+    ``env_estimate`` 是槽位地址的环境估计（档案环境轴，None = 零证据），
+    供 select 做文本环境一致性软权重。
     """
     cand: dict
     addr: str
@@ -53,11 +55,10 @@ class SlotRuling:
     affordance: float = 0.0
     starved: bool = False
     promoted: bool = False
+    env_estimate: Optional[float] = None
 
 
-def hook_supports_lanes(impl) -> bool:
-    """行为包覆盖的 select 实现是否接受 lanes 参数（决定引擎走窗口还是
-    旧全局剪枝兜底——不支持 lanes 的旧包钉住旧语义）。"""
+def _hook_accepts(impl, name: str) -> bool:
     if impl is None:
         return True
     try:
@@ -65,8 +66,20 @@ def hook_supports_lanes(impl) -> bool:
         params = inspect.signature(impl).parameters
     except (TypeError, ValueError):
         return False
-    return "lanes" in params or any(p.kind == p.VAR_KEYWORD
-                                     for p in params.values())
+    return name in params or any(p.kind == p.VAR_KEYWORD
+                                 for p in params.values())
+
+
+def hook_supports_lanes(impl) -> bool:
+    """行为包覆盖的 select 实现是否接受 lanes 参数（决定引擎走窗口还是
+    旧全局剪枝兜底——不支持 lanes 的旧包钉住旧语义）。"""
+    return _hook_accepts(impl, "lanes")
+
+
+def hook_supports_env(impl) -> bool:
+    """行为包覆盖的 select 实现是否接受 env_estimate 参数（不支持的环境
+    软权重中性缺席，零证据零权重同源——旧包钉住旧语义）。"""
+    return _hook_accepts(impl, "env_estimate")
 
 
 class SelectionArbiter:
@@ -269,7 +282,8 @@ class SelectionArbiter:
             affordance = self._affordance(lanes, size_cat, coords) if lanes else 0.0
             return SlotRuling(cand=cand, addr=addr, lanes=lanes,
                               affordance=affordance,
-                              starved=has_quips and affordance <= 0.0)
+                              starved=has_quips and affordance <= 0.0,
+                              env_estimate=profile.env_estimate(addr))
 
         # ---------- 阶段 B：车道与充裕度（建槽时一并完成） ----------
         slots = [make_ruling(c) for c in candidates]

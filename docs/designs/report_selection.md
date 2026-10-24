@@ -63,6 +63,16 @@
 - **旧档案**（无到访历史、无空间标签）所有档案权重中性，选取行为与
   从前一致。
 
+**环境一致性软权重**：角色空间档案的环境轴（`spatial.py` 的
+`EnvironmentProfile`，把在线报告沉淀的环境证据按地址聚合）为每个带
+地址的槽位给出环境估计（零证据为 `None`）。描述选取时对每条候选文本
+单次采样环境因子，与槽位估计偏差越小排序加分越高（`quips.py` 的
+`W_ENV_CONSISTENCY`）——角色更倾向讲述与所在环境相称的故事。三条
+铁律：**零证据零权重**（无沉淀时不制造伪偏差，行为与从前一致）；
+**软权重不做硬闸**（全池矛盾时矛盾文本照常被选，池耗尽降级不受影响）；
+**环境只影响文本选取**，不进地标可达 / 配对的几何口径。行为包覆盖
+选取且未支持 `env_estimate` 参数时软权重中性缺席（同车道兼容判定）。
+
 ## §4 覆盖报告与行为包兼容
 
 - 每份报告携带 `coverage`（星槽数 / 浪费风格 / 实际触发的风格）与
@@ -77,11 +87,11 @@
 | 关注点 | 位置 |
 |---|---|
 | 仲裁主入口 / 车道 / 充裕度 / 提拔 / 物理走查 | `services/exploration/arbiter.py` |
-| 描述选取与车道窗口 | `core/logic/quips.py::select_quip_with_budget`（`lanes` 参数） |
+| 描述选取与车道窗口 / 环境一致性加分 | `core/logic/quips.py::select_quip_with_budget`（`lanes` / `env_estimate` 参数） |
 | 报告引擎接线 / 兼容兜底判定 | `services/exploration/report.py::generate`、`arbiter.hook_supports_lanes` |
-| 角色空间档案（学习 + TAG 先验 + 活动区域） | `services/character/spatial.py` |
+| 角色空间档案（学习 + TAG 先验 + 活动区域 + 环境轴） | `services/character/spatial.py` |
 | 地标地址解析 / stuck 选项 | `services/exploration/address_plan.py` |
-| 行为锁（改语义先改预期） | `tests/check_address_planning.py`、`tests/check_selection_arbiter.py` |
+| 行为锁（改语义先改预期） | `tests/check_address_planning.py`、`tests/check_selection_arbiter.py`、`tests/check_env_selection.py` |
 
 ## 附录 B：参数
 
