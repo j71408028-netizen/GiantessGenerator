@@ -345,12 +345,22 @@ class ExplorationContext:
             if personality.init_destruction != 0:
                 destruction_after = report_data["curr_destruction"]
             # 本次报告记为一行完整演化：步进取报告内各事件步进之和
-            step = sum(qr.get("step", 0.0) for qr in report_data.get("quip_results", []) or [])
+            quips = report_data.get("quip_results", []) or []
+            step = sum(qr.get("step", 0.0) for qr in quips)
+            # 环境沉淀：各段落文本因子的步进加权均值（与本行伤亡的实际
+            # 结算口径一致），随 position 沉淀为该地址的环境证据
+            env_quips = [qr for qr in quips
+                         if qr.get("environment_factor") is not None]
+            env_weight = sum(abs(qr.get("step", 0.0)) for qr in env_quips)
+            settled_env = (sum(qr["environment_factor"] * abs(qr.get("step", 0.0))
+                               for qr in env_quips) / env_weight
+                           if env_weight > 0 else None)
             state.record_change(step=step, intrusion=intrusion_after,
                                 destruction=destruction_after,
                                 casualties=state.total_casualties + report_data["total_casualties"],
                                 source="report_from_core_or_character",
-                                position=report_data.get("position") or state.position or "")
+                                position=report_data.get("position") or state.position or "",
+                                env_factor=settled_env)
             # 步长随本次报告演化后的当前值写回角色存储
             state.step_intrusion = report_data.get("step_intrusion",
                                                    state.current_step_intrusion)

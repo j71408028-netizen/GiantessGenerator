@@ -24,8 +24,9 @@ from typing import Dict, Iterable, List, Optional
 
 from core.address_model import covers, parse_full
 
-# EWMA 半衰期（天）：到访权重随时间减半的周期，承担区域偏好的时间衰减
-_HALF_LIFE_DAYS = 14.0
+# EWMA 半衰期（天）：到访/环境证据权重随时间减半的周期，承担区域偏好与
+# 地址环境沉淀的时间衰减（离线结算同用此口径，见 services/character/offline.py）
+HALF_LIFE_DAYS = 14.0
 # 狄利赫里平滑伪计数：越大越向均匀分布收缩（样本越少收缩越强）
 _SMOOTHING_K = 6.0
 # 调制因子夹取区间（与 rhythm 同口径：围绕 1.0，不归零也不爆炸）
@@ -81,7 +82,7 @@ def _age_weight(changed_at: str, now: datetime.datetime) -> float:
     except (TypeError, ValueError):
         return 0.0
     age_days = max(0.0, (now - ts).total_seconds() / 86400.0)
-    return 0.5 ** (age_days / _HALF_LIFE_DAYS)
+    return 0.5 ** (age_days / HALF_LIFE_DAYS)
 
 
 class SpatialProfileService:

@@ -151,6 +151,11 @@ class EvolutionRecord:
     # 权重（services/character/spatial.py）。空 = 该行不作为到访证据（旧档
     # 与非故事性行）；仅报告收尾与副本出口等有明确位置的行会填写。
     position: str = ""
+    # 环境沉淀：本行结算实际采用的环境因子（在线报告路径为各段落文本因子
+    # 的步进加权均值）。与 position 联合构成“地址环境因子”的到访证据，
+    # 供离线结算按地址聚合（services/character/offline.py）；None = 本行
+    # 未做文本环境结算（旧档与非故事性行），不作为环境证据。
+    env_factor: Optional[float] = None
 
 
 @dataclass
@@ -279,12 +284,14 @@ class CharacterSnapshot:
                       destruction: Optional[float] = None,
                       casualties: Optional[float] = None,
                       source: str = "",
-                      position: str = "") -> EvolutionRecord:
+                      position: str = "",
+                      env_factor: Optional[float] = None) -> EvolutionRecord:
         """更改介入度/破坏性/累计伤亡，并向演化表追加一条完整的新行。
 
         未给出的数值沿用当前值；step 为本次的故事步进权重，默认 0.0；
         source 为更改标签，标注该条更改来源于哪一方法；
-        position 为本行到访地址（空 = 不作为到访证据）。
+        position 为本行到访地址（空 = 不作为到访证据）；
+        env_factor 为本行环境沉淀（None = 本行未做文本环境结算）。
         """
         record = EvolutionRecord(
             changed_at=datetime.datetime.now().isoformat(),
@@ -294,6 +301,7 @@ class CharacterSnapshot:
             casualties=self.total_casualties if casualties is None else float(casualties),
             source=source,
             position=position or "",
+            env_factor=env_factor,
         )
         self.evolution.append(record)
         return record
