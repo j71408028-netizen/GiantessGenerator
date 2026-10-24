@@ -226,14 +226,16 @@ class SpatialProfile:
                    for r in (self.activity_regions or []))
 
 
-def build_spatial_profile(state) -> SpatialProfile:
+def build_spatial_profile(state, now: Optional[datetime.datetime] = None
+                          ) -> SpatialProfile:
     """从角色快照装配空间档案：演化表学习 + TAG 先验 + 活动区域透传。
 
     ``state`` 只需具备 evolution / selected_tags / activity_regions 三个
-    属性（``CharacterSnapshot`` 或等价鸭子类型均可）。
+    属性（``CharacterSnapshot`` 或等价鸭子类型均可）；``now`` 透传给
+    学习层（缺省用系统当前时间，测试可注入固定时钟）。
     """
     learned = SpatialProfileService().learn_from_evolution(
-        getattr(state, "evolution", None) or [])
+        getattr(state, "evolution", None) or [], now=now)
     return SpatialProfile(
         priors=priors_for_tags(getattr(state, "selected_tags", None) or []),
         activity_regions=[r for r in (getattr(state, "activity_regions", None) or [])

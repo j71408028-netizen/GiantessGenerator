@@ -144,7 +144,7 @@ _snap2 = CharacterSnapshot(giantess_id="g2", name="t",
                            selected_tags=["旅行"],
                            activity_regions=["1e4_1e3_1e2@*!TH-East"])
 _snap2.evolution = _rows_hist
-profile = build_spatial_profile(_snap2)
+profile = build_spatial_profile(_snap2, now=_NOW)
 check("档案透传活动区域", profile.activity_regions == ["1e4_1e3_1e2@*!TH-East"])
 check("档案装配先验", profile.priors == priors_for_tags(["旅行"]))
 check("档案学习层有数据", profile.learned is not None and profile.learned.has_data())
