@@ -20,6 +20,7 @@ from ui.exploration.exp_frame import ExplorationPanel
 from ui.landmark import LandmarkCardManager
 from ui.navbar import NavigationBar
 from ui.quip import QuipCardManager
+from ui.resources import ResourceHubPanel
 from ui.scenario.sc_frame import ScenarioEditor
 from ui.settings import SettingsPanel
 from ui.exploration.news_dlg import NewsDialog
@@ -99,7 +100,8 @@ class MainWindowManager:
 
         # 创建各页面框架
         self.pages = {}
-        for key in ["generator", "text_mgmt", "dungeon", "challenge", "settings"]:
+        for key in ["generator", "text_mgmt", "dungeon", "challenge",
+                    "resources", "settings"]:
             frame = ctk.CTkFrame(self.content_frame, corner_radius=0,
                                   fg_color=APP_BG)
             frame.place(relwidth=1, relheight=1)
@@ -287,6 +289,27 @@ class MainWindowManager:
         self.challenge_panel.set_world_active(
             self.world_state is not None and self.world_state.active)
 
+    # ==================== 资源中心标签页 ====================
+    def create_resources_tab(self, parent):
+        self.resource_hub = ResourceHubPanel(
+            parent,
+            self._settings_repo,
+            self._landmark_repo,
+            self._quip_repo,
+            self.settings,
+            on_styles_changed=self._on_styles_changed,
+            on_name_table_changed=self.on_name_table_changed,
+            on_news_table_changed=self.on_news_table_changed,
+            on_preset_table_changed=self.on_preset_table_changed,
+            on_personality_table_changed=self.on_personality_table_changed,
+            gui_ref=self,
+            world_manager=self.world_manager,
+            name_repo=self.context.name_repo,
+            preset_repo=self._preset_repo,
+            personality_repo=self._personality_repo
+        )
+        self.resource_hub.pack(fill='both', expand=True)
+
     # ==================== 设置面板 ====================
     def create_settings_panel(self):
         parent = self.pages["settings"]
@@ -299,21 +322,11 @@ class MainWindowManager:
         self.settings_panel = SettingsPanel(
             main_container,
             self._settings_repo,
-            self._landmark_repo,
-            self._quip_repo,
             self.settings,
-            on_styles_changed=self._on_styles_changed,
             on_world_setting_changed=self.on_world_setting_changed,
-            on_name_table_changed=self.on_name_table_changed,
-            on_news_table_changed=self.on_news_table_changed,
-            on_preset_table_changed=self.on_preset_table_changed,
-            on_personality_table_changed=self.on_personality_table_changed,
             on_return_callback=lambda: self.show_page("generator"),
             gui_ref=self,
-            world_manager=self.world_manager,
-            name_repo=self.context.name_repo,
-            preset_repo=self._preset_repo,
-            personality_repo=self._personality_repo
+            world_manager=self.world_manager
         )
         self.settings_panel.pack(fill='both', expand=True)
 
@@ -337,8 +350,8 @@ class MainWindowManager:
 
     def _on_styles_changed(self):
         self.context.update_styles(
-            self.settings_panel.selected_styles,
-            self.settings_panel.selected_quip_styles
+            self.resource_hub.selected_styles,
+            self.resource_hub.selected_quip_styles
         )
         self.selected_styles = self.context.selected_styles
         self.selected_quip_styles = self.context.selected_quip_styles
@@ -389,8 +402,10 @@ class MainWindowManager:
             self.quip_card_mgr.refresh_styles()
         if hasattr(self, 'scenario_editor'):
             self.scenario_editor._refresh_scenario_list()
+        if hasattr(self, 'resource_hub'):
+            self.resource_hub.on_world_state_changed()
         if hasattr(self, 'settings_panel'):
-            self.settings_panel._refresh_world_pack_ui()
+            self.settings_panel.on_world_state_changed()
 
     def _refresh_palette_bound_widgets(self):
         """配色切换后重建把单色 token 写死在创建参数里的控件。
@@ -414,12 +429,14 @@ class MainWindowManager:
                 print(f"[Warning] 刷新挑战卡片失败: {e}")
 
     def refresh_style_listboxes(self):
-        """风格新建/重命名/删除后，刷新所有 StyleListBox（挑战面板与设置面板）。"""
+        """风格新建/重命名/删除后，刷新所有 StyleListBox（挑战面板与资源中心）。"""
         if hasattr(self, 'challenge_panel'):
             self.challenge_panel._sync_landmark_styles()
             self.challenge_panel._sync_quip_styles()
+        if hasattr(self, 'resource_hub'):
+            self.resource_hub._sync_all_states()
         if hasattr(self, 'settings_panel'):
-            self.settings_panel._sync_all_states()
+            self.settings_panel._sync_parts_states()
 
     def apply_settings(self):
         # SettingsPanel 在保存前只修改控件变量；保存完成后从 settings 读取
@@ -599,8 +616,8 @@ class MainWindowManager:
             self.quip_card_mgr.update_theme(mode)
         if hasattr(self, 'generator_panel'):
             self.generator_panel.update_theme(mode)
-        if hasattr(self, 'settings_panel'):
-            self.settings_panel.update_theme(mode)
+        if hasattr(self, 'resource_hub'):
+            self.resource_hub.update_theme(mode)
 
     # ==================== 角色加载与导出 ====================
     def load_character_by_id(self, giantess_id: str):

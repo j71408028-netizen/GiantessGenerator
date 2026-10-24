@@ -638,8 +638,8 @@ class ExplorationPanel(ctk.CTkFrame):
         self.report_panel.update_theme(mode)
 
     def _jump_to_style_settings(self):
-        self.app.show_page("settings")
-        self.app.root.after(100, lambda: self.app.settings_panel.scroll_to_style_section())
+        self.app.show_page("resources")
+        self.app.root.after(100, lambda: self.app.resource_hub.scroll_to_style_section())
 
     def update_world_setting(self, world_setting: str):
         self.params_panel.update_world_setting(world_setting)

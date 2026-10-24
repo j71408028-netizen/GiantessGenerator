@@ -143,6 +143,7 @@ def build_professional(boot):
     manager = MainWindowManager(root, _build_context(boot),
                                 world_manager=boot["world_manager"])
     manager.create_generator_tab(manager.pages["generator"])
+    manager.create_resources_tab(manager.pages["resources"])
     root.update_idletasks()
     return root, manager
 

@@ -3,7 +3,7 @@ import uuid
 import tkinter as tk
 import tkinter.font as tkfont
 from typing import Dict, Callable, Optional, TYPE_CHECKING
-from ui.settings.dialogs import AIConfigDialog, WorldPackCreateDialog
+from ui.settings.dialogs import AIConfigDialog
 
 import customtkinter as ctk
 
@@ -11,29 +11,19 @@ import ui.ctk.dialogs
 
 if TYPE_CHECKING:
     from persistence.settings_repo import SettingsRepo
-    from persistence.landmark_repo import LandmarkRepo
-    from persistence.quip_repo import QuipRepo
 
 from core.logic import ALL_PART_NAMES, normalize_blocked_words
 from core import netproxy
-from core.address_model import world_of
-from persistence import DungeonSettingsRepo, PresetRepo, PersonalityRepo
-from persistence.name_repo import NameRepo, DEFAULT_NAME_TABLE
-from persistence.world_pack import list_behavior_packs
-from dungeon.terms import is_default_scenario
+from persistence import DungeonSettingsRepo
 from dungeon.audio import buses
-from services.challenges import ChallengeService
 import services.ui_mode as ui_mode
-from services.news import DEFAULT_NEWS_TABLE, NewsService
-from ui.ctk.widgets import (
-    CollapsibleBlock, StyleListBox, OptionButton,
-)
+from ui.ctk.widgets import CollapsibleBlock, OptionButton
 from ui.ctk import fonts as ui_fonts
 from ui.ctk.theme import (
     SETTINGS_PANEL_BG, SETTINGS_HOVER, SETTINGS_CHECKBOX_HOVER, SETTINGS_INPUT_HOVER,
     SETTINGS_INPUT_BG, SETTINGS_INPUT_BORDER,
     SETTINGS_SWITCH_TRACK, SETTINGS_SWITCH_PROGRESS, SETTINGS_SWITCH_KNOB, SETTINGS_TEXT_SOFT,
-    SETTINGS_LABEL, SETTINGS_OK, SETTINGS_ERR,
+    SETTINGS_LABEL,
 )
 from ui.ctk.theme import (
     DEFAULT_PALETTE, current_palette, palette_display_names,
@@ -51,21 +41,11 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             self,
             parent,
             settings_repo: 'SettingsRepo',
-            landmark_repo: 'LandmarkRepo',
-            quip_repo: 'QuipRepo',
             initial_settings: Dict,
-            on_styles_changed: Callable,
             on_world_setting_changed: Optional[Callable] = None,
-            on_name_table_changed: Optional[Callable] = None,
-            on_news_table_changed: Optional[Callable] = None,
-            on_preset_table_changed: Optional[Callable] = None,
-            on_personality_table_changed: Optional[Callable] = None,
             on_return_callback: Optional[Callable] = None,
             gui_ref=None,
             world_manager=None,
-            name_repo: Optional[NameRepo] = None,
-            preset_repo=None,
-            personality_repo=None,
             **kwargs
     ):
         super().__init__(parent, fg_color="transparent", **kwargs)
@@ -74,23 +54,13 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         # data/user/dungeon_settings.json，见 persistence/dungeon_settings_repo.py。
         self.dungeon_settings_repo = DungeonSettingsRepo()
         self.dungeon_settings = self.dungeon_settings_repo.load()
-        self.landmark_repo = landmark_repo
-        self.quip_repo = quip_repo
         self.settings = initial_settings
-        self.on_styles_changed = on_styles_changed
-        self.on_return_callback = on_return_callback
         self.on_world_setting_changed = on_world_setting_changed
-        self.on_name_table_changed = on_name_table_changed
-        self.on_news_table_changed = on_news_table_changed
-        self.on_preset_table_changed = on_preset_table_changed
-        self.on_personality_table_changed = on_personality_table_changed
+        self.on_return_callback = on_return_callback
         self.gui_ref = gui_ref
         self.world_manager = world_manager
         self.world_state = getattr(world_manager, "world_state", None) \
             if world_manager is not None else None
-        self.name_repo = name_repo or NameRepo(world_state=self.world_state)
-        self.preset_repo = preset_repo or PresetRepo(world_state=self.world_state)
-        self.personality_repo = personality_repo or PersonalityRepo(world_state=self.world_state)
         self.parts_checkboxes = {}
 
         self.theme_mode = self.settings.get("theme_mode", "Light")
@@ -101,12 +71,6 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.comparison_count = self.settings.get("comparison_count", 5)
         self.comparison_order = self.settings.get("comparison_order", "match")
         self.world_setting = self.settings.get("world_setting", "appear")
-        self.name_table = self.settings.get("name_table", DEFAULT_NAME_TABLE)
-        self.news_table = self.settings.get("news_table", DEFAULT_NEWS_TABLE)
-        self.preset_table = self.settings.get("preset_table", "default")
-        self.personality_table = self.settings.get("personality_table", "default")
-        self.selected_styles = self.settings.get("selected_styles", ["ChineseMix"])
-        self.selected_quip_styles = self.settings.get("selected_quip_styles", [])
         self.ai_configs = self._load_ai_configs()
         self.ai_provider = self.settings.get("ai_provider", "zhipu")
         if self.ai_provider not in self.ai_configs:
@@ -121,12 +85,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self._bus_level_labels = {}
 
         self._create_widgets()
-        self._sync_all_states()
-        # System 模式的实际颜色由 CustomTkinter 决定，原生 Listbox 也必须使用
-        # 这个实际模式，否则首次打开设置页可能短暂显示浅色。
-        actual_mode = ctk.get_appearance_mode()
-        self.landmark_selector.apply_theme(actual_mode)
-        self.quip_selector.apply_theme(actual_mode)
+        self._sync_parts_states()
 
     # ───────────────────── UI 构建 ─────────────────────
     def _create_widgets(self):
@@ -216,19 +175,6 @@ class SettingsPanel(ctk.CTkScrollableFrame):
                 self._parent_canvas.itemconfigure(self._create_window_id, height=0)
         except Exception:
             pass
-
-    def scroll_to_style_section(self):
-        if not self.world_body.winfo_ismapped():
-            self.world_block.toggle()
-            self.update_idletasks()
-
-        if hasattr(self, '_parent_frame') and hasattr(self, '_parent_canvas'):
-            total_height = self._parent_frame.winfo_reqheight()
-            if total_height <= 0:
-                return
-            y = self.landmark_selector.border.winfo_y()
-            fraction = max(0.0, min(1.0, (y - 10) / total_height))
-            self._parent_canvas.yview_moveto(fraction)
 
     # ───────────────── 通用控件辅助 ─────────────────
     @staticmethod
@@ -331,285 +277,20 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         )
         self.seed_random_btn.pack(side='left', padx=(8,0))
 
-        # ── 世界资源 ──
-        self._section_label(self.world_body, row, "世界资源")
-        row += 1
-
-        _, ctrl = self._make_row(self.world_body, row, "姓名表")
-        row += 1
-        self.name_table_var = tk.StringVar(value=self.name_table)
-        name_tables = self.name_repo.get_tables()
-        if self.name_table not in name_tables:
-            name_tables.insert(0, self.name_table)
-        self.name_table_menu = self._make_option_button(
-            ctrl, name_tables,
-            self._on_name_table_changed, self.name_table_var
-        )
-
-        _, ctrl = self._make_row(self.world_body, row, "新闻表")
-        row += 1
-        self.news_table_var = tk.StringVar(value=self.news_table)
-        news_service = NewsService(news_table=self.news_table,
-                                    world_state=self.world_state)
-        news_tables = news_service.get_tables()
-        if self.news_table not in news_tables:
-            news_tables.insert(0, self.news_table)
-        if not news_tables:
-            news_tables = [DEFAULT_NEWS_TABLE]
-        self.news_table_menu = self._make_option_button(
-            ctrl, news_tables,
-            self._on_news_table_changed, self.news_table_var
-        )
-        row += 1
-
-        _, ctrl = self._make_row(self.world_body, row, "身材表")
-        row += 1
-        self.preset_table_var = tk.StringVar(value=self.preset_table)
-        preset_tables = self.preset_repo.get_tables()
-        if self.preset_table not in preset_tables:
-            preset_tables.insert(0, self.preset_table)
-        if not preset_tables:
-            preset_tables = ["default"]
-        self.preset_table_menu = self._make_option_button(
-            ctrl, preset_tables,
-            self._on_preset_table_changed, self.preset_table_var
-        )
-
-        _, ctrl = self._make_row(self.world_body, row, "性格表")
-        row += 1
-        self.personality_table_var = tk.StringVar(value=self.personality_table)
-        personality_tables = self.personality_repo.get_tables()
-        if self.personality_table not in personality_tables:
-            personality_tables.insert(0, self.personality_table)
-        if not personality_tables:
-            personality_tables = ["default"]
-        self.personality_table_menu = self._make_option_button(
-            ctrl, personality_tables,
-            self._on_personality_table_changed, self.personality_table_var
-        )
-        row += 1
-
-        # 地标/描述风格多选（世界资源段内，占整行）
-        styles_row = ctk.CTkFrame(self.world_body, fg_color="transparent")
-        styles_row.grid(row=row, column=0, columnspan=2, sticky='ew',
-                        padx=18, pady=(10, 6))
-        styles_row.columnconfigure(0, weight=1, uniform="world_style")
-        styles_row.columnconfigure(1, weight=1, uniform="world_style")
-        row += 1
-
-        self.landmark_selector = StyleListBox(styles_row, "地标风格组", height=2,
-                                              on_change=self._on_landmark_selection_changed)
-        self.landmark_selector.grid(row=0, column=0, sticky='nsew', padx=(0, 10))
-        self.landmark_selector.add_button("默认", self.landmark_selector.set_default, padx=0)
-        self.landmark_selector.add_button("全选", self.landmark_selector.select_all, padx=10)
-
-        self.quip_selector = StyleListBox(styles_row, "描述风格组", height=2,
-                                          on_change=self._on_quip_selection_changed)
-        self.quip_selector.grid(row=0, column=1, sticky='nsew', padx=(10, 0))
-        self.quip_selector.add_button("清空", self.quip_selector.clear_selection, padx=0)
-        self.quip_selector.add_button("全选", self.quip_selector.select_all, padx=10)
-
-        # ── 包设置 ──
-        self._section_label(self.world_body, row, "包设置")
-        row += 1
-
-        # 第1行：世界包
-        self.world_pack_label, ctrl = self._make_row(self.world_body, row, "世界包")
-        row += 1
-
-        self.world_pack_idle_frame = ctk.CTkFrame(ctrl, fg_color="transparent")
-        self.world_pack_idle_frame.pack(side='left')
-        self.world_pack_var = tk.StringVar(value="")
-        self.world_pack_menu = self._make_option_button(
-            self.world_pack_idle_frame, [],
-            self._on_world_pack_changed, self.world_pack_var, expand=False
-        )
-        self.world_pack_new_btn = ctk.CTkButton(
-            self.world_pack_idle_frame, text="新建", width=60, height=28,
-            command=self._create_world_pack, fg_color="transparent",
-            text_color=SETTINGS_TEXT_SOFT, hover_color=SETTINGS_HOVER,
-            border_width=1, border_color=SETTINGS_INPUT_BORDER,
-            corner_radius=8, font=ui_fonts.ui_font(12)
-        )
-        self.world_pack_new_btn.pack(side='left', padx=(8, 0))
-
-        self.world_pack_active_frame = ctk.CTkFrame(ctrl, fg_color="transparent")
-        self.world_pack_active_label = ctk.CTkLabel(
-            self.world_pack_active_frame, text="", anchor='w',
-            font=_FONT, text_color=SETTINGS_OK)
-        self.world_pack_active_label.pack(side='left')
-        self.world_pack_dissolve_btn = ctk.CTkButton(
-            self.world_pack_active_frame, text="删除", width=60, height=28,
-            command=self._dissolve_world_pack, fg_color="transparent",
-            text_color=SETTINGS_ERR, hover_color=SETTINGS_HOVER,
-            border_width=1, border_color=SETTINGS_INPUT_BORDER,
-            corner_radius=8, font=ui_fonts.ui_font(12)
-        )
-        self.world_pack_dissolve_btn.pack(side='left', padx=(12, 0))
-        self.world_pack_active_frame.pack_forget()
-
-        # 第2行：启用开关（参考 AI 设置段的布局风格）
-        _, ctrl = self._make_row(self.world_body, row, "启用")
-        row += 1
-        self.world_pack_enable_var = tk.BooleanVar(value=False)
-        self.world_pack_switch = ctk.CTkSwitch(
-            ctrl, text="", variable=self.world_pack_enable_var,
-            width=44, height=22, command=self._on_world_pack_switch,
-            progress_color=SETTINGS_SWITCH_PROGRESS, fg_color=SETTINGS_SWITCH_TRACK,
-            button_color=SETTINGS_SWITCH_KNOB, button_hover_color=SETTINGS_SWITCH_KNOB
-        )
-        self.world_pack_switch.pack(side='left')
-
-        self._refresh_world_pack_ui()
-
-    # ───────────────── 世界包操作 ─────────────────
-    def _refresh_world_pack_ui(self):
-        """刷新包设置段：未启用时显示 optionmenu+新建键，已启用时显示启用标签+解散键。"""
-        if self.world_manager is None:
-            self.world_pack_label.configure(
-                text="世界包（不可用）", text_color=SETTINGS_TEXT_SOFT)
-            self.world_pack_menu.configure(state="disabled")
-            self.world_pack_new_btn.configure(state="disabled")
-            self.world_pack_dissolve_btn.configure(state="disabled")
-            self.world_pack_switch.configure(state="disabled")
-            self._show_pack_row(False)
-            self.world_pack_var.set("")
-            self._set_world_controls_locked()
-            return
-
-        self.world_pack_menu.configure(state="normal")
-        self.world_pack_new_btn.configure(state="normal")
-        self.world_pack_dissolve_btn.configure(state="normal")
-        self.world_pack_switch.configure(state="normal")
-
-        names = []
-        for p in self.world_manager.list_packs():
-            if not p.get("error"):
-                names.append(p["name"])
-        current = self.world_pack_var.get()
-        self.world_pack_menu.configure(values=names)
-        if current not in names:
-            self.world_pack_var.set(names[0] if names else "")
-
-        active = self.world_state is not None and self.world_state.active
-        if active:
-            self.world_pack_label.configure(text="世界包", text_color=SETTINGS_LABEL)
-            self.world_pack_active_label.configure(
-                text=f"已启用：{self.world_state.pack_name}")
-            self._show_pack_row(True)
-            self.world_pack_var.set(self.world_state.pack_name)
-            self.world_pack_enable_var.set(True)
-        else:
-            self.world_pack_label.configure(text="世界包", text_color=SETTINGS_LABEL)
-            self.world_pack_active_label.configure(text="已启用：")
-            self._show_pack_row(False)
-            self.world_pack_enable_var.set(False)
         self._set_world_controls_locked()
 
-    def _show_pack_row(self, active):
-        """在“optionmenu+新建键”与“启用标签+解散键”两种布局间切换。"""
-        if active:
-            self.world_pack_idle_frame.pack_forget()
-            self.world_pack_active_frame.pack(side='left')
-        else:
-            self.world_pack_active_frame.pack_forget()
-            self.world_pack_idle_frame.pack(side='left')
-
-    def _on_world_pack_changed(self, choice):
-        """仅记录 optionmenu 选择，加装/卸载由第2行“启用”开关触发。"""
-        pass
-
-    def _on_world_pack_switch(self):
-        """开关仅记录启用意图，不立即应用任何更改；保存设置时才生效。"""
-        if self.world_manager is None:
-            self.world_pack_enable_var.set(False)
-            return
-        if self.world_pack_enable_var.get():
-            for p in self.world_manager.list_packs():
-                if p["name"] == self.world_pack_var.get() and not p.get("error"):
-                    return
-            self.world_pack_enable_var.set(False)
-            ui.ctk.dialogs.showwarning("提示", "没有可加载的世界包，请先创建")
-
-    def _activate_selected_pack(self):
-        """根据 optionmenu 当前选择的包执行激活（供保存流程调用）。"""
-        if self.world_manager is None:
-            raise ValueError("世界包功能不可用")
-        target = None
-        for p in self.world_manager.list_packs():
-            if p["name"] == self.world_pack_var.get() and not p.get("error"):
-                target = p
-                break
-        if target is None:
-            raise ValueError("没有可加载的世界包，请先创建")
-        self.world_manager.activate(
-            target["world_id"], self.settings, self.settings_repo)
-
-    def _apply_world_pack_changes_on_save(self):
-        """保存设置时应用世界包启用/卸载更改：先保存自由设置，再执行切换。"""
-        if self.world_manager is None or self.world_state is None:
-            return
-        enabled = self.world_pack_enable_var.get()
-        active = self.world_state.active
-        if enabled and active:
-            if self.world_state.pack_name == self.world_pack_var.get():
-                return
-            self.world_manager.deactivate(self.settings, self.settings_repo)
-            self._activate_selected_pack()
-        elif enabled and not active:
-            self._activate_selected_pack()
-        elif not enabled and active:
-            self.world_manager.deactivate(self.settings, self.settings_repo)
-
-    def _build_available_resources(self) -> Dict[str, list]:
-        """返回各资源类型可选打包的具体条目（供创建对话框的选择控件使用）。"""
-        resources: Dict[str, list] = {}
-        resources["landmarks"] = list(self.landmark_repo.get_styles())
-        resources["quips"] = list(self.quip_repo.get_styles())
-        resources["presets"] = list(self.preset_repo.get_tables())
-        resources["personalities"] = list(self.personality_repo.get_tables())
-        scenario_repo = getattr(self.gui_ref, "_scenario_repo", None) if self.gui_ref else None
-        if scenario_repo is not None:
-            resources["scenarios"] = [d for d in scenario_repo.list_all()
-                                  if not is_default_scenario(d)]
-        # 挑战包：列出全部自由 .chal（打包不依赖密钥，密钥由用户手动放入包内）
-        cm = ChallengeService(self.settings_repo, world_state=self.world_state)
-        resources["challenges"] = [
-            f for f in cm.get_available_packs() if not cm.is_bundled(f)]
-        resources["names"] = list(self.name_repo.get_tables())
-        news_service = getattr(getattr(self.gui_ref, "context", None), "news_service", None)
-        if news_service is not None:
-            resources["news"] = list(news_service.get_tables())
-        if self.world_manager is not None:
-            behaviors = list_behavior_packs(self.world_manager.data_dir)
-            if (self.world_state is not None and self.world_state.active
-                    and self.world_state.owns("behaviors")):
-                for name in self.world_state.manifest.resources.get("behaviors") or []:
-                    if name not in behaviors:
-                        behaviors.append(name)
-                behaviors.sort()
-            if behaviors:
-                resources["behaviors"] = behaviors
-        return {k: v for k, v in resources.items() if v}
-
+    # ───────────────── 世界包联动（规则段） ─────────────────
     def _set_world_controls_locked(self):
-        """按包锁定的设置键禁用对应控件（世界块）。"""
+        """按包锁定的设置键禁用规则段控件（静态表菜单的锁在资源中心页）。"""
         locked = self.world_state.locked_keys() if self.world_state is not None else set()
         self.world_setting_button.configure(
             state="disabled" if "world_setting" in locked else "normal")
         self.seed_entry.configure(state="disabled" if "seed" in locked else "normal")
         self.seed_random_btn.configure(state="disabled" if "seed" in locked else "normal")
-        self.name_table_menu.configure(
-            state="disabled" if "name_table" in locked else "normal")
-        self.news_table_menu.configure(
-            state="disabled" if "news_table" in locked else "normal")
-        self.preset_table_menu.configure(
-            state="disabled" if "preset_table" in locked else "normal")
-        self.personality_table_menu.configure(
-            state="disabled" if "personality_table" in locked else "normal")
 
     def _sync_world_vars(self):
-        """激活/卸载/解散后，按 self.settings 刷新世界块控件。"""
+        """激活/卸载/解散后，按 self.settings 刷新规则段控件（世界包 settings
+        可能改写体型/种子）。"""
         world_options = {"出现": "appear", "绝对巨大化": "abs_giant", "相对巨大化": "rel_giant"}
         world_setting = self.settings.get("world_setting", "appear")
         for display, value in world_options.items():
@@ -621,150 +302,11 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         seed = self.settings.get("seed", 0)
         self.seed_var.set(str(seed) if seed != 0 else "")
         self.user_seed = seed
+        self._set_world_controls_locked()
 
-        name_tables = self.name_repo.get_tables()
-        name_table = self.settings.get("name_table", DEFAULT_NAME_TABLE)
-        if name_table not in name_tables:
-            name_tables.insert(0, name_table)
-        self.name_table = name_table
-        self.name_table_var.set(name_table)
-        self.name_table_menu.configure(values=name_tables)
-
-        news_table = self.settings.get("news_table", DEFAULT_NEWS_TABLE)
-        news_service = NewsService(news_table=news_table,
-                                   world_state=self.world_state)
-        news_tables = news_service.get_tables()
-        if news_table not in news_tables:
-            news_tables.insert(0, news_table)
-        if not news_tables:
-            news_tables = [DEFAULT_NEWS_TABLE]
-        self.news_table = news_table
-        self.news_table_var.set(news_table)
-        self.news_table_menu.configure(values=news_tables)
-
-        preset_table = self.settings.get("preset_table", "default")
-        preset_tables = self.preset_repo.get_tables()
-        if preset_table not in preset_tables:
-            preset_tables.insert(0, preset_table)
-        if not preset_tables:
-            preset_tables = ["default"]
-        self.preset_table = preset_table
-        self.preset_table_var.set(preset_table)
-        self.preset_table_menu.configure(values=preset_tables)
-
-        personality_table = self.settings.get("personality_table", "default")
-        personality_tables = self.personality_repo.get_tables()
-        if personality_table not in personality_tables:
-            personality_tables.insert(0, personality_table)
-        if not personality_tables:
-            personality_tables = ["default"]
-        self.personality_table = personality_table
-        self.personality_table_var.set(personality_table)
-        self.personality_table_menu.configure(values=personality_tables)
-
-    def _after_world_state_change(self):
-        """世界包状态变化后同步面板控件、上下文与全局绿色指示。"""
+    def on_world_state_changed(self):
+        """世界包状态变化后的本页刷新（由 gui_ref.refresh_world_ui 调度）。"""
         self._sync_world_vars()
-        self.selected_styles = self.settings.get("selected_styles", ["ChineseMix"])
-        self.selected_quip_styles = self.settings.get("selected_quip_styles", [])
-        self._sync_all_states()
-        if self.on_styles_changed:
-            self.on_styles_changed()
-        if self.gui_ref is not None:
-            for method, arg in [
-                ("on_world_setting_changed", self.world_setting),
-                ("on_name_table_changed", self.name_table),
-                ("on_news_table_changed", self.news_table),
-                ("on_preset_table_changed", self.preset_table),
-                ("on_personality_table_changed", self.personality_table),
-            ]:
-                if hasattr(self.gui_ref, method):
-                    getattr(self.gui_ref, method)(arg)
-            if hasattr(self.gui_ref, "refresh_world_ui"):
-                self.gui_ref.refresh_world_ui()
-        self._refresh_world_pack_ui()
-
-    def _create_world_pack(self):
-        if self.world_manager is None:
-            ui.ctk.dialogs.showerror("错误", "世界包功能不可用")
-            return
-        dialog = WorldPackCreateDialog(
-            self, available_resources=self._build_available_resources())
-        cfg = dialog.result
-        if not cfg:
-            return
-
-        def _do_work():
-            try:
-                challenge_mgr = ChallengeService(
-                    self.settings_repo,
-                    getattr(self.gui_ref, "_character_repo", None) if self.gui_ref else None,
-                    self.landmark_repo,
-                    self.quip_repo,
-                    getattr(self.gui_ref, "_scenario_repo", None) if self.gui_ref else None,
-                )
-                manifest = self.world_manager.create_from_current(
-                    cfg["world_id"], cfg["name"], self.settings,
-                    landmark_repo=self.landmark_repo,
-                    quip_repo=self.quip_repo,
-                    preset_repo=getattr(self.gui_ref, "_preset_repo", None) if self.gui_ref else None,
-                    personality_repo=getattr(self.gui_ref, "_personality_repo", None) if self.gui_ref else None,
-                    scenario_repo=getattr(self.gui_ref, "_scenario_repo", None) if self.gui_ref else None,
-                    name_repo=self.name_repo,
-                    news_service=getattr(getattr(self.gui_ref, "context", None),
-                                         "news_service", None),
-                    challenge_mgr=challenge_mgr,
-                    version=cfg["version"],
-                    author=cfg["author"],
-                    description=cfg["description"],
-                    selected_resources=cfg["selected_resources"],
-                )
-            except Exception as e:
-                self.after(0, lambda: ui.ctk.dialogs.showerror(
-                    "错误", f"创建世界包失败：{e}"))
-                return
-            self.after(0, lambda m=manifest: self._on_pack_created(m))
-
-        self.after(50, _do_work)
-
-    def _on_pack_created(self, manifest):
-        ui.ctk.dialogs.showinfo(
-            "成功", f"世界包「{manifest.name}」已创建\nworld_id: {manifest.world_id}")
-        self._refresh_world_pack_ui()
-
-    def _dissolve_world_pack(self):
-        if self.world_manager is None:
-            ui.ctk.dialogs.showerror("错误", "世界包功能不可用")
-            return
-        if self.world_state is None or not self.world_state.active:
-            return
-        world_id = self.world_state.world_id
-        name = self.world_state.pack_name
-        choice = ui.ctk.dialogs.askyesnocancel(
-            "删除世界包",
-            f"删除「{name}」会立即退出该世界包。\n是否将包内资源解散到自由资源？")
-        if choice is None:
-            return
-        try:
-            challenge_mgr = ChallengeService(
-                self.settings_repo,
-                getattr(self.gui_ref, "_character_repo", None) if self.gui_ref else None,
-                self.landmark_repo,
-                self.quip_repo,
-                getattr(self.gui_ref, "_scenario_repo", None) if self.gui_ref else None,
-            )
-            if choice:
-                self.world_manager.dissolve(
-                    world_id, self.settings, self.settings_repo,
-                    remove_pack=True, challenge_mgr=challenge_mgr)
-            else:
-                self.world_manager.deactivate(self.settings, self.settings_repo)
-                self.world_manager.delete_pack(world_id)
-        except ValueError as e:
-            ui.ctk.dialogs.showerror("错误", str(e))
-            return
-        ui.ctk.dialogs.showinfo("成功", f"世界包「{name}」已删除")
-        self._after_world_state_change()
 
     def _build_generation_block(self):
         self._setup_body_grid(self.gen_body, "gen")
@@ -1155,30 +697,6 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         if self.on_world_setting_changed:
             self.on_world_setting_changed(self.world_setting)
 
-    def _on_name_table_changed(self, choice):
-        self.name_table = choice or DEFAULT_NAME_TABLE
-        self.name_table_var.set(choice)
-        if self.on_name_table_changed:
-            self.on_name_table_changed(self.name_table)
-
-    def _on_news_table_changed(self, choice):
-        self.news_table = choice or DEFAULT_NEWS_TABLE
-        self.news_table_var.set(self.news_table)
-        if self.on_news_table_changed:
-            self.on_news_table_changed(self.news_table)
-
-    def _on_preset_table_changed(self, choice):
-        self.preset_table = choice or "default"
-        self.preset_table_var.set(self.preset_table)
-        if self.on_preset_table_changed:
-            self.on_preset_table_changed(self.preset_table)
-
-    def _on_personality_table_changed(self, choice):
-        self.personality_table = choice or "default"
-        self.personality_table_var.set(self.personality_table)
-        if self.on_personality_table_changed:
-            self.on_personality_table_changed(self.personality_table)
-
     def _on_order_option_changed(self, choice):
         order_options = {"匹配度": "match", "尺寸升序": "size_asc", "尺寸降序": "size_desc"}
         self.comparison_order = order_options.get(choice, "match")
@@ -1208,12 +726,6 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         # 主题只保存在编辑状态中。点击“保存并返回主页面”后，才由主窗口
         # 管理器统一写入设置并应用，避免全局实际主题与 settings 暂存值分离。
 
-    def update_theme(self, mode=None):
-        """刷新设置页中的原生 Listbox，不改变待保存的主题选择。"""
-        actual_mode = mode or ctk.get_appearance_mode()
-        self.landmark_selector.apply_theme(actual_mode)
-        self.quip_selector.apply_theme(actual_mode)
-
     def sync_saved_theme(self):
         """进入设置页时丢弃未保存的主题选择，显示持久化值。"""
         saved_mode = self.settings.get("theme_mode", "Light")
@@ -1238,115 +750,12 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         new_seed = random.randint(1, 2 ** 31 - 1)
         self.seed_var.set(str(new_seed))
 
-    # ───────────────── 风格选择逻辑 ─────────────────
-    def _sync_all_states(self):
-        self._sync_landmark_styles()
-        self._sync_quip_styles()
+    # ───────────────── 部位选择同步 ─────────────────
+    def _sync_parts_states(self):
+        """按 self.settings 刷新部位多选（风格列表的同步在资源中心页）。"""
         selected = self.settings.get("selected_parts", ALL_PART_NAMES)
         for part, var in self.parts_checkboxes.items():
             var.set(part in selected)
-
-    def _sync_landmark_styles(self, filter_world=None):
-        styles = self.landmark_repo.get_styles()
-        display_items = []
-        kept = []
-        for style in styles:
-            reg_world = world_of(self.landmark_repo.load_style_address(style))
-            if filter_world and reg_world and reg_world != filter_world:
-                continue  # 同一世界观自动筛选：隐藏其它世界观的地标风格
-            landmarks = self.landmark_repo.load(style)
-            display_items.append(f"{style} ({len(landmarks)})")
-            kept.append(style)
-        selected_indices = [i for i, s in enumerate(kept) if s in self.selected_styles]
-        self.landmark_selector.sync_items(display_items, selected_indices)
-
-    def _sync_quip_styles(self, filter_world=None):
-        styles = self.quip_repo.get_styles()
-        size_order = ["small", "medium", "large", "huge", "colossal"]
-        display_items = []
-        kept = []
-        for style in styles:
-            reg_world = world_of(self.quip_repo.load_style_address(style))
-            if filter_world and reg_world and reg_world != filter_world:
-                continue  # 同一世界观自动筛选：隐藏其它世界观的描述风格
-            quips = self.quip_repo.load(style)
-            counts = []
-            for size in size_order:
-                matrix = quips.get(size, {})
-                total = sum(len(qlist) for qlist in matrix.values())
-                counts.append(str(total))
-            display_items.append(f"{style} ({', '.join(counts)})")
-            kept.append(style)
-        selected_indices = [i for i, s in enumerate(kept) if s in self.selected_quip_styles]
-        self.quip_selector.sync_items(display_items, selected_indices)
-
-    def _lock_world_from_selection(self) -> Optional[str]:
-        """当前选中风格共同锁定的世界观（先地标风格后描述风格）；未注册返回 None。"""
-        for s in self.selected_styles:
-            w = world_of(self.landmark_repo.load_style_address(s))
-            if w:
-                return w
-        for s in self.selected_quip_styles:
-            w = world_of(self.quip_repo.load_style_address(s))
-            if w:
-                return w
-        return None
-
-    def _apply_world_lock(self, forced: Optional[str] = None):
-        """同一世界观互斥：把两栏风格列表自动筛选到同一个世界观，剔除混选。
-
-        forced：用户本次新点选的风格带世界观时，以该世界观为准切换（自动筛选）。
-        """
-        lock = forced if forced is not None else self._lock_world_from_selection()
-        # 剔除与锁定世界观不一致的已选风格（未注册风格不限制）
-        def _filter_for_world(names, repo):
-            out = []
-            for s in names:
-                w = world_of(repo.load_style_address(s))
-                if not w or (lock is not None and w == lock):
-                    out.append(s)
-            return out
-
-        self.selected_styles = _filter_for_world(self.selected_styles, self.landmark_repo)
-        self.selected_quip_styles = _filter_for_world(self.selected_quip_styles, self.quip_repo)
-        if not self.selected_styles:
-            self.selected_styles = ["ChineseMix"]
-        self._sync_landmark_styles(lock)
-        self._sync_quip_styles(lock)
-        # 同步后以实际可见的选中项为准
-        self.selected_styles = self.landmark_selector.get_selected_raw_names() or self.selected_styles
-        self.selected_quip_styles = self.quip_selector.get_selected_raw_names() or self.selected_quip_styles
-        self.on_styles_changed()
-
-    def _on_landmark_selection_changed(self):
-        prev = list(self.selected_styles)
-        names = self.landmark_selector.get_selected_raw_names()
-        if not names:
-            names = ["ChineseMix"]
-        forced = None
-        for n in names:
-            if n in prev:
-                continue
-            w = world_of(self.landmark_repo.load_style_address(n))
-            if w:
-                forced = w
-                break
-        self.selected_styles = names
-        self._apply_world_lock(forced)
-
-    def _on_quip_selection_changed(self):
-        prev = list(self.selected_quip_styles)
-        names = self.quip_selector.get_selected_raw_names()
-        forced = None
-        for n in names:
-            if n in prev:
-                continue
-            w = world_of(self.quip_repo.load_style_address(n))
-            if w:
-                forced = w
-                break
-        self.selected_quip_styles = names
-        self._apply_world_lock(forced)
 
     # ───────────────── 保存与返回 ─────────────────────
     def _save_and_return(self):
@@ -1405,12 +814,6 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             "comparison_count": count,
             "comparison_order": comparison_order,
             "world_setting": world_setting,
-            "name_table": self.name_table,
-            "news_table": self.news_table,
-            "preset_table": self.preset_table,
-            "personality_table": self.personality_table,
-            "selected_styles": self.selected_styles,
-            "selected_quip_styles": self.selected_quip_styles,
             "show_all_details": self.show_all_details_var.get(),
             "enable_confusion": self.confusion_var.get(),
             "blocked_words": normalize_blocked_words(self.blocked_words_var.get()),
@@ -1449,17 +852,8 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         # 语音与 AI 共用同一份覆盖值——设一次两处都跟。
         netproxy.set_override(self.settings.get("net_proxy"))
 
-        try:
-            self._apply_world_pack_changes_on_save()
-        except ValueError as e:
-            ui.ctk.dialogs.showerror("错误", str(e))
-            self._refresh_world_pack_ui()
-            return
-
         if self.gui_ref and hasattr(self.gui_ref, 'apply_settings'):
             self.gui_ref.apply_settings()
-
-        self._after_world_state_change()
 
         if self.on_return_callback:
             self.on_return_callback()

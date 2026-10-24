@@ -416,6 +416,7 @@ def run_professional(boot):
         (0.50, "构建文本管理页面...", "text_mgmt"),
         (0.60, "构建副本页面...", "dungeon"),
         (0.70, "构建挑战页面...", "challenge"),
+        (0.75, "构建资源中心页面...", "resources"),
     ):
         enqueue(value, detail, lambda key=page_key: _build_tab(state, key))
 

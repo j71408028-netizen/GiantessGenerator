@@ -40,6 +40,7 @@ class NavigationBar(ctk.CTkFrame):
             ("  🧭  探索模式", "generator"),
             ("  🎯  挑战模式", "challenge"),
             ("  📑  文本管理", "text_mgmt"),
+            ("  📦  资源中心", "resources"),
             ("  🎭  副本编辑", "dungeon"),
             ("  ⚙️  设置", "settings"),
         ]
