@@ -170,6 +170,7 @@ class SelectionArbiter:
         if ruling.addr:
             score *= 1.0 + profile.priors.anchored_bias      # 有地址内容
             score *= profile.region_factor(ruling.addr)
+            score *= profile.env_preference_factor(ruling.addr)   # 环境偏好交点
             if profile.in_activity_region(ruling.addr):
                 score *= W_REGION
             if position:

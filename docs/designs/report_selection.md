@@ -73,6 +73,14 @@
 **环境只影响文本选取**，不进地标可达 / 配对的几何口径。行为包覆盖
 选取且未支持 `env_estimate` 参数时软权重中性缺席（同车道兼容判定）。
 
+**环境偏好（第三轴交点）**：`EnvPreferenceProfile` 从 step>0 的沉淀行
+学角色偏好什么环境（值域等宽分箱直方图 + EWMA 淡出），TAG 先验
+（`TAG_ENV_PRIORS` 并列表，旅行 / 地理测量偏爱人烟稀少）以伪计数做
+初值，并受成熟度阻尼压低权重——step 正负是相关性不是因果。消费在
+仲裁联合分：带地址槽位按其环境估计（零证据回落精确度默认值）查偏好
+分布乘调制因子，角色常讲的环境里的地标略微优先。中性档案（无证据、
+无先验标签）恒为 1.0，行为与从前一致。
+
 ## §4 覆盖报告与行为包兼容
 
 - 每份报告携带 `coverage`（星槽数 / 浪费风格 / 实际触发的风格）与
@@ -89,7 +97,7 @@
 | 仲裁主入口 / 车道 / 充裕度 / 提拔 / 物理走查 | `services/exploration/arbiter.py` |
 | 描述选取与车道窗口 / 环境一致性加分 | `core/logic/quips.py::select_quip_with_budget`（`lanes` / `env_estimate` 参数） |
 | 报告引擎接线 / 兼容兜底判定 | `services/exploration/report.py::generate`、`arbiter.hook_supports_lanes` |
-| 角色空间档案（学习 + TAG 先验 + 活动区域 + 环境轴） | `services/character/spatial.py` |
+| 角色空间档案（区域 / 环境轴 / 环境偏好轴 + TAG 先验 + 活动区域） | `services/character/spatial.py` |
 | 地标地址解析 / stuck 选项 | `services/exploration/address_plan.py` |
 | 行为锁（改语义先改预期） | `tests/check_address_planning.py`、`tests/check_selection_arbiter.py`、`tests/check_env_selection.py` |
 
@@ -97,8 +105,11 @@
 
 全部在 `services/exploration/arbiter.py` 顶部常量：`LANE_WEIGHTS`、
 `NEAR_MATCH_TAU`（近匹配容差，log 尺度）、提拔上限（`limit // 2`）、
-`W_COVER` / `W_REGION` / `W_PATH`（联合分权重）。默认值是建议值，
-行为锁只锁语义不锁数值——调整后跑上述两个测试确认语义未破即可。
+`W_COVER` / `W_REGION` / `W_PATH`（联合分权重）。环境两轴的常量在
+各自实现处：`quips.py` 的 `W_ENV_CONSISTENCY`（一致性加分），
+`spatial.py` 的 `TAG_ENV_PRIORS` / `_ENV_PRIOR_K` /
+`_ENV_PREFERENCE_SMOOTHING`（偏好先验与阻尼）。默认值是建议值，
+行为锁只锁语义不锁数值——调整后跑上述测试确认语义未破即可。
 
 ## 附录 C：开放点
 

@@ -13,7 +13,9 @@
    空间语义的标签入表，姿态/内容类标签留在内容层。
 
 模块同时承载环境轴（``EnvironmentProfile``）：在线报告沉淀的环境证据行
-按距离核聚合成地址环境估计，是环境因子的唯一事实来源（离线结算消费）。
+按距离核聚合成地址环境估计，是环境因子的唯一事实来源（离线结算消费）；
+以及环境偏好轴（``EnvPreferenceProfile``）：正步进沉淀行对环境值投票
+学到的偏好分布（区域偏好 × 环境估计的交点，消费于选取仲裁器）。
 
 与 ``rhythm.py`` 同构（先验 + 借力收缩），差异在特征空间：作息是 7×12
 平面网格、用全局均值收缩；地址是层级树、用父节点 + 均匀先验收缩
@@ -206,12 +208,14 @@ class SpatialProfile:
     ``region_factor`` 只合并学习层与先验层（粘性放大偏离、新颖加成未到访
     分支）；手工覆盖层不并入数值——命中与否（``in_activity_region``）的
     权重语义留给消费方（P4a 调度器），与现行规划器"只调顺序不改可选集"
-    的软偏好兼容。``env`` 是环境轴（沉淀聚合，见 ``EnvironmentProfile``）。
+    的软偏好兼容。``env`` 是环境轴（沉淀聚合，见 ``EnvironmentProfile``），
+    ``env_preference`` 是环境偏好轴（正步进投票，见 ``EnvPreferenceProfile``）。
     """
     priors: SpatialPriors = field(default_factory=SpatialPriors)
     activity_regions: List[str] = field(default_factory=list)
     learned: Optional[SpatialProfileService] = None
     env: Optional["EnvironmentProfile"] = None
+    env_preference: Optional["EnvPreferenceProfile"] = None
 
     def region_factor(self, address_text: str) -> float:
         svc = self.learned
@@ -234,6 +238,23 @@ class SpatialProfile:
             return None
         return self.env.env_factor(address_text)
 
+    def env_preference_factor(self, address_text: str) -> float:
+        """候选地址的环境偏好调制（围绕 1.0；无地址/无数据 → 1.0）。
+
+        环境值取槽位环境估计；零证据回落精确度默认值——偏好是「分布对
+        值」的函数，默认值只是温和的先验评价，不制造伪偏差（与
+        ``env_estimate`` 的零证据零权重铁律分属两轴，语义不同）。
+        """
+        pref = self.env_preference
+        if pref is None or not pref.has_data() or not address_text:
+            return 1.0
+        if parse_full(address_text) is None:
+            return 1.0
+        value = self.env_estimate(address_text)
+        if value is None:
+            value = _default_env_by_precision(address_text)
+        return pref.preference_factor(value)
+
     def in_activity_region(self, address_text: str) -> bool:
         """手工活动区域是否覆盖候选地址（软偏好最高层，坏文本不命中）。"""
         if not address_text:
@@ -253,12 +274,16 @@ def build_spatial_profile(state, now: Optional[datetime.datetime] = None
     evolution = getattr(state, "evolution", None) or []
     learned = SpatialProfileService().learn_from_evolution(evolution, now=now)
     env = EnvironmentProfile().learn_from_evolution(evolution, now=now)
+    tags = getattr(state, "selected_tags", None) or []
+    preference = EnvPreferenceProfile().learn_from_evolution(
+        evolution, prior_shares=env_priors_for_tags(tags), now=now)
     return SpatialProfile(
-        priors=priors_for_tags(getattr(state, "selected_tags", None) or []),
+        priors=priors_for_tags(tags),
         activity_regions=[r for r in (getattr(state, "activity_regions", None) or [])
                           if isinstance(r, str) and r.strip()],
         learned=learned,
         env=env,
+        env_preference=preference,
     )
 
 
@@ -414,3 +439,113 @@ class EnvironmentProfile:
             env = trust * trusted + (1.0 - trust) * ((1.0 - sweep) * core
                                                      + sweep * default)
         return max(_MIN_ENV, min(_MAX_ENV, env))
+
+
+# ==================== 环境偏好轴：交点学习（EnvPreferenceProfile） ====================
+
+# 环境偏好直方图：值域 [_MIN_ENV, _MAX_ENV] 等宽分箱；step>0 的沉淀行按
+# env 值投票（EWMA 半衰期淡出），TAG 先验以伪计数做初值。step 正负是
+# 相关性不是因果，先验权重须压低：伪计数 + 成熟度阻尼双重收缩，使先验
+# 单独在场时只是温和扰动（≈0.15~0.3 量级），随证据积累让位给学习结果。
+_ENV_BINS = 7                                    # 偏好直方图箱数
+_ENV_PREF_LO, _ENV_PREF_HI = 0.5, 1.5            # 偏好调制夹取（围绕 1.0）
+_ENV_PRIOR_K = 2.0                               # TAG 先验伪计数（相对证据行强度）
+_ENV_PREFERENCE_SMOOTHING = 6.0                  # 成熟度：≈6 行证据达半影响力
+                                                 # （与 _SMOOTHING_K 同型，语义各异不合并）
+
+# TAG → 环境偏好先验（并列表，不进 ``SpatialPriors`` 标量组）：值域升序
+# 分箱份额（和为 1）。只有环境语义清晰的标签入表（旅行 / 地理测量偏爱
+# 人烟稀少处）；数值是建议，行为锁只锁方向。行为包可扩展映射（键值均
+# 按标签名对齐）。
+TAG_ENV_PRIORS: Dict[str, tuple] = {
+    "旅行": (0.30, 0.25, 0.15, 0.10, 0.08, 0.07, 0.05),
+    "地理测量": (0.22, 0.20, 0.16, 0.13, 0.11, 0.10, 0.08),
+}
+
+
+def env_priors_for_tags(tags: Iterable[str]) -> Optional[List[float]]:
+    """合并多标签的环境偏好先验：份额逐箱相加后归一；无命中返回 None
+    （消费方以均匀分布兜底）。"""
+    shares = None
+    for tag in tags or []:
+        p = TAG_ENV_PRIORS.get(tag)
+        if p is None:
+            continue
+        shares = list(p) if shares is None else [a + b for a, b in zip(shares, p)]
+    if shares is None:
+        return None
+    total = sum(shares)
+    return [s / total for s in shares] if total > 0 else None
+
+
+class EnvPreferenceProfile:
+    """环境偏好学习器（第三轴：偏好什么环境）。
+
+        pref = EnvPreferenceProfile().learn_from_evolution(state.evolution)
+        factor = pref.preference_factor(0.3)   # 该环境值的偏好调制（围绕 1.0）
+
+    step>0 的沉淀行（带 position + env_factor，与 ``EnvironmentProfile``
+    同一行集）按 env 值分箱投票，EWMA 半衰期淡出；TAG 先验以伪计数做
+    初值。调制 = 箱份额 × 箱数（均匀 → 恰好 1.0），再乘证据成熟度阻尼——
+    零证据 + 无先验 = 全中性；先验单独在场时被压在低位。
+    """
+
+    def __init__(self):
+        self._votes: List[float] = [0.0] * _ENV_BINS
+        self._total = 0.0
+        self._prior: Optional[List[float]] = None
+
+    def learn_from_evolution(self, evolution: list,
+                             prior_shares: Optional[List[float]] = None,
+                             now: Optional[datetime.datetime] = None
+                             ) -> "EnvPreferenceProfile":
+        """收集正步进沉淀行的环境投票；``prior_shares`` 为归一化的 TAG
+        先验（``env_priors_for_tags`` 的输出），None = 均匀兜底。"""
+        now = now or datetime.datetime.now()
+        self._votes = [0.0] * _ENV_BINS
+        self._total = 0.0
+        self._prior = list(prior_shares) if prior_shares else None
+        for ev in evolution or []:
+            if not (getattr(ev, "step", 0.0) or 0.0) > 0:
+                continue
+            if not ((getattr(ev, "position", "") or "").strip()
+                    and getattr(ev, "env_factor", None) is not None):
+                continue
+            try:
+                env = float(ev.env_factor)
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(env):
+                continue
+            weight = _age_weight(getattr(ev, "changed_at", ""), now)
+            if weight <= 0.0:
+                continue
+            self._votes[self._bin_of(env)] += weight
+            self._total += weight
+        return self
+
+    @staticmethod
+    def _bin_of(env: float) -> int:
+        e = max(_MIN_ENV, min(_MAX_ENV, env))
+        return min(_ENV_BINS - 1,
+                   int((e - _MIN_ENV) / ((_MAX_ENV - _MIN_ENV) / _ENV_BINS)))
+
+    def has_data(self) -> bool:
+        return self._total > 0.0 or self._prior is not None
+
+    def preference_factor(self, env_value: float) -> float:
+        """环境值的偏好调制（围绕 1.0；无数据返回 1.0）。
+
+        分母含先验伪计数（收缩目标 = TAG 先验而非均匀）；成熟度把调制
+        从 1.0 随证据量渐次放开，先验不越俎代庖。
+        """
+        denom = self._total + (_ENV_PRIOR_K if self._prior else 0.0)
+        if denom <= 0.0:
+            return 1.0
+        maturity = denom / (denom + _ENV_PREFERENCE_SMOOTHING)
+        prior = self._prior or [1.0 / _ENV_BINS] * _ENV_BINS
+        idx = self._bin_of(env_value)
+        density = ((self._votes[idx] + _ENV_PRIOR_K * prior[idx]) / denom) * _ENV_BINS
+        density = max(_ENV_PREF_LO, min(_ENV_PREF_HI, density))
+        return max(_ENV_PREF_LO, min(_ENV_PREF_HI,
+                                     1.0 + maturity * (density - 1.0)))
