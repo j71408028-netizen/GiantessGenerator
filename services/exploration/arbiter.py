@@ -43,7 +43,7 @@ class SlotRuling:
     """单个对比槽位的仲裁结果。
 
     ``lanes`` 是给 ``select_quip_with_budget`` 的资格窗口；无地址槽位为
-    全部风格 FREE（继承旧 quip_allowed_styles 的 None 语义，均匀权重不
+    全部风格 FREE（None = 不限的旧语义等价于均匀权重，均匀权重不
     改变同池相对顺序）；无描述内容时为空表。``starved`` 仅在有描述内容
     但充裕度为 0 时置位（纯地址内容不参与仲裁）。
     ``env_estimate`` 是槽位地址的环境估计（档案环境轴，None = 零证据），
@@ -56,30 +56,6 @@ class SlotRuling:
     starved: bool = False
     promoted: bool = False
     env_estimate: Optional[float] = None
-
-
-def _hook_accepts(impl, name: str) -> bool:
-    if impl is None:
-        return True
-    try:
-        import inspect
-        params = inspect.signature(impl).parameters
-    except (TypeError, ValueError):
-        return False
-    return name in params or any(p.kind == p.VAR_KEYWORD
-                                 for p in params.values())
-
-
-def hook_supports_lanes(impl) -> bool:
-    """行为包覆盖的 select 实现是否接受 lanes 参数（决定引擎走窗口还是
-    旧全局剪枝兜底——不支持 lanes 的旧包钉住旧语义）。"""
-    return _hook_accepts(impl, "lanes")
-
-
-def hook_supports_env(impl) -> bool:
-    """行为包覆盖的 select 实现是否接受 env_estimate 参数（不支持的环境
-    软权重中性缺席，零证据零权重同源——旧包钉住旧语义）。"""
-    return _hook_accepts(impl, "env_estimate")
 
 
 class SelectionArbiter:

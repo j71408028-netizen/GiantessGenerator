@@ -12,7 +12,7 @@ P4a 之后本类收敛为**地址解析 + stuck_options 工具层**：选点循�
 """
 
 from core.address_model import (
-    compose_address_ex, covers, world_of, resolve_full_address,
+    compose_address_ex, world_of, resolve_full_address,
 )
 
 
@@ -20,9 +20,7 @@ class AddressPlanner:
     """地标地址规划器。
 
     ``landmark_address`` 供 ``ReportEngine`` 在对比循环里解析地标地址（耐久
-    键、叙述定位）；``quip_allowed_styles`` / ``prune_quips_by_styles`` 仅作为
-    **兼容兜底**保留——当行为包覆盖了 ``select_quip_with_budget`` 且不支持
-    lanes 参数时，引擎退回旧的全局剪枝语义（旧包钉住旧行为）。
+    键、叙述定位）。
     """
 
     def __init__(self, catalog):
@@ -81,40 +79,6 @@ class AddressPlanner:
             if reg is None:
                 reg = self.catalog.landmark_repo.load_style_address(style)
         return resolve_full_address(reg, getattr(landmark, "address", "") or "")
-
-    def quip_allowed_styles(self, landmark_addr_text: str, quip_registers: dict):
-        """某条地标对比可衔接的描述风格（兼容兜底，语义同旧实现）。
-
-        主路径已由仲裁器的车道窗口（``SelectionArbiter.quip_lanes``）取代；
-        返回 None 表示不限（地标本身无地址 / 旧内容兼容）。
-        """
-        if not landmark_addr_text:
-            return None
-        allowed = []
-        for style, reg in quip_registers.items():
-            reg = (reg or "").strip()
-            if not reg or covers(reg, landmark_addr_text):
-                allowed.append(style)
-        return allowed
-
-    @staticmethod
-    def prune_quips_by_styles(quips_working: dict, allowed) -> None:
-        """把描述池中不属于 allowed 风格的事件就地移除（兼容兜底）。
-
-        注意这会**永久**缩小共享池（窄允许集影响后续宽允许集的地标），
-        旧语义如此；主路径（车道窗口）只消费不剪枝，无此问题。
-        """
-        if allowed is None:
-            return
-        allowed_set = set(allowed)
-        for size_cat, matrix in quips_working.items():
-            for coord, quip_list in list(matrix.items()):
-                kept = [q for q in quip_list
-                        if isinstance(q, dict) and q.get("style", "") in allowed_set]
-                if kept:
-                    matrix[coord] = kept
-                else:
-                    matrix.pop(coord, None)
 
     def stuck_options(self, state, stuck: dict) -> dict:
         """无路可走时可供角色选择的目标：当前/其它世界观内的地标地址，以及可切换的世界观。

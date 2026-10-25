@@ -33,7 +33,6 @@ from core.logic import select_quip_with_budget  # noqa: E402
 from core.models import Landmark  # noqa: E402
 from services.character.spatial import SpatialProfile, priors_for_tags  # noqa: E402
 from services.exploration.address_plan import AddressPlanner  # noqa: E402
-from services.exploration.arbiter import hook_supports_lanes  # noqa: E402
 
 
 # ---------------- 1. select 的车道窗口（裁定级） ----------------
@@ -213,14 +212,6 @@ _plan4 = _arb4.arbitrate(
     profile=SpatialProfile(priors=priors_for_tags(["旅行"])))
 check("旅行先验把锚定内容排到 portable 之前",
       [c["landmark"].name for c in _plan4["comparisons"]][0] == "锚定地标")
-
-# ---------------- 5. hook 兼容判定 ----------------
-check("无覆盖时支持 lanes", hook_supports_lanes(None))
-check("旧签名覆盖不支持 lanes",
-      not hook_supports_lanes(lambda size_cat, intrusion_val: None))
-check("带 lanes 参数的覆盖支持",
-      hook_supports_lanes(lambda size_cat, lanes=None: None))
-check("**kwargs 覆盖支持", hook_supports_lanes(lambda **kw: None))
 
 # ---------------- 结论 ----------------
 _log.flush()

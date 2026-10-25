@@ -70,8 +70,7 @@
 `W_ENV_CONSISTENCY`）——角色更倾向讲述与所在环境相称的故事。三条
 铁律：**零证据零权重**（无沉淀时不制造伪偏差，行为与从前一致）；
 **软权重不做硬闸**（全池矛盾时矛盾文本照常被选，池耗尽降级不受影响）；
-**环境只影响文本选取**，不进地标可达 / 配对的几何口径。行为包覆盖
-选取且未支持 `env_estimate` 参数时软权重中性缺席（同车道兼容判定）。
+**环境只影响文本选取**，不进地标可达 / 配对的几何口径。
 
 **环境偏好（第三轴交点）**：`EnvPreferenceProfile` 从 step>0 的沉淀行
 学角色偏好什么环境（值域等宽分箱直方图 + EWMA 淡出），TAG 先验
@@ -81,14 +80,14 @@
 分布乘调制因子，角色常讲的环境里的地标略微优先。中性档案（无证据、
 无先验标签）恒为 1.0，行为与从前一致。
 
-## §4 覆盖报告与行为包兼容
+## §4 覆盖报告与行为包
 
 - 每份报告携带 `coverage`（星槽数 / 浪费风格 / 实际触发的风格）与
   `promotions`（提拔记录：谁让位给谁），供后续界面展示与调试——目前
   只作为数据，未上界面；
-- 行为包若覆盖了描述选取（`logic.select_quip_with_budget`）且未支持
-  车道参数（`lanes`），程序自动退回旧的「按地标筛风格」模式——该包
-  钉住它发布时的旧语义。
+- 描述选取的覆盖实现必须接受 `lanes` / `env_estimate` 参数并遵循其
+  语义（车道资格窗口是裁定级，环境一致性是软权重），引擎不再提供
+  旧签名兼容路径。
 
 ## 附录 A：代码地图（开发者）
 
@@ -96,7 +95,7 @@
 |---|---|
 | 仲裁主入口 / 车道 / 充裕度 / 提拔 / 物理走查 | `services/exploration/arbiter.py` |
 | 描述选取与车道窗口 / 环境一致性加分 | `core/logic/quips.py::select_quip_with_budget`（`lanes` / `env_estimate` 参数） |
-| 报告引擎接线 / 兼容兜底判定 | `services/exploration/report.py::generate`、`arbiter.hook_supports_lanes` |
+| 报告引擎接线 | `services/exploration/report.py::generate` |
 | 角色空间档案（区域 / 环境轴 / 环境偏好轴 + TAG 先验 + 活动区域） | `services/character/spatial.py` |
 | 地标地址解析 / stuck 选项 | `services/exploration/address_plan.py` |
 | 行为锁（改语义先改预期） | `tests/check_address_planning.py`、`tests/check_selection_arbiter.py`、`tests/check_env_selection.py` |

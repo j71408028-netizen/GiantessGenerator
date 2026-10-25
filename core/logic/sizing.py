@@ -74,7 +74,7 @@ def get_size_category(height: float) -> str:
         return "small"
 
 
-@behavior_hook("logic", "_build_size_description")
+@behavior_hook("logic", "build_size_description")
 def build_size_description(quip_result: dict) -> str:
     """由报告正文中的一条尺寸对比结果构造解锁描述（使用对应的事件描述 quip）。"""
     quip_text = (quip_result.get("quip_text") or "").strip()

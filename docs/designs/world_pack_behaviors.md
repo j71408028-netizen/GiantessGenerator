@@ -157,8 +157,8 @@ data/worlds/<world_id>/
 | `should_skip_by_part_tags` | `(part, selected_tags, p) -> bool` | 在构造对比时，按与部位展示有关的个性标签添加偏好。                                                                  |
 | `contains_blocked_word` | `(text, blocked_words) -> bool` | 判断文本是否包含任一屏蔽词（大小写不敏感的子串匹配）。覆盖后地标匹配、描述匹配与副本提示词过滤都会生效。 |
 | `get_comparisons` | `(landmarks, body_parts, order="match", limit=5, selected_tags=None, skip_base_prob=0.0, selected_parts=None, blocked_words=None) -> List[Dict]` | 寻找最接近的地标对比。名称含屏蔽词的地标会被跳过（内部调用 `contains_blocked_word`）。                                                                                |
-| `_build_size_description` | `(quip_result) -> str` | 由报告正文中的一条尺寸对比结果构造解锁描述。                                                                     |
-| `select_quip_with_budget` | `(size_cat, intrusion_val, destruction_val, quips_working, locked_coords, cumulative_actual, cumulative_base, rate_factor=1.0, step_index=0, selected_tags=None, skip_base_prob=0.0, posture_list=None, blocked_words=None) -> (text, style, coord, actual_step, new_cumulative_actual, new_cumulative_base)` | 在预算内挑选事件描述 quip。含屏蔽词的描述会被跳过（内部调用 `contains_blocked_word`）。注意它会**就地弹出** `quips_working` 中被选中的 quip，覆盖实现必须保持该行为并返回 6 元组。               |
+| `build_size_description` | `(quip_result) -> str` | 由报告正文中的一条尺寸对比结果构造解锁描述。 |                                                                     |
+| `select_quip_with_budget` | `(size_cat, intrusion_val, destruction_val, quips_working, locked_coords, cumulative_actual, cumulative_base, rate_factor=1.0, step_index=0, selected_tags=None, skip_base_prob=0.0, posture_list=None, blocked_words=None, lanes=None, env_estimate=None) -> (text, style, coord, actual_step, new_cumulative_actual, new_cumulative_base)` | 在预算内挑选事件描述 quip。含屏蔽词的描述会被跳过（内部调用 `contains_blocked_word`）。注意它会**就地弹出** `quips_working` 中被选中的 quip，覆盖实现必须保持该行为并返回 6 元组。`lanes` 是仲裁资格窗口（裁定级），`env_estimate` 是槽位环境估计（软权重）；覆盖实现必须接受这两个参数并遵循其语义。 |
 
 ### `profile`（档案派生层文本化，模块函数）
 

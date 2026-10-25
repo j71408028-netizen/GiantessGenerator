@@ -40,7 +40,7 @@ from services.character.spatial import (  # noqa: E402
 )
 from services.exploration.address_plan import AddressPlanner  # noqa: E402
 from services.exploration.arbiter import (  # noqa: E402
-    SelectionArbiter, SlotRuling, hook_supports_env,
+    SelectionArbiter, SlotRuling,
 )
 
 _NOW = datetime.datetime(2026, 10, 25, 12, 0, 0)
@@ -156,14 +156,6 @@ _plan_neutral = _arb.arbitrate([_cand(_lm, 1.0, 100)], _LM_ADDR, height=100.0,
                                durability={}, profile=None, skip_base_prob=0.0)
 check("无档案时槽位环境估计为 None",
       _plan_neutral["chosen"] and _plan_neutral["chosen"][0].env_estimate is None)
-
-# ---------------- 4. hook 兼容判定 ----------------
-check("无覆盖时支持 env_estimate", hook_supports_env(None))
-check("旧签名覆盖不支持 env_estimate",
-      not hook_supports_env(lambda size_cat, lanes=None: None))
-check("带 env_estimate 参数的覆盖支持",
-      hook_supports_env(lambda size_cat, env_estimate=None: None))
-check("**kwargs 覆盖支持", hook_supports_env(lambda **kw: None))
 
 # ---------------- 5. 环境偏好学习（第三轴：交点） ----------------
 def _vote_rows(env, n, step=1.0, days_ago=0.0, addr=_LM_ADDR):

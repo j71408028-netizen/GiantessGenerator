@@ -16,14 +16,12 @@ import random
 import re
 from typing import List
 
-from core.behavior_runtime import get_runtime
 from core.logic import (
     ALL_PART_NAMES, format_size, get_size_category, replace_quip_tags,
     get_comparisons, compute_casualty, compute_environment_factor,
     select_quip_with_budget, comparison_lines,
 )
 from services.character.spatial import SpatialProfile, priors_for_tags
-from services.exploration.arbiter import hook_supports_env, hook_supports_lanes
 
 
 class ReportEngine:
@@ -127,14 +125,6 @@ class ReportEngine:
         style_meta_cache = {}
         for st in selected_quip_styles:
             style_meta_cache[st] = quip_repo.load_meta(st)
-        # 行为包覆盖 select 且不支持 lanes（**kwargs 也算支持）时，退回旧
-        # 全局剪枝兜底——旧包钉住旧语义（F2 缩池缺陷随之保留在该路径）。
-        _select_impl = get_runtime().resolve("logic.select_quip_with_budget")
-        _compat_prune = not hook_supports_lanes(_select_impl)
-        # 环境软权重同样按签名检测：不支持的覆盖实现不传（中性缺席）
-        _env_supported = (not _compat_prune
-                          and hook_supports_env(_select_impl))
-        _pruned_styles = None
 
         quip_results = []
         total_casualties = 0.0
@@ -183,18 +173,8 @@ class ReportEngine:
             actual_step = 0
 
             if has_quips:
-                if _compat_prune:
-                    # 兼容兜底：全局剪枝（allowed=None 表示不限，同旧口径）
-                    allowed_styles = ([s for s, _w in ruling.lanes]
-                                      if ruling.addr else None)
-                    if allowed_styles != _pruned_styles:
-                        self.addresses.prune_quips_by_styles(quips_working,
-                                                             allowed_styles)
-                        _pruned_styles = allowed_styles
-
-                # 兼容模式下不能传 lanes 关键字（旧签名覆盖不接受）
-                _lane_kwargs = {} if _compat_prune else {"lanes": ruling.lanes}
-                if _env_supported and ruling.env_estimate is not None:
+                _lane_kwargs = {"lanes": ruling.lanes}
+                if ruling.env_estimate is not None:
                     _lane_kwargs["env_estimate"] = ruling.env_estimate
                 quip_text, quip_style, coord, actual_step, cumulative_actual, cumulative_base = select_quip_with_budget(
                     size_cat, curr_intrusion, curr_destruction,
