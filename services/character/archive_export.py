@@ -21,6 +21,8 @@ from core.address_model import parse_full as _parse_addr, cell_width_m as _addr_
 from core.logic import ALL_PART_NAMES, format_size
 from core.models import CharacterSnapshot
 from paths import data_dir, template_dir
+from services.character.profile_text import describe_rhythm, describe_spatial
+from services.character.spatial import build_spatial_profile
 
 
 # -----------------------------------------------------------------
@@ -202,6 +204,21 @@ def _build_guide_block(state: CharacterSnapshot) -> str:
         "不代表真实应对建议，请以官方防灾指导为准。</div>"
         "</div>"
     )
+
+
+def _build_profile_para(state: CharacterSnapshot) -> str:
+    """简介栏的作息与活动范围段：档案派生层的可读结论，wiki 式连贯
+    文本（无样本不渲染）。文本来自 profile_text 的行为包钩子，默认
+    实现每行以句号收尾，逐行转义后连缀成一段。"""
+    rhythm_text = describe_rhythm(state.evolution)
+    spatial_text = describe_spatial(build_spatial_profile(state),
+                                    state.position)
+    lines = [line for line in (rhythm_text, spatial_text) if line]
+    if not lines:
+        return ""
+    body = "".join(_esc(line) for line in "\n".join(lines).splitlines())
+    return ("<p class='bio-p'>" + body
+            + "以上观察由内部模型从活动记录推得，仅供角色扮演参考。</p>")
 
 
 # -----------------------------------------------------------------
@@ -1097,7 +1114,8 @@ def _build_replays_section(replay_files: list) -> str:
 
 def _build_bio_section(state: CharacterSnapshot,
                        gallery_html: str = "", gallery_count: int = 0) -> str:
-    """wiki 式人物简介栏：以连贯文本讲述个人简介、生成信息与达成的重要事件。
+    """wiki 式人物简介栏：以连贯文本讲述个人简介、生成信息、作息与
+    活动范围观察及达成的重要事件。
 
     末尾附“内部设定”折叠卡（隐藏简介）与人物形象图，仅当有内容时渲染。
     """
@@ -1126,6 +1144,10 @@ def _build_bio_section(state: CharacterSnapshot,
             seg += f"——{desc}"
         info_bits.append(seg + "。")
     paras.append("<p class='bio-p'>" + "".join(info_bits) + "</p>")
+
+    profile_para = _build_profile_para(state)
+    if profile_para:
+        paras.append(profile_para)
 
     endings = state.achieved_endings or []
     if endings:
