@@ -173,7 +173,7 @@ class ChallengeModePanel(ctk.CTkFrame):
         self.card_frame.pack(fill='both', expand=True, padx=22, pady=5)
         self._pack_cards = {}
 
-        # 挑战风格选择：按世界观互斥的已选集合
+        # 挑战风格选择：按维度互斥的已选集合
         self._sel_lm = []
         self._sel_qp = []
 
@@ -227,7 +227,7 @@ class ChallengeModePanel(ctk.CTkFrame):
         for style in styles:
             reg_world = world_of(self.gui._landmark_repo.load_style_address(style))
             if filter_world and reg_world and reg_world != filter_world:
-                continue  # 同一世界观自动筛选：隐藏其它世界观的地标风格
+                continue  # 同一维度自动筛选：隐藏其它维度的地标风格
             landmarks = self.gui._landmark_repo.load(style)
             display_items.append(f"{style} ({len(landmarks)})")
             kept.append(style)
@@ -247,7 +247,7 @@ class ChallengeModePanel(ctk.CTkFrame):
         for style in styles:
             reg_world = world_of(self.gui._quip_repo.load_style_address(style))
             if filter_world and reg_world and reg_world != filter_world:
-                continue  # 同一世界观自动筛选：隐藏其它世界观的描述风格
+                continue  # 同一维度自动筛选：隐藏其它维度的描述风格
             quips = self.gui._quip_repo.load(style)
             counts = []
             for size in size_order:
@@ -262,7 +262,7 @@ class ChallengeModePanel(ctk.CTkFrame):
         self._sel_qp = self.quip_selector.get_selected_raw_names()
 
     def _lock_world_from_selection(self):
-        """当前已选风格共同锁定的世界观；未注册返回 None。"""
+        """当前已选风格共同锁定的维度；未注册返回 None。"""
         for s in getattr(self, "_sel_lm", []):
             w = world_of(self.gui._landmark_repo.load_style_address(s))
             if w:
@@ -274,7 +274,7 @@ class ChallengeModePanel(ctk.CTkFrame):
         return None
 
     def _apply_world_lock(self, forced=None):
-        """同一世界观互斥：两栏风格按世界观自动筛选，剔除混选。"""
+        """同一维度互斥：两栏风格按维度自动筛选，剔除混选。"""
         lock = forced if forced is not None else self._lock_world_from_selection()
 
         def _filter_for_world(names, repo):

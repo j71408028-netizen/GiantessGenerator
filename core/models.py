@@ -11,7 +11,7 @@ class Landmark:
     frequency: str  # 'unique' 或 'common'
     horizontal_type: Optional[str] = None
     # 注册地址：独特地标补在其“风格注册地址”之下的剩余级数（纯文本，
-    # 无世界观时需自带世界观）。空：独特地标继承风格地址，均值地标不参与。
+    # 无维度时需自带维度）。空：独特地标继承风格地址，均值地标不参与。
     address: str = ""
     # 地址参与方式："" = 自动（独特地标继承风格、均值地标仅显式地址参与）、
     # "inherit" = 继承风格、 "portable" = 不参与地址规则、
@@ -240,7 +240,7 @@ class CharacterSnapshot:
     landmark_addresses: Dict[str, str] = field(default_factory=dict)
     news_checked_at: str = ""          # 上次弹出新闻的时间（每日9点后首载门控）
     last_news: str = ""                # 上一次新闻正文，避免连续两次主干完全一致
-    # 注册地址系统：角色当前位置（完整地址，含世界观段）。首次生成报告时由
+    # 注册地址系统：角色当前位置（完整地址，含维度段）。首次生成报告时由
     # 第一个地标锚定并持久化；空表示尚无位置（新角色或当前内容未注册地址）。
     position: str = ""
     # 活动区域（完整地址文本列表，软约束）：报告选取时区域内地标优先，让角色

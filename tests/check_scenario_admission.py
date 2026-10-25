@@ -4,7 +4,7 @@
 输出：控制台一行 ASCII 结论 + UTF-8 报告文件路径。
 
 只覆盖纯逻辑（不建窗口、不联网）。地址文本使用 ``core.address_model`` 的
-规范格式：``<规模>@<世界观>-<一级>-<二级>-<三级>``。
+规范格式：``<规模>@<维度>-<一级>-<二级>-<三级>``。
 """
 
 import os
@@ -59,15 +59,15 @@ _config = {
 }
 check("地址相同距离 0，可进入",
       admission.check_entry_requirements(_config, position=_ADDR_1) == "")
-check("同世界观、分歧级距离 100m > 上限 50m，拒绝",
+check("同维度、分歧级距离 100m > 上限 50m，拒绝",
       "不超过" in admission.check_entry_requirements(_config, position=_ADDR_2))
 check("上限 100m 时距离 100m 可进入",
       admission.check_entry_requirements(
           {admission.FIELD_ADDRESS: _ADDR_1,
            admission.FIELD_MAX_DISTANCE: 100},
           position=_ADDR_2) == "")
-check("不同世界观拒绝",
-      "同一世界观" in admission.check_entry_requirements(
+check("不同维度拒绝",
+      "同一维度" in admission.check_entry_requirements(
           {admission.FIELD_ADDRESS: _ADDR_1,
            admission.FIELD_MAX_DISTANCE: 1000},
           position=_FAR_WORLD))

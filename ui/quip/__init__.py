@@ -104,7 +104,7 @@ class QuipCardManager(CardManager):
                      "border_color": QUIP_ERR}
         ctk.CTkButton(parent, text="删除", width=80, command=self.delete_style,
                        **_btn_spec, **_del_spec).pack(side='left', padx=2)
-        # 描述风格注册地址：世界观 + 该风格注册的若干上级级
+        # 描述风格注册地址：维度 + 该风格注册的若干上级级
         ctk.CTkButton(parent, text="📍地址", width=62, command=self._edit_style_address,
                        **_btn_spec, **_btn_muted).pack(side='left', padx=2)
 
@@ -116,7 +116,7 @@ class QuipCardManager(CardManager):
         dlg = AddressTextDialog(
             self, "描述风格注册地址",
             description=(
-                "注册该描述风格所在的地址（仅注册最上面的若干级，世界观必填）。\n"
+                "注册该描述风格所在的地址（仅注册最上面的若干级，维度必填）。\n"
                 "报告生成时，该风格只能用于同一 / 包含它的地标地址之后的描述。\n"
                 "当前风格：" + style
             ),

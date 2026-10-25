@@ -5,7 +5,7 @@
 推荐树形式（``worlds`` 键），已申领地址按地域层级组织::
 
     {"version": 2,
-     "worlds": {"ea1": {"description": "世界观描述", "owner": "...",
+     "worlds": {"ea1": {"description": "维度描述", "owner": "...",
                   "regions": {"1": {"scale": ["1e4", "1e3", "1e2"], "chunk": "abc",
                                 "description": "...", "owner": "...",
                                 "regions": {"3": {"scale": ["1e3", "1e2"],
@@ -20,7 +20,7 @@
 其他私有名的语境下扩展，应申领平行地址。
 
 客户端把树扁平化为"派生条目"（沿路径逐级覆写后的完整地址文本），供搜索、
-逐字匹配与子地址下拉使用；每个节点（含世界观本身）都是可注册的申领记录。
+逐字匹配与子地址下拉使用；每个节点（含维度本身）都是可注册的申领记录。
 
 兼容旧的扁平格式：列表式 ``{"addresses": [{address, description, ...}]}`` 与
 映射式 ``{"<地址>": "描述"}``。
@@ -193,12 +193,12 @@ def flatten_tree(data: dict) -> tuple:
     for world, wnode in worlds.items():
         world = str(world).strip()
         if not _WORLD_RE.match(world):
-            issues.append(f"世界观 '{world}' 名称不合法，已跳过")
+            issues.append(f"维度 '{world}' 名称不合法，已跳过")
             continue
         wnode = wnode if isinstance(wnode, dict) else {}
         _check_unknown_keys(wnode, world, issues)
         wmeta = _node_meta(wnode)
-        # 世界观本身也是可注册的申领节点（纯世界观地址）
+        # 维度本身也是可注册的申领节点（纯维度地址）
         entries.append({"address": world, **wmeta})
         for lid, lnode in _child_regions(wnode, world, issues).items():
             path1 = f"{world}-{lid}"
@@ -328,14 +328,14 @@ def search_entries(keyword: str, entries: list) -> list:
 # ==================== 地址树（派生条目按地域前缀构成树） ====================
 
 def ids_of(address_text: str) -> list:
-    """地址的地域 id 段（世界观 + 各级地域）；非法地址返回 []。"""
+    """地址的地域 id 段（维度 + 各级地域）；非法地址返回 []。"""
     return split_address(address_text or "")
 
 
 def claimed_descendants(style_address_text: str, entries: list) -> list:
     """已申领地址树中某地址的所有严格后代（各级细度都包含），按树序排列。
 
-    树关系：后代的 id 段以祖先的 id 段为前缀（同一世界观）。
+    树关系：后代的 id 段以祖先的 id 段为前缀（同一维度）。
     """
     base = ids_of(style_address_text)
     if not base:

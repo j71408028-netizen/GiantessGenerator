@@ -103,7 +103,7 @@ class LandmarkCardManager(CardManager):
                      "border_color": LM_ERR}
         ctk.CTkButton(parent, text="删除", width=80, command=self.delete_style,
                        **_btn_spec, **_del_spec).pack(side='left', padx=2)
-        # 风格注册地址：世界观 + 该风格注册的若干上级级
+        # 风格注册地址：维度 + 该风格注册的若干上级级
         ctk.CTkButton(parent, text="📍地址", width=62, command=self._edit_style_address,
                        **_btn_spec, **_btn_muted).pack(side='left', padx=2)
 
@@ -527,7 +527,7 @@ class LandmarkDialog(BaseDialog):
         addr_entry = ctk.CTkEntry(self, textvariable=self.address_var, width=210, height=28,
                                   font=self.UI_FONT)
         addr_entry.grid(row=4, column=1, pady=(4, 6), padx=5)
-        ctk.CTkLabel(self, text="风格已注册时填剩余级（如 12-0），未注册时填完整地址（含世界观）；"
+        ctk.CTkLabel(self, text="风格已注册时填剩余级（如 12-0），未注册时填完整地址（含维度）；"
                                "双击地址框可从注册表已申领的子地址中选择",
                      font=ui_fonts.ui_font(9), text_color=LM_TEXT_SOFT, wraplength=210,
                      justify='left').grid(

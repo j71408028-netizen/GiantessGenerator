@@ -61,8 +61,8 @@ def _save_json(path: str, data: Any) -> None:
 def pack_worlds_warnings(manifest: WorldPackManifest, pack_root: str) -> List[str]:
     """声明 worlds 与包内风格注册地址（.addr.json）的一致性检查（P3b 先 warning）。
 
-    检查地标 / 描述风格的注册地址世界观是否都落在声明 worlds 内；注册
-    地址无法解析、或世界观不在声明内，都给出警告。未声明 worlds 的包
+    检查地标 / 描述风格的注册地址维度是否都落在声明 worlds 内；注册
+    地址无法解析、或维度不在声明内，都给出警告。未声明 worlds 的包
     不检查（保持整类型接管口径）。何时转 error 另行裁决（Q2）。
     """
     if not manifest.worlds:
@@ -78,7 +78,7 @@ def pack_worlds_warnings(manifest: WorldPackManifest, pack_root: str) -> List[st
             w = world_of(addr)
             if w not in declared:
                 warnings.append(
-                    f"{rtype}/{style} 的注册地址世界观 "
+                    f"{rtype}/{style} 的注册地址维度 "
                     f"{w or '（无法解析）'} 不在声明 worlds 内")
     return warnings
 
@@ -234,7 +234,7 @@ class WorldManager:
         """命名空间合并下保留在选取中的自由风格。
 
         仅限玩家此前已选、且未被激活包遮蔽（不在包内同名、注册地址不在包
-        声明世界观内）的自由风格——包内容全选 + 玩家旧选择中仍可用的部分。
+        声明维度内）的自由风格——包内容全选 + 玩家旧选择中仍可用的部分。
         未声明 worlds 时返回空（整类型接管，旧行为）。
         """
         declared = self.world_state.declared_worlds()
@@ -620,7 +620,7 @@ class WorldManager:
                 self._copy_behavior_pack(
                     src, os.path.join(target, "behaviors", name))
                 resources["behaviors"] = [name]
-        # 派生 worlds：从收集到的地标 / 描述风格注册地址取世界观并集。
+        # 派生 worlds：从收集到的地标 / 描述风格注册地址取维度并集。
         # 全部未注册地址时保持空（未声明 → 整类型接管旧行为）。
         worlds = set()
         for rtype, repo in (("landmarks", landmark_repo), ("quips", quip_repo)):

@@ -2,18 +2,18 @@
 
 地址格式（新分离写法）：:
 
-    <绝对规模>@[<私有名或*>!]<世界观>-<一级地域>-<二级地域>-<三级地域>
+    <绝对规模>@[<私有名或*>!]<维度>-<一级地域>-<二级地域>-<三级地域>
 
 - 绝对规模：以 ``_`` 分隔的 3 个数字，按 一级/二级/三级 给出边长（米），
   例如 ``1e5_5e3_1e2`` = 一级地域 100 km、二级地域 5 km、三级地域 100 m。
-  绝对规模**必须提供**（除非地址仅包含世界观，不包含任何地域段）。
+  绝对规模**必须提供**（除非地址仅包含维度，不包含任何地域段）。
 - ``@`` 之后、``!`` 之前是“约束段”（可有可无；空或 ``*`` 表示不指定私有名）：
   - 完全没有 ``@...!`` 段 → 不可与任何带约束的地址匹配（仅用于无约束地址）；
   - ``@!`` / ``@*!`` → 只能与**相同规模组**的地址匹配；
   - ``@abc!`` → 只能与规模组相同、且私有名恰为 ``abc`` 的地址匹配。
   注：``*`` 与空等价（都只要求规模组相同）。
-- ``-`` 连接世界观与地域 id。地域 id 为任意字母/数字/下划线，不再兼任缩放指数。
-- 世界观为字母/数字/下划线，长度 1~48。
+- ``-`` 连接维度与地域 id。地域 id 为任意字母/数字/下划线，不再兼任缩放指数。
+- 维度为字母/数字/下划线，长度 1~48。
 
 距离规则
 --------
@@ -22,17 +22,17 @@
   距离在 ``0`` 到该方最小单元边长之间；若目标更粗，距离为 ``0``。
   ``distance_m`` 返回区间下界（兼容旧调用），``distance_interval_m``
   返回完整区间，供需要“定位精度”判断的调用方使用。
-- 其余情况（同一世界观）：以"共同前缀之后编号首次不同"的那一级作为分歧级，
+- 其余情况（同一维度）：以"共同前缀之后编号首次不同"的那一级作为分歧级，
   距离 = 双方在该级边长的**平均值**（允许不同分支申领不同规模；同一分支内
   的规模一致性由注册表的地址树保证）。
-- 世界观不同 → 距离未知（不可达）。
+- 维度不同 → 距离未知（不可达）。
 
 相对地址
 --------
 地标可以只写风格注册地址之下的剩余级（如风格注册到 ``RW-CN1``，地标写
 ``East-3``）。``parse_full`` 只接受完整地址；``parse_address(text, base)``
 在给出 ``base`` 时把无 ``@``、含 ``-`` 的文本解析为相对后缀。组合时
-``compose_address_ex`` 会拒绝跨世界观、分支分叉、层级超过三级和私有名冲突，
+``compose_address_ex`` 会拒绝跨维度、分支分叉、层级超过三级和私有名冲突，
 不再“尽量拼接”。
 
 配对规则
@@ -55,7 +55,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 LEVEL_NAMES = ("world", "large", "medium", "small")
-LEVEL_LABELS = {"world": "世界观", "large": "一级地域", "medium": "二级地域", "small": "三级地域"}
+LEVEL_LABELS = {"world": "维度", "large": "一级地域", "medium": "二级地域", "small": "三级地域"}
 REGION_LABELS = ("一级地域", "二级地域", "三级地域")
 
 MAX_PARTS = 4
@@ -71,7 +71,7 @@ class Addr:
     """解析后的完整地址。"""
     world: str
     regions: Tuple[str, str, str]   # (一级, 二级, 三级)，缺省为 ""
-    scale: Tuple[float, float, float]   # (一级,二级,三级) 边长（米），必须存在（除非纯世界观）
+    scale: Tuple[float, float, float]   # (一级,二级,三级) 边长（米），必须存在（除非纯维度）
     scale_raw: str                  # 原始规模字符串，如 "1e5_5e3_1e2"
     chunk: str                      # 约束段私有名，"" 或 "*" 表示不指定；其他为具体名
     has_mark: bool                  # 是否带有 @...! 段（带则要求规模组/私有名匹配）
@@ -118,7 +118,7 @@ def parse_full(text: str) -> Optional[Addr]:
     """解析地址；非法/空返回 None。
 
     强制要求：
-    - 纯世界观（如 "world"）允许没有 @...! 段，且无地域；
+    - 纯维度（如 "world"）允许没有 @...! 段，且无地域；
     - 包含地域（至少一级）必须提供绝对规模（即必须有 @ 且 scale_raw 非空）。
     """
     s = (text or "").strip()
@@ -130,10 +130,10 @@ def parse_full(text: str) -> Optional[Addr]:
     has_mark = False
     at = s.find("@")
     if at < 0:
-        # 没有 @，必须是纯世界观（无 '-'）
+        # 没有 @，必须是纯维度（无 '-'）
         if "-" in s:
             return None   # 有地域但缺少规模，非法
-        # 纯世界观
+        # 纯维度
         if not _WORLD_RE.match(s):
             return None
         return Addr(world=s, regions=("", "", ""), scale=(0.0, 0.0, 0.0),
@@ -216,7 +216,7 @@ def parse_address_ex(text: str, base=None):
     """解析地址，支持相对写法。返回 ``(Addr, 错误文本)``。
 
     - 有 ``@``：按完整地址解析；
-    - 无 ``@``、无 ``-``：有 ``base`` 时按剩余一级解析，否则按纯世界观解析；
+    - 无 ``@``、无 ``-``：有 ``base`` 时按剩余一级解析，否则按纯维度解析；
     - 无 ``@``、有 ``-``：需要 ``base``（风格注册地址），按剩余级解析。
     """
     s = (text or "").strip()
@@ -227,7 +227,7 @@ def parse_address_ex(text: str, base=None):
         return addr, "" if addr is not None else "地址格式不正确"
     if "-" not in s and base is None:
         addr = parse_full(s)
-        return addr, "" if addr is not None else "世界观格式不正确"
+        return addr, "" if addr is not None else "维度格式不正确"
 
     if base is None:
         return None, "相对地址需要风格注册地址作为基准"
@@ -235,7 +235,7 @@ def parse_address_ex(text: str, base=None):
     if not isinstance(base_addr, Addr) or not base_addr.world:
         return None, "风格注册地址无法解析，不能使用相对地址"
     parts = [p.strip() for p in s.split("-") if p.strip()]
-    # 以 base 的世界观开头却缺少规模，通常是“完整地址漏了 @”，不要误当成相对后缀
+    # 以 base 的维度开头却缺少规模，通常是“完整地址漏了 @”，不要误当成相对后缀
     if len(parts) > 1 and parts[0] == base_addr.world:
         return None, "包含地域段时必须提供绝对规模（...@...）"
     return _parse_relative_ex(s, base_addr)
@@ -268,7 +268,7 @@ def world_of(text: str) -> str:
 
 
 def valid_world_id(text: str) -> bool:
-    """世界观段（地址第一段）是否合法：字母/数字/下划线，1~48 位。"""
+    """维度段（地址第一段）是否合法：字母/数字/下划线，1~48 位。"""
     return bool(text) and bool(_WORLD_RE.match(text))
 
 
@@ -295,7 +295,7 @@ def cell_width_m(full_addr_text: str) -> float:
         return addr_widths(addr)[1]
     if addr.regions[0]:
         return addr_widths(addr)[0]
-    return 0.0   # 纯世界观，无单元
+    return 0.0   # 纯维度，无单元
 
 
 def _chunk_requirement_ok(this: Addr, other: Addr) -> bool:
@@ -314,7 +314,7 @@ def _chunk_requirement_ok(this: Addr, other: Addr) -> bool:
 
 #: 任一地址无法解析
 REL_INVALID = "invalid"
-#: 不在同一世界观，距离不可达
+#: 不在同一维度，距离不可达
 REL_WORLD_MISMATCH = "world_mismatch"
 #: 地域序列完全一致
 REL_SAME = "same"
@@ -322,7 +322,7 @@ REL_SAME = "same"
 REL_CONTAINS = "contains"
 #: 查询方更细：查询方落在目标的作用域内
 REL_INSIDE = "inside"
-#: 同世界观，但在某一级地域分叉
+#: 同维度，但在某一级地域分叉
 REL_DIVERGENT = "divergent"
 
 
@@ -338,7 +338,7 @@ class AddressRelation:
     diverge_level: int                       # 首个分歧级（0=一级…2=三级）；无分歧为 -1
     interval: Optional[Tuple[float, float]]  # 距离区间（米）；不可达为 None
     chunk_ok: bool                           # 私有名约束是否互相满足
-    lcp_depth: int                           # 最长公共前缀深度（世界观计 1；跨世界观为 0）
+    lcp_depth: int                           # 最长公共前缀深度（维度计 1；跨维度为 0）
 
     def same_branch(self) -> bool:
         """地域序列是否同址或互相包含（不含私有名约束）。"""
@@ -357,7 +357,7 @@ def relate(a_text: str, b_text: str) -> AddressRelation:
 
     - 目标包含查询方（INSIDE）→ ``(0, 0)``，目标区域内的距离按 0 计；
     - 查询方包含目标（CONTAINS）→ ``(0, 查询方最小单元边长)``，
-      因为位置只精确到该单元；纯世界观位置用目标在该级的边长兜底；
+      因为位置只精确到该单元；纯维度位置用目标在该级的边长兜底；
     - 分歧（DIVERGENT）→ 双方在分歧级边长的平均值（单点估计）。
     """
     a = parse_full(a_text)
@@ -367,7 +367,7 @@ def relate(a_text: str, b_text: str) -> AddressRelation:
     chunk_ok = _chunk_requirement_ok(a, b) and _chunk_requirement_ok(b, a)
     if not a.world or a.world != b.world:
         return AddressRelation(REL_WORLD_MISMATCH, -1, None, chunk_ok, 0)
-    lcp = 1   # 世界观一致即公共前缀第 1 级
+    lcp = 1   # 维度一致即公共前缀第 1 级
     for level in range(3):
         sa, sb = a.regions[level], b.regions[level]
         if sa and sb:
@@ -496,7 +496,7 @@ def compose_address_ex(style_reg: str, landmark_addr: str):
 
     - 地标为空 → 继承风格注册地址；
     - 地标可写相对后缀（如 ``East-3``），也可写完整地址；
-    - 世界观不同、地域分支分叉、层级超过三级、私有名冲突 → 报错，不拼接；
+    - 维度不同、地域分支分叉、层级超过三级、私有名冲突 → 报错，不拼接；
     - 规模取更细一方；私有名取先声明的一方（风格在前）。
     """
     style_reg = (style_reg or "").strip()
@@ -523,7 +523,7 @@ def compose_address_ex(style_reg: str, landmark_addr: str):
         _, err = parse_address_ex(landmark_addr, base=s)
         return "", err or "地标地址无法解析"
     if l.world != s.world:
-        return "", "地标地址与风格注册地址不在同一世界观"
+        return "", "地标地址与风格注册地址不在同一维度"
 
     s_parts = [p for p in (s.world,) + s.regions if p]
     l_parts = [p for p in (l.world,) + l.regions if p]
@@ -658,12 +658,12 @@ def _describe_invalid(text: str) -> str:
         if "-" in s:
             return "包含地域段时必须提供绝对规模（...@...）"
         if not _WORLD_RE.match(s):
-            return "世界观段应为字母/数字/下划线"
+            return "维度段应为字母/数字/下划线"
     parts = split_address(s)
     if not parts:
-        return "缺少世界观"
+        return "缺少维度"
     if not _WORLD_RE.match(parts[0]):
-        return "世界观段无效"
+        return "维度段无效"
     for seg in parts[1:]:
         if not _REGION_RE.match(seg):
             return f"地域段 '{seg}' 应为字母/数字/下划线"
@@ -688,7 +688,7 @@ def format_addr_verbose(text: str) -> str:
         segs.append(f"私有名 {addr.chunk}")
     elif addr.chunk == "*":
         segs.append("私有名 *")
-    labels = ("世界观", "一级地域", "二级地域", "三级地域")
+    labels = ("维度", "一级地域", "二级地域", "三级地域")
     for label, seg in zip(labels, (addr.world,) + addr.regions):
         if not seg:
             break
@@ -699,13 +699,13 @@ def format_addr_verbose(text: str) -> str:
 def format_addr_compact(text: str) -> str:
     """单行紧凑地址描述（聊天提示词等 AI 语境用），带定位精度提示。
 
-    例：``世界观 RW ／ 一级地域 CN1（定位精度：约 10 千米范围内）``。
-    纯世界观地址无精度段；无法解析时原样返回文本。
+    例：``维度 RW ／ 一级地域 CN1（定位精度：约 10 千米范围内）``。
+    纯维度地址无精度段；无法解析时原样返回文本。
     """
     addr = parse_full(text)
     if addr is None:
         return (text or "").strip()
-    labels = ("世界观", "一级地域", "二级地域", "三级地域")
+    labels = ("维度", "一级地域", "二级地域", "三级地域")
     segs = [f"{label} {seg}"
             for label, seg in zip(labels, (addr.world,) + addr.regions) if seg]
     width = cell_width_m(text)

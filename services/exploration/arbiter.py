@@ -4,7 +4,7 @@
 设计全文：``docs/designs/report_selection.md``。定位是**仲裁者，不是
 指挥官**——只有"槽位 × 描述风格"的配对资格（车道窗口）与近匹配提拔是
 裁定级输出；联合分、档案权重、路径连贯都是建议，报告引擎的预算走步与
-坐标演化可自由偏离。硬闸（可达 / 私有名 / 世界观 / 耐久）口径原样继承
+坐标演化可自由偏离。硬闸（可达 / 私有名 / 维度 / 耐久）口径原样继承
 自地址规划器；本类吸收其选点循环后，``AddressPlanner`` 收敛为地址解析 +
 stuck_options 工具层。
 
@@ -337,7 +337,7 @@ class SelectionArbiter:
             stuck = {"reason": "invalid_position", "position": pos_text}
             return self._result(True, stuck, pos_text, [], slots, [], errors=errors)
 
-        # 世界观集合来自所有携带地址的内容（风格注册、地标、描述风格）
+        # 维度集合来自所有携带地址的内容（风格注册、地标、描述风格）
         content_worlds = set()
         for reg in registers.values():
             if world_of(reg):

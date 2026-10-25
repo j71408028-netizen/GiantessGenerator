@@ -238,7 +238,7 @@ data/worlds/<world_id>/
 近匹配提拔是裁定级输出，联合分是建议级（报告引擎的预算走步与坐标演化可
 自由偏离）。`ruling` 参数是 :class:`~services.exploration.arbiter.SlotRuling`
 （字段 `cand` / `addr` / `lanes` / `affordance` / `starved` / `promoted` /
-`env_estimate`）。硬闸（可达 / 私有名 / 世界观 / 耐久）、物理走查（位置
+`env_estimate`）。硬闸（可达 / 私有名 / 维度 / 耐久）、物理走查（位置
 演化）与 stuck 判定不开放。`logic.select_quip_with_budget` /
 `logic.get_comparisons` 的 key 不变（scope `logic` 是已部署契约）。
 

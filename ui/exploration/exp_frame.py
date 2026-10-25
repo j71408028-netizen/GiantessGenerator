@@ -464,7 +464,7 @@ class ExplorationPanel(ctk.CTkFrame):
 
     # ---------- 核心功能 ----------
     def _resolve_stuck_choice(self, state, stuck, ctx):
-        """地址系统“无路可走”时的决策入口（切换地址 / 世界观，或放弃负向演化）。"""
+        """地址系统“无路可走”时的决策入口（切换地址 / 维度，或放弃负向演化）。"""
         options = ctx.stuck_options(state, stuck)
         dialog = _StuckRelocateDialog(self, state, stuck, options, ctx.state_service)
         if dialog.result is None:
@@ -692,9 +692,9 @@ class ExplorationPanel(ctk.CTkFrame):
 class _StuckRelocateDialog(BaseDialog):
     """无路可走（地址系统）时的切换决策对话框。
 
-    提供三种选择：前往同世界观内的另一个已注册地标地址（消耗
-    0.05×距离/身高 行动点数）、切换世界观（消耗 125 行动点数，
-    落到该世界观第一个可用地标地址）、或放弃并进入负向演化。
+    提供三种选择：前往同维度内的另一个已注册地标地址（消耗
+    0.05×距离/身高 行动点数）、切换维度（消耗 125 行动点数，
+    落到该维度第一个可用地标地址）、或放弃并进入负向演化。
     """
 
     def __init__(self, host, state, stuck, options, state_service):
@@ -719,13 +719,13 @@ class _StuckRelocateDialog(BaseDialog):
     def _create_widgets(self):
         reason = self.stuck.get("reason", "")
         reason_text = {
-            "world_mismatch": "当前选用的地标世界观已切换：角色的位置（世界观 "
+            "world_mismatch": "当前选用的地标维度已切换：角色的位置（维度 "
                               f"{self.stuck.get('current_world') or '未知'}）没有可去的地址，"
-                              "需要接入当前世界观或前往其它地标。",
+                              "需要接入当前维度或前往其它地标。",
             "no_reachable": "角色当前位置（10×身高可达范围）内没有可对比的已注册地标地址。",
             "all_damaged": "角色所在范围（50×身高×个性强度）内的独特建筑耐久均已低于 0.5。",
             "invalid_position": "角色保存的位置地址无法解析。请清除位置或选择一个有效地标地址。",
-            "invalid_address": "当前地标地址都无法与风格注册地址组合（世界观不同、分支分叉或层级过深）。",
+            "invalid_address": "当前地标地址都无法与风格注册地址组合（维度不同、分支分叉或层级过深）。",
         }.get(reason, "角色目前没有可去的地标地址。")
         ctk.CTkLabel(self, text=f"📡 {reason_text}", font=ui_fonts.ui_font(12),
                      text_color=EXP_TEXT_SOFT, justify='left', wraplength=520).pack(
@@ -759,7 +759,7 @@ class _StuckRelocateDialog(BaseDialog):
                           fg_color="transparent", border_width=1, border_color=EXP_OK,
                           text_color=EXP_OK, hover_color=EXP_OK_HOVER).pack(side='left', padx=(0, 8))
         if self.options.get("worlds"):
-            ctk.CTkButton(btn_frame, text="🌍 切换世界观（125 AP）", width=200,
+            ctk.CTkButton(btn_frame, text="🌍 切换维度（125 AP）", width=200,
                           font=ui_fonts.ui_font(12), command=self._apply_world_switch,
                           fg_color="transparent", border_width=1,
                           border_color=EXP_DUNGEON, text_color=EXP_DUNGEON,
@@ -783,7 +783,7 @@ class _StuckRelocateDialog(BaseDialog):
         if self.state.position:
             interval = distance_interval_m(self.state.position, addr)
             if interval is None:
-                return f"{base}　（跨世界观，请用「切换世界观」）"
+                return f"{base}　（跨维度，请用「切换维度」）"
             nearest, farthest = interval
             cost = self._move_cost(farthest)
             if nearest == farthest:
@@ -809,7 +809,7 @@ class _StuckRelocateDialog(BaseDialog):
         interval = (distance_interval_m(self.state.position, it["address"])
                     if self.state.position else None)
         if interval is None:
-            ui.ctk.dialogs.showerror("无法直接前往", "该地址与角色位置不在同一世界观，请使用「切换世界观」。")
+            ui.ctk.dialogs.showerror("无法直接前往", "该地址与角色位置不在同一维度，请使用「切换维度」。")
             return
         cost = self._move_cost(interval[1])
         if not self.state_service.consume_action_points(self.state, cost):
@@ -824,7 +824,7 @@ class _StuckRelocateDialog(BaseDialog):
     def _apply_world_switch(self):
         worlds = self.options.get("worlds") or []
         if not worlds:
-            ui.ctk.dialogs.showwarning("提示", "当前没有其它世界观可供切换。")
+            ui.ctk.dialogs.showwarning("提示", "当前没有其它维度可供切换。")
             return
         target_world = worlds[0]
         anchor = None
@@ -833,12 +833,12 @@ class _StuckRelocateDialog(BaseDialog):
                 anchor = it["address"]
                 break
         if anchor is None:
-            ui.ctk.dialogs.showerror("无法切换世界观", "目标世界观内没有已注册地标可作为落脚点。")
+            ui.ctk.dialogs.showerror("无法切换维度", "目标维度内没有已注册地标可作为落脚点。")
             return
         if not self.state_service.consume_action_points(self.state, 125):
             ui.ctk.dialogs.showerror(
                 "行动点数不足",
-                f"切换世界观需要 125 行动点数，当前仅剩 {self.state.action_points}。\n"
+                f"切换维度需要 125 行动点数，当前仅剩 {self.state.action_points}。\n"
                 "无法切换时将进入负向演化。")
             self._close_with(None)
             return

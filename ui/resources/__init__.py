@@ -698,7 +698,7 @@ class ResourceHubPanel(ctk.CTkFrame):
         for style in styles:
             reg_world = world_of(self.landmark_repo.load_style_address(style))
             if filter_world and reg_world and reg_world != filter_world:
-                continue  # 同一世界观自动筛选：隐藏其它世界观的地标风格
+                continue  # 同一维度自动筛选：隐藏其它维度的地标风格
             landmarks = self.landmark_repo.load(style)
             display_items.append(f"{style} ({len(landmarks)})")
             kept.append(style)
@@ -713,7 +713,7 @@ class ResourceHubPanel(ctk.CTkFrame):
         for style in styles:
             reg_world = world_of(self.quip_repo.load_style_address(style))
             if filter_world and reg_world and reg_world != filter_world:
-                continue  # 同一世界观自动筛选：隐藏其它世界观的描述风格
+                continue  # 同一维度自动筛选：隐藏其它维度的描述风格
             quips = self.quip_repo.load(style)
             counts = []
             for size in size_order:
@@ -726,7 +726,7 @@ class ResourceHubPanel(ctk.CTkFrame):
         self.quip_selector.sync_items(display_items, selected_indices)
 
     def _lock_world_from_selection(self) -> Optional[str]:
-        """当前选中风格共同锁定的世界观（先地标风格后描述风格）；未注册返回 None。"""
+        """当前选中风格共同锁定的维度（先地标风格后描述风格）；未注册返回 None。"""
         for s in self.selected_styles:
             w = world_of(self.landmark_repo.load_style_address(s))
             if w:
@@ -738,12 +738,12 @@ class ResourceHubPanel(ctk.CTkFrame):
         return None
 
     def _apply_world_lock(self, forced: Optional[str] = None):
-        """同一世界观互斥：把两栏风格列表自动筛选到同一个世界观，剔除混选。
+        """同一维度互斥：把两栏风格列表自动筛选到同一个维度，剔除混选。
 
-        forced：用户本次新点选的风格带世界观时，以该世界观为准切换（自动筛选）。
+        forced：用户本次新点选的风格带维度时，以该维度为准切换（自动筛选）。
         """
         lock = forced if forced is not None else self._lock_world_from_selection()
-        # 剔除与锁定世界观不一致的已选风格（未注册风格不限制）
+        # 剔除与锁定维度不一致的已选风格（未注册风格不限制）
         def _filter_for_world(names, repo):
             out = []
             for s in names:

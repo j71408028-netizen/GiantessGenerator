@@ -53,13 +53,13 @@ check("单段相对地址在 base 下作为一级地域",
 check("相对地址无 base 时拒绝", parse_address("East-3") is None)
 check("相对地址无 base 时有明确诊断",
       "基准" in parse_address_ex("East-3")[1])
-check("纯世界观 base 无规模时相对地址拒绝",
+check("纯维度 base 无规模时相对地址拒绝",
       parse_address("East-3", "RW") is None
       and "规模" in parse_address_ex("East-3", "RW")[1])
 
 check("漏写 @ 的完整地域段不被误当相对后缀",
       parse_address("RW-CN1", "1e4_1e3_1e2@RW") is None)
-check("纯世界观可解析",
+check("纯维度可解析",
       parse_full("RW") is not None and parse_full("RW").world == "RW")
 
 # ---------------- 2. 严格组合 ----------------
@@ -77,7 +77,7 @@ check("风格地址为空时继承地标完整地址",
       parse_full(resolve_full_address("", _ABS)) is not None)
 check("风格注册地址写坏时报错",
       resolve_full_address_ex("坏风格", _ABS)[0] == "")
-check("纯世界观风格不能组合相对后缀",
+check("纯维度风格不能组合相对后缀",
       resolve_full_address_ex("RW", "East-3")[0] == "")
 check("风格地址为空时相对地址不可用",
       resolve_full_address("", "East-3") == "")
@@ -86,8 +86,8 @@ check("地标地址为空时继承风格地址",
 
 _cross = resolve_full_address_ex("1e4_1e3_1e2@RW-CN1",
                                  "1e4_1e3_1e2@TH-X")
-check("跨世界观组合报错", _cross[0] == "" and "世界观" in _cross[1])
-check("跨世界观不再产出 RW-TH-X", "TH-X" not in _cross[0])
+check("跨维度组合报错", _cross[0] == "" and "维度" in _cross[1])
+check("跨维度不再产出 RW-TH-X", "TH-X" not in _cross[0])
 
 _diverge = resolve_full_address_ex("1e4_1e3_1e2@RW-CN1",
                                    "1e4_1e3_1e2@RW-CN2")
@@ -120,7 +120,7 @@ _interval = distance_interval_m("1e5_1e3_1e2@RW-A",
                                 "1e5_1e3_1e2@RW-A-B")
 check("位置比目标粗时距离有上界",
       _interval is not None and _interval[0] == 0.0 and _interval[1] == 1e5)
-check("纯世界观位置用目标分歧级边长兜底",
+check("纯维度位置用目标分歧级边长兜底",
       distance_interval_m("RW", "1e5_1e3_1e2@RW-A-B-C") == (0.0, 1e5))
 check("位置比目标细时目标区域按 0 计",
       distance_interval_m("1e5_1e3_1e2@RW-A-B",
@@ -128,7 +128,7 @@ check("位置比目标细时目标区域按 0 计",
 check("分歧级距离取平均边长",
       distance_interval_m("1e4_1e3_1e2@RW-A-B-1",
                           "1e4_1e3_1e2@RW-A-B-2") == (100.0, 100.0))
-check("跨世界观距离未知",
+check("跨维度距离未知",
       distance_interval_m("1e4_1e3_1e2@RW-A",
                           "1e4_1e3_1e2@TH-A") is None)
 check("distance_m 保持区间下界",
@@ -144,7 +144,7 @@ check("粗作用域覆盖细地址",
 check("细作用域不覆盖粗地址",
       not covers("1e4_1e3_1e2@RW-A-B", "1e4_1e3_1e2@RW-A"))
 check("同址覆盖", covers("1e4_1e3_1e2@RW-A", "1e4_1e3_1e2@RW-A"))
-check("跨世界观不覆盖",
+check("跨维度不覆盖",
       not covers("1e4_1e3_1e2@RW-A", "1e4_1e3_1e2@TH-A"))
 check("规范键归一化规模写法",
       canonical_key("1e4_1e3_1e2@RW-A")
@@ -174,7 +174,7 @@ check("relate 带私有名对未声明方不兼容",
       not relate("1e4_1e3_1e2@A!RW-A", "1e4_1e3_1e2@RW-A").chunk_ok)
 check("relate 相同私有名兼容",
       relate("1e4_1e3_1e2@A!RW-A", "1e4_1e3_1e2@A!RW-A-B").chunk_ok)
-check("relate 跨世界观 world_mismatch 且不可达",
+check("relate 跨维度 world_mismatch 且不可达",
       relate("1e4_1e3_1e2@RW-A", "1e4_1e3_1e2@TH-A").kind == REL_WORLD_MISMATCH
       and relate("1e4_1e3_1e2@RW-A", "1e4_1e3_1e2@TH-A").interval is None)
 check("relate 坏地址 invalid",
@@ -183,15 +183,15 @@ check("relate 坏地址 invalid",
 # ---------------- 6. 紧凑地址描述 ----------------
 _compact = format_addr_compact("1e4_1e3_1e2@RW-CN1")
 check("紧凑描述含级别标签与定位精度",
-      "世界观 RW" in _compact and "一级地域 CN1" in _compact
+      "维度 RW" in _compact and "一级地域 CN1" in _compact
       and "二级地域" not in _compact and "定位精度" in _compact)
 _compact_full = format_addr_compact("1e4_1e3_1e2@RW-CN1-East-3")
 check("三级地址紧凑描述逐级列出",
-      all(s in _compact_full for s in ("世界观 RW", "一级地域 CN1",
+      all(s in _compact_full for s in ("维度 RW", "一级地域 CN1",
                                        "二级地域 East", "三级地域 3")))
 _pure_world = format_addr_compact("RW")
-check("纯世界观紧凑描述无精度段",
-      "世界观 RW" in _pure_world and "定位精度" not in _pure_world)
+check("纯维度紧凑描述无精度段",
+      "维度 RW" in _pure_world and "定位精度" not in _pure_world)
 check("坏地址紧凑描述回退原文", format_addr_compact("坏地址") == "坏地址")
 
 # ---------------- 结论 ----------------

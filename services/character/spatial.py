@@ -5,7 +5,7 @@
 
 1. 手工覆盖层：``CharacterSnapshot.activity_regions`` 原样透传，命中判定用
    ``covers``（与地址规划器现行口径一致）；
-2. 学习层：从演化表带 ``position`` 的行学习区域权重树（世界观 → 一级 →
+2. 学习层：从演化表带 ``position`` 的行学习区域权重树（维度 → 一级 →
    二级；三级单元过细，作为个体地标对待，不进区域统计）。行权重按时间
    指数衰减（EWMA 半衰期），节点份额做狄利赫里平滑——样本少时向均匀
    分布收缩，长期不到访则整体向 1.0 回落，即"区域偏好随时间衰减"；
@@ -128,7 +128,7 @@ class SpatialProfileService:
         spatial = SpatialProfileService().learn_from_evolution(state.evolution)
         factor = spatial.region_factor("1e5_5e3_1e2@*!TH-GSK1-East")
 
-    节点键为地域元组：世界观 ``(w,)``、一级 ``(w, r0)``、二级 ``(w, r0, r1)``。
+    节点键为地域元组：维度 ``(w,)``、一级 ``(w, r0)``、二级 ``(w, r0, r1)``。
     """
 
     def __init__(self):
@@ -173,8 +173,8 @@ class SpatialProfileService:
     def top_regions(self, n: int = 2) -> List[tuple]:
         """按加权到访量降序的前 n 个已到访区域 [(标签元组, 权重)]。
 
-        纯世界观节点只在没有任何更深节点时才参与（单学到世界观时也
-        有话可说）；标签元组形如 ``(世界观,)`` / ``(世界观, 一级, 二级)``。
+        纯维度节点只在没有任何更深节点时才参与（单学到维度时也
+        有话可说）；标签元组形如 ``(维度,)`` / ``(维度, 一级, 二级)``。
         """
         keys = [k for k in self._weights if len(k) > 1] or list(self._weights)
         ranked = sorted(keys, key=lambda k: (-self._weights[k], k))[:max(0, n)]
@@ -184,7 +184,7 @@ class SpatialProfileService:
         return {k[0] for k in self._weights if len(k) == 1}
 
     def visit_weight(self, address_text: str) -> float:
-        """地址最深可学习节点（世界观/一级/二级）上的 EWMA 加权到访量。
+        """地址最深可学习节点（维度/一级/二级）上的 EWMA 加权到访量。
 
         更细的候选（三级单元）落在已到访分支上即视为已知区域，取其二级
         节点权重；返回 0 表示该分支从未到访（新颖加成的判定依据）。
@@ -351,7 +351,7 @@ def _default_env_by_precision(position: str) -> float:
     """按位置精确度给环境因子默认值：越细 → 越可能有人烟，默认值越高。
 
     有细分申领 ≈ 有人烟，但三级也可以是无人区，故先验差值压窄
-    （0.32~0.60），把分辨力留给文本环境沉淀。无法解析/纯世界观取下限。
+    （0.32~0.60），把分辨力留给文本环境沉淀。无法解析/纯维度取下限。
     """
     width = cell_width_m(position)
     if width <= 0:
@@ -418,7 +418,7 @@ class EnvironmentProfile:
 
     def _distances(self, query: str) -> List[tuple]:
         """样本到查询地址的距离下界列表 [(距离, env, 时间权重)]，
-        世界观不一致 / 无法解析的样本跳过。"""
+        维度不一致 / 无法解析的样本跳过。"""
         out = []
         for addr, env, age_w in self._samples:
             rel = relate(addr, query)

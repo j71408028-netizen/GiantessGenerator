@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""世界包命名空间自检（P3b）：manifest worlds 声明、按世界观合并素材、
+"""世界包命名空间自检（P3b）：manifest worlds 声明、按维度合并素材、
 设置保留与一致性警告。
 
 用法：``python tests/check_world_pack_worlds.py``
@@ -42,10 +42,10 @@ from services.worlds.service import (  # noqa: E402
     WorldManager, pack_worlds_warnings,
 )
 
-# ---------------- 1. 地址世界观校验 ----------------
-check("世界观名校验接受合法值",
+# ---------------- 1. 地址维度校验 ----------------
+check("维度名校验接受合法值",
       valid_world_id("TH") and valid_world_id("ea1_x"))
-check("世界观名校验拒绝非法值",
+check("维度名校验拒绝非法值",
       not valid_world_id("") and not valid_world_id("a b")
       and not valid_world_id("x" * 49) and not valid_world_id("TH-1"))
 
@@ -62,7 +62,7 @@ check("worlds 非列表报错", any("worlds" in e for e in bad.validate()))
 bad = WorldPackManifest(world_id="t1", name="t", worlds=["TH", "TH-1", "TH"])
 errs = bad.validate()
 check("worlds 非法名与重复声明报错",
-      any("非法世界观名" in e for e in errs) and any("重复" in e for e in errs))
+      any("非法维度名" in e for e in errs) and any("重复" in e for e in errs))
 
 ws = WorldState(active_manifest=m)
 check("声明 worlds 的状态可查询", ws.declared_worlds() == {"TH", "RW"})
@@ -140,11 +140,11 @@ check("接管下风格注册地址读包内",
       _old_repo.load_style_address("P1") == _ADDR_TH)
 _mgr.world_state.set_active(None)
 
-# 3c. 声明 worlds 的包：按世界观合并
+# 3c. 声明 worlds 的包：按维度合并
 _wid = _deploy_pack(worlds=["TH"])
 _mgr.load_active(_wid)
 _repo = LandmarkRepo(data_dir=_DATA, world_state=_mgr.world_state)
-check("声明 worlds 时合并自由目录其它世界观素材",
+check("声明 worlds 时合并自由目录其它维度素材",
       set(_repo.get_styles()) == {"P1", "FDup", "FOut", "FPort"},
       str(sorted(_repo.get_styles())))
 check("声明世界内的自由风格被遮蔽", "FIn" not in _repo.get_styles())
@@ -161,7 +161,7 @@ check("合并的自由风格不在包目录时读自由目录",
       _repo._filepath("FPort").startswith(os.path.join(_DATA, "packs")))
 
 _qrepo = QuipRepo(data_dir=_DATA, world_state=_mgr.world_state)
-check("描述风格同样按世界观合并",
+check("描述风格同样按维度合并",
       set(_qrepo.get_styles()) == {"Q1", "QFree"},
       str(sorted(_qrepo.get_styles())))
 check("描述风格注册地址路由正确",

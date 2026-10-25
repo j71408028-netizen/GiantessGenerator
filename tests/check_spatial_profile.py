@@ -66,8 +66,8 @@ def _rows(n, addr, days_ago=0.0):
 
 
 _hot = "1e4_1e3_1e2@*!TH-East-1"          # 常去分支
-_cold = "1e4_1e3_1e2@*!TH-West-1"         # 少去分支（同世界观）
-_other = "1e4_1e3_1e2@*!RW-CN1-2"         # 另一世界观
+_cold = "1e4_1e3_1e2@*!TH-West-1"         # 少去分支（同维度）
+_other = "1e4_1e3_1e2@*!RW-CN1-2"         # 另一维度
 _rows_hist = _rows(8, _hot) + _rows(2, _cold)
 
 svc = SpatialProfileService().learn_from_evolution(_rows_hist, now=_NOW)
@@ -120,8 +120,8 @@ svc_v = SpatialProfileService().learn_from_evolution(_rows_hist, now=_NOW)
 check("已到访分支权重为正", svc_v.visit_weight(_hot) > 0.0)
 check("未到访分支权重为零",
       svc_v.visit_weight("1e4_1e3_1e2@*!TH-North-1") == 0.0)
-check("另一世界观未到访", svc_v.visit_weight(_other) == 0.0)
-check("已到访世界观集合正确", svc_v.visited_worlds() == {"TH"})
+check("另一维度未到访", svc_v.visit_weight(_other) == 0.0)
+check("已到访维度集合正确", svc_v.visited_worlds() == {"TH"})
 
 # ---------------- 3. 先验层：TAG → 参数 ----------------
 for tag, priors in TAG_SPATIAL_PRIORS.items():

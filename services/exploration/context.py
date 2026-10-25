@@ -256,7 +256,7 @@ class ExplorationContext:
         resolve_stuck：地址系统“无路可走”（no_reachable / all_damaged /
         world_mismatch）时的决策回调。回调签名 (state, stuck, ctx) -> dict 或 None：
           - 返回 {"kind": "address", "address": 完整地址}：角色移动到该地址；
-          - 返回 {"kind": "world", "address": 完整地址}：角色切换到该世界观地址；
+          - 返回 {"kind": "world", "address": 完整地址}：角色切换到该维度地址；
           - 返回 None：角色拒绝切换 → 进入负向演化并取消本次报告。
         """
         if isinstance(source, CharacterSnapshot):

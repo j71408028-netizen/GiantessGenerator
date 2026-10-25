@@ -147,7 +147,7 @@ _catalog = FakeCatalog([_other], {}, styles=[])
 _plan = _arbiter(_catalog).arbitrate(
     [_cand(_other)], "1e3_1e2_1e1@W-Y", height=1.0,
     durability={}, skip_base_prob=0.0)
-check("未注册风格的地标也能触发世界观不匹配",
+check("未注册风格的地标也能触发维度不匹配",
       _plan["stuck"]["reason"] == "world_mismatch"
       and "V" in _plan["stuck"]["worlds"])
 
@@ -196,7 +196,7 @@ check("同址车道为 exact、覆盖为 cover、未注册为 free",
       _lanes["exact"] == LANE_WEIGHTS[LANE_EXACT]
       and _lanes["coarse"] == LANE_WEIGHTS[LANE_COVER]
       and _lanes["portable"] == LANE_WEIGHTS[LANE_FREE])
-check("不覆盖的世界观与反向细地址不入窗口",
+check("不覆盖的维度与反向细地址不入窗口",
       "other" not in _lanes)
 check("无地址地标全部风格 free",
       dict(_arbiter(_catalog).quip_lanes("", _qregs))
@@ -205,7 +205,7 @@ _chunk_regs = {"ck": "1e5_1e3_1e2@A!W-A"}
 check("私有名冲突的风格不入窗口",
       _arbiter(_catalog).quip_lanes("1e5_1e3_1e2@B!W-A-B-1", _chunk_regs) == [])
 
-# ---------------- 7. stuck_options 只给出可落地的其它世界观 ----------------
+# ---------------- 7. stuck_options 只给出可落地的其它维度 ----------------
 _u1 = Landmark("U1", 100, "vertical", "unique")
 _u1._style = "S"
 _u2 = Landmark("U2", 100, "vertical", "unique",

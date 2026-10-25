@@ -4,7 +4,7 @@
 
     world.json                  # 清单（唯一必需文件）
     landmarks/<style>.json      # 地标风格
-    landmarks/<style>.addr.json # （可选）地标风格注册地址（世界观 + 风格注册的若干级）
+    landmarks/<style>.addr.json # （可选）地标风格注册地址（维度 + 风格注册的若干级）
     quips/<style>.json          # 描述风格
     quips/<style>.addr.json     # （可选）描述风格注册地址
     presets/<table>.csv         # 身材表
@@ -118,9 +118,9 @@ class WorldPackManifest:
     app_min_version: str = ""
     created_at: str = field(
         default_factory=lambda: datetime.datetime.now().isoformat(timespec="seconds"))
-    # 声明包素材所属的地址世界观命名空间（core.address_model 世界观段）。
-    # 空 = 未声明：包整类型接管资源（旧行为）；非空 = 包只接管这些世界观，
-    # 自由目录中其它世界观的同名类型素材保持可用（按世界观合并）。
+    # 声明包素材所属的地址维度命名空间（core.address_model 维度段）。
+    # 空 = 未声明：包整类型接管资源（旧行为）；非空 = 包只接管这些维度，
+    # 自由目录中其它维度的同名类型素材保持可用（按维度合并）。
     worlds: List[str] = field(default_factory=list)
     settings: Dict[str, Any] = field(default_factory=dict)
     resources: Dict[str, Any] = field(default_factory=dict)
@@ -202,8 +202,8 @@ class WorldPackManifest:
             for w in self.worlds:
                 if not isinstance(w, str) or not valid_world_id(w):
                     errors.append(
-                        f"worlds 含非法世界观名 {w!r}"
-                        "（应为字母/数字/下划线，1-48 位，与地址世界观段同口径）")
+                        f"worlds 含非法维度名 {w!r}"
+                        "（应为字母/数字/下划线，1-48 位，与地址维度段同口径）")
                 elif w in seen_worlds:
                     errors.append(f"worlds 重复声明 '{w}'")
                 else:
@@ -385,7 +385,7 @@ class WorldState:
         self._manifest = manifest
 
     def declared_worlds(self) -> Set[str]:
-        """包声明的地址世界观命名空间；未激活 / 未声明返回空集。
+        """包声明的地址维度命名空间；未激活 / 未声明返回空集。
 
         非空时，拥有着的资源类型（目前只有地标与描述风格有意义）按世界
         观合并自由目录素材；空集保持整类型接管的旧行为。

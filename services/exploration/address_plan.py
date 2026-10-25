@@ -81,9 +81,9 @@ class AddressPlanner:
         return resolve_full_address(reg, getattr(landmark, "address", "") or "")
 
     def stuck_options(self, state, stuck: dict) -> dict:
-        """无路可走时可供角色选择的目标：当前/其它世界观内的地标地址，以及可切换的世界观。
+        """无路可走时可供角色选择的目标：当前/其它维度内的地标地址，以及可切换的维度。
 
-        ``worlds`` 只列出“有可用落脚地址、且不同于当前位置”的世界观，避免 UI
+        ``worlds`` 只列出“有可用落脚地址、且不同于当前位置”的维度，避免 UI
         拿到一个无法落地的世界或原地切换。
         """
         landmark_repo = self.catalog.landmark_repo

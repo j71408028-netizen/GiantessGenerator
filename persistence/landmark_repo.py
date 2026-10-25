@@ -65,7 +65,7 @@ class LandmarkRepo:
         return _addr_path(self._free_dir, style_name)
 
     def load_style_address(self, style_name: str) -> str:
-        """读取风格注册地址文本（世界观 + 风格注册的若干级）。空 = 未注册。"""
+        """读取风格注册地址文本（维度 + 风格注册的若干级）。空 = 未注册。"""
         read_dir = _style_read_dir(self._world_state, "landmarks",
                                    self._free_dir, style_name)
         return _load_addr(read_dir, style_name)

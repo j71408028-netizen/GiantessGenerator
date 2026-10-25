@@ -11,7 +11,7 @@
 判定口径：
 
 - 角色**没有可用地址**（``position`` 为空或无法解析）时，地址条件自动跳过；
-- 角色有地址时，两者必须在同一世界观。距离按 ``core.address_model.relate``
+- 角色有地址时，两者必须在同一维度。距离按 ``core.address_model.relate``
   的区间（``AddressRelation.interval``）计算，并用区间上界保守判定
   （位置越粗，上界越大），超过上限即拒绝；
 - 身高条件只看角色身高，落在区间外即拒绝；
@@ -92,7 +92,7 @@ def check_entry_requirements(config, *, position: str = "",
             if rel.kind == "world_mismatch":
                 return (f"该副本要求角色位于地址「{format_addr_verbose(address)}」附近，"
                         f"但角色当前地址「{format_addr_verbose(position)}」"
-                        f"与方案地址不在同一世界观，无法进入。")
+                        f"与方案地址不在同一维度，无法进入。")
             nearest, farthest = rel.interval
             if farthest > max_distance:
                 if nearest == farthest:
