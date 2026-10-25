@@ -14,6 +14,9 @@
 - `profile`（`services/character/profile_text.py`，档案派生层的文本化出口）：作息与
   空间偏好的可读结论与实时提示（见附录 A 的 `profile` 组）。scope 同样是与文件位置
   无关的字面量契约——以后新域按此模式扩展。
+- `spatial`（`services/character/spatial.py`，空间档案的学习层）：TAG 先验表
+  （`TAG_SPATIAL_PRIORS` / `TAG_ENV_PRIORS`）是常量钩子，行为包可按标签名扩展或
+  替换（见附录 A 的 `spatial` 组）。
 
 **核心规则**：
 
@@ -108,7 +111,8 @@ data/worlds/<world_id>/
 
 | 方法 | 说明 |
 |------|------|
-| `runtime.override(target, impl)` | 注册对某个可覆盖目标的实现。`target` 可以是 `"logic.compute_casualty"` 这样的字符串，也可以是 `CreationService.calculate_height` / `logic.compute_casualty` 等被包装的函数对象（带 `__hook_key__`）。函数覆盖的 `impl` 必须可调用且签名与原函数一致；对常量（如 `logic.PREDEFINED_TAGS`）也可直接传列表值。 |
+| `runtime.override(target, impl)` | 注册对某个可覆盖目标的实现。`target` 可以是 `"logic.compute_casualty"` 这样的字符串，也可以是 `CreationService.calculate_height` / `logic.compute_casualty` 等被包装的函数对象（带 `__hook_key__`）。函数覆盖的 `impl` 必须可调用且接受原函数的全部具名参数（或以 `**kwargs` 兜底）；常量覆盖的 `impl` 须为同类型值或返回该值的可调用对象。不满足时该条注册在激活时被拒绝并记入启用诊断。 |
+| `runtime.resolve_value(key)` | 读取常量细度目标的有效值（覆盖实现可调用则调用取值；无覆盖返回默认值）。 |
 | `runtime.default(target)` | 返回被覆盖前的默认实现。覆盖函数内部如需复用默认逻辑，可调用 `runtime.default(target)(...)`。 |
 | `runtime.reset()` | 清空全部覆盖（一般由程序自动调用，模块内无需使用）。 |
 
@@ -132,7 +136,9 @@ data/worlds/<world_id>/
 |----------------------------|------|---------------------------------------------------------|
 | `clamp_coordinates`        | `(intrusion, destruction) -> (float, float)` | 把介入度/破坏性夹取到统一的 0.5~4.5 大边界。以下的坐标操作方法都应用此大边界。            |
 | `shift_coordinates`        | `(intrusion, destruction, intrusion_delta, destruction_delta) -> (float, float)` | 按原始坐标增量平移坐标（副本结局增量等场景）。                                 |
-| `advance_coordinates`      | `(personality, intrusion, destruction, step) -> (float, float)` | 按故事步进推进坐标（坐标 += 步进 × 性格步长）；报告事件与负向演化共用。                 |
+| `advance_coordinates`      | `(personality, intrusion, destruction, step, step_intrusion=None, step_destruction=None) -> (float, float)` | 按故事步进推进坐标（坐标 += 步进 × 步长）；未传显式步长时沿用性格初始步长。报告事件与负向演化共用。                 |
+| `evolve_step_rates`        | `(personality, step_intrusion, step_destruction, step, intrusion=None, destruction=None) -> (float, float)` | 坐标演化后的步长演化：先按敏感值/重力扣除，再向初始值恢复；传入坐标时叠加不适应性衰减。 |
+| `decay_step_rates`         | `(personality, step_intrusion, step_destruction, step_intr, step_destr, intrusion=None, destruction=None) -> (float, float)` | 不适应性衰减的纯计算：坐标贴到 0.5/4.5 边界后，对应步长按 `0.4 ^ (|步进| × (1 - 归一个性强度))` 收敛；仅衰减，不负责敏感/重力扣除。 |
 | `apply_landmark_switch`    | `(personality, intrusion, destruction, to_frequency) -> (float, float)` | 地标切换（含首次匹配）时的性格调整：切换到 common 介入度 + 敏感值，切换到 unique 介入度 - 敏感值；破坏性达到 3 以上时，切换到 unique 破坏性 + 重力，切换到 common 破坏性 - 重力。 |
 | `decayed_coordinates`      | `(personality, intrusion, destruction, fraction) -> (float, float)` | 步进衰减的纯计算：仅当坐标越过性格边界（初始值 - 0.5 × 性格步长）时向边界回落 fraction 个步长。 |
 | `apply_negative_evolution` | `(state) -> None` | 行动点数不足（<50）时应用负向演化：介入度步进取 -1 - 0.5 × 性格敏感值（由敏感值直接控制），破坏性步进取 -1 - 0.5 × 性格重力；步长演化叠加不适应性衰减；有变化时向演化表追加一行（步进取本次负向步进之和）。 |
@@ -172,6 +178,18 @@ data/worlds/<world_id>/
 | `profile.rhythm_now_hint` | `(evolution, now=None) -> str` | 作息实时提示：当前时刻活跃期 / 休整期各一行措辞，平常时段与样本不足时返回空串。 |
 | `profile.describe_spatial` | `(profile, position="") -> str` | 空间偏好历史结论：常活动地带、环境偏好、手工活动区域。`profile` 是 `services.character.spatial.build_spatial_profile` 的装配结果。 |
 | `profile.spatial_now_hint` | `(profile, position="") -> str` | 空间实时提示：当前位置相对偏好的评价 + 环境口语化描述；零证据返回空串。 |
+
+### `spatial`（空间档案学习层，常量）
+
+两张 TAG 先验表都可整体替换（常量细度）：注册 `dict`，或返回 `dict` 的可调用
+对象。读取入口是 `services.character.spatial.priors_for_tags` /
+`env_priors_for_tags`；直接 import 模块常量只能拿到默认表。键为个性标签名，
+未登记的标签不参与。
+
+| 目标 | 形态 | 说明 |
+|------|------|------|
+| `spatial.TAG_SPATIAL_PRIORS` | `Dict[str, SpatialPriors]` | 空间参数先验：`range_factor` / `stickiness` / `novelty_bonus` / `anchored_bias`。 |
+| `spatial.TAG_ENV_PRIORS` | `Dict[str, tuple]` | 环境偏好先验：值域升序分箱份额（和为 1）。 |
 
 ## 附录 B：完整示例（imperial_units）
 
@@ -222,10 +240,23 @@ def register(runtime):
 
 - **任意代码执行**：行为包本质是 Python 代码，会在激活时于本机执行。只应加载来自可信
   来源的世界包，如同对待一般软件一样。
-- **签名一致性**：覆盖实现的参数与返回值约定必须与原静态方法一致，否则可能引发参数
-  错位、异常或生成逻辑出错。
-- **错误隔离**：某个行为模块加载或注册失败时，程序会打印
-  `[BehaviorPack] ...` 警告并跳过该模块，其余行为模块与默认行为不受影响。
-- **常量覆盖**：`logic.PREDEFINED_TAGS` 不是函数，必须用字符串键
-  `"logic.PREDEFINED_TAGS"` 注册，且 `impl` 可为列表值或返回列表的可调用对象。
-  程序统一通过 `logic.get_predefined_tags()` 读取该常量。
+- **签名一致性**：覆盖实现的参数与返回值约定必须与原静态方法一致。激活时运行时
+  会校验：签名缺少默认实现要求的具名参数、或多出默认实现不提供的必填参数，都会被
+  拒绝并记入启用诊断，避免参数错位到运行中才暴露。
+- **错误隔离**：某个行为模块加载或注册失败时，异常只影响该模块（其余行为模块与
+  默认行为不受影响），原因（含异常类型与文本）记入启用诊断。
+- **常量覆盖**：`logic.PREDEFINED_TAGS` 是常量细度钩子（`behavior_const` 注册），
+  必须用字符串键 `"logic.PREDEFINED_TAGS"` 注册，`impl` 可为列表值或返回列表的
+  可调用对象（其他类型被拒绝）。数值常量允许 int / float 互通；可调用对象在每次
+  读取时重新求值，返回值类型与默认值不符会回退默认值并记入诊断。程序统一通过
+  `logic.get_predefined_tags()` 读取。
+- **重复注册**：同一 key 被多个模块或同一模块多次注册时，最后一条生效，启用诊断
+  给出警告。
+- **启用诊断**：激活行为包时，`load_pack` 逐条校验注册并产出诊断报告
+  （`BehaviorLoadReport`）：接管了哪些 key、未知 key / 签名或类型不符的拒绝原因、
+  模块加载失败等，经 `[BehaviorPack]` 通道打印；导航栏会显示接管项数或诊断异常
+  计数。坏注册只拒绝该条，不影响包内其余注册。
+- **能力边界（副本）**：副本演化主体公式 `dungeon/rules.py::evolve_attributes`
+  没有行为钩子——副本路径只通过注入的 `StateService.decay_step_rates` 受行为包
+  影响；段步进、转移矩阵与章节敏感效果属于方案配置，不应由行为包重复表达。
+  副本子进程会随激活世界包加载同一个行为包，父进程已有的钩子在副本内同样生效。

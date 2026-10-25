@@ -9,6 +9,7 @@ import customtkinter as ctk
 
 import ui.ctk.dialogs
 import ui.ctk.ctk_patch  # noqa: F401  模式切换时同步刷新 CTk 控件 Frame 底色，避免几何重排露旧色
+from core.behavior_runtime import get_runtime
 from services.exploration.context import ExplorationContext
 from paths import icon_dir
 from persistence import QuipRepo, ScenarioRepo, CharacterRepo
@@ -385,8 +386,10 @@ class MainWindowManager:
         manifest = self.world_state.manifest if active else None
         world_version = manifest.version if manifest is not None else ""
         has_behavior_pack = bool(manifest is not None and manifest.owns("behaviors"))
+        behavior_report = get_runtime().last_report if has_behavior_pack else None
         self.nav_bar.set_world_active(
-            active, world_name, world_version, has_behavior_pack)
+            active, world_name, world_version, has_behavior_pack,
+            behavior_report=behavior_report)
         if hasattr(self, 'generator_panel'):
             self.generator_panel.set_world_active(active)
         if hasattr(self, 'challenge_panel'):

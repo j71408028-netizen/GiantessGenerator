@@ -3,7 +3,8 @@
 此前性格描述、公开/隐藏介绍、个性标签、体型尺度等"人设素材"散落在
 intro 面板、副本提示词、探索上下文等各处自行拼接。本模块把它们统一为
 一个纯函数，供聊天协议与未来的其他 AI 功能共用；UI 展示仍由各自面板
-自行决定（如 tag_hints 提示词保留在 intro 面板，供行为包覆写）。
+自行决定（如 `tag_hints` 提示词只属于 intro 面板的界面文案，不在行为包
+覆盖范围内）。
 """
 
 from core.address_model import format_addr_compact

@@ -87,7 +87,11 @@
   只作为数据，未上界面；
 - 描述选取的覆盖实现必须接受 `lanes` / `env_estimate` 参数并遵循其
   语义（车道资格窗口是裁定级，环境一致性是软权重），引擎不再提供
-  旧签名兼容路径。
+  旧签名兼容路径；
+- 空间档案的两张 TAG 先验表（`spatial.TAG_SPATIAL_PRIORS` /
+  `spatial.TAG_ENV_PRIORS`）是常量钩子，行为包可按标签名扩展或替换；
+  直接 import 模块常量只能拿到默认表，消费入口是
+  `priors_for_tags` / `env_priors_for_tags`。
 
 ## 附录 A：代码地图（开发者）
 

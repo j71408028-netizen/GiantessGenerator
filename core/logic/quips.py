@@ -10,16 +10,16 @@ import random
 import re
 from typing import Dict, List, Optional, Set, Tuple
 
-from core.behavior_runtime import behavior_hook, get_runtime
+from core.behavior_runtime import behavior_const, behavior_hook, get_runtime
 from core.models import Landmark
 from core.logic.simulation import compute_environment_factor
 from core.logic.text import contains_blocked_word, should_skip_by_part_tags
 
-PREDEFINED_TAGS = [
+PREDEFINED_TAGS = behavior_const("logic", "PREDEFINED_TAGS", [
     "涩涩", "裙装", "制服", "旅行", "地理测量",
     "能躺着不站着", "四处走走", "摄影师请就位",
     "细节控", "尺寸焦虑症",
-]
+])
 
 
 def get_predefined_tags() -> List[str]:
@@ -27,10 +27,7 @@ def get_predefined_tags() -> List[str]:
 
     行为包既可注册一个返回标签列表的可调用对象，也可直接注册列表本身。
     """
-    impl = get_runtime().resolve("logic.PREDEFINED_TAGS")
-    if impl is not None:
-        return impl() if callable(impl) else impl
-    return list(PREDEFINED_TAGS)
+    return list(get_runtime().resolve_value("logic.PREDEFINED_TAGS"))
 
 
 @behavior_hook("logic", "replace_quip_tags")

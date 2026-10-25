@@ -9,8 +9,9 @@
    二级；三级单元过细，作为个体地标对待，不进区域统计）。行权重按时间
    指数衰减（EWMA 半衰期），节点份额做狄利赫里平滑——样本少时向均匀
    分布收缩，长期不到访则整体向 1.0 回落，即"区域偏好随时间衰减"；
-3. 先验层：TAG → 空间参数向量（``TAG_SPATIAL_PRIORS`` 数据表）。只有纯
-   空间语义的标签入表，姿态/内容类标签留在内容层。
+3. 先验层：TAG → 空间参数向量（``TAG_SPATIAL_PRIORS`` 数据表，已注册为常量
+   钩子 ``spatial.TAG_SPATIAL_PRIORS``）。只有纯空间语义的标签入表，姿态/内容
+   类标签留在内容层。
 
 模块同时承载环境轴（``EnvironmentProfile``）：在线报告沉淀的环境证据行
 按距离核聚合成地址环境估计，是环境因子的唯一事实来源（离线结算消费）；
@@ -29,6 +30,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional
 
 from core.address_model import cell_width_m, covers, parse_full, relate
+from core.behavior_runtime import behavior_const, get_runtime
 
 # EWMA 半衰期（天）：到访/环境证据权重随时间减半的周期，承担区域偏好与
 # 地址环境沉淀的时间衰减（离线结算同用此口径）
@@ -49,24 +51,27 @@ class SpatialPriors:
     anchored_bias: float = 0.0    # 有地址内容相对 portable 内容的偏好偏移
 
 
-# TAG → 先验参数的数据表。参数语义对齐 get_comparisons 的现行效果：
-# 旅行偏爱独特（锚定）地标、地理测量较弱地偏爱独特地标——这两项空间语义
-# P4a 迁入调度器后从此表取参；四处走走/能躺着不站着的姿态过滤留在内容层，
-# 这里只登记其活动范围倾向。行为包可扩展映射（键值均按标签名对齐）。
-TAG_SPATIAL_PRIORS: Dict[str, SpatialPriors] = {
-    "旅行": SpatialPriors(range_factor=1.25, novelty_bonus=0.5, anchored_bias=0.3),
-    "地理测量": SpatialPriors(range_factor=1.1, novelty_bonus=0.3, anchored_bias=0.15),
-    "四处走走": SpatialPriors(range_factor=1.15, stickiness=-0.3),
-    "能躺着不站着": SpatialPriors(range_factor=0.8, stickiness=0.4),
-}
+# TAG → 先验参数的数据表（常量钩子 ``spatial.TAG_SPATIAL_PRIORS``）。
+# 参数语义对齐 get_comparisons 的现行效果：旅行偏爱独特（锚定）地标、
+# 地理测量较弱地偏爱独特地标——这两项空间语义 P4a 迁入调度器后从此表取参；
+# 四处走走/能躺着不站着的姿态过滤留在内容层，这里只登记其活动范围倾向。
+# 行为包可扩展映射（键值均按标签名对齐）。
+TAG_SPATIAL_PRIORS: Dict[str, SpatialPriors] = behavior_const(
+    "spatial", "TAG_SPATIAL_PRIORS", {
+        "旅行": SpatialPriors(range_factor=1.25, novelty_bonus=0.5, anchored_bias=0.3),
+        "地理测量": SpatialPriors(range_factor=1.1, novelty_bonus=0.3, anchored_bias=0.15),
+        "四处走走": SpatialPriors(range_factor=1.15, stickiness=-0.3),
+        "能躺着不站着": SpatialPriors(range_factor=0.8, stickiness=0.4),
+    })
 
 
 def priors_for_tags(tags: Iterable[str]) -> SpatialPriors:
     """合并多个标签的先验：半径倍率相乘、其余相加；未知标签不参与。"""
+    table = get_runtime().resolve_value("spatial.TAG_SPATIAL_PRIORS") or {}
     range_factor = 1.0
     stickiness = novelty = anchored = 0.0
     for tag in tags or []:
-        p = TAG_SPATIAL_PRIORS.get(tag)
+        p = table.get(tag)
         if p is None:
             continue
         range_factor *= p.range_factor
@@ -470,19 +475,21 @@ _ENV_PREFERENCE_SMOOTHING = 6.0                  # 成熟度：≈6 行证据达
 # TAG → 环境偏好先验（并列表，不进 ``SpatialPriors`` 标量组）：值域升序
 # 分箱份额（和为 1）。只有环境语义清晰的标签入表（旅行 / 地理测量偏爱
 # 人烟稀少处）；数值是建议，行为锁只锁方向。行为包可扩展映射（键值均
-# 按标签名对齐）。
-TAG_ENV_PRIORS: Dict[str, tuple] = {
-    "旅行": (0.30, 0.25, 0.15, 0.10, 0.08, 0.07, 0.05),
-    "地理测量": (0.22, 0.20, 0.16, 0.13, 0.11, 0.10, 0.08),
-}
+# 按标签名对齐），常量钩子为 ``spatial.TAG_ENV_PRIORS``。
+TAG_ENV_PRIORS: Dict[str, tuple] = behavior_const(
+    "spatial", "TAG_ENV_PRIORS", {
+        "旅行": (0.30, 0.25, 0.15, 0.10, 0.08, 0.07, 0.05),
+        "地理测量": (0.22, 0.20, 0.16, 0.13, 0.11, 0.10, 0.08),
+    })
 
 
 def env_priors_for_tags(tags: Iterable[str]) -> Optional[List[float]]:
     """合并多标签的环境偏好先验：份额逐箱相加后归一；无命中返回 None
     （消费方以均匀分布兜底）。"""
+    table = get_runtime().resolve_value("spatial.TAG_ENV_PRIORS") or {}
     shares = None
     for tag in tags or []:
-        p = TAG_ENV_PRIORS.get(tag)
+        p = table.get(tag)
         if p is None:
             continue
         shares = list(p) if shares is None else [a + b for a, b in zip(shares, p)]

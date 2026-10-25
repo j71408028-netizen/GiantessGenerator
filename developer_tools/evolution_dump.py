@@ -332,8 +332,9 @@ def _load_pack_source(source: str, runtime) -> None:
     paths = _python_files(source) if os.path.isdir(source) else [source]
     for path in paths:
         name = os.path.splitext(os.path.basename(path))[0]
-        module = _load_module(f"_evo_behavior_{name}", path)
+        module, error = _load_module(f"_evo_behavior_{name}", path)
         if module is None:
+            print(f"[BehaviorPack] 行为模块 '{path}' 加载失败: {error}")
             continue
         register = getattr(module, "register", None)
         if not callable(register):

@@ -30,10 +30,11 @@ def check(name, ok, extra=""):
         failures.append(name)
 
 
+from core.behavior_runtime import get_runtime, reset_runtime  # noqa: E402
 from core.models import CharacterSnapshot, EvolutionRecord  # noqa: E402
 from services.character.spatial import (  # noqa: E402
     TAG_SPATIAL_PRIORS, SpatialProfileService, SpatialPriors,
-    build_spatial_profile, priors_for_tags,
+    build_spatial_profile, env_priors_for_tags, priors_for_tags,
 )
 
 _NOW = datetime.datetime(2026, 10, 24, 12, 0, 0)
@@ -176,6 +177,26 @@ class _Duck:
     selected_tags = []
     activity_regions = []
 check("鸭子类型可装配", build_spatial_profile(_Duck()).learned.has_data())
+
+# ---------------- 5. 行为包常量钩子 ----------------
+reset_runtime()
+get_runtime().override(
+    "spatial.TAG_SPATIAL_PRIORS",
+    {"旅行": SpatialPriors(range_factor=2.0, novelty_bonus=1.0)})
+_p_override = priors_for_tags(["旅行"])
+check("行为包可覆盖空间先验表",
+      _p_override.range_factor == 2.0 and _p_override.novelty_bonus == 1.0,
+      str(_p_override))
+check("覆盖表外的标签不参与", priors_for_tags(["地理测量"]) == SpatialPriors())
+
+get_runtime().override(
+    "spatial.TAG_ENV_PRIORS",
+    {"旅行": (1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)})
+check("行为包可覆盖环境先验表",
+      env_priors_for_tags(["旅行"]) == [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      str(env_priors_for_tags(["旅行"])))
+reset_runtime()
+check("重置后恢复默认先验", priors_for_tags(["旅行"]) == TAG_SPATIAL_PRIORS["旅行"])
 
 # ---------------- 结论 ----------------
 _log.flush()

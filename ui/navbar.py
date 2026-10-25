@@ -100,19 +100,26 @@ class NavigationBar(ctk.CTkFrame):
         self._apply_world_style()
 
     def set_world_active(self, active, world_name="", world_version="",
-                         has_behavior_pack=False):
+                         has_behavior_pack=False, behavior_report=None):
         """世界包加载状态：导航栏整体淡绿色风格 + 底部世界包信息区。
 
         程序版本号始终显示在导航栏底部；加载世界包时额外展示世界包版本，
-        并在包含行为包时提示行为已更改。
+        并在包含行为包时按启用诊断报告提示接管项数或诊断异常。
         """
         self._world_active = bool(active)
         if active:
             self.worldpack_version_label.configure(
                 text=f"世界包版本：v{world_version}" if world_version else "世界包版本：未知")
             if has_behavior_pack:
-                self.packloaded_label.configure(text=f"🌍 {world_name} （行为已更改）"
-                if world_name else "🌍 世界包已加载 （行为已更改）")
+                if behavior_report is not None and behavior_report.errors:
+                    suffix = (f"（⚠ 行为包诊断异常 {len(behavior_report.errors)} 项，"
+                              f"接管 {len(behavior_report.overridden)} 项）")
+                elif (behavior_report is not None and behavior_report.overridden):
+                    suffix = f"（行为已更改 {len(behavior_report.overridden)} 项）"
+                else:
+                    suffix = "（行为已更改）"
+                self.packloaded_label.configure(text=f"🌍 {world_name} {suffix}"
+                if world_name else f"🌍 世界包已加载 {suffix}")
             else:
                 self.packloaded_label.configure(text=f"🌍 {world_name}" if world_name else "🌍 世界包已加载")
         else:

@@ -55,13 +55,13 @@
 → `normalize` → `validate`）；音频端到端链（说话人分档 / 三条引擎路径 / 降级 /
 播放收尾）在 `check_audio_chain.py`。加字段时别漏，见 §5.4。
 
-### 1.3 当前实测数字（2026-10-06）
+### 1.3 当前实测数字（2026-10-25）
 
 ```
-[check_import_graph] 已检查 158 个模块，592 条第一方依赖边
+[check_import_graph] 已检查 194 个模块，779 条第一方依赖边
 [check_import_graph] PASSED：层间依赖方向与 UI 框架禁令均无未登记越界
 KNOWN_EXCEPTIONS = []          # 原 11 条已全部消除
-tests/run_checks.py            # 13/13
+tests/run_checks.py            # 42/42
 ```
 
 ---
@@ -70,9 +70,9 @@ tests/run_checks.py            # 13/13
 
 ### 2.1 `@behavior_hook` 的 scope 不是模块路径 ⚠️ 最高优先
 
-`core/logic/`（四子模块合计）里有 12 处、`core/behavior_runtime.py` 有 1 处
-`@behavior_hook("logic", "format_size")`。`behavior_hook(scope, name)` 把 key 拼成
-`f"{scope}.{name}"`，**scope 是写死的字面量，与文件在哪个模块无关**。
+`core/logic/`（四子模块合计）里有 11 处 `@behavior_hook("logic", ...)`，另有 1 处
+`behavior_const("logic", "PREDEFINED_TAGS", ...)`。`behavior_hook(scope, name)` 把 key
+拼成 `f"{scope}.{name}"`，**scope 是写死的字面量，与文件在哪个模块无关**。
 
 这个 key 是**已部署世界包行为包的公开契约**：
 
@@ -83,7 +83,9 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 
 所以搬家、重命名 `core/`、把 `logic.py` 拆成多个文件——**`"logic"` 这个字面量一个字都不能改**。
 改成 `"core.logic.format_size"` 会让用户已安装的行为包**静默失效**（`resolve()` 返回 None，
-静默回退默认实现，不报错、不告警）。
+静默回退默认实现，不报错、不告警）。激活时的启用诊断（`load_pack` 产出
+`BehaviorLoadReport`）只能拦住行为包**写错 key** 这一类失效；运行时对未命中 key
+的回退语义不变，契约字面量仍然一个字都不能改。
 
 ### 2.2 `data/` 是用户数据区
 
@@ -147,7 +149,8 @@ data/static/behaviors/imperial_units/imperial_units.py:45
   子域直连 import，一律从层内装配入口取数（`build_spatial_profile` /
   `RhythmService().learn_from_evolution`），不各自复刻学习逻辑；
 - `profile_text.py` 的四个入口是行为包钩子，scope 为字面量 `"profile"`
-  （§2.1 同款契约），行为包覆盖范围见
+  （§2.1 同款契约）；`spatial.py` 的两张 TAG 先验表是常量钩子，scope 为
+  `"spatial"`。行为包覆盖范围见
   `docs/designs/world_pack_behaviors.md` 附录 A。
 
 ---
