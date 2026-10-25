@@ -61,6 +61,7 @@ from services.chat.persona import build_character_persona
 from services.chat.experience_events import (collect_experience_events,
                                         consume_experience_events,
                                         events_for_prompt)
+from services.character.profile_text import build_live_context
 from services.state_service import StateService
 
 # 隐藏介绍的透露门槛：聊天态度达到该值后人设里才注入 intro_hidden
@@ -158,7 +159,7 @@ _SYSTEM_TEMPLATE = """你正在手机聊天软件里与「{user_nick}」私聊�
 【你当前的状态】
 行动点（精力余裕）：{action_points}/100
 聊天态度：{attitude}（范围 -100~100，越高越亲近；你以此为依据决定回复意愿与语气）
-
+{live_context}
 【你的聊天习惯】（由你的性格决定，固定不变）
 {chat_habits}
 
@@ -392,9 +393,10 @@ def topic_context_text(chat_state: ChatState) -> str:
     return "\n".join(lines)
 
 
-def build_chat_system_prompt(state: CharacterSnapshot, chat_state: ChatState) -> str:
+def build_chat_system_prompt(state: CharacterSnapshot, chat_state: ChatState,
+                             now: Optional[datetime.datetime] = None) -> str:
     """组装聊天系统提示词：统一人设（按态度门槛注入隐藏介绍）+ 状态 +
-    聊天习惯 + 话题上下文 + 输出协议。"""
+    聊天习惯 + 话题上下文 + 输出协议。``now`` 供测试注入固定时钟。"""
     return _SYSTEM_TEMPLATE.format(
         user_nick=chat_state.user_nick or "一个普通人类",
         name=state.name,
@@ -402,10 +404,19 @@ def build_chat_system_prompt(state: CharacterSnapshot, chat_state: ChatState) ->
             state, include_hidden=chat_state.attitude >= REVEAL_ATTITUDE),
         action_points=state.action_points,
         attitude=chat_state.attitude,
+        live_context=live_context_block(state, now=now),
         chat_habits=chat_habits_text(chat_state.chat_params),
         topic_context=topic_context_text(chat_state),
         output_rule=_OUTPUT_RULE,
     )
+
+
+def live_context_block(state: CharacterSnapshot,
+                       now: Optional[datetime.datetime] = None) -> str:
+    """实时情境段（作息/空间的 now 提示，见 profile_text）；有内容时补
+    一个尾空行分隔版面，无内容时留空（模板行自然退化为空行）。"""
+    ctx = build_live_context(state, now=now)
+    return f"{ctx}\n" if ctx else ""
 
 
 # 收尾 JSON 提醒：弱模型对长系统提示词末尾的输出协议服从率低
@@ -829,6 +840,9 @@ class ChatService:
                 if state.position:
                     context_lines.append(
                         f"你目前在：{format_addr_compact(state.position)}")
+                live_ctx = build_live_context(state)
+                if live_ctx:
+                    context_lines.append(live_ctx)
                 context = ("\n".join(context_lines) + "\n") if context_lines else ""
                 parts.append(
                     "你隔了一段时间拿起手机，没有新消息。\n" + context +

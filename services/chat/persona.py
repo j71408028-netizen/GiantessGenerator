@@ -12,6 +12,8 @@ from core.models import CharacterSnapshot
 from core.scale_reference import (destruction_level_text,
                                       intrusion_level_text,
                                       size_definition_text)
+from services.character.profile_text import describe_rhythm, describe_spatial
+from services.character.spatial import build_spatial_profile
 
 
 def build_character_persona(state: CharacterSnapshot,
@@ -44,6 +46,15 @@ def build_character_persona(state: CharacterSnapshot,
     lines.append(f"破坏性（{state.destruction:.1f}/4）：{destruction_level_text(state.destruction)}")
     if state.position:
         lines.append(f"当前位置：{format_addr_compact(state.position)}")
+    # 作息/空间偏好是演化表的派生结论，随人设一并注入：聊天系统提示与
+    # 首次聊天习惯判定（ensure_chat_params）都以此为准；无样本时为空。
+    rhythm_text = describe_rhythm(state.evolution)
+    if rhythm_text:
+        lines.append("作息（从活动记录学到的习惯）：\n" + rhythm_text)
+    spatial_text = describe_spatial(build_spatial_profile(state),
+                                    state.position)
+    if spatial_text:
+        lines.append("活动范围（从到访记录学到的习惯）：\n" + spatial_text)
     measured = [(part, desc) for part, desc in state.size_unlocks.items()
                 if desc and desc != "MEASURED"]
     if measured:
