@@ -12,17 +12,23 @@
 :class:`~core.models.OfflineRecoveryPlan`；``OfflineService`` 负责把计划
 写回状态并记录演化。行为包改的是计划，不是执行与持久化。展示文案由
 ``offline.report_text`` 从结算结果生成，``recover_offline`` 返回该文案。
+
+模型参数来自角色档案的出身烙印（``CharacterSnapshot.model_tuning``，
+创建期经 ``CreationService.derive_model_tuning`` 派生）：世界包对离线
+结算的调制只发生在角色创建时，已有角色的结算不随世界包启停变化。
 """
 
 import datetime
 import math
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 
-from core.behavior_runtime import behavior_const, behavior_hook, get_runtime
+from core.behavior_runtime import behavior_hook
 from core.logic import compute_casualty
-from core.models import CharacterSnapshot, OfflineDetail, OfflineRecoveryPlan
+from core.models import (
+    CharacterSnapshot, ModelTuning, OfflineDetail, OfflineRecoveryPlan,
+)
 from services.character.rhythm import RhythmService
 from services.character.spatial import EnvironmentProfile
 
@@ -31,62 +37,58 @@ from services.character.spatial import EnvironmentProfile
 _OFFLINE_WINDOW_HOURS = 72.0
 _OFFLINE_BIN_HOURS = 2.0
 
-# 可被行为包覆盖的离线模型参数。
-_OFFLINE_STEP_PER_HOUR = behavior_const(
-    "offline", "model.step_per_hour", 0.01,
-    layer="infra", contract="data")
-_OFFLINE_EXIT_AMP = behavior_const(
-    "offline", "model.exit_amp", 0.05,
-    layer="infra", contract="data")
-_OFFLINE_EXIT_TAU = behavior_const(
-    "offline", "model.exit_tau", 0.9,
-    layer="infra", contract="data")
-_OFFLINE_RECOVERY_POINTS_PER_MINUTE = behavior_const(
-    "offline", "model.recovery_points_per_minute", 0.5,
-    layer="infra", contract="data")
-_OFFLINE_RECOVERY_DECAY_PER_MINUTE = behavior_const(
-    "offline", "model.recovery_decay_per_minute", 0.01,
-    layer="infra", contract="data")
-_OFFLINE_NOISE_SCALE = behavior_const(
-    "offline", "model.noise_scale", 0.1,
-    layer="infra", contract="data")
-_OFFLINE_OLD_STEP_DIVISOR = behavior_const(
-    "offline", "model.old_step_divisor", math.pi,
-    layer="infra", contract="data")
-# 作息调制对离线步进的放大倍率（读取时夹取 0~3）：0 = 昼夜平坦，1 = 默认，
-# >1 放大昼夜差异。只作用于离线结算的步进曲线，不改变角色档案学到的作息
-# 与档案 / 聊天措辞——作息学习参数属于角色身份，不开放。
-_OFFLINE_RHYTHM_SWING = behavior_const(
-    "offline", "model.rhythm_swing", 1.0,
-    layer="infra", contract="data")
+# 结算参数的默认值唯一来源是 ModelTuning（出身烙印的默认表）。
+_DEFAULT_TUNING = ModelTuning()
+
+# OfflineService 可显式覆盖的烙印参数名（覆盖 > 烙印 > 默认）。
+_TUNING_FIELDS = (
+    "step_per_hour", "exit_amp", "exit_tau",
+    "recovery_points_per_minute", "recovery_decay_per_minute",
+    "noise_scale", "old_step_divisor", "rhythm_swing",
+)
 
 
 @dataclass(frozen=True)
 class OfflineModel:
-    """一次离线结算的模型参数。
+    """一次离线结算的模型参数快照。
 
-    ``window_hours`` / ``bin_hours`` 是固定导出契约；其余字段由
-    ``offline.model.*`` 常量钩子解析，实例构造时也可显式覆盖。
+    ``window_hours`` / ``bin_hours`` 是固定导出契约；其余字段默认取
+    :class:`~core.models.ModelTuning` 的默认值，正常路径经 :meth:`from_tuning`
+    由角色出身烙印构造（行为包整体覆盖 ``offline.recover_plan`` 时收到的
+    model 即来自烙印），实例构造时也可显式覆盖（测试与特殊场景）。
     """
 
     window_hours: float = _OFFLINE_WINDOW_HOURS
     bin_hours: float = _OFFLINE_BIN_HOURS
-    step_per_hour: float = _OFFLINE_STEP_PER_HOUR
-    exit_amp: float = _OFFLINE_EXIT_AMP
-    exit_tau: float = _OFFLINE_EXIT_TAU
-    recovery_points_per_minute: float = _OFFLINE_RECOVERY_POINTS_PER_MINUTE
-    recovery_decay_per_minute: float = _OFFLINE_RECOVERY_DECAY_PER_MINUTE
-    noise_scale: float = _OFFLINE_NOISE_SCALE
-    old_step_divisor: float = _OFFLINE_OLD_STEP_DIVISOR
-    rhythm_swing: float = _OFFLINE_RHYTHM_SWING
+    step_per_hour: float = _DEFAULT_TUNING.step_per_hour
+    exit_amp: float = _DEFAULT_TUNING.exit_amp
+    exit_tau: float = _DEFAULT_TUNING.exit_tau
+    recovery_points_per_minute: float = _DEFAULT_TUNING.recovery_points_per_minute
+    recovery_decay_per_minute: float = _DEFAULT_TUNING.recovery_decay_per_minute
+    noise_scale: float = _DEFAULT_TUNING.noise_scale
+    old_step_divisor: float = _DEFAULT_TUNING.old_step_divisor
+    rhythm_swing: float = _DEFAULT_TUNING.rhythm_swing
 
-
-def _model_value(explicit: Optional[float], key: str) -> float:
-    """显式参数优先；否则读取常量钩子的有效值。"""
-    if explicit is not None:
-        return float(explicit)
-    value = get_runtime().resolve_value(key)
-    return float(value) if value is not None else 0.0
+    @classmethod
+    def from_tuning(cls, tuning: Optional[ModelTuning],
+                    window_hours: Optional[float] = None,
+                    bin_hours: Optional[float] = None) -> "OfflineModel":
+        """由出身烙印构造参数快照；窗口两参可显式覆盖（固定导出契约）。"""
+        t = tuning if isinstance(tuning, ModelTuning) else ModelTuning()
+        return cls(
+            window_hours=(window_hours if window_hours is not None
+                          else _OFFLINE_WINDOW_HOURS),
+            bin_hours=(bin_hours if bin_hours is not None
+                       else _OFFLINE_BIN_HOURS),
+            step_per_hour=t.step_per_hour,
+            exit_amp=t.exit_amp,
+            exit_tau=t.exit_tau,
+            recovery_points_per_minute=t.recovery_points_per_minute,
+            recovery_decay_per_minute=t.recovery_decay_per_minute,
+            noise_scale=t.noise_scale,
+            old_step_divisor=t.old_step_divisor,
+            rhythm_swing=t.rhythm_swing,
+        )
 
 
 def _activity_baseline(personality) -> float:
@@ -347,10 +349,11 @@ def build_offline_report(state: CharacterSnapshot,
 class OfflineService:
     """离线结算：把角色从 updated_at 到 now 的离线时长换算为状态恢复。
 
-    实例形态：时钟/噪声参数（随机种子、窗口、步进率等）在实例上可配置，
-    便于测试；行为包优先覆盖 ``offline.recover_plan``，旧
-    ``StateService.recover_evolution`` 保留为兼容入口。环境因子取角色演化表
-    中的在线沉淀（``EnvironmentProfile`` 按地址聚合），无沉淀时按位置精确度兜底。
+    结算模型参数取角色档案的出身烙印（``state.model_tuning``），实例构造
+    参数可显式覆盖（测试与特殊场景）；行为包优先覆盖 ``offline.recover_plan``
+    （收到的 model 即来自烙印），旧 ``StateService.recover_evolution`` 保留为
+    兼容入口。环境因子取角色演化表中的在线沉淀（``EnvironmentProfile`` 按
+    地址聚合），无沉淀时按位置精确度兜底。
     """
 
     def __init__(self, window_hours: Optional[float] = None,
@@ -367,38 +370,27 @@ class OfflineService:
                              else float(window_hours))
         self.bin_hours = (_OFFLINE_BIN_HOURS if bin_hours is None
                           else float(bin_hours))
-        self.step_per_hour = _model_value(
-            step_per_hour, "offline.model.step_per_hour")
-        self.exit_amp = _model_value(exit_amp, "offline.model.exit_amp")
-        self.exit_tau = _model_value(exit_tau, "offline.model.exit_tau")
-        self.recovery_points_per_minute = _model_value(
-            recovery_points_per_minute,
-            "offline.model.recovery_points_per_minute")
-        self.recovery_decay_per_minute = _model_value(
-            recovery_decay_per_minute,
-            "offline.model.recovery_decay_per_minute")
-        self.noise_scale = _model_value(
-            noise_scale, "offline.model.noise_scale")
-        self.old_step_divisor = _model_value(
-            old_step_divisor, "offline.model.old_step_divisor")
-        self.rhythm_swing = _model_value(
-            rhythm_swing, "offline.model.rhythm_swing")
+        # 其余参数 None = 按角色出身烙印取（见 _model）
+        self.step_per_hour = step_per_hour
+        self.exit_amp = exit_amp
+        self.exit_tau = exit_tau
+        self.recovery_points_per_minute = recovery_points_per_minute
+        self.recovery_decay_per_minute = recovery_decay_per_minute
+        self.noise_scale = noise_scale
+        self.old_step_divisor = old_step_divisor
+        self.rhythm_swing = rhythm_swing
 
     # ==================== 兼容查询入口 ====================
 
-    def _model(self) -> OfflineModel:
-        return OfflineModel(
-            window_hours=self.window_hours,
-            bin_hours=self.bin_hours,
-            step_per_hour=self.step_per_hour,
-            exit_amp=self.exit_amp,
-            exit_tau=self.exit_tau,
-            recovery_points_per_minute=self.recovery_points_per_minute,
-            recovery_decay_per_minute=self.recovery_decay_per_minute,
-            noise_scale=self.noise_scale,
-            old_step_divisor=self.old_step_divisor,
-            rhythm_swing=self.rhythm_swing,
-        )
+    def _model(self, state=None) -> OfflineModel:
+        """一次结算的参数快照：实例显式参数 > 角色出身烙印 > 默认。"""
+        model = OfflineModel.from_tuning(
+            getattr(state, "model_tuning", None),
+            window_hours=self.window_hours, bin_hours=self.bin_hours)
+        overrides = {name: float(getattr(self, name))
+                     for name in _TUNING_FIELDS
+                     if getattr(self, name) is not None}
+        return replace(model, **overrides) if overrides else model
 
     def _environment_factor(self, state, step: float,
                             profile: Optional[EnvironmentProfile] = None
@@ -414,11 +406,12 @@ class OfflineService:
 
         ``now`` 为空时使用系统当前时间；恢复后的状态变化会写入演化表
         （record_change），调用方负责持久化。计划生成与计划执行分离：
-        ``offline.recover_plan`` 可被行为包整体替换，写回仍由本方法完成。
-        返回 ``offline.report_text`` 生成的展示文案，无离线时长时为空串。
+        ``offline.recover_plan`` 可被行为包整体替换（收到的 model 由角色
+        出身烙印构造），写回仍由本方法完成。返回 ``offline.report_text``
+        生成的展示文案，无离线时长时为空串。
         """
         now = now or datetime.datetime.now()
-        plan = build_recover_plan(state, now, self._model())
+        plan = build_recover_plan(state, now, self._model(state))
         elapsed_minutes = _elapsed_minutes(state, now)
         before_points = state.action_points
         apply_recover_plan(state, plan)

@@ -1,4 +1,4 @@
-from typing import Any, List, Dict, Optional
+from typing import Any, ClassVar, List, Dict, Optional
 from dataclasses import dataclass, field, fields, replace
 import datetime
 import math
@@ -267,19 +267,40 @@ class ModelTuning:
 
     def _sanitize_shares(self) -> Optional[List[float]]:
         """环境份额：须恰好 ``ENV_PRIOR_BINS`` 个有限数值，负值归零后归一；
-        形状不符（含 None）返回 None = 均匀兜底。"""
+        形状不符（含 None）返回 None = 均匀兜底，非 None 的非法值警告一次。"""
         shares = self.env_prior_shares
         if shares is None:
             return None
         try:
             vals = [float(v) for v in shares]
         except (TypeError, ValueError):
+            self._warn_bad_shares("含不可解析为数值的条目")
             return None
-        if len(vals) != ENV_PRIOR_BINS or not all(math.isfinite(v) for v in vals):
+        if len(vals) != ENV_PRIOR_BINS:
+            self._warn_bad_shares(
+                f"须为 {ENV_PRIOR_BINS} 元（得到 {len(vals)} 个）")
+            return None
+        if not all(math.isfinite(v) for v in vals):
+            self._warn_bad_shares("含非有限数值")
             return None
         vals = [max(0.0, v) for v in vals]
         total = sum(vals)
-        return [v / total for v in vals] if total > 0 else None
+        if total <= 0:
+            self._warn_bad_shares("总和为零")
+            return None
+        return [v / total for v in vals]
+
+    # 非法份额的警告去重（每进程每原因一次）；ClassVar 不进字段。
+    _SHARES_WARNED: ClassVar[set] = set()
+
+    @classmethod
+    def _warn_bad_shares(cls, reason: str) -> None:
+        """[BehaviorPack] 通道一次性警告：烙印路径的非法环境份额按兜底处理。"""
+        if reason in cls._SHARES_WARNED:
+            return
+        cls._SHARES_WARNED.add(reason)
+        print(f"[BehaviorPack] 警告：model_tuning.env_prior_shares {reason}，"
+              f"已回退均匀兜底")
 
     def sanitize(self) -> "ModelTuning":
         """夹取归一，返回清洗后的新实例。

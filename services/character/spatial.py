@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""角色空间档案：TAG 先验 + 到访日志学习的区域权重树（P3a）。
+"""角色空间档案：到访日志学习的区域权重树（P3a）。
 
 三层结构（优先级从高到低，消费方见 docs/designs/report_selection.md §3）：
 
@@ -9,9 +9,10 @@
    二级；三级单元过细，作为个体地标对待，不进区域统计）。行权重按时间
    指数衰减（EWMA 半衰期），节点份额做狄利赫里平滑——样本少时向均匀
    分布收缩，长期不到访则整体向 1.0 回落，即"区域偏好随时间衰减"；
-3. 先验层：TAG → 空间参数向量（``TAG_SPATIAL_PRIORS`` 数据表，已注册为常量
-   钩子 ``spatial.TAG_SPATIAL_PRIORS``）。只有纯空间语义的标签入表，姿态/内容
-   类标签留在内容层。
+3. 先验层：创建期烙印的空间参数（``CharacterSnapshot.model_tuning``
+   的 ``spatial_priors`` / ``env_prior_shares``，创建时按 TAG 默认表经
+   ``CreationService.derive_model_tuning`` 合并烙印）。只有纯空间语义的
+   标签入表，姿态/内容类标签留在内容层；本模块不再持有运行时钩子。
 
 模块同时承载环境轴（``EnvironmentProfile``）：在线报告沉淀的环境证据行
 按距离核聚合成地址环境估计，是环境因子的唯一事实来源（离线结算消费）；
@@ -30,7 +31,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional
 
 from core.address_model import cell_width_m, covers, parse_full, relate
-from core.behavior_runtime import behavior_const, get_runtime
+from core.models import SpatialPriorsParams
 
 # EWMA 半衰期（天）：到访/环境证据权重随时间减半的周期，承担区域偏好与
 # 地址环境沉淀的时间衰减（离线结算同用此口径）
@@ -42,69 +43,38 @@ _MIN_FACTOR = 0.15
 _MAX_FACTOR = 2.5
 
 
-@dataclass
-class SpatialPriors:
-    """TAG 先验给出的空间参数向量（中性值 = 不影响调度）。"""
-    range_factor: float = 1.0     # 活动半径倍率（调度器作用于可达范围）
-    stickiness: float = 0.0       # 区域粘性：>0 放大学习层对已到访区域的偏向，<0 抹平
-    novelty_bonus: float = 0.0    # 新颖加成：未到访分支的因子乘 (1 + bonus)
-    anchored_bias: float = 0.0    # 有地址内容相对 portable 内容的偏好偏移
+# TAG → 先验参数的默认表：创建期经 ``CreationService.derive_model_tuning``
+# 合并烙印（``priors_for_tags``），不是运行时可覆盖目标；行为包要调制先验
+# 请覆盖该钩子。参数语义对齐 get_comparisons 的现行效果：旅行偏爱独特
+# （锚定）地标、地理测量较弱地偏爱独特地标——这两项空间语义 P4a 迁入
+# 调度器后从此表取参；四处走走/能躺着不站着的姿态过滤留在内容层，
+# 这里只登记其活动范围倾向。
+TAG_SPATIAL_PRIORS: Dict[str, SpatialPriorsParams] = {
+    "旅行": SpatialPriorsParams(range_factor=1.25, novelty_bonus=0.5,
+                                anchored_bias=0.3),
+    "地理测量": SpatialPriorsParams(range_factor=1.1, novelty_bonus=0.3,
+                                    anchored_bias=0.15),
+    "四处走走": SpatialPriorsParams(range_factor=1.15, stickiness=-0.3),
+    "能躺着不站着": SpatialPriorsParams(range_factor=0.8, stickiness=0.4),
+}
 
 
-# TAG → 先验参数的数据表（常量钩子 ``spatial.TAG_SPATIAL_PRIORS``）。
-# 参数语义对齐 get_comparisons 的现行效果：旅行偏爱独特（锚定）地标、
-# 地理测量较弱地偏爱独特地标——这两项空间语义 P4a 迁入调度器后从此表取参；
-# 四处走走/能躺着不站着的姿态过滤留在内容层，这里只登记其活动范围倾向。
-# 行为包可扩展映射（键值均按标签名对齐）。
-TAG_SPATIAL_PRIORS: Dict[str, SpatialPriors] = behavior_const(
-    "spatial", "TAG_SPATIAL_PRIORS", {
-        "旅行": SpatialPriors(range_factor=1.25, novelty_bonus=0.5, anchored_bias=0.3),
-        "地理测量": SpatialPriors(range_factor=1.1, novelty_bonus=0.3, anchored_bias=0.15),
-        "四处走走": SpatialPriors(range_factor=1.15, stickiness=-0.3),
-        "能躺着不站着": SpatialPriors(range_factor=0.8, stickiness=0.4),
-    }, layer="content", contract="data")
-
-
-# 条目级校验：常量钩子只校验外层容器类型，内层形状在消费入口把关——
-# 非法条目跳过并只警告一次，防行为包笔误变成运行时崩溃。
-_TABLE_WARNED: set = set()
-
-
-def _warn_table_entry(key: str, tag: str, reason: str) -> None:
-    flag = (key, tag)
-    if flag in _TABLE_WARNED:
-        return
-    _TABLE_WARNED.add(flag)
-    print(f"[BehaviorPack] 警告：常量覆盖 '{key}' 的条目 '{tag}'"
-          f" {reason}，已忽略该条目")
-
-
-def priors_for_tags(tags: Iterable[str]) -> SpatialPriors:
+def priors_for_tags(tags: Iterable[str]) -> SpatialPriorsParams:
     """合并多个标签的先验：半径倍率相乘、其余相加；未知标签不参与。
 
-    覆盖表条目须具备四个数值字段（``SpatialPriors`` 或等价鸭子类型）；
-    非法条目跳过并警告一次。
+    供创建期默认派生使用；输出再经 ``ModelTuning.sanitize`` 夹取后烙印。
     """
-    table = get_runtime().resolve_value("spatial.TAG_SPATIAL_PRIORS") or {}
     range_factor = 1.0
     stickiness = novelty = anchored = 0.0
     for tag in tags or []:
-        p = table.get(tag)
+        p = TAG_SPATIAL_PRIORS.get(tag)
         if p is None:
             continue
-        try:
-            rf, st, no, an = (float(p.range_factor), float(p.stickiness),
-                              float(p.novelty_bonus), float(p.anchored_bias))
-        except (AttributeError, TypeError, ValueError):
-            _warn_table_entry(
-                "spatial.TAG_SPATIAL_PRIORS", tag,
-                "缺少数值字段 range_factor/stickiness/novelty_bonus/anchored_bias")
-            continue
-        range_factor *= rf
-        stickiness += st
-        novelty += no
-        anchored += an
-    return SpatialPriors(
+        range_factor *= p.range_factor
+        stickiness += p.stickiness
+        novelty += p.novelty_bonus
+        anchored += p.anchored_bias
+    return SpatialPriorsParams(
         range_factor=max(0.5, min(2.0, range_factor)),
         stickiness=max(-0.8, min(0.8, stickiness)),
         novelty_bonus=max(0.0, novelty),
@@ -256,7 +226,7 @@ class SpatialProfile:
     的软偏好兼容。``env`` 是环境轴（沉淀聚合，见 ``EnvironmentProfile``），
     ``env_preference`` 是环境偏好轴（正步进投票，见 ``EnvPreferenceProfile``）。
     """
-    priors: SpatialPriors = field(default_factory=SpatialPriors)
+    priors: SpatialPriorsParams = field(default_factory=SpatialPriorsParams)
     activity_regions: List[str] = field(default_factory=list)
     learned: Optional[SpatialProfileService] = None
     env: Optional["EnvironmentProfile"] = None
@@ -310,20 +280,24 @@ class SpatialProfile:
 
 def build_spatial_profile(state, now: Optional[datetime.datetime] = None
                           ) -> SpatialProfile:
-    """从角色快照装配空间档案：演化表学习 + TAG 先验 + 活动区域透传。
+    """从角色快照装配空间档案：演化表学习 + 出身烙印先验 + 活动区域透传。
 
-    ``state`` 只需具备 evolution / selected_tags / activity_regions 三个
-    属性（``CharacterSnapshot`` 或等价鸭子类型均可）；``now`` 透传给
-    学习层（缺省用系统当前时间，测试可注入固定时钟）。
+    ``state`` 只需具备 evolution / model_tuning / activity_regions 三个属性
+    （``CharacterSnapshot`` 或等价鸭子类型均可）；先验取创建期烙印
+    （``state.model_tuning``），不按标签现算——旧档 / 无烙印的鸭子类型
+    全中性。``now`` 透传给学习层（缺省用系统当前时间，测试可注入固定时钟）。
     """
     evolution = getattr(state, "evolution", None) or []
     learned = SpatialProfileService().learn_from_evolution(evolution, now=now)
     env = EnvironmentProfile().learn_from_evolution(evolution, now=now)
-    tags = getattr(state, "selected_tags", None) or []
+    tuning = getattr(state, "model_tuning", None)
+    priors = getattr(tuning, "spatial_priors", None)
+    shares = getattr(tuning, "env_prior_shares", None)
     preference = EnvPreferenceProfile().learn_from_evolution(
-        evolution, prior_shares=env_priors_for_tags(tags), now=now)
+        evolution, prior_shares=shares, now=now)
     return SpatialProfile(
-        priors=priors_for_tags(tags),
+        priors=(priors if isinstance(priors, SpatialPriorsParams)
+                else SpatialPriorsParams()),
         activity_regions=[r for r in (getattr(state, "activity_regions", None) or [])
                           if isinstance(r, str) and r.strip()],
         learned=learned,
@@ -489,53 +463,38 @@ class EnvironmentProfile:
 # ==================== 环境偏好轴：交点学习（EnvPreferenceProfile） ====================
 
 # 环境偏好直方图：值域 [_MIN_ENV, _MAX_ENV] 等宽分箱；step>0 的沉淀行按
-# env 值投票（EWMA 半衰期淡出），TAG 先验以伪计数做初值。step 正负是
+# env 值投票（EWMA 半衰期淡出），烙印先验以伪计数做初值。step 正负是
 # 相关性不是因果，先验权重须压低：伪计数 + 成熟度阻尼双重收缩，使先验
 # 单独在场时只是温和扰动（≈0.15~0.3 量级），随证据积累让位给学习结果。
 _ENV_BINS = 7                                    # 偏好直方图箱数
 _ENV_PREF_LO, _ENV_PREF_HI = 0.5, 1.5            # 偏好调制夹取（围绕 1.0）
-_ENV_PRIOR_K = 2.0                               # TAG 先验伪计数（相对证据行强度）
+_ENV_PRIOR_K = 2.0                               # 烙印先验伪计数（相对证据行强度）
 _ENV_PREFERENCE_SMOOTHING = 6.0                  # 成熟度：≈6 行证据达半影响力
                                                  # （与 _SMOOTHING_K 同型，语义各异不合并）
 
-# TAG → 环境偏好先验（并列表，不进 ``SpatialPriors`` 标量组）：值域升序
-# 分箱份额（和为 1），每条固定 7 个数值（与 ``_ENV_BINS`` 同步；覆盖表
-# 的条目也须 7 元，否则被消费入口跳过并警告）。只有环境语义清晰的标签
-# 入表（旅行 / 地理测量偏爱人烟稀少处）；数值是建议，行为锁只锁方向。
-# 行为包可扩展映射（键值均按标签名对齐），常量钩子为 ``spatial.TAG_ENV_PRIORS``。
-TAG_ENV_PRIORS: Dict[str, tuple] = behavior_const(
-    "spatial", "TAG_ENV_PRIORS", {
-        "旅行": (0.30, 0.25, 0.15, 0.10, 0.08, 0.07, 0.05),
-        "地理测量": (0.22, 0.20, 0.16, 0.13, 0.11, 0.10, 0.08),
-    }, layer="content", contract="data")
+# TAG → 环境偏好先验的默认表（并列表，不进 ``SpatialPriorsParams`` 标量组）：
+# 值域升序分箱份额（和为 1），每条固定 7 个数值（与 ``_ENV_BINS`` 同步）。
+# 只有环境语义清晰的标签入表（旅行 / 地理测量偏爱人烟稀少处）；数值是
+# 建议，行为锁只锁方向。创建期经 ``CreationService.derive_model_tuning``
+# 合并烙印（``env_priors_for_tags``），不是运行时可覆盖目标。
+TAG_ENV_PRIORS: Dict[str, tuple] = {
+    "旅行": (0.30, 0.25, 0.15, 0.10, 0.08, 0.07, 0.05),
+    "地理测量": (0.22, 0.20, 0.16, 0.13, 0.11, 0.10, 0.08),
+}
 
 
 def env_priors_for_tags(tags: Iterable[str]) -> Optional[List[float]]:
     """合并多标签的环境偏好先验：份额逐箱相加后归一；无命中返回 None
-    （消费方以均匀分布兜底）。
-
-    覆盖表条目须为 ``_ENV_BINS`` 个有限数值（箱数是 ``TAG_ENV_PRIORS``
-    值类型的隐含契约，不同步会错位崩溃）；非法条目跳过并警告一次。
+    （消费方以均匀分布兜底）。箱数与 ``_ENV_BINS`` 同步（7 元硬契约，
+    烙印端的形状校验见 ``ModelTuning.sanitize``）。
     """
-    table = get_runtime().resolve_value("spatial.TAG_ENV_PRIORS") or {}
     shares = None
     for tag in tags or []:
-        p = table.get(tag)
+        p = TAG_ENV_PRIORS.get(tag)
         if p is None:
             continue
-        try:
-            vals = [float(v) for v in p]
-        except (TypeError, ValueError):
-            _warn_table_entry(
-                "spatial.TAG_ENV_PRIORS", tag,
-                f"需要 {_ENV_BINS} 个数值的序列")
-            continue
-        if len(vals) != _ENV_BINS or not all(math.isfinite(v) for v in vals):
-            _warn_table_entry(
-                "spatial.TAG_ENV_PRIORS", tag,
-                f"需要 {_ENV_BINS} 个有限数值（得到 {len(vals)} 个）")
-            continue
-        shares = vals if shares is None else [a + b for a, b in zip(shares, vals)]
+        shares = (list(p) if shares is None
+                  else [a + b for a, b in zip(shares, p)])
     if shares is None:
         return None
     total = sum(shares)
@@ -549,7 +508,7 @@ class EnvPreferenceProfile:
         factor = pref.preference_factor(0.3)   # 该环境值的偏好调制（围绕 1.0）
 
     step>0 的沉淀行（带 position + env_factor，与 ``EnvironmentProfile``
-    同一行集）按 env 值分箱投票，EWMA 半衰期淡出；TAG 先验以伪计数做
+    同一行集）按 env 值分箱投票，EWMA 半衰期淡出；烙印先验以伪计数做
     初值。调制 = 箱份额 × 箱数（均匀 → 恰好 1.0），再乘证据成熟度阻尼——
     零证据 + 无先验 = 全中性；先验单独在场时被压在低位。
     """
@@ -600,7 +559,7 @@ class EnvPreferenceProfile:
     def preferred_env(self) -> Optional[tuple]:
         """偏好分布的代表值 ``(代表 env 值, 置信度 0~1)``，供文本化层措辞。
 
-        代表值取证据投票份额加权的箱中心（TAG 先验不参与——只说学到
+        代表值取证据投票份额加权的箱中心（烙印先验不参与——只说学到
         的偏好）；置信度即证据成熟度。零证据返回 None。
         """
         if self._total <= 0.0:
@@ -614,7 +573,7 @@ class EnvPreferenceProfile:
     def preference_factor(self, env_value: float) -> float:
         """环境值的偏好调制（围绕 1.0；无数据返回 1.0）。
 
-        分母含先验伪计数（收缩目标 = TAG 先验而非均匀）；成熟度把调制
+        分母含先验伪计数（收缩目标 = 烙印先验而非均匀）；成熟度把调制
         从 1.0 随证据量渐次放开，先验不越俎代庖。
         """
         denom = self._total + (_ENV_PRIOR_K if self._prior else 0.0)

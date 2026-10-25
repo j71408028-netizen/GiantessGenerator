@@ -14,15 +14,16 @@
 - `profile`（`services/character/profile_text.py`，档案派生层的文本化出口）：作息与
   空间偏好的可读结论与实时提示（见附录 A 的 `profile` 组）。scope 同样是与文件位置
   无关的字面量契约——以后新域按此模式扩展。
-- `spatial`（`services/character/spatial.py`，空间档案的学习层）：TAG 先验表
-  （`TAG_SPATIAL_PRIORS` / `TAG_ENV_PRIORS`）是常量钩子，行为包可按标签名扩展或
-  替换（见附录 A 的 `spatial` 组）。
 - `offline`（`services/character/offline.py`，离线恢复）：纯计划
-  `offline.recover_plan` 与 `offline.model.*` 模型常量；计划执行与持久化仍由
-  服务层负责（见附录 A 的 `offline` 组）。
+  `offline.recover_plan` 与展示文案 `offline.report_text`；计划收到的模型参数
+  快照来自角色出身烙印（见下文三层模型）。执行与持久化仍由服务层负责
+  （见附录 A 的 `offline` 组）。
 - `select`（`services/exploration/arbiter.py`，报告选取仲裁）：车道窗口 /
   联合分 / 近匹配提拔是模块策略，模型参数是 `select.model.*` 常量钩子；
   硬闸、物理走查与 stuck 判定不开放（见附录 A 的 `select` 组）。
+
+离线模型参数与空间 / 环境先验的调制**不再是运行时钩子**：它们经
+`CreationService.derive_model_tuning` 在创建角色时烙印（出身层，见下文）。
 
 **核心规则**：
 
@@ -36,29 +37,41 @@
 程序在 `data/static/behaviors/imperial_units/` 提供了一个现成示例：把显示单位从
 米 / 千米改为英尺 / 英里。想快速了解行为包长什么样，可直接阅读它（完整代码见附录 B）。
 
-## 开放边界：角色身份稳定性
+## 开放边界：三层开放模型与角色身份稳定性
 
-可覆盖目标按「世界规则」与「角色身份」划分，这条边界与层级 / 契约元数据并行生效：
+可覆盖目标分三层，这条边界与层级 / 契约元数据并行生效：
 
-- **世界规则可以换**。坐标演化（`StateService` 坐标 / 步长原语）服务于资源匹配，
-  世界包自带与演化动态匹配的资源；离线结算是把角色活动换算为世界效果的转换层
-  （`offline.*` 与 `offline.model.*`）；选取仲裁（`select.*`）配对的是世界内的
-  资源供给。覆盖这些改变「世界如何运转」，角色已学到的东西不被重新解释。
-- **角色身份不可重写**。作息学习（`RhythmService`）与空间 / 环境 / 偏好学习
+| 层 | 内容 | 生效方式 |
+|---|---|---|
+| 世界规则 | `select.*`（含 `select.model.*` 常量）、`StateService` 坐标/行动点、`logic.*`、`offline.recover_plan` / `report_text`、`profile.*` 文本化 | 运行时钩子，随世界包启停 |
+| 角色出身 | 离线结算参数与空间/环境先验的调制烙印（`ModelTuning`） | `CreationService.derive_model_tuning` 创建时烙印，终身携带 |
+| 角色习性 | rhythm / spatial 演化表学习 | 模型内部，参数封闭（不开放） |
+
+原理一句话：世界包能改「世界如何运转」，不能重写「她是谁」。出身层让
+世界包对角色的影响只发生在创建时（出身论）；习性层让她继续演化
+（潜移默化）；两者相乘——烙印定**包络**（整体活动量、先验偏向），学习定
+**形状**（何时活跃、常去哪里），现有结构（`step_per_hour × rhythm.factor_at`、
+`priors × region_factor`）天然支持。存量角色因此结构性免疫：旧档案无
+tuning 字段 → 读档回退默认 → 任何世界包启停都不再触及其离线/空间调制。
+
+- **世界规则可以换**（运行时层）。坐标演化（`StateService` 坐标 / 步长原语）
+  服务于资源匹配，世界包自带与演化动态匹配的资源；选取仲裁（`select.*`）
+  配对的是世界内的资源供给；离线结算是把角色活动换算为世界效果的转换层
+  （`offline.recover_plan`，收到的 model 即来自角色烙印）。覆盖这些改变
+  「世界如何运转」，角色已学到的东西不被重新解释。
+- **角色出身只在创建时烙印**。角色的离线结算参数与空间 / 环境先验以
+  `ModelTuning` 烙印在档案里（`CreationService.derive_model_tuning` 派生，
+  内部 sanitize 夹取归一；`origin_world` 记录出身世界包）：世界包对
+  「她是谁」的调制只发生在出身时刻，已有角色的烙印终身携带、不随世界包
+  启停变化。
+- **角色习性不可重写**。作息学习（`RhythmService`）与空间 / 环境 / 偏好学习
   （`spatial.py` 学习层）的参数——半衰期、平滑伪计数、收缩强度、调制夹取、
-  成熟度阻尼等——**不开放**：它们决定「从角色历史里学出什么样的她」，覆盖会让
-  已有角色在加载世界包后性情大变。已开放的 `spatial.TAG_*` 先验表受内部夹取与
-  阻尼约束，只能温和调制习惯的表达强度，不能改写习惯本身；
-  `offline.model.rhythm_swing` 同理只重塑离线结算的步进曲线，不动作息学习，
-  也不影响档案导出与聊天的作息 / 空间措辞。
-- **出身调制是创建期烙印，不是运行时常量**。角色的离线结算参数与空间 /
-  环境先验以 `ModelTuning` 烙印在档案里（`CreationService.derive_model_tuning`
-  在创建时派生一次）：世界包对「她是谁」的调制只发生在出身时刻，已有角色的
-  烙印终身携带、不随世界包启停变化；旧档案（无烙印字段）自动回退默认值，
-  结构性免疫后续任何启停。
+  成熟度阻尼等——**不开放**：它们决定「从角色历史里学出什么样的她」，覆盖
+  会让已有角色在加载世界包后性情大变。
 
 后续开放的新域（如 `chat.*` 人设相关）同样遵守：世界包可以追加世界语境，
-不可改写角色的既有身份事实（名字、性格、学到的习惯、达成的经历）。
+不可改写角色的既有身份事实（名字、性格、学到的习惯、达成的经历）；出身与
+履历文本可经 persona 注入，但同样只追加语境。
 
 ## 开发流程
 
@@ -167,10 +180,10 @@ data/worlds/<world_id>/
 | 层级 / 契约 | 开放方式 | 典型目标 |
 |------|------|------|
 | `infra/point` | 固定流程中的单个算法点 | `logic.*` 数值核、`StateService` 坐标 / 行动点原语 |
-| `infra/data` | 固定流程中的模型参数（数值 / 表） | `offline.model.*`、`select.model.*` |
-| `module/strategy` | 模块门面的决策策略，返回决策或计划 | `profile.*`、`offline.recover_plan`、`select.*`；后续 `chat.*` / `news.*` |
-| `content/data` | 数据表、文案、阈值 | `logic.PREDEFINED_TAGS`、`spatial.TAG_*` |
-| 核心不变式 | 不开放，不进入目录 | 坐标夹取、AP 上限、JSON 协议、消息状态机、持久化 |
+| `infra/data` | 固定流程中的模型参数（数值 / 表） | `select.model.*` |
+| `module/strategy` | 模块门面的决策策略，返回决策或计划 | `profile.*`、`offline.recover_plan`、`select.*`、`CreationService.derive_model_tuning`（创建期烙印）；后续 `chat.*` / `news.*` |
+| `content/data` | 数据表、文案、阈值 | `logic.PREDEFINED_TAGS` |
+| 核心不变式 | 不开放，不进入目录 | 坐标夹取、AP 上限、JSON 协议、消息状态机、持久化、习性学习参数 |
 
 > `StateService.recover_evolution` 是离线恢复的兼容入口，已标 `deprecated`：主体计划
 > 已迁移到 `offline.recover_plan`。新增行为包应接新 key；旧 key 仍可单独使用，
@@ -210,27 +223,21 @@ data/worlds/<world_id>/
 | `refund_action_points`     | `(state, amount) -> int` | 返还行动点数（副本结算、报告解锁返还等），不设 100 上限，返回实际变化量。 |
 | `recover_action_points`    | `(state) -> None` | 在角色面板逗留时，根据性格恢复行动点数（内部调用 `receive_action_points`，覆盖前者会自动生效）。 |
 
-### `offline`（离线恢复模型与计划）
+### `offline`（离线恢复计划）
 
 离线结算拆成两层：`offline.recover_plan` 只读取状态并返回
 `OfflineRecoveryPlan`，不写状态、不记演化；`OfflineService` 把计划写回角色并
 追加演化行。展示文案同为模块策略：`recover_offline` 把实际恢复的行动点与
-离线时长交给 `offline.report_text` 生成并返回。`OfflineModel` 是计划函数收到的
-模型参数快照，字段与下列常量一一对应。72 小时明细窗口与 2 小时精度同时是
-导出图表、演化表和 UI 的跨模块契约，固定不开放。
+离线时长交给 `offline.report_text` 生成并返回。`OfflineModel` 是计划函数收到
+的模型参数快照，**由角色出身烙印构造**（`OfflineModel.from_tuning
+(state.model_tuning)`，创建期经 `CreationService.derive_model_tuning` 派生并
+已夹取；离线 8 项默认值见 `core/models.py::ModelTuning`）。72 小时明细窗口与
+2 小时精度同时是导出图表、演化表和 UI 的跨模块契约，固定不开放。
 
 | 目标 | 类型 | 签名 / 默认 | 说明 |
 |------|------|------|------|
 | `offline.recover_plan` | 函数 | `(state, now, model) -> Optional[OfflineRecoveryPlan]` | 生成恢复计划。返回 `None` 表示时间戳无效或没有可结算时长。计划字段：`action_point_gain`（请求恢复量）、`intrusion` / `destruction`（结算后坐标，`None` 表示不改）、`details`（明细，`None` 表示保留现有明细）、`step`、`casualties`（本次新增伤亡）。 |
 | `offline.report_text` | 函数 | `(state, plan, elapsed_minutes, action_point_gain) -> str` | 把一次离线结算转成展示文案，`plan` 为 `None` 返回空串。`elapsed_minutes` 是离线分钟数，`action_point_gain` 是执行层实际恢复的行动点（已受自然回复上限约束）；步进/伤亡增量取自计划。 |
-| `offline.model.step_per_hour` | 常量 float | `0.01` | 白昼闲逛基础步进率（步/小时）。 |
-| `offline.model.exit_amp` | 常量 float | `0.05` | 退出后残留活动的初始幅值（步/小时）。 |
-| `offline.model.exit_tau` | 常量 float | `0.9` | 残留活动的指数衰减时间常数（小时）。 |
-| `offline.model.recovery_points_per_minute` | 常量 float | `0.5` | 离线行动点每分钟恢复量。 |
-| `offline.model.recovery_decay_per_minute` | 常量 float | `0.01` | 离线坐标每分钟回落比例。 |
-| `offline.model.noise_scale` | 常量 float | `0.1` | 环境噪声标准差系数（乘 `log10(身高)`）。 |
-| `offline.model.old_step_divisor` | 常量 float | `π` | 72 小时窗口外按天汇总时的平滑除数。 |
-| `offline.model.rhythm_swing` | 常量 float | `1.0` | 作息调制对离线步进的放大倍率（读取时夹取 0~3）：`0` = 昼夜平坦（离线活动不看作息），`1` = 默认，`>1` 放大昼夜差异。只作用于离线结算的步进曲线，不改变角色档案学到的作息与档案 / 聊天措辞（见「角色身份稳定性」）。 |
 
 覆盖 `offline.recover_plan` 可调用 `runtime.default("offline.recover_plan")` 复用
 默认计划后再改字段。旧 key `StateService.recover_evolution` 仍可单独整体替换恢复
@@ -295,30 +302,17 @@ data/worlds/<world_id>/
 | `profile.describe_spatial` | `(profile, position="") -> str` | 空间偏好历史结论：常活动地带、环境偏好、手工活动区域。`profile` 是 `services.character.spatial.build_spatial_profile` 的装配结果。 |
 | `profile.spatial_now_hint` | `(profile, position="") -> str` | 空间实时提示：当前位置相对偏好的评价 + 环境口语化描述；零证据返回空串。 |
 
-### `spatial`（空间档案学习层，常量）
+### `spatial`（空间档案学习层）
 
-两张 TAG 先验表都可整体替换（常量细度）：注册 `dict`，或返回 `dict` 的可调用
-对象。读取入口是 `services.character.spatial.priors_for_tags` /
-`env_priors_for_tags`；直接 import 模块常量只能拿到默认表。键为个性标签名，
-未登记的标签不参与。
-
-条目形状契约（外层 `dict` 之外的内层形状，常量校验不覆盖，由读取入口把关，
-非法条目跳过并经 `[BehaviorPack]` 通道警告一次）：
-
-- `TAG_SPATIAL_PRIORS` 的条目须具备四个数值字段 `range_factor` /
-  `stickiness` / `novelty_bonus` / `anchored_bias`（`SpatialPriors` 或等价
-  鸭子类型；构造前者需 `from services.character.spatial import SpatialPriors`，
-  该模块路径同属契约）；
-- `TAG_ENV_PRIORS` 的条目须为 **7 个有限数值**的序列（环境偏好直方图的箱数
-  固定，不同步会与学习层错位）。
+空间 / 环境先验的调制入口是**创建期烙印**（覆盖
+`CreationService.derive_model_tuning`，返回值里的 `spatial_priors` 四标量与
+`env_prior_shares` 7 元份额），不再提供运行时常量钩子；份额形状在烙印端校验
+（非法值回退均匀兜底并经 `[BehaviorPack]` 通道警告一次）。TAG 默认表
+（`services/character/spatial.py` 的 `TAG_SPATIAL_PRIORS` / `TAG_ENV_PRIORS`）
+只是默认派生的数据来源，直接 import 只能拿到默认值。
 
 学习层参数（EWMA 半衰期、平滑伪计数、调制夹取、成熟度阻尼等）不开放——
-它们重新解释角色的到访与沉淀历史，见「角色身份稳定性」。
-
-| 目标 | 形态 | 说明 |
-|------|------|------|
-| `spatial.TAG_SPATIAL_PRIORS` | `Dict[str, SpatialPriors]` | 空间参数先验：`range_factor` / `stickiness` / `novelty_bonus` / `anchored_bias`。 |
-| `spatial.TAG_ENV_PRIORS` | `Dict[str, tuple]` | 环境偏好先验：值域升序分箱份额（和为 1）。 |
+它们重新解释角色的到访与沉淀历史，见「三层开放模型与角色身份稳定性」。
 
 ## 附录 B：完整示例（imperial_units）
 

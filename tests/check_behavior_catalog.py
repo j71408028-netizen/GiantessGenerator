@@ -26,7 +26,6 @@ import core.logic  # noqa: E402,F401  注册 logic 函数与常量
 import services.character.offline  # noqa: E402,F401
 import services.character.profile_text  # noqa: E402,F401
 import services.exploration.arbiter  # noqa: E402,F401
-import services.character.spatial  # noqa: E402,F401
 import services.creation_service  # noqa: E402,F401
 import services.state_service  # noqa: E402,F401
 
@@ -55,10 +54,9 @@ SCOPE_LAYERS = {
     "CreationService": {LAYER_INFRA, LAYER_MODULE},
     "StateService": {LAYER_INFRA, LAYER_MODULE},
     "logic": {LAYER_INFRA, LAYER_CONTENT},
-    "offline": {LAYER_INFRA, LAYER_MODULE},
+    "offline": {LAYER_MODULE},
     "profile": {LAYER_MODULE},
     "select": {LAYER_INFRA, LAYER_MODULE},
-    "spatial": {LAYER_CONTENT},
 }
 LAYER_CONTRACTS = {
     LAYER_INFRA: {CONTRACT_POINT, CONTRACT_DATA},
@@ -136,10 +134,9 @@ _classify("offline.recover_plan", LAYER_MODULE, CONTRACT_STRATEGY,
           KIND_FUNCTION)
 _classify("offline.report_text", LAYER_MODULE, CONTRACT_STRATEGY,
           KIND_FUNCTION)
-_classify("offline.model.step_per_hour", LAYER_INFRA, CONTRACT_DATA,
-          KIND_CONST)
-_classify("offline.model.rhythm_swing", LAYER_INFRA, CONTRACT_DATA,
-          KIND_CONST)
+check("offline.model.* / spatial.TAG_* 已随出身烙印基线删除", not [
+    key for key in _by_key
+    if key.startswith("offline.model.") or key.startswith("spatial.")])
 _classify("select.lanes", LAYER_MODULE, CONTRACT_STRATEGY, KIND_FUNCTION)
 _classify("select.joint_score", LAYER_MODULE, CONTRACT_STRATEGY,
           KIND_FUNCTION)
@@ -152,8 +149,6 @@ _classify("select.model.near_match_tau", LAYER_INFRA, CONTRACT_DATA,
 _classify("logic.compute_casualty", LAYER_INFRA, CONTRACT_POINT,
           KIND_FUNCTION)
 _classify("logic.PREDEFINED_TAGS", LAYER_CONTENT, CONTRACT_DATA,
-          KIND_CONST)
-_classify("spatial.TAG_SPATIAL_PRIORS", LAYER_CONTENT, CONTRACT_DATA,
           KIND_CONST)
 _classify("profile.describe_rhythm", LAYER_MODULE, CONTRACT_STRATEGY,
           KIND_FUNCTION)

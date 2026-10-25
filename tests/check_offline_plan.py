@@ -33,7 +33,8 @@ def check(name, ok, extra=""):
 
 from core.behavior_runtime import get_runtime  # noqa: E402
 from core.models import (  # noqa: E402
-    CharacterSnapshot, EvolutionRecord, OfflineDetail, OfflineRecoveryPlan,
+    CharacterSnapshot, EvolutionRecord, ModelTuning, OfflineDetail,
+    OfflineRecoveryPlan,
 )
 from services.character.offline import (  # noqa: E402
     OfflineModel, OfflineService, apply_recover_plan, build_offline_report,
@@ -125,25 +126,26 @@ try:
 finally:
     _RUNTIME.reset()
 
-# ---------------- 5. 常量覆盖模型参数 ----------------
-try:
-    _RUNTIME.override("offline.model.step_per_hour", 0.02)
-    svc = OfflineService()
-    check("常量覆盖进入实例", svc.step_per_hour == 0.02)
-    fast = build_recover_plan(_snap(), _NOW, svc._model())
-    base = build_recover_plan(
-        _snap(), _NOW, OfflineModel(step_per_hour=0.01))
-    check("提高步进率抬高计划步进", fast.step > base.step)
-finally:
-    _RUNTIME.reset()
+# ---------------- 5. 烙印调制模型参数（出身烙印 > 默认，显式覆盖 > 烙印） ----------------
+_snap_fast = _snap()
+_snap_fast.model_tuning = ModelTuning(step_per_hour=0.02)
+svc = OfflineService()
+check("烙印进入结算模型", svc._model(_snap_fast).step_per_hour == 0.02)
+check("无烙印走默认", svc._model(_snap()).step_per_hour
+      == OfflineModel().step_per_hour)
+fast = build_recover_plan(_snap_fast, _NOW, svc._model(_snap_fast))
+base = build_recover_plan(
+    _snap(), _NOW, OfflineModel(step_per_hour=0.01))
+check("提高步进率抬高计划步进", fast.step > base.step)
 
-try:
-    _RUNTIME.override("offline.model.recovery_points_per_minute", 1.0)
-    plan = build_recover_plan(_snap(), _NOW, OfflineService()._model())
-    check("提高行动点恢复率抬高恢复量",
-          plan.action_point_gain == 480)
-finally:
-    _RUNTIME.reset()
+_snap_recover = _snap()
+_snap_recover.model_tuning = ModelTuning(recovery_points_per_minute=1.0)
+plan = build_recover_plan(_snap_recover, _NOW, svc._model(_snap_recover))
+check("提高行动点恢复率抬高恢复量",
+      plan.action_point_gain == 480)
+check("实例显式参数优先于烙印",
+      OfflineService(step_per_hour=0.03)._model(_snap_fast).step_per_hour
+      == 0.03)
 
 # ---------------- 6. 旧入口兼容与优先级 ----------------
 calls = []
@@ -268,15 +270,14 @@ check("默认（swing=1）昼夜步进有差异",
 check("swing=0 昼夜平坦", max(_flat_steps) - min(_flat_steps) < 1e-9)
 check("负值夹取为 0（与平坦一致）", _flat_steps == _clamped_steps)
 
-try:
-    _RUNTIME.override("offline.model.rhythm_swing", 0.0)
-    _svc = OfflineService()
-    check("rhythm_swing 常量钩子可覆盖", _svc.rhythm_swing == 0.0)
-    check("覆盖经服务默认模型生效",
-          [d.step for d in build_recover_plan(
-              _rhythmic_snap(), _NOW, _svc._model()).details] == _flat_steps)
-finally:
-    _RUNTIME.reset()
+_snap_swing = _rhythmic_snap()
+_snap_swing.model_tuning = ModelTuning(rhythm_swing=0.0)
+_svc = OfflineService()
+check("烙印 rhythm_swing 进入结算模型",
+      _svc._model(_snap_swing).rhythm_swing == 0.0)
+check("烙印经服务默认模型生效",
+      [d.step for d in build_recover_plan(
+          _snap_swing, _NOW, _svc._model(_snap_swing)).details] == _flat_steps)
 
 # ---------------- 结论 ----------------
 _log.flush()

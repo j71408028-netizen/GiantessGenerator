@@ -73,9 +73,9 @@
 **环境只影响文本选取**，不进地标可达 / 配对的几何口径。
 
 **环境偏好（第三轴交点）**：`EnvPreferenceProfile` 从 step>0 的沉淀行
-学角色偏好什么环境（值域等宽分箱直方图 + EWMA 淡出），TAG 先验
-（`TAG_ENV_PRIORS` 并列表，旅行 / 地理测量偏爱人烟稀少）以伪计数做
-初值，并受成熟度阻尼压低权重——step 正负是相关性不是因果。消费在
+学角色偏好什么环境（值域等宽分箱直方图 + EWMA 淡出），出身烙印的
+环境份额先验（创建时按 `TAG_ENV_PRIORS` 默认表合并，旅行 / 地理测量
+偏爱人烟稀少）以伪计数做初值，并受成熟度阻尼压低权重——step 正负是相关性不是因果。消费在
 仲裁联合分：带地址槽位按其环境估计（零证据回落精确度默认值）查偏好
 分布乘调制因子，角色常讲的环境里的地标略微优先。中性档案（无证据、
 无先验标签）恒为 1.0，行为与从前一致。
@@ -92,10 +92,10 @@
   模块策略钩子，模型参数（容差、提拔上限、联合分权重、可达范围等）是
   `select.model.*` 常量钩子；硬闸、物理走查与 stuck 判定不开放
   （逐项见 `world_pack_behaviors.md` 附录 A 的 `select` 组）；
-- 空间档案的两张 TAG 先验表（`spatial.TAG_SPATIAL_PRIORS` /
-  `spatial.TAG_ENV_PRIORS`）是常量钩子，行为包可按标签名扩展或替换；
-  直接 import 模块常量只能拿到默认表，消费入口是
-  `priors_for_tags` / `env_priors_for_tags`。
+- 空间 / 环境先验的调制经**创建期烙印**（`CreationService.derive_model_tuning`
+  返回 `ModelTuning`，创建时按 `services/character/spatial.py` 的 TAG 默认表
+  合并烙进角色档案），不再是运行时常量钩子；已有角色的烙印终身携带，
+  不随世界包启停变化。
 
 ## 附录 A：代码地图（开发者）
 
@@ -115,11 +115,11 @@
 `services/exploration/arbiter.py` 顶部与 `quips.py` 的注册处：车道权重表
 `LANE_WEIGHTS`、近匹配容差 `NEAR_MATCH_TAU`、提拔上限除数、联合分权重
 `W_COVER` / `W_REGION` / `W_PATH`、充裕度池深饱和与邻域口径、可达范围
-倍数，以及环境一致性加分 / 偏差归一分母。空间档案侧只有两张 TAG 先验表
-（`spatial.TAG_SPATIAL_PRIORS` / `spatial.TAG_ENV_PRIORS`）是常量钩子；
-`_ENV_PRIOR_K` / `_ENV_PREFERENCE_SMOOTHING` 等学习层参数不开放——它们
-正是压住先验、保护角色身份稳定的阻尼（`world_pack_behaviors.md` 的
-「角色身份稳定性」）。默认值是建议值，行为锁只锁语义不锁数值——调整后
+倍数，以及环境一致性加分 / 偏差归一分母。空间 / 环境先验侧没有运行时
+钩子：调制经创建期烙印（`CreationService.derive_model_tuning`，见三层
+开放模型）进入档案；`_ENV_PRIOR_K` / `_ENV_PREFERENCE_SMOOTHING` 等学习层
+参数不开放——它们正是压住先验、保护角色身份稳定的阻尼
+（`world_pack_behaviors.md` 的「三层开放模型与角色身份稳定性」）。默认值是建议值，行为锁只锁语义不锁数值——调整后
 跑上述测试确认语义未破即可。
 
 ## 附录 C：开放点

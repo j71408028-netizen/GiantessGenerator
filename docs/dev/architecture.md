@@ -142,8 +142,9 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 可能照此 import。因此 **`services/creation_service.py` 与 `services/state_service.py`
 两个文件不得改名、不得收编进子包**（除非留 shim，那是一笔永久的税，别轻易决定）。
 `services/` 整理（2026-10-06）据此把它们留在顶层，理由记录在 `services/__init__.py`。
-`services/character/spatial.py` 的模块路径同属此类契约：行为包构造
-`spatial.TAG_SPATIAL_PRIORS` 覆盖表的条目要 import 其 `SpatialPriors`。
+出身烙印基线（2026-10）删除 `spatial.TAG_*` 常量钩子后，`spatial.py` 的模块
+路径不再承载行为包契约（先验调制改经 `CreationService.derive_model_tuning`），
+但其公开名（`build_spatial_profile` 等）仍是 services 内部的直连入口契约。
 
 ### 2.6 档案派生层（rhythm / spatial / profile_text）
 
@@ -158,9 +159,11 @@ data/static/behaviors/imperial_units/imperial_units.py:45
   子域直连 import，一律从层内装配入口取数（`build_spatial_profile` /
   `RhythmService().learn_from_evolution`），不各自复刻学习逻辑；
 - `profile_text.py` 的四个入口是行为包钩子，scope 为字面量 `"profile"`
-  （§2.1 同款契约）；`spatial.py` 的两张 TAG 先验表是常量钩子，scope 为
-  `"spatial"`，条目形状契约与「学习层不开放」的身份稳定性边界见
-  `docs/designs/world_pack_behaviors.md` 附录 A。
+  （§2.1 同款契约）；空间 / 环境先验的调制经创建期烙印
+  （`CharacterSnapshot.model_tuning`，由 `CreationService.derive_model_tuning`
+  派生）进入 `build_spatial_profile`，spatial 模块只保留 TAG 默认表与学习层，
+  三层开放模型与「学习层不开放」的边界见
+  `docs/designs/world_pack_behaviors.md`。
 
 ---
 

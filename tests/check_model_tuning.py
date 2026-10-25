@@ -1,14 +1,13 @@
 # -*- coding: utf-8 -*-
-"""角色出身调制烙印（ModelTuning）自检：派生 / 烙印 / 兼容行为锁。
+"""角色出身调制烙印（ModelTuning）自检：派生 / 烙印 / 消费 / 兼容行为锁。
 
 用法：``python tests/check_model_tuning.py``
 只跑纯逻辑，不建窗口、不联网；档案读写走系统临时目录，不碰 data/。
 
-行为锁（对应 .workbuddy/behavior-pack-baseline-v2.md 阶段 A）：
-- 默认派生 = 现行常量默认（无包时数值不变）；
-- 常量 / TAG 表 / derive 钩子的覆盖都能进入烙印；
-- 烙印终身携带，世界包停用（runtime.reset）不触及已烙印的角色；
-- 离谱调制被 sanitize 夹取（烙印与 from_dict 两端）；
+行为锁（对应 .workbuddy/behavior-pack-baseline-v2.md 阶段 A/B）：
+- 默认派生 = 默认表（离线 8 项与 OfflineModel 默认同源）；
+- derive 钩子的覆盖能进入烙印，且经 sanitize 夹取；
+- 烙印终身携带：世界包停用（runtime.reset）后离线结算 / 空间档案仍按烙印；
 - 旧档（无 tuning 字段）回退全默认，离线结算结果与改动前一致；
 - 副本 payload 不携带 tuning。
 """
@@ -18,6 +17,7 @@ import json
 import os
 import sys
 import tempfile
+from dataclasses import asdict, replace
 from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -43,12 +43,14 @@ def check(name, ok, extra=""):
 
 from core.behavior_runtime import get_runtime  # noqa: E402
 from core.models import (  # noqa: E402
-    CharacterSnapshot, ModelTuning, SpatialPriorsParams,
+    CharacterSnapshot, ModelTuning, OfflineRecoveryPlan, SpatialPriorsParams,
 )
 from persistence.character_repo import CharacterRepo  # noqa: E402
-from services.character.offline import OfflineModel  # noqa: E402
+from services.character.offline import (  # noqa: E402
+    OfflineModel, OfflineService, build_recover_plan,
+)
 from services.character.spatial import (  # noqa: E402
-    SpatialPriors, env_priors_for_tags, priors_for_tags,
+    build_spatial_profile, env_priors_for_tags, priors_for_tags,
 )
 from services.creation_service import CreationService  # noqa: E402
 from services.exploration.character import CharacterAssembler  # noqa: E402
@@ -86,12 +88,13 @@ _ACTIVE_WORLD = SimpleNamespace(
     active=True,
     manifest=SimpleNamespace(world_id="w1", name="测试世界", version="2.1"),
 )
+_NOW = datetime.datetime(2026, 10, 26, 12, 0, 0)
 
 # ---------------- 1. 默认派生 = 现行常量默认 ----------------
 
 tuning = CreationService.derive_model_tuning(None, [], None)
 model = OfflineModel()
-check("默认派生离线 8 项与现行常量一致", (
+check("默认派生离线 8 项与 OfflineModel 默认同源", (
     tuning.step_per_hour == model.step_per_hour
     and tuning.exit_amp == model.exit_amp
     and tuning.exit_tau == model.exit_tau
@@ -117,22 +120,22 @@ check("默认派生按标签合并环境份额", (
     tuning_travel.env_prior_shares
     == env_priors_for_tags(["旅行"])))
 
-# ---------------- 2. 世界包覆盖进入烙印 ----------------
+# ---------------- 2. 烙印 → 消费端（OfflineModel.from_tuning） ----------------
 
-_RUNTIME.override("offline.model.step_per_hour", 0.05)
-_RUNTIME.override("spatial.TAG_SPATIAL_PRIORS", {
-    "旅行": SpatialPriors(range_factor=1.4, novelty_bonus=0.2)})
-_RUNTIME.override("spatial.TAG_ENV_PRIORS", {"旅行": (0.3,) * 7})
-tuning_pack = CreationService.derive_model_tuning(None, ["旅行"], None)
-check("常量与 TAG 表覆盖进入派生结果", (
-    tuning_pack.step_per_hour == 0.05
-    and tuning_pack.spatial_priors.range_factor == 1.4
-    and tuning_pack.env_prior_shares is not None
-    and abs(sum(tuning_pack.env_prior_shares) - 1.0) < 1e-9))
-_RUNTIME.reset()
-check("停用后派生回落默认",
-      CreationService.derive_model_tuning(None, [], None).step_per_hour
-      == model.step_per_hour)
+check("默认烙印构造默认结算模型",
+      OfflineModel.from_tuning(None) == OfflineModel())
+_t2 = ModelTuning(step_per_hour=0.02, exit_amp=0.06, exit_tau=1.2,
+                  recovery_points_per_minute=0.7,
+                  recovery_decay_per_minute=0.02, noise_scale=0.2,
+                  old_step_divisor=3.0, rhythm_swing=2.0)
+_m2 = OfflineModel.from_tuning(_t2)
+check("from_tuning 携带烙印八项", (
+    _m2.step_per_hour == 0.02 and _m2.exit_amp == 0.06
+    and _m2.exit_tau == 1.2 and _m2.recovery_points_per_minute == 0.7
+    and _m2.recovery_decay_per_minute == 0.02 and _m2.noise_scale == 0.2
+    and _m2.old_step_divisor == 3.0 and _m2.rhythm_swing == 2.0))
+check("无烙印快照走默认模型", (
+    OfflineService()._model(None).step_per_hour == OfflineModel().step_per_hour))
 
 # ---------------- 3. derive 钩子整体覆盖 + 烙印终身携带 ----------------
 
@@ -166,6 +169,50 @@ repo_none, assembler_none = _assembler(world_state=None)
 state3 = assembler_none.character_from_core_or_report(_core(name="无包娘"))
 check("未激活世界包时 origin_world 为 None",
       state3.model_tuning.origin_world is None)
+
+# ---------------- 3.5 停用世界包后结算仍按烙印（身份稳定性） ----------------
+
+_RUNTIME.override(
+    CreationService.derive_model_tuning,
+    lambda personality, selected_tags, height, core=None:
+        ModelTuning(step_per_hour=0.05))
+state_b = assembler.character_from_core_or_report(_core(name="烙印B娘"))
+_RUNTIME.reset()
+check("停用后结算模型仍读烙印",
+      OfflineService()._model(state_b).step_per_hour == 0.05)
+
+# 同形状默认烙印角色对照（噪声置零后结算可比）
+twin = CharacterSnapshot.from_dict(asdict(state_b))
+twin.model_tuning = ModelTuning()
+state_b.updated_at = (_NOW - datetime.timedelta(hours=8)).isoformat()
+twin.updated_at = state_b.updated_at
+plan_b = build_recover_plan(
+    state_b, _NOW,
+    replace(OfflineService()._model(state_b), noise_scale=0.0))
+plan_t = build_recover_plan(
+    twin, _NOW,
+    replace(OfflineService()._model(twin), noise_scale=0.0))
+check("烙印步进率抬高结算步进（停用后仍生效）",
+      plan_b.step > plan_t.step,
+      f"{plan_b.step} vs {plan_t.step}")
+
+_captured = []
+
+
+def _capture_plan(state, now, model):
+    _captured.append(model)
+    return OfflineRecoveryPlan(action_point_gain=1)
+
+
+_RUNTIME.override("offline.recover_plan", _capture_plan)
+OfflineService().recover_offline(state_b, _NOW)
+_RUNTIME.reset()
+check("recover_plan 覆盖收到的 model 来自烙印",
+      bool(_captured) and _captured[0].step_per_hour == 0.05)
+
+_profile_b = build_spatial_profile(state_b)
+check("空间档案先验读烙印（不读标签）", (
+    _profile_b.priors == state_b.model_tuning.spatial_priors))
 
 # ---------------- 4. sanitize 两端夹取 ----------------
 
@@ -231,9 +278,6 @@ check("旧档无 tuning 字段回退全默认", (
 
 # ---------------- 6. 旧档 / 新档的离线结算一致 ----------------
 
-from services.character.offline import build_recover_plan  # noqa: E402
-
-_NOW = datetime.datetime(2026, 10, 26, 12, 0, 0)
 legacy.updated_at = (_NOW - datetime.timedelta(hours=8)).isoformat()
 fresh = CharacterSnapshot.from_dict(saved)
 fresh.updated_at = legacy.updated_at
