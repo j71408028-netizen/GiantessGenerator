@@ -185,9 +185,10 @@ data/worlds/<world_id>/
 | `content/data` | 数据表、文案、阈值 | `logic.PREDEFINED_TAGS` |
 | 核心不变式 | 不开放，不进入目录 | 坐标夹取、AP 上限、JSON 协议、消息状态机、持久化、习性学习参数 |
 
-> `StateService.recover_evolution` 是离线恢复的兼容入口，已标 `deprecated`：主体计划
-> 已迁移到 `offline.recover_plan`。新增行为包应接新 key；旧 key 仍可单独使用，
-> 若同时注册两者，新 key 生效，旧 key 被忽略并记入启用诊断。
+> 全目录 `since` 以 **2.0** 为基线（出身烙印基线在 2.0 alpha 窗口重定了整个
+> 开放面）；已删 key 不回潮：`offline.model.*`、`spatial.TAG_*`、
+> `StateService.recover_evolution`（离线恢复入口已收敛为 `offline.recover_plan`
+> 与 `OfflineService` 直连）。
 
 ### `CreationService`
 
@@ -217,7 +218,6 @@ data/worlds/<world_id>/
 | `decayed_coordinates`      | `(personality, intrusion, destruction, fraction) -> (float, float)` | 步进衰减的纯计算：仅当坐标越过性格边界（初始值 - 0.5 × 性格步长）时向边界回落 fraction 个步长。 |
 | `apply_negative_evolution` | `(state) -> None` | 行动点数不足（<50）时应用负向演化：介入度步进取 -1 - 0.5 × 性格敏感值（由敏感值直接控制），破坏性步进取 -1 - 0.5 × 性格重力；步长演化叠加不适应性衰减；有变化时向演化表追加一行（步进取本次负向步进之和）。 |
 | `apply_step_decay`         | `(state, fraction=0.1) -> None` | 步进衰减（角色面板逗留每分钟 fraction=0.1），有变化时向演化表追加一行。              |
-| `recover_evolution`        | `(state, now=None) -> None` | 离线恢复的兼容入口（已标 `deprecated`）：默认委托 `offline.recover_plan` 与 `OfflineService`；有变化时追加演化表一行。新包应优先接 `offline.recover_plan`；两者同时注册时新 key 生效。 |
 | `consume_action_points`    | `(state, cost) -> bool` | 消耗行动点数；点数不足返回 `False`。                                  |
 | `receive_action_points`    | `(state, amount) -> int` | 自然回复行动点数（离线恢复、角色面板在线恢复），夹取到 0~100，返回实际变化量。 |
 | `refund_action_points`     | `(state, amount) -> int` | 返还行动点数（副本结算、报告解锁返还等），不设 100 上限，返回实际变化量。 |
@@ -240,10 +240,9 @@ data/worlds/<world_id>/
 | `offline.report_text` | 函数 | `(state, plan, elapsed_minutes, action_point_gain) -> str` | 把一次离线结算转成展示文案，`plan` 为 `None` 返回空串。`elapsed_minutes` 是离线分钟数，`action_point_gain` 是执行层实际恢复的行动点（已受自然回复上限约束）；步进/伤亡增量取自计划。 |
 
 覆盖 `offline.recover_plan` 可调用 `runtime.default("offline.recover_plan")` 复用
-默认计划后再改字段。旧 key `StateService.recover_evolution` 仍可单独整体替换恢复
-流程；两者同时注册时新 key 生效，旧 key 被忽略并记入诊断。执行层会夹取坐标、把
-行动点恢复量交给 `StateService.receive_action_points`（自然上限 100），并按
-`recover_evolution` 来源记录演化；这些执行语义不开放。
+默认计划后再改字段。执行层会夹取坐标、把行动点恢复量交给
+`StateService.receive_action_points`（自然上限 100），并按 `recover_evolution`
+来源标签记录演化（历史演化行的字符串标签，入口本身已删）；这些执行语义不开放。
 
 ### `select`（报告选取仲裁）
 

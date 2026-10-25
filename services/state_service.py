@@ -1,4 +1,3 @@
-import datetime
 from typing import Optional, Tuple
 
 from core.models import CharacterSnapshot
@@ -13,9 +12,9 @@ class StateService:
     以及快照级操作（传入 CharacterSnapshot，有变化时向演化表追加一行）。
     行动点数的消耗/恢复/返还同样统一在此。
 
-    离线结算（角色下线期间的步进/伤亡/明细）已拆分到
-    :class:`OfflineService`，主体计划由 ``offline.recover_plan`` 产出；
-    本类的 :meth:`recover_evolution` 保留为兼容钩子入口并委托。
+    离线结算（角色下线期间的步进/伤亡/明细）在
+    :class:`OfflineService`（``services/character/offline.py``），主体计划由
+    ``offline.recover_plan`` 产出；本类不保留恢复入口。
     """
 
     # ==================== 坐标：纯数值运算 ====================
@@ -221,23 +220,6 @@ class StateService:
         if intrusion != state.intrusion or destruction != state.destruction:
             state.record_change(intrusion=intrusion, destruction=destruction,
                                 source="apply_step_decay")
-
-    @staticmethod
-    @behavior_hook("StateService", "recover_evolution",
-                   layer="module", contract="strategy", deprecated=True)
-    def recover_evolution(state: CharacterSnapshot,
-                          now: Optional[datetime.datetime] = None):
-        """按加载间隔时长恢复：每分钟恢复行动点、坐标衰减，
-        并结算离线期间的步进与伤亡。
-
-        兼容入口。默认委托 :class:`OfflineService`，主体计划由
-        ``offline.recover_plan`` 产出（行为包优先接这个新 key）。
-        ``"StateService.recover_evolution"`` 仍可单独整体替换恢复流程；两者
-        同时注册时新 key 生效，旧 key 被忽略并记入启用诊断。
-        返回 ``offline.report_text`` 生成的展示文案，无离线时长时为空串。
-        """
-        from services.character.offline import OfflineService
-        return OfflineService().recover_offline(state, now)
 
     # ==================== 行动点数 ====================
 

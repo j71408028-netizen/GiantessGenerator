@@ -35,6 +35,7 @@ from persistence.character_repo import CharacterRepo
 from persistence.settings_repo import SettingsRepo
 from core.address_model import parse_full
 from core.models import CharacterSnapshot, ReportData
+from services.character.offline import OfflineService
 from services.character.spatial import build_spatial_profile
 from services.exploration.address_plan import AddressPlanner
 from services.exploration.arbiter import SelectionArbiter
@@ -376,6 +377,8 @@ class ExplorationContext:
                     state.position = new_position
                 else:
                     print(f"⚠️ 位置地址无法解析，保留原位置：{new_position}")
+            # 世界履历：报告生成成功的旅居记录（始终记录，展示由开关控制）
+            self._character.record_world_history(state)
             self.character_repo.save(state)
 
         return ReportData(
@@ -453,7 +456,10 @@ class ExplorationContext:
 
         saved_at = state.updated_at  # 本次加载前的保存时间（用于新闻七天判断）
         # 时间恢复：每分钟恢复行动点并回落属性，超1小时按日间步进结算离线伤亡
-        offline_report = self.state_service.recover_evolution(state)
+        offline_report = OfflineService().recover_offline(state)
+        if offline_report:
+            # 世界履历：离线结算完成的旅居记录（始终记录，展示由开关控制）
+            self._character.record_world_history(state)
         self.state_service.apply_negative_evolution(state)
         self.ensure_avatar_for_state(state)
         self.character_repo.save(state)
@@ -487,5 +493,12 @@ class ExplorationContext:
             uploaded_image_path)
 
     def build_export_card_from_state(self, state: CharacterSnapshot) -> dict:
-        """从已加载角色还原性格/身材并构建角色卡数据。"""
-        return _build_export_card_from_state(state, self.character_repo)
+        """从已加载角色还原性格/身材并构建角色卡数据。
+
+        出身始终导出；世界履历只在 ``world_history_enabled`` 开启时导出
+        （履历始终记录，开关只控制读取 / 展示）。
+        """
+        return _build_export_card_from_state(
+            state, self.character_repo,
+            world_history_enabled=self.settings.get(
+                "world_history_enabled", True))

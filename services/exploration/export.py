@@ -38,11 +38,14 @@ def build_export_card_data(name: str, nick: str, original_height: float,
 
 
 def build_export_card_from_state(state: CharacterSnapshot,
-                                 character_repo) -> dict:
+                                 character_repo,
+                                 world_history_enabled: bool = True) -> dict:
     """从已加载角色还原性格/身材并构建角色卡数据。
 
     ``character_repo`` 用来取头像的绝对路径——这是本函数唯一的外部状态，
-    因此作为参数显式注入而不是再造一个类。
+    因此作为参数显式注入而不是再造一个类。出身世界包（``origin_world``）
+    始终导出；世界履历（``world_history``）只在 ``world_history_enabled``
+    开启时导出——履历始终记录，开关只控制读取 / 展示。
     """
     from services.creation_service import CreationService
     if state is None or state.personality is None:
@@ -55,7 +58,7 @@ def build_export_card_from_state(state: CharacterSnapshot,
         raise ValueError("角色没有身材数据，无法导出角色卡")
     avatar = character_repo.get_avatar_abspath(
         state.giantess_id, state.avatar_path) or ""
-    return build_export_card_data(
+    card = build_export_card_data(
         name=state.name,
         nick=state.nick,
         original_height=state.original_height,
@@ -67,3 +70,7 @@ def build_export_card_from_state(state: CharacterSnapshot,
         birthday=state.birthday or "",
         uploaded_image_path=avatar,
     )
+    card["origin_world"] = getattr(state.model_tuning, "origin_world", None)
+    if world_history_enabled and state.world_history:
+        card["world_history"] = [dict(e) for e in state.world_history]
+    return card

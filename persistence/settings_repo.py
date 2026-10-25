@@ -47,6 +47,8 @@ class SettingsRepo:
             "net_proxy": "",
             "save_low_resolution_image": False,
             "use_preview_image_as_avatar": False,
+            # 世界履历展示开关：履历始终记录（只写），关闭只影响展示/导出读取
+            "world_history_enabled": True,
             # 启动界面模式偏好：pro/mini 固定其一，exit=退出时模式
             # （跟随 ui_mode 记录的上次所在界面），见 services.ui_mode.resolve_startup_mode
             "ui_startup": "exit",

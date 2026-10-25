@@ -398,12 +398,19 @@ class CharacterSnapshot:
     # 活动区域（完整地址文本列表，软约束）：报告选取时区域内地标优先，让角色
     # 的空间行为有惯性；空 = 无偏好。不做合法性校验，坏文本使用时不命中。
     activity_regions: List[str] = field(default_factory=list)
-    # 离线恢复期间的2小时精度步进与伤亡明细，由 recover_evolution 计算填充。
+    # 离线恢复期间的2小时精度步进与伤亡明细，由离线结算
+    # （services/character/offline.py::recover_offline）计算填充。
     offline_details: List[OfflineDetail] = field(default_factory=list)
     # 出身调制烙印：创建期由 CreationService.derive_model_tuning 派生并经
     # sanitize 后烙印（见 ModelTuning）。旧档无此字段 → 全默认，任何世界包
     # 启停都不再触及已有角色的离线/空间调制。
     model_tuning: ModelTuning = field(default_factory=ModelTuning)
+    # 世界履历：旅居过的世界包记录 [{pack_id, name, version, first_at,
+    # last_at, born}]。创建时写 born 条目，报告生成成功与离线结算完成时
+    # 更新 last_at / 追加新条目；始终记录（world_history_enabled 开关只
+    # 控制展示/导出读取，不影响写入）。与地址 / 学习层正交：不产生地址、
+    # 不改写演化表已有行。
+    world_history: List[Dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self):
         # 允许以字典列表构造（从 JSON 加载），统一规范化为 EvolutionRecord
@@ -417,6 +424,8 @@ class CharacterSnapshot:
         ]
         if isinstance(self.model_tuning, dict):
             self.model_tuning = ModelTuning.from_dict(self.model_tuning)
+        self.world_history = [e for e in (self.world_history or [])
+                              if isinstance(e, dict)]
 
     @classmethod
     def from_dict(cls, data: dict) -> "CharacterSnapshot":

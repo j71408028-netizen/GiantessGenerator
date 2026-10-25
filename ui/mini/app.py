@@ -896,6 +896,10 @@ class MiniApp:
         self.settings["use_preview_image_as_avatar"] = bool(enabled)
         self._save_settings()
 
+    def set_world_history(self, enabled: bool):
+        self.settings["world_history_enabled"] = bool(enabled)
+        self._save_settings()
+
     # ---------- AI 配置 ----------
     def ai_configs(self) -> dict:
         return self.settings.get("ai_configs") or {}

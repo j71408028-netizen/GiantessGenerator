@@ -89,9 +89,9 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 
 每个 hook 还带 `layer` / `contract` / `since` / `deprecated` 元数据，
 `runtime.catalog()` 可列出。`layer` 按语义所有权划分，不按目录：基础设施
-算法点 / 模型参数、模块决策策略、内容数据。离线恢复的主体已迁到
-`offline.recover_plan`，`StateService.recover_evolution` 保留为已废弃的
-兼容入口；报告选取仲裁开放为 `select` 组（车道窗口 / 联合分 / 提拔与
+算法点 / 模型参数、模块决策策略、内容数据。离线恢复开放为 `offline` 组
+（`recover_plan` / `report_text`，执行走 `OfflineService` 直连）；报告选取
+仲裁开放为 `select` 组（车道 / 联合分 / 提拔与
 `select.model.*` 常量），硬闸与物理走查不开放。
 
 ### 2.2 `data/` 是用户数据区

@@ -277,8 +277,8 @@ SIMULATED_HOOKS = (
 # 同为可覆盖目标、但**本模拟不调用**：覆盖后不会体现在结果里（报告里点明，免得误判）。
 NOT_SIMULATED_HOOKS = (
     "StateService.refund_action_points（返回副本结算才用）",
-    "StateService.recover_evolution（真实离线结算走 services.character.offline）",
-    "CreationService.*（身高生成，与演化无关）",
+    "offline.recover_plan / report_text（真实离线结算走 services.character.offline）",
+    "CreationService.*（身高生成 / 出身烙印派生，与演化无关）",
     "logic.*（尺寸格式化 / 描述 / 屏蔽词等显示层）",
 )
 

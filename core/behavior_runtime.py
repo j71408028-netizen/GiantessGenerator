@@ -66,10 +66,9 @@ _LAYER_CONTRACTS = {
     LAYER_CONTENT: {CONTRACT_DATA},
 }
 
-# 旧 key -> 新 key：同时注册时新 key 生效，旧 key 不再进入覆盖表。
-_SUPERSEDED_KEYS = {
-    "StateService.recover_evolution": "offline.recover_plan",
-}
+# 目录契约基线版本：出身烙印基线（2026-10）在 2.0 alpha 窗口重定了整个
+# 开放面，全目录 since 以此为基线；此后新增条目按实际版本显式标注。
+_CATALOG_SINCE = "2.0"
 
 
 @dataclass
@@ -86,7 +85,7 @@ class HookSpec:
     param_names: Tuple[str, ...] = ()
     layer: str = LAYER_INFRA
     contract: str = CONTRACT_POINT
-    since: str = "1"
+    since: str = _CATALOG_SINCE
     deprecated: bool = False
 
 
@@ -191,20 +190,6 @@ class BehaviorRuntime:
         if not ok:
             self._reject(f"覆盖 '{key}' 被拒绝：{reason}")
             return
-        replacement = _SUPERSEDED_KEYS.get(key)
-        if replacement is not None and replacement in self._overrides:
-            self._warn(
-                f"覆盖目标 '{key}' 已被 '{replacement}' 取代，本次注册被忽略")
-            return
-        for old, new in _SUPERSEDED_KEYS.items():
-            if new != key or old not in self._overrides:
-                continue
-            del self._overrides[old]
-            if (self._pending is not None
-                    and old in self._pending.overridden):
-                self._pending.overridden.remove(old)
-            self._warn(
-                f"覆盖目标 '{old}' 已被 '{key}' 取代，旧 key 不再生效")
         if key in self._overrides:
             self._warn(f"覆盖目标 '{key}' 被重复注册，后注册的实现生效")
         self._overrides[key] = impl
@@ -447,7 +432,7 @@ def reset_runtime() -> None:
 
 
 def behavior_hook(scope: str, name: str, *, layer: str = LAYER_INFRA,
-                  contract: str = CONTRACT_POINT, since: str = "1",
+                  contract: str = CONTRACT_POINT, since: str = _CATALOG_SINCE,
                   deprecated: bool = False) -> Callable:
     """把模块函数或静态方法包装为可被行为包覆盖的钩子（函数细度）。
 
@@ -495,7 +480,7 @@ def behavior_hook(scope: str, name: str, *, layer: str = LAYER_INFRA,
 
 def behavior_const(scope: str, name: str, value: Any, *,
                    layer: str = LAYER_CONTENT, contract: str = CONTRACT_DATA,
-                   since: str = "1", deprecated: bool = False) -> Any:
+                   since: str = _CATALOG_SINCE, deprecated: bool = False) -> Any:
     """注册常量细度的可覆盖目标，原样返回 ``value`` 便于模块内继续使用::
 
         PREDEFINED_TAGS = behavior_const("logic", "PREDEFINED_TAGS", [...])

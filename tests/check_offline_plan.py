@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""离线恢复计划自检：计划/执行分离、行为包覆盖与旧入口兼容。
+"""离线恢复计划自检：计划/执行分离、行为包覆盖与烙印模型。
 
 用法：``python tests/check_offline_plan.py``
 只跑纯逻辑，不建窗口、不联网、不碰 data/。
@@ -40,7 +40,6 @@ from services.character.offline import (  # noqa: E402
     OfflineModel, OfflineService, apply_recover_plan, build_offline_report,
     build_recover_plan,
 )
-from services.state_service import StateService  # noqa: E402
 
 _NOW = datetime.datetime(2026, 10, 24, 12, 0, 0)
 _RUNTIME = get_runtime()
@@ -147,52 +146,7 @@ check("实例显式参数优先于烙印",
       OfflineService(step_per_hour=0.03)._model(_snap_fast).step_per_hour
       == 0.03)
 
-# ---------------- 6. 旧入口兼容与优先级 ----------------
-calls = []
-
-
-def _legacy(state, now=None):
-    calls.append("legacy")
-    state.action_points = 77
-
-
-def _new_plan(state, now, model):
-    calls.append("new")
-    return OfflineRecoveryPlan(action_point_gain=1)
-
-
-try:
-    _RUNTIME.override("StateService.recover_evolution", _legacy)
-    state = _snap()
-    StateService.recover_evolution(state, _NOW)
-    check("旧 key 单独仍可整体替换", state.action_points == 77)
-    check("旧 key 单独注册时被调用", calls == ["legacy"])
-finally:
-    _RUNTIME.reset()
-
-calls.clear()
-try:
-    _RUNTIME.override("StateService.recover_evolution", _legacy)
-    _RUNTIME.override("offline.recover_plan", _new_plan)
-    state = _snap()
-    StateService.recover_evolution(state, _NOW)
-    check("旧 key 先注册时新 key 取代", state.action_points == 1)
-    check("旧 key 先注册时不调用旧实现", calls == ["new"])
-finally:
-    _RUNTIME.reset()
-
-calls.clear()
-try:
-    _RUNTIME.override("offline.recover_plan", _new_plan)
-    _RUNTIME.override("StateService.recover_evolution", _legacy)
-    state = _snap()
-    StateService.recover_evolution(state, _NOW)
-    check("旧 key 后注册时仍被忽略", state.action_points == 1)
-    check("旧 key 后注册时不调用旧实现", calls == ["new"])
-finally:
-    _RUNTIME.reset()
-
-# ---------------- 7. 无效时间戳不产生计划 ----------------
+# ---------------- 6. 无效时间戳不产生计划 ----------------
 state = _snap()
 state.updated_at = "not-a-date"
 before = (state.action_points, state.intrusion, state.destruction,

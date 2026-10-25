@@ -7,7 +7,8 @@
 验证：
 - 每个 hook 都带 layer / contract / since / deprecated 元数据；
 - 层级与契约组合合法，scope 的默认归属符合登记表；
-- 已知例外（recover_evolution、profile、内容常量）分类正确；
+- 已知例外（profile、内容常量）分类正确；
+- 已删 key（offline.model.* / spatial.TAG_* / recover_evolution）不回潮；
 - 目录按 key 排序，且每个 key 都能在行为包文档中找到。
 """
 
@@ -122,10 +123,8 @@ check("层级 / 契约组合合法", not _bad_pair, str(_bad_pair))
 
 _classify("StateService.clamp_coordinates", LAYER_INFRA, CONTRACT_POINT,
           KIND_FUNCTION)
-_classify("StateService.recover_evolution", LAYER_MODULE, CONTRACT_STRATEGY,
-          KIND_FUNCTION)
-check("StateService.recover_evolution 标记兼容废弃",
-      _by_key["StateService.recover_evolution"]["deprecated"] is True)
+check("StateService.recover_evolution 已随出身烙印基线删除",
+      "StateService.recover_evolution" not in _by_key)
 _classify("CreationService.derive_model_tuning", LAYER_MODULE,
           CONTRACT_STRATEGY, KIND_FUNCTION)
 check("CreationService.derive_model_tuning since 2.0",
@@ -156,8 +155,11 @@ _classify("profile.describe_rhythm", LAYER_MODULE, CONTRACT_STRATEGY,
 _state_module = [entry["key"] for entry in _catalog
                  if entry["scope"] == "StateService"
                  and entry["layer"] != LAYER_INFRA]
-check("StateService 仅 recover_evolution 为模块级",
-      _state_module == ["StateService.recover_evolution"], str(_state_module))
+check("StateService 全部为基础设施层",
+      _state_module == [], str(_state_module))
+
+_since_bad = [entry["key"] for entry in _catalog if entry["since"] != "2.0"]
+check("全目录 since 以 2.0 为基线", not _since_bad, str(_since_bad))
 
 # ---------------- 3. 文档覆盖 ----------------
 

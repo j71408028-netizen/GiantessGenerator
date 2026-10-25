@@ -351,9 +351,8 @@ class OfflineService:
 
     结算模型参数取角色档案的出身烙印（``state.model_tuning``），实例构造
     参数可显式覆盖（测试与特殊场景）；行为包优先覆盖 ``offline.recover_plan``
-    （收到的 model 即来自烙印），旧 ``StateService.recover_evolution`` 保留为
-    兼容入口。环境因子取角色演化表中的在线沉淀（``EnvironmentProfile`` 按
-    地址聚合），无沉淀时按位置精确度兜底。
+    （收到的 model 即来自烙印）。环境因子取角色演化表中的在线沉淀
+    （``EnvironmentProfile`` 按地址聚合），无沉淀时按位置精确度兜底。
     """
 
     def __init__(self, window_hours: Optional[float] = None,

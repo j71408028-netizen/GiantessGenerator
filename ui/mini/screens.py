@@ -124,6 +124,14 @@ class SettingsScreen(Screen):
             "开" if settings.get("use_preview_image_as_avatar", True) else "关")
         avatar.pack(fill='x', pady=3)
 
+        history = px.CycleRow(
+            body, "世界履历展示", ["开", "关"],
+            on_change=lambda v: self.app.set_world_history(v == "开"),
+            tone="ok", button_width=110)
+        history.set_value(
+            "开" if settings.get("world_history_enabled", True) else "关")
+        history.pack(fill='x', pady=3)
+
         px.divider(body).pack(fill='x', pady=8)
 
         self.provider_row = px.CycleRow(

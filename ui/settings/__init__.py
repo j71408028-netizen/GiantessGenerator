@@ -376,6 +376,11 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.use_preview_avatar_var = tk.BooleanVar(value=self.settings.get("use_preview_image_as_avatar", False))
         self.use_preview_avatar_switch = self._make_switch(ctrl, self.use_preview_avatar_var)
 
+        _, ctrl = self._make_row(self.gen_body, row, "展示世界履历")
+        row += 1
+        self.world_history_var = tk.BooleanVar(value=self.settings.get("world_history_enabled", True))
+        self.world_history_switch = self._make_switch(ctrl, self.world_history_var)
+
         self._section_label(self.gen_body, row, "副本引擎")
         row += 1
 
@@ -827,6 +832,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             "net_proxy": self.net_proxy_var.get().strip(),
             "save_low_resolution_image": self.save_low_resolution_var.get(),
             "use_preview_image_as_avatar": self.use_preview_avatar_var.get(),
+            "world_history_enabled": self.world_history_var.get(),
             "info_update_rate": INFO_UPDATE_OPTIONS.get(self.info_update_var.get(), self.info_update_rate)
         })
 

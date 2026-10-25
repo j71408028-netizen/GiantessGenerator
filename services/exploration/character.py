@@ -111,6 +111,8 @@ class CharacterAssembler:
         ).sanitize()
         tuning.origin_world = self._origin_world()
         state.model_tuning = tuning
+        # 世界履历：出身条目（born=true）。始终记录，不受履历开关影响。
+        self.record_world_history(state, born=True)
 
         uploaded_image = core.get('uploaded_image')
 
@@ -143,6 +145,34 @@ class CharacterAssembler:
             "name": getattr(manifest, "name", "") or "",
             "version": getattr(manifest, "version", "") or "",
         }
+
+    def record_world_history(self, state: CharacterSnapshot, born: bool = False,
+                             now: Optional[datetime.datetime] = None) -> bool:
+        """世界履历旅居记录：有激活世界包时更新/追加条目，返回是否写入。
+
+        已有同 pack_id 条目只推进 last_at；新条目记 first_at / last_at 与
+        born（仅创建路径传 True）。履历**始终记录**——
+        ``world_history_enabled`` 开关只控制展示 / 导出读取，不影响写入；
+        本方法不产生地址、不改写演化表已有行与 position（与地址 / 学习层
+        正交）。
+        """
+        origin = self._origin_world()
+        if origin is None:
+            return False
+        now = now or datetime.datetime.now()
+        for entry in state.world_history:
+            if entry.get("pack_id") == origin["pack_id"]:
+                entry["last_at"] = now.isoformat()
+                return True
+        state.world_history.append({
+            "pack_id": origin["pack_id"],
+            "name": origin["name"],
+            "version": origin["version"],
+            "first_at": now.isoformat(),
+            "last_at": now.isoformat(),
+            "born": bool(born),
+        })
+        return True
 
     def size_unlocks_from_report(self, report: ReportData) -> Dict[str, str]:
         """从一份报告现推部位解锁表（未持角色档案时看尺寸一览用）。
