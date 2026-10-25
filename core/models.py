@@ -181,6 +181,25 @@ class OfflineDetail:
 
 
 @dataclass
+class OfflineRecoveryPlan:
+    """一次离线恢复的纯计划。
+
+    由 ``offline.recover_plan`` 产出，执行层负责写回状态与记录演化。
+    ``action_point_gain`` 是请求恢复量（执行时仍受自然回复上限约束）；
+    ``intrusion`` / ``destruction`` 是结算后的坐标，``None`` 表示不改坐标；
+    ``details`` 为 ``None`` 表示保留现有明细；``casualties`` 是本次新增伤亡，
+    不是累计值。计划本身不修改角色状态。
+    """
+
+    action_point_gain: int = 0
+    intrusion: Optional[float] = None
+    destruction: Optional[float] = None
+    details: Optional[List[OfflineDetail]] = None
+    step: float = 0.0
+    casualties: float = 0.0
+
+
+@dataclass
 class CharacterSnapshot:
     giantess_id: str
     name: str

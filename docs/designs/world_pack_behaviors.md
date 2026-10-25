@@ -17,6 +17,9 @@
 - `spatial`（`services/character/spatial.py`，空间档案的学习层）：TAG 先验表
   （`TAG_SPATIAL_PRIORS` / `TAG_ENV_PRIORS`）是常量钩子，行为包可按标签名扩展或
   替换（见附录 A 的 `spatial` 组）。
+- `offline`（`services/character/offline.py`，离线恢复）：纯计划
+  `offline.recover_plan` 与 `offline.model.*` 模型常量；计划执行与持久化仍由
+  服务层负责（见附录 A 的 `offline` 组）。
 
 **核心规则**：
 
@@ -137,13 +140,13 @@ data/worlds/<world_id>/
 | 层级 / 契约 | 开放方式 | 典型目标 |
 |------|------|------|
 | `infra/point` | 固定流程中的单个算法点或参数 | `logic.*` 数值核、`StateService` 坐标 / 行动点原语 |
-| `module/strategy` | 模块门面的决策策略，返回决策或计划 | `profile.*`；后续 `chat.*` / `news.*` / `offline.*` |
+| `module/strategy` | 模块门面的决策策略，返回决策或计划 | `profile.*`、`offline.recover_plan`；后续 `chat.*` / `news.*` |
 | `content/data` | 数据表、文案、阈值 | `logic.PREDEFINED_TAGS`、`spatial.TAG_*` |
 | 核心不变式 | 不开放，不进入目录 | 坐标夹取、AP 上限、JSON 协议、消息状态机、持久化 |
 
-> `StateService.recover_evolution` 当前标为 `module/strategy`：它是模块级恢复流程，
-> 暂寄在 `StateService` 门面上。后续迁移到 `offline.*` 时，旧 key 保留为兼容
-> 适配器；新增行为包不应再把它当作基础设施原语。
+> `StateService.recover_evolution` 是离线恢复的兼容入口，已标 `deprecated`：主体计划
+> 已迁移到 `offline.recover_plan`。新增行为包应接新 key；旧 key 仍可单独使用，
+> 若同时注册两者，新 key 生效，旧 key 被忽略并记入启用诊断。
 
 ### `CreationService`
 
@@ -172,11 +175,36 @@ data/worlds/<world_id>/
 | `decayed_coordinates`      | `(personality, intrusion, destruction, fraction) -> (float, float)` | 步进衰减的纯计算：仅当坐标越过性格边界（初始值 - 0.5 × 性格步长）时向边界回落 fraction 个步长。 |
 | `apply_negative_evolution` | `(state) -> None` | 行动点数不足（<50）时应用负向演化：介入度步进取 -1 - 0.5 × 性格敏感值（由敏感值直接控制），破坏性步进取 -1 - 0.5 × 性格重力；步长演化叠加不适应性衰减；有变化时向演化表追加一行（步进取本次负向步进之和）。 |
 | `apply_step_decay`         | `(state, fraction=0.1) -> None` | 步进衰减（角色面板逗留每分钟 fraction=0.1），有变化时向演化表追加一行。              |
-| `recover_evolution`        | `(state, now=None) -> None` | 离线恢复：行动点按分钟恢复、坐标按分钟衰减，宽限后按日间步进结算伤亡；有变化时追加演化表一行。层级为 `module/strategy`：整段恢复流程暂寄在 `StateService`，后续迁移到 `offline.*`。         |
+| `recover_evolution`        | `(state, now=None) -> None` | 离线恢复的兼容入口（已标 `deprecated`）：默认委托 `offline.recover_plan` 与 `OfflineService`；有变化时追加演化表一行。新包应优先接 `offline.recover_plan`；两者同时注册时新 key 生效。 |
 | `consume_action_points`    | `(state, cost) -> bool` | 消耗行动点数；点数不足返回 `False`。                                  |
 | `receive_action_points`    | `(state, amount) -> int` | 自然回复行动点数（离线恢复、角色面板在线恢复），夹取到 0~100，返回实际变化量。 |
 | `refund_action_points`     | `(state, amount) -> int` | 返还行动点数（副本结算、报告解锁返还等），不设 100 上限，返回实际变化量。 |
 | `recover_action_points`    | `(state) -> None` | 在角色面板逗留时，根据性格恢复行动点数（内部调用 `receive_action_points`，覆盖前者会自动生效）。 |
+
+### `offline`（离线恢复模型与计划）
+
+离线结算拆成两层：`offline.recover_plan` 只读取状态并返回
+`OfflineRecoveryPlan`，不写状态、不记演化；`OfflineService` 把计划写回角色并
+追加演化行。`OfflineModel` 是计划函数收到的模型参数快照，字段与下列常量一一
+对应。72 小时明细窗口与 2 小时精度同时是导出图表、演化表和 UI 的跨模块契约，
+固定不开放。
+
+| 目标 | 类型 | 签名 / 默认 | 说明 |
+|------|------|------|------|
+| `offline.recover_plan` | 函数 | `(state, now, model) -> Optional[OfflineRecoveryPlan]` | 生成恢复计划。返回 `None` 表示时间戳无效或没有可结算时长。计划字段：`action_point_gain`（请求恢复量）、`intrusion` / `destruction`（结算后坐标，`None` 表示不改）、`details`（明细，`None` 表示保留现有明细）、`step`、`casualties`（本次新增伤亡）。 |
+| `offline.model.step_per_hour` | 常量 float | `0.01` | 白昼闲逛基础步进率（步/小时）。 |
+| `offline.model.exit_amp` | 常量 float | `0.05` | 退出后残留活动的初始幅值（步/小时）。 |
+| `offline.model.exit_tau` | 常量 float | `0.9` | 残留活动的指数衰减时间常数（小时）。 |
+| `offline.model.recovery_points_per_minute` | 常量 float | `0.5` | 离线行动点每分钟恢复量。 |
+| `offline.model.recovery_decay_per_minute` | 常量 float | `0.01` | 离线坐标每分钟回落比例。 |
+| `offline.model.noise_scale` | 常量 float | `0.1` | 环境噪声标准差系数（乘 `log10(身高)`）。 |
+| `offline.model.old_step_divisor` | 常量 float | `π` | 72 小时窗口外按天汇总时的平滑除数。 |
+
+覆盖 `offline.recover_plan` 可调用 `runtime.default("offline.recover_plan")` 复用
+默认计划后再改字段。旧 key `StateService.recover_evolution` 仍可单独整体替换恢复
+流程；两者同时注册时新 key 生效，旧 key 被忽略并记入诊断。执行层会夹取坐标、把
+行动点恢复量交给 `StateService.receive_action_points`（自然上限 100），并按
+`recover_evolution` 来源记录演化；这些执行语义不开放。
 
 ### `logic`（模块函数与常量）
 

@@ -23,6 +23,7 @@ from core.behavior_runtime import (  # noqa: E402
     LAYER_CONTENT, LAYER_INFRA, LAYER_MODULE, get_runtime,
 )
 import core.logic  # noqa: E402,F401  注册 logic 函数与常量
+import services.character.offline  # noqa: E402,F401
 import services.character.profile_text  # noqa: E402,F401
 import services.character.spatial  # noqa: E402,F401
 import services.creation_service  # noqa: E402,F401
@@ -53,6 +54,7 @@ SCOPE_LAYERS = {
     "CreationService": {LAYER_INFRA},
     "StateService": {LAYER_INFRA, LAYER_MODULE},
     "logic": {LAYER_INFRA, LAYER_CONTENT},
+    "offline": {LAYER_INFRA, LAYER_MODULE},
     "profile": {LAYER_MODULE},
     "spatial": {LAYER_CONTENT},
 }
@@ -122,6 +124,12 @@ _classify("StateService.clamp_coordinates", LAYER_INFRA, CONTRACT_POINT,
           KIND_FUNCTION)
 _classify("StateService.recover_evolution", LAYER_MODULE, CONTRACT_STRATEGY,
           KIND_FUNCTION)
+check("StateService.recover_evolution 标记兼容废弃",
+      _by_key["StateService.recover_evolution"]["deprecated"] is True)
+_classify("offline.recover_plan", LAYER_MODULE, CONTRACT_STRATEGY,
+          KIND_FUNCTION)
+_classify("offline.model.step_per_hour", LAYER_INFRA, CONTRACT_DATA,
+          KIND_CONST)
 _classify("logic.compute_casualty", LAYER_INFRA, CONTRACT_POINT,
           KIND_FUNCTION)
 _classify("logic.PREDEFINED_TAGS", LAYER_CONTENT, CONTRACT_DATA,

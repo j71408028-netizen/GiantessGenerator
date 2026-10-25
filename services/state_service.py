@@ -14,8 +14,8 @@ class StateService:
     行动点数的消耗/恢复/返还同样统一在此。
 
     离线结算（角色下线期间的步进/伤亡/明细）已拆分到
-    :class:`OfflineService`，本类的 :meth:`recover_evolution` 保留
-    静态钩子入口并委托给它的实例方法。
+    :class:`OfflineService`，主体计划由 ``offline.recover_plan`` 产出；
+    本类的 :meth:`recover_evolution` 保留为兼容钩子入口并委托。
     """
 
     # ==================== 坐标：纯数值运算 ====================
@@ -224,16 +224,16 @@ class StateService:
 
     @staticmethod
     @behavior_hook("StateService", "recover_evolution",
-                   layer="module", contract="strategy")
+                   layer="module", contract="strategy", deprecated=True)
     def recover_evolution(state: CharacterSnapshot,
                           now: Optional[datetime.datetime] = None):
         """按加载间隔时长恢复：每分钟恢复行动点、坐标衰减，
         并结算离线期间的步进与伤亡。
 
-        离线结算逻辑与参数已拆分到 :class:`OfflineService`（实例方法
-        :meth:`OfflineService.recover_offline`），此处仅保留行为钩子
-        兼容入口并委托；行为包仍可按 ``"StateService.recover_evolution"``
-        覆盖整套恢复流程。
+        兼容入口。默认委托 :class:`OfflineService`，主体计划由
+        ``offline.recover_plan`` 产出（行为包优先接这个新 key）。
+        ``"StateService.recover_evolution"`` 仍可单独整体替换恢复流程；两者
+        同时注册时新 key 生效，旧 key 被忽略并记入启用诊断。
         """
         from services.character.offline import OfflineService
         OfflineService().recover_offline(state, now)

@@ -66,6 +66,11 @@ _LAYER_CONTRACTS = {
     LAYER_CONTENT: {CONTRACT_DATA},
 }
 
+# 旧 key -> 新 key：同时注册时新 key 生效，旧 key 不再进入覆盖表。
+_SUPERSEDED_KEYS = {
+    "StateService.recover_evolution": "offline.recover_plan",
+}
+
 
 @dataclass
 class HookSpec:
@@ -186,6 +191,20 @@ class BehaviorRuntime:
         if not ok:
             self._reject(f"覆盖 '{key}' 被拒绝：{reason}")
             return
+        replacement = _SUPERSEDED_KEYS.get(key)
+        if replacement is not None and replacement in self._overrides:
+            self._warn(
+                f"覆盖目标 '{key}' 已被 '{replacement}' 取代，本次注册被忽略")
+            return
+        for old, new in _SUPERSEDED_KEYS.items():
+            if new != key or old not in self._overrides:
+                continue
+            del self._overrides[old]
+            if (self._pending is not None
+                    and old in self._pending.overridden):
+                self._pending.overridden.remove(old)
+            self._warn(
+                f"覆盖目标 '{old}' 已被 '{key}' 取代，旧 key 不再生效")
         if key in self._overrides:
             self._warn(f"覆盖目标 '{key}' 被重复注册，后注册的实现生效")
         self._overrides[key] = impl

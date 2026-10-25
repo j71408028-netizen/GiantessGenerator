@@ -58,10 +58,10 @@
 ### 1.3 当前实测数字（2026-10-25）
 
 ```
-[check_import_graph] 已检查 194 个模块，779 条第一方依赖边
+[check_import_graph] 已检查 194 个模块，781 条第一方依赖边
 [check_import_graph] PASSED：层间依赖方向与 UI 框架禁令均无未登记越界
 KNOWN_EXCEPTIONS = []          # 原 11 条已全部消除
-tests/run_checks.py            # 43/43
+tests/run_checks.py            # 44/44
 ```
 
 ---
@@ -89,8 +89,8 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 
 每个 hook 还带 `layer` / `contract` / `since` / `deprecated` 元数据，
 `runtime.catalog()` 可列出。`layer` 按语义所有权划分，不按目录：基础设施算法点、
-模块决策策略、内容数据；`StateService.recover_evolution` 标为 `module/strategy`
-（错层遗留，后续迁移到 `offline.*`）。
+模块决策策略、内容数据；离线恢复的主体已迁到 `offline.recover_plan`，
+`StateService.recover_evolution` 保留为已废弃的兼容入口。
 
 ### 2.2 `data/` 是用户数据区
 
@@ -193,7 +193,7 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 
 | 命令 | 用途 | 注意 |
 |---|---|---|
-| `python tests/run_checks.py` | **离线 31 项，提交前必跑** | 纯静态，不需要显示器 |
+| `python tests/run_checks.py` | **离线 44 项，提交前必跑** | 纯静态，不需要显示器 |
 | `python tests/run_checks.py --smoke` | 追加 GUI 冒烟（3 个） | **两个 GUI 自检不可并发** |
 | `python tests/smoke_mini.py` | 挂件全链路（75 项）+ 真实副本窗口 | 需显示器 |
 | `python tests/smoke_switch.py` | 界面热切换 5 轮 | 改切换 / 收尾逻辑后必跑；当前 50/50 |
