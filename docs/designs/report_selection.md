@@ -115,10 +115,12 @@
 `services/exploration/arbiter.py` 顶部与 `quips.py` 的注册处：车道权重表
 `LANE_WEIGHTS`、近匹配容差 `NEAR_MATCH_TAU`、提拔上限除数、联合分权重
 `W_COVER` / `W_REGION` / `W_PATH`、充裕度池深饱和与邻域口径、可达范围
-倍数，以及环境一致性加分 / 偏差归一分母。空间档案的常量在 `spatial.py`：
-`TAG_ENV_PRIORS` / `_ENV_PRIOR_K` / `_ENV_PREFERENCE_SMOOTHING`（偏好先验
-与阻尼）。默认值是建议值，行为锁只锁语义不锁数值——调整后跑上述测试
-确认语义未破即可。
+倍数，以及环境一致性加分 / 偏差归一分母。空间档案侧只有两张 TAG 先验表
+（`spatial.TAG_SPATIAL_PRIORS` / `spatial.TAG_ENV_PRIORS`）是常量钩子；
+`_ENV_PRIOR_K` / `_ENV_PREFERENCE_SMOOTHING` 等学习层参数不开放——它们
+正是压住先验、保护角色身份稳定的阻尼（`world_pack_behaviors.md` 的
+「角色身份稳定性」）。默认值是建议值，行为锁只锁语义不锁数值——调整后
+跑上述测试确认语义未破即可。
 
 ## 附录 C：开放点
 

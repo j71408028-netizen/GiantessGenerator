@@ -36,6 +36,25 @@
 程序在 `data/static/behaviors/imperial_units/` 提供了一个现成示例：把显示单位从
 米 / 千米改为英尺 / 英里。想快速了解行为包长什么样，可直接阅读它（完整代码见附录 B）。
 
+## 开放边界：角色身份稳定性
+
+可覆盖目标按「世界规则」与「角色身份」划分，这条边界与层级 / 契约元数据并行生效：
+
+- **世界规则可以换**。坐标演化（`StateService` 坐标 / 步长原语）服务于资源匹配，
+  世界包自带与演化动态匹配的资源；离线结算是把角色活动换算为世界效果的转换层
+  （`offline.*` 与 `offline.model.*`）；选取仲裁（`select.*`）配对的是世界内的
+  资源供给。覆盖这些改变「世界如何运转」，角色已学到的东西不被重新解释。
+- **角色身份不可重写**。作息学习（`RhythmService`）与空间 / 环境 / 偏好学习
+  （`spatial.py` 学习层）的参数——半衰期、平滑伪计数、收缩强度、调制夹取、
+  成熟度阻尼等——**不开放**：它们决定「从角色历史里学出什么样的她」，覆盖会让
+  已有角色在加载世界包后性情大变。已开放的 `spatial.TAG_*` 先验表受内部夹取与
+  阻尼约束，只能温和调制习惯的表达强度，不能改写习惯本身；
+  `offline.model.rhythm_swing` 同理只重塑离线结算的步进曲线，不动作息学习，
+  也不影响档案导出与聊天的作息 / 空间措辞。
+
+后续开放的新域（如 `chat.*` 人设相关）同样遵守：世界包可以追加世界语境，
+不可改写角色的既有身份事实（名字、性格、学到的习惯、达成的经历）。
+
 ## 开发流程
 
 ### 第 1 步：编写行为模块
@@ -205,6 +224,7 @@ data/worlds/<world_id>/
 | `offline.model.recovery_decay_per_minute` | 常量 float | `0.01` | 离线坐标每分钟回落比例。 |
 | `offline.model.noise_scale` | 常量 float | `0.1` | 环境噪声标准差系数（乘 `log10(身高)`）。 |
 | `offline.model.old_step_divisor` | 常量 float | `π` | 72 小时窗口外按天汇总时的平滑除数。 |
+| `offline.model.rhythm_swing` | 常量 float | `1.0` | 作息调制对离线步进的放大倍率（读取时夹取 0~3）：`0` = 昼夜平坦（离线活动不看作息），`1` = 默认，`>1` 放大昼夜差异。只作用于离线结算的步进曲线，不改变角色档案学到的作息与档案 / 聊天措辞（见「角色身份稳定性」）。 |
 
 覆盖 `offline.recover_plan` 可调用 `runtime.default("offline.recover_plan")` 复用
 默认计划后再改字段。旧 key `StateService.recover_evolution` 仍可单独整体替换恢复
@@ -275,6 +295,19 @@ data/worlds/<world_id>/
 对象。读取入口是 `services.character.spatial.priors_for_tags` /
 `env_priors_for_tags`；直接 import 模块常量只能拿到默认表。键为个性标签名，
 未登记的标签不参与。
+
+条目形状契约（外层 `dict` 之外的内层形状，常量校验不覆盖，由读取入口把关，
+非法条目跳过并经 `[BehaviorPack]` 通道警告一次）：
+
+- `TAG_SPATIAL_PRIORS` 的条目须具备四个数值字段 `range_factor` /
+  `stickiness` / `novelty_bonus` / `anchored_bias`（`SpatialPriors` 或等价
+  鸭子类型；构造前者需 `from services.character.spatial import SpatialPriors`，
+  该模块路径同属契约）；
+- `TAG_ENV_PRIORS` 的条目须为 **7 个有限数值**的序列（环境偏好直方图的箱数
+  固定，不同步会与学习层错位）。
+
+学习层参数（EWMA 半衰期、平滑伪计数、调制夹取、成熟度阻尼等）不开放——
+它们重新解释角色的到访与沉淀历史，见「角色身份稳定性」。
 
 | 目标 | 形态 | 说明 |
 |------|------|------|
