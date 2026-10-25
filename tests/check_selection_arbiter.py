@@ -213,6 +213,68 @@ _plan4 = _arb4.arbitrate(
 check("旅行先验把锚定内容排到 portable 之前",
       [c["landmark"].name for c in _plan4["comparisons"]][0] == "锚定地标")
 
+# ---------------- 5. select 组钩子覆盖生效 ----------------
+from core.behavior_runtime import get_runtime  # noqa: E402
+
+_RUNTIME = get_runtime()
+
+
+def _free_lanes(landmark_addr, quip_registers):
+    """整体替换车道窗口：全部风格发 FREE 资格。"""
+    return [(s, 0.5) for s in (quip_registers or {})]
+
+
+try:
+    _RUNTIME.override("select.lanes", _free_lanes)
+    _catalog5, _s5, _c5 = _scene()
+    _plan5 = _arbiter(_catalog5).arbitrate(
+        [_cand(_s5, 1.0, 200), _cand(_c5, 1.25, 100)],
+        "1e5_1e3_1e2@W-A-B", height=1000.0, durability={},
+        skip_base_prob=0.0, coords=_COORDS, size_cat=_SIZE_CAT)
+    check("车道窗口覆盖生效（全部风格 FREE）",
+          dict(_plan5["chosen"][0].lanes) == {"RICH": 0.5, "IDLE": 0.5},
+          str(_plan5["chosen"][0].lanes))
+    check("覆盖后无星槽、无提拔",
+          _plan5["promotions"] == []
+          and not any(r.starved for r in _plan5["chosen"]))
+finally:
+    _RUNTIME.reset()
+
+try:
+    _RUNTIME.override("select.model.near_match_tau", 0.0)
+    _catalog6, _s6, _c6 = _scene()
+    _plan6 = _arbiter(_catalog6).arbitrate(
+        [_cand(_s6, 1.0, 200), _cand(_c6, 1.25, 100)],
+        "1e5_1e3_1e2@W-A-B", height=1000.0, durability={},
+        skip_base_prob=0.0, coords=_COORDS, size_cat=_SIZE_CAT)
+    check("容差常量覆盖生效（τ=0 不提拔）", _plan6["promotions"] == [])
+finally:
+    _RUNTIME.reset()
+
+
+def _flat_score(ruling, position, reach, profile):
+    return 1.0
+
+
+def _no_promotions(order, cap):
+    return list(order), []
+
+
+try:
+    _RUNTIME.override("select.joint_score", _flat_score)
+    _RUNTIME.override("select.promotions", _no_promotions)
+    _catalog7, _s7, _c7 = _scene("match")
+    _plan7 = _arbiter(_catalog7).arbitrate(
+        [_cand(_s7, 1.0, 200), _cand(_c7, 1.25, 100)],
+        "1e5_1e3_1e2@W-A-B", height=1000.0, durability={},
+        skip_base_prob=0.0, coords=_COORDS, size_cat=_SIZE_CAT)
+    check("联合分覆盖生效（等分保持候选原序）",
+          [c["landmark"].name for c in _plan7["comparisons"]]
+          == ["星槽地标", "覆盖地标"],
+          str([c["landmark"].name for c in _plan7["comparisons"]]))
+finally:
+    _RUNTIME.reset()
+
 # ---------------- 结论 ----------------
 _log.flush()
 sys.stdout = sys.__stdout__

@@ -88,6 +88,10 @@
 - 描述选取的覆盖实现必须接受 `lanes` / `env_estimate` 参数并遵循其
   语义（车道资格窗口是裁定级，环境一致性是软权重），引擎不再提供
   旧签名兼容路径；
+- 仲裁的决策面已开放为 `select` 组：车道窗口 / 联合分 / 近匹配提拔是
+  模块策略钩子，模型参数（容差、提拔上限、联合分权重、可达范围等）是
+  `select.model.*` 常量钩子；硬闸、物理走查与 stuck 判定不开放
+  （逐项见 `world_pack_behaviors.md` 附录 A 的 `select` 组）；
 - 空间档案的两张 TAG 先验表（`spatial.TAG_SPATIAL_PRIORS` /
   `spatial.TAG_ENV_PRIORS`）是常量钩子，行为包可按标签名扩展或替换；
   直接 import 模块常量只能拿到默认表，消费入口是
@@ -106,18 +110,21 @@
 
 ## 附录 B：参数
 
-全部在 `services/exploration/arbiter.py` 顶部常量：`LANE_WEIGHTS`、
-`NEAR_MATCH_TAU`（近匹配容差，log 尺度）、提拔上限（`limit // 2`）、
-`W_COVER` / `W_REGION` / `W_PATH`（联合分权重）。环境两轴的常量在
-各自实现处：`quips.py` 的 `W_ENV_CONSISTENCY`（一致性加分），
-`spatial.py` 的 `TAG_ENV_PRIORS` / `_ENV_PRIOR_K` /
-`_ENV_PREFERENCE_SMOOTHING`（偏好先验与阻尼）。默认值是建议值，
-行为锁只锁语义不锁数值——调整后跑上述测试确认语义未破即可。
+仲裁模型参数已注册为 `select.model.*` 常量钩子（行为包可覆盖，逐项说明见
+`world_pack_behaviors.md` 附录 A 的 `select` 组），默认值仍是
+`services/exploration/arbiter.py` 顶部与 `quips.py` 的注册处：车道权重表
+`LANE_WEIGHTS`、近匹配容差 `NEAR_MATCH_TAU`、提拔上限除数、联合分权重
+`W_COVER` / `W_REGION` / `W_PATH`、充裕度池深饱和与邻域口径、可达范围
+倍数，以及环境一致性加分 / 偏差归一分母。空间档案的常量在 `spatial.py`：
+`TAG_ENV_PRIORS` / `_ENV_PRIOR_K` / `_ENV_PREFERENCE_SMOOTHING`（偏好先验
+与阻尼）。默认值是建议值，行为锁只锁语义不锁数值——调整后跑上述测试
+确认语义未破即可。
 
 ## 附录 C：开放点
 
 - 近匹配容差与提拔上限需试玩校准（验收场景：最优匹配无覆盖时，次优
-  是否如愿上移、报告是否仍以合身内容为主）；
+  是否如愿上移、报告是否仍以合身内容为主）；两者已是 `select.model.*`
+  常量钩子，行为包可按世界调校；
 - 可达范围（10 倍身高）目前是硬闸；是否降级为随距离衰减的权重未裁决；
 - 副本侧的配对（方案阶段地址 / 出口回写 / 提示词注入地址上下文）与
   「从 A 移动到 B」的移动叙述保留待做。

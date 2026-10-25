@@ -20,6 +20,9 @@
 - `offline`（`services/character/offline.py`，离线恢复）：纯计划
   `offline.recover_plan` 与 `offline.model.*` 模型常量；计划执行与持久化仍由
   服务层负责（见附录 A 的 `offline` 组）。
+- `select`（`services/exploration/arbiter.py`，报告选取仲裁）：车道窗口 /
+  联合分 / 近匹配提拔是模块策略，模型参数是 `select.model.*` 常量钩子；
+  硬闸、物理走查与 stuck 判定不开放（见附录 A 的 `select` 组）。
 
 **核心规则**：
 
@@ -141,7 +144,7 @@ data/worlds/<world_id>/
 |------|------|------|
 | `infra/point` | 固定流程中的单个算法点 | `logic.*` 数值核、`StateService` 坐标 / 行动点原语 |
 | `infra/data` | 固定流程中的模型参数（数值 / 表） | `offline.model.*`、`select.model.*` |
-| `module/strategy` | 模块门面的决策策略，返回决策或计划 | `profile.*`、`offline.recover_plan`；后续 `chat.*` / `news.*` |
+| `module/strategy` | 模块门面的决策策略，返回决策或计划 | `profile.*`、`offline.recover_plan`、`select.*`；后续 `chat.*` / `news.*` |
 | `content/data` | 数据表、文案、阈值 | `logic.PREDEFINED_TAGS`、`spatial.TAG_*` |
 | 核心不变式 | 不开放，不进入目录 | 坐标夹取、AP 上限、JSON 协议、消息状态机、持久化 |
 
@@ -208,6 +211,33 @@ data/worlds/<world_id>/
 流程；两者同时注册时新 key 生效，旧 key 被忽略并记入诊断。执行层会夹取坐标、把
 行动点恢复量交给 `StateService.receive_action_points`（自然上限 100），并按
 `recover_evolution` 来源记录演化；这些执行语义不开放。
+
+### `select`（报告选取仲裁）
+
+`SelectionArbiter` 在地标候选与描述风格供给之间做配对仲裁：车道资格窗口与
+近匹配提拔是裁定级输出，联合分是建议级（报告引擎的预算走步与坐标演化可
+自由偏离）。`ruling` 参数是 :class:`~services.exploration.arbiter.SlotRuling`
+（字段 `cand` / `addr` / `lanes` / `affordance` / `starved` / `promoted` /
+`env_estimate`）。硬闸（可达 / 私有名 / 世界观 / 耐久）、物理走查（位置
+演化）与 stuck 判定不开放。`logic.select_quip_with_budget` /
+`logic.get_comparisons` 的 key 不变（scope `logic` 是已部署契约）。
+
+| 目标 | 类型 | 签名 / 默认 | 说明 |
+|------|------|------|------|
+| `select.lanes` | 函数 | `(landmark_addr, quip_registers) -> list` | 槽位 × 风格的车道表 `[(style, weight)]`（裁定级）：无地址地标全部风格 FREE；注册地址同址 EXACT、覆盖 COVER；不覆盖 / 私有名冲突不入窗口。 |
+| `select.joint_score` | 函数 | `(ruling, position, reach, profile) -> float` | 建议级联合分：尺寸匹配主导，覆盖收益 / 档案 / 路径只调制。 |
+| `select.promotions` | 函数 | `(order, cap) -> (list, list)` | 近匹配提拔（裁定级）：星槽在容差带内与有覆盖替代者交换位置，返回 `(新序, 提拔记录)`。 |
+| `select.model.lane_weights` | 常量 dict | `{exact: 1.0, cover: 0.8, free: 0.5}` | 车道权重表（只调制排序，不改变资格判定）。 |
+| `select.model.near_match_tau` | 常量 float | `0.35` | 近匹配容差（log 尺度）。 |
+| `select.model.cover_weight` | 常量 float | `0.5` | 联合分覆盖收益权重。 |
+| `select.model.region_weight` | 常量 float | `1.5` | 联合分活动区域命中增益。 |
+| `select.model.path_weight` | 常量 float | `0.3` | 联合分路径连贯惩罚权重。 |
+| `select.model.pool_saturation` | 常量 float | `2.0` | 充裕度池深饱和折算除数（`depth/(depth+k)`）。 |
+| `select.model.pool_neighborhood` | 常量 float | `2.0` | 充裕度坐标邻域口径（坐标距离上限）。 |
+| `select.model.promotion_cap_divisor` | 常量 float | `2.0` | 提拔上限 = 对比槽位数 / 该除数（除数下限 1.0）。 |
+| `select.model.reach_multiplier` | 常量 float | `10.0` | 可达范围 = 身高倍数；硬闸语义不开放，仅开放数值。 |
+| `select.model.env_consistency` | 常量 float | `0.5` | 描述文本环境一致性加分上限（消费于 `logic.select_quip_with_budget`）。 |
+| `select.model.env_dev_range` | 常量 float | `1.4` | 环境偏差归一分母（环境因子值域全宽）。 |
 
 ### `logic`（模块函数与常量）
 

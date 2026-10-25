@@ -55,10 +55,10 @@
 → `normalize` → `validate`）；音频端到端链（说话人分档 / 三条引擎路径 / 降级 /
 播放收尾）在 `check_audio_chain.py`。加字段时别漏，见 §5.4。
 
-### 1.3 当前实测数字（2026-10-25）
+### 1.3 当前实测数字（2026-10-26）
 
 ```
-[check_import_graph] 已检查 194 个模块，781 条第一方依赖边
+[check_import_graph] 已检查 194 个模块，782 条第一方依赖边
 [check_import_graph] PASSED：层间依赖方向与 UI 框架禁令均无未登记越界
 KNOWN_EXCEPTIONS = []          # 原 11 条已全部消除
 tests/run_checks.py            # 44/44
@@ -88,9 +88,11 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 的回退语义不变，契约字面量仍然一个字都不能改。
 
 每个 hook 还带 `layer` / `contract` / `since` / `deprecated` 元数据，
-`runtime.catalog()` 可列出。`layer` 按语义所有权划分，不按目录：基础设施算法点、
-模块决策策略、内容数据；离线恢复的主体已迁到 `offline.recover_plan`，
-`StateService.recover_evolution` 保留为已废弃的兼容入口。
+`runtime.catalog()` 可列出。`layer` 按语义所有权划分，不按目录：基础设施
+算法点 / 模型参数、模块决策策略、内容数据。离线恢复的主体已迁到
+`offline.recover_plan`，`StateService.recover_evolution` 保留为已废弃的
+兼容入口；报告选取仲裁开放为 `select` 组（车道窗口 / 联合分 / 提拔与
+`select.model.*` 常量），硬闸与物理走查不开放。
 
 ### 2.2 `data/` 是用户数据区
 
