@@ -10,7 +10,8 @@
 
 结算分两层：``offline.recover_plan`` 只读取状态、返回
 :class:`~core.models.OfflineRecoveryPlan`；``OfflineService`` 负责把计划
-写回状态并记录演化。行为包改的是计划，不是执行与持久化。
+写回状态并记录演化。行为包改的是计划，不是执行与持久化。展示文案由
+``offline.report_text`` 从结算结果生成，``recover_offline`` 返回该文案。
 """
 
 import datetime
@@ -293,6 +294,42 @@ def apply_recover_plan(state: CharacterSnapshot,
                             source="recover_evolution")
 
 
+def _elapsed_minutes(state: CharacterSnapshot,
+                     now: datetime.datetime) -> float:
+    """离线时长（分钟）；时间戳无效时为 0（与空计划一致）。"""
+    try:
+        updated = datetime.datetime.fromisoformat(state.updated_at)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, (now - updated).total_seconds() / 60.0)
+
+
+@behavior_hook("offline", "report_text", layer="module", contract="strategy")
+def build_offline_report(state: CharacterSnapshot,
+                         plan: Optional[OfflineRecoveryPlan],
+                         elapsed_minutes: float,
+                         action_point_gain: int) -> str:
+    """把一次离线结算转成展示文案；``plan`` 为 ``None`` 时返回空串。
+
+    ``elapsed_minutes`` 是离线时长（分钟），``action_point_gain`` 是执行层
+    实际恢复的行动点（已受自然回复上限约束）；步进与伤亡增量取自计划。
+    """
+    if plan is None:
+        return ""
+    if elapsed_minutes >= 90.0:
+        duration = f"{elapsed_minutes / 60.0:.1f} 小时"
+    else:
+        duration = f"{int(round(elapsed_minutes))} 分钟"
+    parts = [f"离线 {duration}"]
+    if action_point_gain > 0:
+        parts.append(f"行动点恢复 {action_point_gain}")
+    if plan.step > 0:
+        parts.append(f"步进 {plan.step:.2f}")
+    if plan.casualties > 0:
+        parts.append(f"新增伤亡 {plan.casualties:.1f}")
+    return "，".join(parts)
+
+
 class OfflineService:
     """离线结算：把角色从 updated_at 到 now 的离线时长换算为状态恢复。
 
@@ -354,13 +391,19 @@ class OfflineService:
     # ==================== 离线结算入口 ====================
 
     def recover_offline(self, state: CharacterSnapshot,
-                        now: Optional[datetime.datetime] = None):
+                        now: Optional[datetime.datetime] = None) -> str:
         """生成恢复计划并写回：每分钟恢复行动点、坐标衰减，结算步进/伤亡。
 
         ``now`` 为空时使用系统当前时间；恢复后的状态变化会写入演化表
         （record_change），调用方负责持久化。计划生成与计划执行分离：
         ``offline.recover_plan`` 可被行为包整体替换，写回仍由本方法完成。
+        返回 ``offline.report_text`` 生成的展示文案，无离线时长时为空串。
         """
-        plan = build_recover_plan(
-            state, now or datetime.datetime.now(), self._model())
+        now = now or datetime.datetime.now()
+        plan = build_recover_plan(state, now, self._model())
+        elapsed_minutes = _elapsed_minutes(state, now)
+        before_points = state.action_points
         apply_recover_plan(state, plan)
+        return build_offline_report(
+            state, plan, elapsed_minutes,
+            state.action_points - before_points)

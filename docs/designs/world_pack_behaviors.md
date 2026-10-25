@@ -139,7 +139,8 @@ data/worlds/<world_id>/
 
 | 层级 / 契约 | 开放方式 | 典型目标 |
 |------|------|------|
-| `infra/point` | 固定流程中的单个算法点或参数 | `logic.*` 数值核、`StateService` 坐标 / 行动点原语 |
+| `infra/point` | 固定流程中的单个算法点 | `logic.*` 数值核、`StateService` 坐标 / 行动点原语 |
+| `infra/data` | 固定流程中的模型参数（数值 / 表） | `offline.model.*`、`select.model.*` |
 | `module/strategy` | 模块门面的决策策略，返回决策或计划 | `profile.*`、`offline.recover_plan`；后续 `chat.*` / `news.*` |
 | `content/data` | 数据表、文案、阈值 | `logic.PREDEFINED_TAGS`、`spatial.TAG_*` |
 | 核心不变式 | 不开放，不进入目录 | 坐标夹取、AP 上限、JSON 协议、消息状态机、持久化 |
@@ -185,13 +186,15 @@ data/worlds/<world_id>/
 
 离线结算拆成两层：`offline.recover_plan` 只读取状态并返回
 `OfflineRecoveryPlan`，不写状态、不记演化；`OfflineService` 把计划写回角色并
-追加演化行。`OfflineModel` 是计划函数收到的模型参数快照，字段与下列常量一一
-对应。72 小时明细窗口与 2 小时精度同时是导出图表、演化表和 UI 的跨模块契约，
-固定不开放。
+追加演化行。展示文案同为模块策略：`recover_offline` 把实际恢复的行动点与
+离线时长交给 `offline.report_text` 生成并返回。`OfflineModel` 是计划函数收到的
+模型参数快照，字段与下列常量一一对应。72 小时明细窗口与 2 小时精度同时是
+导出图表、演化表和 UI 的跨模块契约，固定不开放。
 
 | 目标 | 类型 | 签名 / 默认 | 说明 |
 |------|------|------|------|
 | `offline.recover_plan` | 函数 | `(state, now, model) -> Optional[OfflineRecoveryPlan]` | 生成恢复计划。返回 `None` 表示时间戳无效或没有可结算时长。计划字段：`action_point_gain`（请求恢复量）、`intrusion` / `destruction`（结算后坐标，`None` 表示不改）、`details`（明细，`None` 表示保留现有明细）、`step`、`casualties`（本次新增伤亡）。 |
+| `offline.report_text` | 函数 | `(state, plan, elapsed_minutes, action_point_gain) -> str` | 把一次离线结算转成展示文案，`plan` 为 `None` 返回空串。`elapsed_minutes` 是离线分钟数，`action_point_gain` 是执行层实际恢复的行动点（已受自然回复上限约束）；步进/伤亡增量取自计划。 |
 | `offline.model.step_per_hour` | 常量 float | `0.01` | 白昼闲逛基础步进率（步/小时）。 |
 | `offline.model.exit_amp` | 常量 float | `0.05` | 退出后残留活动的初始幅值（步/小时）。 |
 | `offline.model.exit_tau` | 常量 float | `0.9` | 残留活动的指数衰减时间常数（小时）。 |

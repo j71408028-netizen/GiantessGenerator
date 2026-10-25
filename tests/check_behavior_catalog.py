@@ -128,6 +128,8 @@ check("StateService.recover_evolution 标记兼容废弃",
       _by_key["StateService.recover_evolution"]["deprecated"] is True)
 _classify("offline.recover_plan", LAYER_MODULE, CONTRACT_STRATEGY,
           KIND_FUNCTION)
+_classify("offline.report_text", LAYER_MODULE, CONTRACT_STRATEGY,
+          KIND_FUNCTION)
 _classify("offline.model.step_per_hour", LAYER_INFRA, CONTRACT_DATA,
           KIND_CONST)
 _classify("logic.compute_casualty", LAYER_INFRA, CONTRACT_POINT,

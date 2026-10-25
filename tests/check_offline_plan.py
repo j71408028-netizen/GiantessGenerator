@@ -36,7 +36,8 @@ from core.models import (  # noqa: E402
     CharacterSnapshot, EvolutionRecord, OfflineDetail, OfflineRecoveryPlan,
 )
 from services.character.offline import (  # noqa: E402
-    OfflineModel, OfflineService, apply_recover_plan, build_recover_plan,
+    OfflineModel, OfflineService, apply_recover_plan, build_offline_report,
+    build_recover_plan,
 )
 from services.state_service import StateService  # noqa: E402
 
@@ -208,6 +209,33 @@ check("默认路径恢复行动点", state.action_points > 0)
 check("默认路径写入明细", bool(state.offline_details))
 check("默认路径追加演化行",
       state.evolution[-1].source == "recover_evolution")
+
+# ---------------- 9. 报告文案 ----------------
+state = _snap()
+text = OfflineService().recover_offline(state, _NOW)
+check("默认路径返回报告文案", text.startswith("离线 8.0 小时"), text)
+check("报告文案含实际恢复行动点", "行动点恢复 100" in text, text)
+check("报告文案含步进与伤亡",
+      "步进" in text and "新增伤亡" in text, text)
+
+state = _snap()
+state.updated_at = "not-a-date"
+check("空计划返回空文案",
+      build_offline_report(state, None, 0.0, 0) == "")
+check("无效时间戳返回空文案",
+      OfflineService().recover_offline(state, _NOW) == "")
+
+
+def _custom_text(state, plan, elapsed_minutes, action_point_gain):
+    return f"自定义报告 {elapsed_minutes:.0f}"
+
+
+try:
+    _RUNTIME.override("offline.report_text", _custom_text)
+    text = OfflineService().recover_offline(_snap(), _NOW)
+    check("报告文案可被覆盖", text.startswith("自定义报告 480"), text)
+finally:
+    _RUNTIME.reset()
 
 # ---------------- 结论 ----------------
 _log.flush()

@@ -452,11 +452,13 @@ class ExplorationContext:
 
         saved_at = state.updated_at  # 本次加载前的保存时间（用于新闻七天判断）
         # 时间恢复：每分钟恢复行动点并回落属性，超1小时按日间步进结算离线伤亡
-        self.state_service.recover_evolution(state)
+        offline_report = self.state_service.recover_evolution(state)
         self.state_service.apply_negative_evolution(state)
         self.ensure_avatar_for_state(state)
         self.character_repo.save(state)
         state._news_saved_at = saved_at
+        # 离线结算展示文案随状态透出，与 _news_saved_at 一样不持久化
+        state._offline_report = offline_report or ""
         return state
 
     def prepare_news_for_character_load(self, state: CharacterSnapshot):

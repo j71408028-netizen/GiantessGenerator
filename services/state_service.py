@@ -234,9 +234,10 @@ class StateService:
         ``offline.recover_plan`` 产出（行为包优先接这个新 key）。
         ``"StateService.recover_evolution"`` 仍可单独整体替换恢复流程；两者
         同时注册时新 key 生效，旧 key 被忽略并记入启用诊断。
+        返回 ``offline.report_text`` 生成的展示文案，无离线时长时为空串。
         """
         from services.character.offline import OfflineService
-        OfflineService().recover_offline(state, now)
+        return OfflineService().recover_offline(state, now)
 
     # ==================== 行动点数 ====================
 
