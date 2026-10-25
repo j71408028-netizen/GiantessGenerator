@@ -65,8 +65,26 @@ TAG_SPATIAL_PRIORS: Dict[str, SpatialPriors] = behavior_const(
     }, layer="content", contract="data")
 
 
+# 条目级校验：常量钩子只校验外层容器类型，内层形状在消费入口把关——
+# 非法条目跳过并只警告一次，防行为包笔误变成运行时崩溃。
+_TABLE_WARNED: set = set()
+
+
+def _warn_table_entry(key: str, tag: str, reason: str) -> None:
+    flag = (key, tag)
+    if flag in _TABLE_WARNED:
+        return
+    _TABLE_WARNED.add(flag)
+    print(f"[BehaviorPack] 警告：常量覆盖 '{key}' 的条目 '{tag}'"
+          f" {reason}，已忽略该条目")
+
+
 def priors_for_tags(tags: Iterable[str]) -> SpatialPriors:
-    """合并多个标签的先验：半径倍率相乘、其余相加；未知标签不参与。"""
+    """合并多个标签的先验：半径倍率相乘、其余相加；未知标签不参与。
+
+    覆盖表条目须具备四个数值字段（``SpatialPriors`` 或等价鸭子类型）；
+    非法条目跳过并警告一次。
+    """
     table = get_runtime().resolve_value("spatial.TAG_SPATIAL_PRIORS") or {}
     range_factor = 1.0
     stickiness = novelty = anchored = 0.0
@@ -74,10 +92,18 @@ def priors_for_tags(tags: Iterable[str]) -> SpatialPriors:
         p = table.get(tag)
         if p is None:
             continue
-        range_factor *= p.range_factor
-        stickiness += p.stickiness
-        novelty += p.novelty_bonus
-        anchored += p.anchored_bias
+        try:
+            rf, st, no, an = (float(p.range_factor), float(p.stickiness),
+                              float(p.novelty_bonus), float(p.anchored_bias))
+        except (AttributeError, TypeError, ValueError):
+            _warn_table_entry(
+                "spatial.TAG_SPATIAL_PRIORS", tag,
+                "缺少数值字段 range_factor/stickiness/novelty_bonus/anchored_bias")
+            continue
+        range_factor *= rf
+        stickiness += st
+        novelty += no
+        anchored += an
     return SpatialPriors(
         range_factor=max(0.5, min(2.0, range_factor)),
         stickiness=max(-0.8, min(0.8, stickiness)),
@@ -473,9 +499,10 @@ _ENV_PREFERENCE_SMOOTHING = 6.0                  # 成熟度：≈6 行证据达
                                                  # （与 _SMOOTHING_K 同型，语义各异不合并）
 
 # TAG → 环境偏好先验（并列表，不进 ``SpatialPriors`` 标量组）：值域升序
-# 分箱份额（和为 1）。只有环境语义清晰的标签入表（旅行 / 地理测量偏爱
-# 人烟稀少处）；数值是建议，行为锁只锁方向。行为包可扩展映射（键值均
-# 按标签名对齐），常量钩子为 ``spatial.TAG_ENV_PRIORS``。
+# 分箱份额（和为 1），每条固定 7 个数值（与 ``_ENV_BINS`` 同步；覆盖表
+# 的条目也须 7 元，否则被消费入口跳过并警告）。只有环境语义清晰的标签
+# 入表（旅行 / 地理测量偏爱人烟稀少处）；数值是建议，行为锁只锁方向。
+# 行为包可扩展映射（键值均按标签名对齐），常量钩子为 ``spatial.TAG_ENV_PRIORS``。
 TAG_ENV_PRIORS: Dict[str, tuple] = behavior_const(
     "spatial", "TAG_ENV_PRIORS", {
         "旅行": (0.30, 0.25, 0.15, 0.10, 0.08, 0.07, 0.05),
@@ -485,14 +512,30 @@ TAG_ENV_PRIORS: Dict[str, tuple] = behavior_const(
 
 def env_priors_for_tags(tags: Iterable[str]) -> Optional[List[float]]:
     """合并多标签的环境偏好先验：份额逐箱相加后归一；无命中返回 None
-    （消费方以均匀分布兜底）。"""
+    （消费方以均匀分布兜底）。
+
+    覆盖表条目须为 ``_ENV_BINS`` 个有限数值（箱数是 ``TAG_ENV_PRIORS``
+    值类型的隐含契约，不同步会错位崩溃）；非法条目跳过并警告一次。
+    """
     table = get_runtime().resolve_value("spatial.TAG_ENV_PRIORS") or {}
     shares = None
     for tag in tags or []:
         p = table.get(tag)
         if p is None:
             continue
-        shares = list(p) if shares is None else [a + b for a, b in zip(shares, p)]
+        try:
+            vals = [float(v) for v in p]
+        except (TypeError, ValueError):
+            _warn_table_entry(
+                "spatial.TAG_ENV_PRIORS", tag,
+                f"需要 {_ENV_BINS} 个数值的序列")
+            continue
+        if len(vals) != _ENV_BINS or not all(math.isfinite(v) for v in vals):
+            _warn_table_entry(
+                "spatial.TAG_ENV_PRIORS", tag,
+                f"需要 {_ENV_BINS} 个有限数值（得到 {len(vals)} 个）")
+            continue
+        shares = vals if shares is None else [a + b for a, b in zip(shares, vals)]
     if shares is None:
         return None
     total = sum(shares)

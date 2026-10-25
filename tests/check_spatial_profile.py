@@ -198,6 +198,33 @@ check("行为包可覆盖环境先验表",
 reset_runtime()
 check("重置后恢复默认先验", priors_for_tags(["旅行"]) == TAG_SPATIAL_PRIORS["旅行"])
 
+# ---------------- 6. 覆盖表的条目级校验 ----------------
+# 外层 dict 类型由常量钩子校验；内层形状在读取入口把关，非法条目跳过
+# 而不是崩溃（错误箱数 / 非数值 / 缺字段是行为包笔误的高发形态）。
+get_runtime().override(
+    "spatial.TAG_ENV_PRIORS",
+    {"地理测量": (0.2, 0.2, 0.1, 0.2, 0.1, 0.1, 0.1),   # 合法 7 元
+     "旅行": (0.4, 0.3, 0.2),                            # 箱数不符
+     "四处走走": "abcdefg"})                              # 长度对但非数值
+_shares = env_priors_for_tags(["地理测量"])
+check("合法环境先验条目参与合并",
+      _shares is not None and abs(sum(_shares) - 1.0) < 1e-9, str(_shares))
+check("箱数不符的环境先验条目被跳过",
+      env_priors_for_tags(["旅行"]) is None)
+check("非数值的环境先验条目被跳过",
+      env_priors_for_tags(["四处走走"]) is None)
+
+get_runtime().override(
+    "spatial.TAG_SPATIAL_PRIORS",
+    {"旅行": SpatialPriors(range_factor=1.4),
+     "地理测量": {"range_factor": 1.2}})   # 缺 stickiness 等字段
+check("合法空间先验条目参与合并",
+      abs(priors_for_tags(["旅行"]).range_factor - 1.4) < 1e-9)
+_bad = priors_for_tags(["地理测量"])
+check("缺字段的空间先验条目被跳过（保持中性）",
+      _bad.range_factor == 1.0 and _bad.stickiness == 0.0, str(_bad))
+reset_runtime()
+
 # ---------------- 结论 ----------------
 _log.flush()
 sys.stdout = sys.__stdout__
