@@ -78,7 +78,8 @@ class ExplorationContext:
         self._addresses = AddressPlanner(self.catalog)
         self._arbiter = SelectionArbiter(self.catalog, self._addresses)
         self._reports = ReportEngine(self.catalog, self._addresses, self._arbiter)
-        self._character = CharacterAssembler(character_repo, settings)
+        self._character = CharacterAssembler(character_repo, settings,
+                                             world_state=world_state)
 
     # ==================== 目录/配置属性透传 ====================
     # 阶段 3.1 **只做抽取、不动 ui 调用点**，所以下面这些名字必须原样保留。

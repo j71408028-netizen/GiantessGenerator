@@ -51,6 +51,11 @@
   阻尼约束，只能温和调制习惯的表达强度，不能改写习惯本身；
   `offline.model.rhythm_swing` 同理只重塑离线结算的步进曲线，不动作息学习，
   也不影响档案导出与聊天的作息 / 空间措辞。
+- **出身调制是创建期烙印，不是运行时常量**。角色的离线结算参数与空间 /
+  环境先验以 `ModelTuning` 烙印在档案里（`CreationService.derive_model_tuning`
+  在创建时派生一次）：世界包对「她是谁」的调制只发生在出身时刻，已有角色的
+  烙印终身携带、不随世界包启停变化；旧档案（无烙印字段）自动回退默认值，
+  结构性免疫后续任何启停。
 
 后续开放的新域（如 `chat.*` 人设相关）同样遵守：世界包可以追加世界语境，
 不可改写角色的既有身份事实（名字、性格、学到的习惯、达成的经历）。
@@ -177,6 +182,7 @@ data/worlds/<world_id>/
 |------|------|------|
 | `generate_random_height` | `() -> float` | 生成一个随机的普通身高（米）。 |
 | `calculate_height` | `(option, custom_val, min_slide, max_slide, use_will, greed, rng, personality=None) -> (float, Optional[str])` | 核心身高算法。`option` 为 `"custom"` 或 `"will"`；返回 `(身高, 意愿状态)`，状态取 `"within"` / `"implemented"` / `"failed"` / `None`。 |
+| `derive_model_tuning` | `(personality, selected_tags, height, core=None) -> ModelTuning` | 派生**角色出身调制烙印**（since 2.0，`module/strategy`）。创建角色时调用一次，返回值经内部夹取归一（`ModelTuning.sanitize`）后烙进角色档案、终身携带：覆盖它只调制**之后创建**的角色（离线结算参数包络 + 空间/环境先验），不触及已有角色；`origin_world`（出身世界包记录）由程序按激活世界包写入，不经本钩子。默认实现按离线模型常量与空间 TAG 先验表的**当前有效值**派生，行为包也可以整体替换（含 `extra` 自定义键，核心模型忽略、下游钩子可读）。 |
 
 > `get_body_parts`、`core_from_params`、`get_deterministic_rng` 不开放覆盖：它们属于
 > 内部编排/辅助逻辑，覆盖 `calculate_height` 等即可间接改变其输出。

@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional, Union
 from core.logic import ALL_PART_NAMES, apply_size_unlock_updates, build_size_description
 from core.models import CharacterSnapshot, ReportData
 from persistence.character_repo import CharacterRepo
+from services.creation_service import CreationService
 
 
 class CharacterAssembler:
@@ -26,14 +27,18 @@ class CharacterAssembler:
 
     - ``character_repo``：角色档案的读写（含头像落盘 / 取绝对路径）；
     - ``settings``：与 ``ExplorationContext`` **共用同一个 dict 对象**（不复制），
-      因此上层对设置的修改在这里立即可见。
+      因此上层对设置的修改在这里立即可见；
+    - ``world_state``：世界包激活状态（出身烙印 origin_world 的来源），
+      可为 None（无世界包环境）。
 
     注意：``settings`` 是共享引用而非快照，切勿在本类里对它做整体替换。
     """
 
-    def __init__(self, character_repo: CharacterRepo, settings: Dict[str, Any]):
+    def __init__(self, character_repo: CharacterRepo, settings: Dict[str, Any],
+                 world_state=None):
         self.character_repo = character_repo
         self.settings = settings
+        self.world_state = world_state
 
     # ---------- 创建角色 ----------
 
@@ -99,6 +104,14 @@ class CharacterAssembler:
             state.step_intrusion = source.step_intrusion or 0.0
             state.step_destruction = source.step_destruction or 0.0
 
+        # 出身烙印：按当前世界规则派生一次、sanitize 后终身携带；世界包此后
+        # 启停不触及已有角色。origin_world 记录出身世界包（无激活包为 None）。
+        tuning = CreationService.derive_model_tuning(
+            state.personality, state.selected_tags, state.height, core=core
+        ).sanitize()
+        tuning.origin_world = self._origin_world()
+        state.model_tuning = tuning
+
         uploaded_image = core.get('uploaded_image')
 
         if from_report:
@@ -118,6 +131,18 @@ class CharacterAssembler:
 
     def _detail_selected_parts(self) -> set:
         return set(self.settings.get("selected_parts", ALL_PART_NAMES.copy()))
+
+    def _origin_world(self) -> Optional[dict]:
+        """出身世界包记录 {pack_id, name, version}；未激活世界包时为 None。"""
+        world_state = self.world_state
+        manifest = getattr(world_state, "manifest", None)
+        if manifest is None or not getattr(world_state, "active", False):
+            return None
+        return {
+            "pack_id": getattr(manifest, "world_id", "") or "",
+            "name": getattr(manifest, "name", "") or "",
+            "version": getattr(manifest, "version", "") or "",
+        }
 
     def size_unlocks_from_report(self, report: ReportData) -> Dict[str, str]:
         """从一份报告现推部位解锁表（未持角色档案时看尺寸一览用）。

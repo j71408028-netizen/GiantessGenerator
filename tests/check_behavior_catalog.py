@@ -52,7 +52,7 @@ def check(name, ok, extra=""):
 # scope 的默认语义归属。新 scope 必须先在这里登记，再写钩子；
 # 特例在 scope 内按 key 单独断言。
 SCOPE_LAYERS = {
-    "CreationService": {LAYER_INFRA},
+    "CreationService": {LAYER_INFRA, LAYER_MODULE},
     "StateService": {LAYER_INFRA, LAYER_MODULE},
     "logic": {LAYER_INFRA, LAYER_CONTENT},
     "offline": {LAYER_INFRA, LAYER_MODULE},
@@ -128,6 +128,10 @@ _classify("StateService.recover_evolution", LAYER_MODULE, CONTRACT_STRATEGY,
           KIND_FUNCTION)
 check("StateService.recover_evolution 标记兼容废弃",
       _by_key["StateService.recover_evolution"]["deprecated"] is True)
+_classify("CreationService.derive_model_tuning", LAYER_MODULE,
+          CONTRACT_STRATEGY, KIND_FUNCTION)
+check("CreationService.derive_model_tuning since 2.0",
+      _by_key["CreationService.derive_model_tuning"]["since"] == "2.0")
 _classify("offline.recover_plan", LAYER_MODULE, CONTRACT_STRATEGY,
           KIND_FUNCTION)
 _classify("offline.report_text", LAYER_MODULE, CONTRACT_STRATEGY,

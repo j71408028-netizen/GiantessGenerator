@@ -2,9 +2,9 @@ import hashlib
 import random
 from typing import Optional, Dict, Tuple
 
-from core.models import Personality, BodyPreset
+from core.models import BodyPreset, ModelTuning, Personality, SpatialPriorsParams
 from persistence.name_repo import NameRepo, DEFAULT_NAME_TABLE
-from core.behavior_runtime import behavior_hook
+from core.behavior_runtime import behavior_hook, get_runtime
 from persistence.static_table import weighted_choice
 
 
@@ -134,6 +134,62 @@ class CreationService:
 
         log_h = center + half_range * scale
         return 10 ** log_h, status
+
+    @staticmethod
+    @behavior_hook("CreationService", "derive_model_tuning",
+                   layer="module", contract="strategy", since="2.0")
+    def derive_model_tuning(personality, selected_tags, height,
+                            core=None) -> ModelTuning:
+        """按当前世界规则的默认表派生角色出身调制烙印。
+
+        创建期调用一次（``CharacterAssembler.character_from_core_or_report``），
+        结果经 sanitize 后烙进角色档案、终身携带；覆盖本钩子只调制**之后
+        创建**的角色，不触及已有角色。默认实现读取离线模型常量与空间
+        TAG 先验表的当前有效值（无包时与不烙印数值一致）；``origin_world``
+        由烙印点按激活世界包写入，不在此处。``personality`` / ``height`` /
+        ``core`` 供覆盖实现取用，默认表不依赖它们。
+        """
+        # 延迟 import：确保 offline.model.* 常量与 spatial TAG 两表已注册进
+        # 行为运行时，resolve_value 读到的是世界包覆盖后的当前有效值。
+        from services.character import offline as _offline  # noqa: F401
+        from services.character.spatial import (
+            env_priors_for_tags, priors_for_tags)
+
+        runtime = get_runtime()
+
+        def _effective(key: str, fallback: float) -> float:
+            value = runtime.resolve_value(key)
+            try:
+                return fallback if value is None else float(value)
+            except (TypeError, ValueError):
+                return fallback
+
+        defaults = ModelTuning()
+        priors = priors_for_tags(selected_tags or [])
+        return ModelTuning(
+            step_per_hour=_effective(
+                "offline.model.step_per_hour", defaults.step_per_hour),
+            exit_amp=_effective("offline.model.exit_amp", defaults.exit_amp),
+            exit_tau=_effective("offline.model.exit_tau", defaults.exit_tau),
+            recovery_points_per_minute=_effective(
+                "offline.model.recovery_points_per_minute",
+                defaults.recovery_points_per_minute),
+            recovery_decay_per_minute=_effective(
+                "offline.model.recovery_decay_per_minute",
+                defaults.recovery_decay_per_minute),
+            noise_scale=_effective(
+                "offline.model.noise_scale", defaults.noise_scale),
+            old_step_divisor=_effective(
+                "offline.model.old_step_divisor", defaults.old_step_divisor),
+            rhythm_swing=_effective(
+                "offline.model.rhythm_swing", defaults.rhythm_swing),
+            spatial_priors=SpatialPriorsParams(
+                range_factor=priors.range_factor,
+                stickiness=priors.stickiness,
+                novelty_bonus=priors.novelty_bonus,
+                anchored_bias=priors.anchored_bias),
+            env_prior_shares=env_priors_for_tags(selected_tags or []),
+        )
 
     _PART_RATIO_ATTRS = (
         ("腿长", "leg_ratio"),

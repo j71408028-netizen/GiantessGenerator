@@ -1,6 +1,7 @@
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional
 from dataclasses import dataclass, field, fields, replace
 import datetime
+import math
 import uuid
 
 @dataclass
@@ -199,6 +200,136 @@ class OfflineRecoveryPlan:
     casualties: float = 0.0
 
 
+# 环境偏好先验的箱数：与学习层（services/character/spatial.py 的 _ENV_BINS）
+# 同步的硬契约，ModelTuning.env_prior_shares 的每条先验都是这个长度。
+ENV_PRIOR_BINS = 7
+
+
+@dataclass
+class SpatialPriorsParams:
+    """烙印进角色档案的空间先验四标量（中性值 = 不影响调度）。
+
+    字段语义与 ``services/character/spatial.py::SpatialPriors`` 一致；
+    创建时按标签合并烙印，此后终身携带，不随世界包启停变化。
+    """
+    range_factor: float = 1.0     # 活动半径倍率
+    stickiness: float = 0.0       # 区域粘性（放大/抹平学习层偏向）
+    novelty_bonus: float = 0.0    # 未到访分支的新颖加成
+    anchored_bias: float = 0.0    # 有地址内容相对 portable 内容的偏好偏移
+
+
+@dataclass
+class ModelTuning:
+    """角色出身调制烙印：创建时经 ``CreationService.derive_model_tuning``
+    派生、烙进档案后终身携带（世界包启停不再触及已有角色）。
+
+    - 离线 8 项：离线结算模型参数（步进率、退出残留、行动点恢复、噪声、
+      旧段除数、作息放大）；
+    - ``spatial_priors`` / ``env_prior_shares``：创建时按标签合并的空间
+      先验与环境份额先验（后者 None = 均匀兜底）；
+    - ``origin_world``：出身世界包记录 ``{pack_id, name, version}`` 或
+      None，由烙印点写入，供导出与排查；
+    - ``extra``：行为包自定义键，核心模型忽略，下游钩子经
+      ``state.model_tuning.extra`` 可读。
+
+    数值统一经 :meth:`sanitize` 夹取归一（烙印与 ``from_dict`` 两端都走），
+    危险值进不来。旧档案无本字段时走全默认，数值与不烙印一致。
+    """
+
+    step_per_hour: float = 0.01
+    exit_amp: float = 0.05
+    exit_tau: float = 0.9
+    recovery_points_per_minute: float = 0.5
+    recovery_decay_per_minute: float = 0.01
+    noise_scale: float = 0.1
+    old_step_divisor: float = math.pi
+    rhythm_swing: float = 1.0   # 作息调制对离线步进的放大：0=平坦 1=默认，夹取 0~3
+    spatial_priors: SpatialPriorsParams = field(default_factory=SpatialPriorsParams)
+    env_prior_shares: Optional[List[float]] = None
+    origin_world: Optional[Dict[str, str]] = None
+    extra: Dict[str, Any] = field(default_factory=dict)
+
+    @staticmethod
+    def _num(value, fallback: float, lo: float = None,
+             hi: float = None) -> float:
+        """数值清洗：不可转 / 非有限回默认，再夹取到给定区间。"""
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return fallback
+        if not math.isfinite(v):
+            return fallback
+        if lo is not None:
+            v = max(lo, v)
+        if hi is not None:
+            v = min(hi, v)
+        return v
+
+    def _sanitize_shares(self) -> Optional[List[float]]:
+        """环境份额：须恰好 ``ENV_PRIOR_BINS`` 个有限数值，负值归零后归一；
+        形状不符（含 None）返回 None = 均匀兜底。"""
+        shares = self.env_prior_shares
+        if shares is None:
+            return None
+        try:
+            vals = [float(v) for v in shares]
+        except (TypeError, ValueError):
+            return None
+        if len(vals) != ENV_PRIOR_BINS or not all(math.isfinite(v) for v in vals):
+            return None
+        vals = [max(0.0, v) for v in vals]
+        total = sum(vals)
+        return [v / total for v in vals] if total > 0 else None
+
+    def sanitize(self) -> "ModelTuning":
+        """夹取归一，返回清洗后的新实例。
+
+        烙印（derive 之后、写档案之前）与读档（``from_dict``）两端统一走
+        这里：非有限值回默认，各参数夹到与消费端一致的安全区间，空间先验
+        按合并口径夹取，环境份额归一。
+        """
+        priors = (self.spatial_priors
+                  if isinstance(self.spatial_priors, SpatialPriorsParams)
+                  else SpatialPriorsParams())
+        return ModelTuning(
+            step_per_hour=self._num(self.step_per_hour, 0.01, lo=0.0),
+            exit_amp=self._num(self.exit_amp, 0.05, lo=0.0),
+            exit_tau=self._num(self.exit_tau, 0.9, lo=1e-9),
+            recovery_points_per_minute=self._num(
+                self.recovery_points_per_minute, 0.5, lo=0.0),
+            recovery_decay_per_minute=self._num(
+                self.recovery_decay_per_minute, 0.01, lo=0.0),
+            noise_scale=self._num(self.noise_scale, 0.1, lo=0.0),
+            old_step_divisor=self._num(
+                self.old_step_divisor, math.pi, lo=1e-9),
+            rhythm_swing=self._num(self.rhythm_swing, 1.0, lo=0.0, hi=3.0),
+            spatial_priors=SpatialPriorsParams(
+                range_factor=self._num(priors.range_factor, 1.0, 0.5, 2.0),
+                stickiness=self._num(priors.stickiness, 0.0, -0.8, 0.8),
+                novelty_bonus=self._num(priors.novelty_bonus, 0.0, lo=0.0),
+                anchored_bias=self._num(priors.anchored_bias, 0.0, -0.5, 0.5),
+            ),
+            env_prior_shares=self._sanitize_shares(),
+            origin_world=(self.origin_world
+                          if isinstance(self.origin_world, dict) else None),
+            extra=dict(self.extra) if isinstance(self.extra, dict) else {},
+        )
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ModelTuning":
+        """从字典构造（忽略未知字段），并经 sanitize 夹取归一。"""
+        if not isinstance(data, dict):
+            return cls()
+        allowed = {f.name for f in fields(cls)}
+        kwargs = {k: v for k, v in data.items() if k in allowed}
+        priors = kwargs.get("spatial_priors")
+        if isinstance(priors, dict):
+            priors_allowed = {f.name for f in fields(SpatialPriorsParams)}
+            kwargs["spatial_priors"] = SpatialPriorsParams(
+                **{k: v for k, v in priors.items() if k in priors_allowed})
+        return cls(**kwargs).sanitize()
+
+
 @dataclass
 class CharacterSnapshot:
     giantess_id: str
@@ -248,6 +379,10 @@ class CharacterSnapshot:
     activity_regions: List[str] = field(default_factory=list)
     # 离线恢复期间的2小时精度步进与伤亡明细，由 recover_evolution 计算填充。
     offline_details: List[OfflineDetail] = field(default_factory=list)
+    # 出身调制烙印：创建期由 CreationService.derive_model_tuning 派生并经
+    # sanitize 后烙印（见 ModelTuning）。旧档无此字段 → 全默认，任何世界包
+    # 启停都不再触及已有角色的离线/空间调制。
+    model_tuning: ModelTuning = field(default_factory=ModelTuning)
 
     def __post_init__(self):
         # 允许以字典列表构造（从 JSON 加载），统一规范化为 EvolutionRecord
@@ -259,14 +394,20 @@ class CharacterSnapshot:
             d if isinstance(d, OfflineDetail) else OfflineDetail.from_dict(d)
             for d in (self.offline_details or [])
         ]
+        if isinstance(self.model_tuning, dict):
+            self.model_tuning = ModelTuning.from_dict(self.model_tuning)
 
     @classmethod
     def from_dict(cls, data: dict) -> "CharacterSnapshot":
         """从字典构造，忽略残余的未知字段（如历史遗留的 negative_reduction_*），
-        并把 personality 字典规范化为 Personality。"""
+        并把 personality / model_tuning 字典规范化为对应对象。"""
         personality = data.get("personality")
         if isinstance(personality, dict):
             data = {**data, "personality": Personality.from_dict(personality)}
+        model_tuning = data.get("model_tuning")
+        if isinstance(model_tuning, dict):
+            data = {**data,
+                    "model_tuning": ModelTuning.from_dict(model_tuning)}
         allowed = {f.name for f in fields(cls)}
         return cls(**{k: v for k, v in data.items() if k in allowed})
 
