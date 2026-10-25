@@ -237,6 +237,47 @@ try:
 finally:
     _RUNTIME.reset()
 
+# ---------------- 10. 离线作息放大（rhythm_swing） ----------------
+# 96h 离线：明细窗只覆盖最近 72h，窗内桶距退出已远（tau≈0.9h），退出
+# 残留可忽略；学习表跨昼夜铺样本，使默认桶间步进有差异、swing=0 平坦。
+
+
+def _rhythmic_snap():
+    snap = CharacterSnapshot(giantess_id="g", name="t", height=100.0)
+    snap.updated_at = (_NOW - datetime.timedelta(hours=96.0)).isoformat()
+    snap.action_points = 0
+    snap.evolution = []
+    for days_ago in range(8):
+        for hour in range(0, 24, 3):
+            snap.evolution.append(EvolutionRecord(
+                changed_at=(_NOW - datetime.timedelta(
+                    days=days_ago, hours=hour + 3)).isoformat(),
+                step=1.0, intrusion=1.0, destruction=1.0,
+                casualties=0.0, source="t"))
+    return snap
+
+
+_default_steps = [d.step for d in
+                  build_recover_plan(_rhythmic_snap(), _NOW, OfflineModel()).details]
+_flat_steps = [d.step for d in build_recover_plan(
+    _rhythmic_snap(), _NOW, OfflineModel(rhythm_swing=0.0)).details]
+_clamped_steps = [d.step for d in build_recover_plan(
+    _rhythmic_snap(), _NOW, OfflineModel(rhythm_swing=-5.0)).details]
+check("默认（swing=1）昼夜步进有差异",
+      max(_default_steps) - min(_default_steps) > 1e-9)
+check("swing=0 昼夜平坦", max(_flat_steps) - min(_flat_steps) < 1e-9)
+check("负值夹取为 0（与平坦一致）", _flat_steps == _clamped_steps)
+
+try:
+    _RUNTIME.override("offline.model.rhythm_swing", 0.0)
+    _svc = OfflineService()
+    check("rhythm_swing 常量钩子可覆盖", _svc.rhythm_swing == 0.0)
+    check("覆盖经服务默认模型生效",
+          [d.step for d in build_recover_plan(
+              _rhythmic_snap(), _NOW, _svc._model()).details] == _flat_steps)
+finally:
+    _RUNTIME.reset()
+
 # ---------------- 结论 ----------------
 _log.flush()
 sys.stdout = sys.__stdout__

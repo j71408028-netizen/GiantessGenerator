@@ -134,6 +134,8 @@ _classify("offline.report_text", LAYER_MODULE, CONTRACT_STRATEGY,
           KIND_FUNCTION)
 _classify("offline.model.step_per_hour", LAYER_INFRA, CONTRACT_DATA,
           KIND_CONST)
+_classify("offline.model.rhythm_swing", LAYER_INFRA, CONTRACT_DATA,
+          KIND_CONST)
 _classify("select.lanes", LAYER_MODULE, CONTRACT_STRATEGY, KIND_FUNCTION)
 _classify("select.joint_score", LAYER_MODULE, CONTRACT_STRATEGY,
           KIND_FUNCTION)

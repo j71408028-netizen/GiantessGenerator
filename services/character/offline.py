@@ -53,6 +53,12 @@ _OFFLINE_NOISE_SCALE = behavior_const(
 _OFFLINE_OLD_STEP_DIVISOR = behavior_const(
     "offline", "model.old_step_divisor", math.pi,
     layer="infra", contract="data")
+# 作息调制对离线步进的放大倍率（读取时夹取 0~3）：0 = 昼夜平坦，1 = 默认，
+# >1 放大昼夜差异。只作用于离线结算的步进曲线，不改变角色档案学到的作息
+# 与档案 / 聊天措辞——作息学习参数属于角色身份，不开放。
+_OFFLINE_RHYTHM_SWING = behavior_const(
+    "offline", "model.rhythm_swing", 1.0,
+    layer="infra", contract="data")
 
 
 @dataclass(frozen=True)
@@ -72,6 +78,7 @@ class OfflineModel:
     recovery_decay_per_minute: float = _OFFLINE_RECOVERY_DECAY_PER_MINUTE
     noise_scale: float = _OFFLINE_NOISE_SCALE
     old_step_divisor: float = _OFFLINE_OLD_STEP_DIVISOR
+    rhythm_swing: float = _OFFLINE_RHYTHM_SWING
 
 
 def _model_value(explicit: Optional[float], key: str) -> float:
@@ -112,6 +119,11 @@ def _rhythm_mean(rhythm) -> float:
     vals = [matrix[w][b] for w in range(len(matrix))
             for b in range(len(matrix[w]))]
     return sum(vals) / len(vals) if vals else 1.0
+
+
+def _swing_factor(factor: float, swing: float) -> float:
+    """作息调制按离线侧放大倍率重塑：1 固定、偏差（factor-1）乘 swing。"""
+    return 1.0 + swing * (factor - 1.0)
 
 
 def _detail_bins(begin: datetime.datetime, end: datetime.datetime,
@@ -201,6 +213,8 @@ def build_recover_plan(state: CharacterSnapshot, now: datetime.datetime,
     # 作息学习：从演化表学到 (星期×2h桶) 的归一化调制因子。
     rhythm = RhythmService().learn_from_evolution(state.evolution)
     step_per_hour = max(0.0, float(model.step_per_hour))
+    # 离线侧作息放大（夹取 0~3）：只重塑本计划的步进曲线，不动作息学习
+    swing = min(3.0, max(0.0, float(model.rhythm_swing)))
 
     # ---- 最近 72h 窗口：2h 精度明细（含噪声） ----
     offline_details = []
@@ -210,7 +224,7 @@ def build_recover_plan(state: CharacterSnapshot, now: datetime.datetime,
         mid = s + (e - s) / 2.0
         rate = (_activity_baseline(state.personality)
                 * step_per_hour
-                * rhythm.factor_at(mid)
+                * _swing_factor(rhythm.factor_at(mid), swing)
                 + _exit_residual_rate(mid, updated, state.personality, model))
         step = rate * (e - s).total_seconds() / 3600.0
         env_factor = max(0.1, min(1.5,
@@ -231,7 +245,7 @@ def build_recover_plan(state: CharacterSnapshot, now: datetime.datetime,
     if old_hours > 0:
         old_days = old_hours / 24.0
         # 窗口外无作息明细，按“24h 平滑步进总量×离线天数×作息均值”汇总
-        rhythm_mean = _rhythm_mean(rhythm)
+        rhythm_mean = _swing_factor(_rhythm_mean(rhythm), swing)
         divisor = max(1e-9, float(model.old_step_divisor))
         old_step = (_activity_baseline(state.personality)
                     * step_per_hour * 24.0 / divisor
@@ -347,7 +361,8 @@ class OfflineService:
                  recovery_points_per_minute: Optional[float] = None,
                  recovery_decay_per_minute: Optional[float] = None,
                  noise_scale: Optional[float] = None,
-                 old_step_divisor: Optional[float] = None):
+                 old_step_divisor: Optional[float] = None,
+                 rhythm_swing: Optional[float] = None):
         self.window_hours = (_OFFLINE_WINDOW_HOURS if window_hours is None
                              else float(window_hours))
         self.bin_hours = (_OFFLINE_BIN_HOURS if bin_hours is None
@@ -366,6 +381,8 @@ class OfflineService:
             noise_scale, "offline.model.noise_scale")
         self.old_step_divisor = _model_value(
             old_step_divisor, "offline.model.old_step_divisor")
+        self.rhythm_swing = _model_value(
+            rhythm_swing, "offline.model.rhythm_swing")
 
     # ==================== 兼容查询入口 ====================
 
@@ -380,6 +397,7 @@ class OfflineService:
             recovery_decay_per_minute=self.recovery_decay_per_minute,
             noise_scale=self.noise_scale,
             old_step_divisor=self.old_step_divisor,
+            rhythm_swing=self.rhythm_swing,
         )
 
     def _environment_factor(self, state, step: float,
