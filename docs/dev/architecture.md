@@ -134,6 +134,22 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 两个文件不得改名、不得收编进子包**（除非留 shim，那是一笔永久的税，别轻易决定）。
 `services/` 整理（2026-10-06）据此把它们留在顶层，理由记录在 `services/__init__.py`。
 
+### 2.6 档案派生层（rhythm / spatial / profile_text）
+
+`services/character/` 下的 `rhythm.py`、`spatial.py`、`profile_text.py` 是一族
+**无状态派生视图**，与其他 service（有状态编排、触仓储）不同：全部从演化表
+（`EvolutionRecord` 行集）即时推导，不持久化、不设单例、不做 IO，`now` 一律
+可注入（测试用固定时钟）。约定：
+
+- 只依赖 core（`models` / `address_model` / `behavior_runtime`），不碰
+  persistence、不依赖其他 service 子域；
+- 消费方（exploration 的仲裁数值、chat / archive_export 的文本）按 services
+  子域直连 import，一律从层内装配入口取数（`build_spatial_profile` /
+  `RhythmService().learn_from_evolution`），不各自复刻学习逻辑；
+- `profile_text.py` 的四个入口是行为包钩子，scope 为字面量 `"profile"`
+  （§2.1 同款契约），行为包覆盖范围见
+  `docs/designs/world_pack_behaviors.md` 附录 A。
+
 ---
 
 ## 3. 历程索引（已移至 legacy/）

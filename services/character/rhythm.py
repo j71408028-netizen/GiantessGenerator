@@ -77,6 +77,22 @@ class RhythmService:
         """2 小时桶下标：桶边界对齐到偶数整点（与离线明细同规则）。"""
         return (dt.hour // 2) % _BUCKETS_PER_DAY
 
+    def total_samples(self) -> float:
+        """参与学习的活动样本总数（文本化措辞的成熟度依据）。"""
+        return sum(self._counts[w][b]
+                   for w in range(_DAYS_PER_WEEK)
+                   for b in range(_BUCKETS_PER_DAY))
+
+    def learned_grid(self) -> List[List[float]]:
+        """7×12 已学习权重网格的只读副本（含昼夜先验与收缩，见
+        ``_learned_weights``），供文本化层挑活跃/安静时段。"""
+        return [row[:] for row in self._learned_weights()]
+
+    def counts_grid(self) -> List[List[float]]:
+        """7×12 样本计数网格的只读副本：区分"有证据的时段"与"先验
+        兜底的时段"，供文本化层只在证据上做周内对比。"""
+        return [row[:] for row in self._counts]
+
     def _learned_weights(self) -> List[List[float]]:
         """返回 7×12 的已学习权重网格（未学习的桶回退默认昼夜曲线）。
 

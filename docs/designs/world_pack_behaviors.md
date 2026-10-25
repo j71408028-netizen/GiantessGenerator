@@ -10,7 +10,10 @@
 - `core/logic/`（原 `core/logic.py`，已按职责拆为 `sizing` / `quips` / `simulation` / `text`
   四个子模块，`core/logic/__init__.py` 薄壳再导出全部公开名）中除 `get_size_category` 外的
   全部模块函数，以及 `PREDEFINED_TAGS` 常量（注册用的键**仍是 `"logic.xxx"`**——键是稳定
-  契约，不含包路径，拆分不改键）。
+  契约，不含包路径，拆分不改键）；
+- `profile`（`services/character/profile_text.py`，档案派生层的文本化出口）：作息与
+  空间偏好的可读结论与实时提示（见附录 A 的 `profile` 组）。scope 同样是与文件位置
+  无关的字面量契约——以后新域按此模式扩展。
 
 **核心规则**：
 
@@ -156,6 +159,19 @@ data/worlds/<world_id>/
 | `get_comparisons` | `(landmarks, body_parts, order="match", limit=5, selected_tags=None, skip_base_prob=0.0, selected_parts=None, blocked_words=None) -> List[Dict]` | 寻找最接近的地标对比。名称含屏蔽词的地标会被跳过（内部调用 `contains_blocked_word`）。                                                                                |
 | `_build_size_description` | `(quip_result) -> str` | 由报告正文中的一条尺寸对比结果构造解锁描述。                                                                     |
 | `select_quip_with_budget` | `(size_cat, intrusion_val, destruction_val, quips_working, locked_coords, cumulative_actual, cumulative_base, rate_factor=1.0, step_index=0, selected_tags=None, skip_base_prob=0.0, posture_list=None, blocked_words=None) -> (text, style, coord, actual_step, new_cumulative_actual, new_cumulative_base)` | 在预算内挑选事件描述 quip。含屏蔽词的描述会被跳过（内部调用 `contains_blocked_word`）。注意它会**就地弹出** `quips_working` 中被选中的 quip，覆盖实现必须保持该行为并返回 6 元组。               |
+
+### `profile`（档案派生层文本化，模块函数）
+
+消费方：角色档案导出的「作息与活动范围观察」块、聊天人设与系统提示词。
+返回约定：**纯文本多行（不含 HTML）**；实时提示在样本不足 / 零证据时返回**空串**
+（消费方据此整行省略）。默认实现会按样本成熟度自动降级措辞，覆盖实现建议保留该约定。
+
+| 目标 | 签名 | 说明 |
+|------|------|------|
+| `profile.describe_rhythm` | `(evolution, now=None) -> str` | 作息历史结论（活跃/安静时段、周末与工作日差异、成熟度措辞）；无样本返回空串。 |
+| `profile.rhythm_now_hint` | `(evolution, now=None) -> str` | 作息实时提示：当前时刻活跃期 / 休整期各一行措辞，平常时段与样本不足时返回空串。 |
+| `profile.describe_spatial` | `(profile, position="") -> str` | 空间偏好历史结论：常活动地带、环境偏好、手工活动区域。`profile` 是 `services.character.spatial.build_spatial_profile` 的装配结果。 |
+| `profile.spatial_now_hint` | `(profile, position="") -> str` | 空间实时提示：当前位置相对偏好的评价 + 环境口语化描述；零证据返回空串。 |
 
 ## 附录 B：完整示例（imperial_units）
 

@@ -135,6 +135,20 @@ class SpatialProfileService:
     def has_data(self) -> bool:
         return self._total > 0.0
 
+    def total_weight(self) -> float:
+        """EWMA 加权到访总量（文本化措辞的成熟度依据）。"""
+        return self._total
+
+    def top_regions(self, n: int = 2) -> List[tuple]:
+        """按加权到访量降序的前 n 个已到访区域 [(标签元组, 权重)]。
+
+        纯世界观节点只在没有任何更深节点时才参与（单学到世界观时也
+        有话可说）；标签元组形如 ``(世界观,)`` / ``(世界观, 一级, 二级)``。
+        """
+        keys = [k for k in self._weights if len(k) > 1] or list(self._weights)
+        ranked = sorted(keys, key=lambda k: (-self._weights[k], k))[:max(0, n)]
+        return [(k, self._weights[k]) for k in ranked]
+
     def visited_worlds(self) -> set:
         return {k[0] for k in self._weights if len(k) == 1}
 
@@ -532,6 +546,20 @@ class EnvPreferenceProfile:
 
     def has_data(self) -> bool:
         return self._total > 0.0 or self._prior is not None
+
+    def preferred_env(self) -> Optional[tuple]:
+        """偏好分布的代表值 ``(代表 env 值, 置信度 0~1)``，供文本化层措辞。
+
+        代表值取证据投票份额加权的箱中心（TAG 先验不参与——只说学到
+        的偏好）；置信度即证据成熟度。零证据返回 None。
+        """
+        if self._total <= 0.0:
+            return None
+        width = (_MAX_ENV - _MIN_ENV) / _ENV_BINS
+        num = sum((_MIN_ENV + (i + 0.5) * width) * v
+                  for i, v in enumerate(self._votes))
+        maturity = self._total / (self._total + _ENV_PREFERENCE_SMOOTHING)
+        return (num / self._total, maturity)
 
     def preference_factor(self, env_value: float) -> float:
         """环境值的偏好调制（围绕 1.0；无数据返回 1.0）。
