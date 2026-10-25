@@ -62,7 +62,7 @@ TAG_SPATIAL_PRIORS: Dict[str, SpatialPriors] = behavior_const(
         "地理测量": SpatialPriors(range_factor=1.1, novelty_bonus=0.3, anchored_bias=0.15),
         "四处走走": SpatialPriors(range_factor=1.15, stickiness=-0.3),
         "能躺着不站着": SpatialPriors(range_factor=0.8, stickiness=0.4),
-    })
+    }, layer="content", contract="data")
 
 
 def priors_for_tags(tags: Iterable[str]) -> SpatialPriors:
@@ -480,7 +480,7 @@ TAG_ENV_PRIORS: Dict[str, tuple] = behavior_const(
     "spatial", "TAG_ENV_PRIORS", {
         "旅行": (0.30, 0.25, 0.15, 0.10, 0.08, 0.07, 0.05),
         "地理测量": (0.22, 0.20, 0.16, 0.13, 0.11, 0.10, 0.08),
-    })
+    }, layer="content", contract="data")
 
 
 def env_priors_for_tags(tags: Iterable[str]) -> Optional[List[float]]:

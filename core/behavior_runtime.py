@@ -13,6 +13,11 @@
 - **常量**：``behavior_const(scope, name, value)`` 注册；覆盖实现可注册同类型
   值，或返回该值的可调用对象；读取方用 ``runtime.resolve_value(key)`` 取有效值。
 
+每个目标还带语义元数据：``layer``（infra / module / content）、``contract``
+（point / strategy / data）、``since``、``deprecated``。``runtime.catalog()``
+返回完整目录，供行为包作者判断“该不该接、接到什么程度”；层级不按目录划分，
+按语义所有权划分。
+
 ``load_pack`` 在激活时逐条校验注册（未知 key / 签名不符 / 常量类型不符均拒绝
 该条覆盖并记入诊断；同一 key 重复注册保留最后一条并给出警告），并产出
 :class:`BehaviorLoadReport` 启用诊断报告，防止行为包静默失效。
@@ -44,15 +49,40 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 KIND_FUNCTION = "function"
 KIND_CONST = "const"
 
+# 语义所有权层级：基础设施点 / 模块策略 / 模块内容。核心不变式不进入目录。
+LAYER_INFRA = "infra"
+LAYER_MODULE = "module"
+LAYER_CONTENT = "content"
+
+# 契约形态：基础设施算法点 / 模块决策策略 / 数据素材。
+CONTRACT_POINT = "point"
+CONTRACT_STRATEGY = "strategy"
+CONTRACT_DATA = "data"
+
+# 层级允许的契约；新增组合前先确认它没有把“机制”和“策略”混在一起。
+_LAYER_CONTRACTS = {
+    LAYER_INFRA: {CONTRACT_POINT, CONTRACT_DATA},
+    LAYER_MODULE: {CONTRACT_STRATEGY, CONTRACT_DATA},
+    LAYER_CONTENT: {CONTRACT_DATA},
+}
+
 
 @dataclass
 class HookSpec:
-    """注册表条目：``key -> 默认实现 + 细度``。函数细度另记录默认实现的具名参数。"""
+    """注册表条目：``key -> 默认实现 + 细度 + 语义元数据``。
+
+    ``layer`` / ``contract`` 说明这个目标属于基础设施点、模块策略还是内容；
+    ``since`` / ``deprecated`` 供后续版本迁移。函数细度另记录默认实现的具名参数。
+    """
 
     key: str
     default: Any
     kind: str
     param_names: Tuple[str, ...] = ()
+    layer: str = LAYER_INFRA
+    contract: str = CONTRACT_POINT
+    since: str = "1"
+    deprecated: bool = False
 
 
 @dataclass
@@ -113,6 +143,7 @@ class BehaviorRuntime:
       注册会被拒绝并记入诊断，不再静默存放永远不被命中的覆盖。
     - ``resolve(key)``：查询覆盖实现；未覆盖时返回 None。
     - ``resolve_value(key)``：常量细度目标的有效值（覆盖实现可调用则调用）。
+    - ``catalog()``：列出全部目标的元数据（层级 / 契约 / 版本 / 废弃状态）。
     - ``default(target)``：返回被覆盖前的默认实现，便于覆盖函数内部委托。
     - ``load_pack(manifest, installed)``：按清单加载行为包模块并注册，
       产出启用诊断报告（``last_report``）。
@@ -206,6 +237,27 @@ class BehaviorRuntime:
                 return spec.default
             return value
         return spec.default if spec is not None else None
+
+    def catalog(self) -> List[Dict[str, Any]]:
+        """返回全部可覆盖目标的元数据，按 key 排序。
+
+        每项含 ``key`` / ``scope`` / ``kind`` / ``layer`` / ``contract`` /
+        ``since`` / ``deprecated`` / ``params``。行为包作者据此判断目标属于
+        基础设施点、模块策略还是内容，以及它是否已废弃。
+        """
+        return [
+            {
+                "key": spec.key,
+                "scope": spec.key.split(".", 1)[0],
+                "kind": spec.kind,
+                "layer": spec.layer,
+                "contract": spec.contract,
+                "since": spec.since,
+                "deprecated": spec.deprecated,
+                "params": list(spec.param_names),
+            }
+            for spec in sorted(_DEFAULTS.values(), key=lambda s: s.key)
+        ]
 
     def default(self, target: Any) -> Callable:
         key = self._key_of(target)
@@ -347,6 +399,20 @@ def _named_params(func: Any) -> Tuple[str, ...]:
                                p.KEYWORD_ONLY))
 
 
+def _check_metadata(layer: str, contract: str, since: str) -> None:
+    """注册时校验层级 / 契约组合，避免目录里出现语义含混的条目。"""
+    if layer not in _LAYER_CONTRACTS:
+        raise ValueError(
+            f"未知的钩子层级: {layer!r}（可选 {', '.join(_LAYER_CONTRACTS)}）")
+    allowed = _LAYER_CONTRACTS[layer]
+    if contract not in allowed:
+        raise ValueError(
+            f"层级 {layer!r} 不支持契约 {contract!r}"
+            f"（可选 {', '.join(sorted(allowed))}）")
+    if not since:
+        raise ValueError("since 不能为空")
+
+
 # 进程内唯一运行时：服务静态方法钩子与 WorldManager 共用同一实例。
 _runtime = BehaviorRuntime()
 
@@ -361,7 +427,9 @@ def reset_runtime() -> None:
     _runtime.reset()
 
 
-def behavior_hook(scope: str, name: str) -> Callable:
+def behavior_hook(scope: str, name: str, *, layer: str = LAYER_INFRA,
+                  contract: str = CONTRACT_POINT, since: str = "1",
+                  deprecated: bool = False) -> Callable:
     """把模块函数或静态方法包装为可被行为包覆盖的钩子（函数细度）。
 
     用法：对类静态方法在 ``@staticmethod`` 下方叠放；对模块函数直接叠放，例如::
@@ -379,12 +447,19 @@ def behavior_hook(scope: str, name: str) -> Callable:
     包装对象带有 ``__hook_key__``，因此行为包既可用 ``"logic.compute_casualty"``
     字符串注册，也可直接传被包装的函数对象。默认实现的具名参数在注册时记录，
     行为包覆盖时据此做签名校验。
+
+    ``layer`` / ``contract`` 描述语义所有权：基础设施算法点默认
+    ``infra/point``；模块决策策略显式传 ``module/strategy``；内容数据用
+    ``behavior_const``。元数据会进入 ``runtime.catalog()``。
     """
+    _check_metadata(layer, contract, since)
     key = f"{scope}.{name}"
 
     def decorator(func: Callable) -> Callable:
-        _DEFAULTS[key] = HookSpec(key=key, default=func, kind=KIND_FUNCTION,
-                                  param_names=_named_params(func))
+        _DEFAULTS[key] = HookSpec(
+            key=key, default=func, kind=KIND_FUNCTION,
+            param_names=_named_params(func), layer=layer, contract=contract,
+            since=since, deprecated=deprecated)
 
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
@@ -399,7 +474,9 @@ def behavior_hook(scope: str, name: str) -> Callable:
     return decorator
 
 
-def behavior_const(scope: str, name: str, value: Any) -> Any:
+def behavior_const(scope: str, name: str, value: Any, *,
+                   layer: str = LAYER_CONTENT, contract: str = CONTRACT_DATA,
+                   since: str = "1", deprecated: bool = False) -> Any:
     """注册常量细度的可覆盖目标，原样返回 ``value`` 便于模块内继续使用::
 
         PREDEFINED_TAGS = behavior_const("logic", "PREDEFINED_TAGS", [...])
@@ -407,7 +484,13 @@ def behavior_const(scope: str, name: str, value: Any) -> Any:
     行为包可覆盖为同类型值或返回该值的可调用对象；数值细度允许 int / float
     互通，可调用对象在每次 ``resolve_value`` 时重新求值（需要稳定值请在包内
     缓存）。key 是已部署行为包的公开契约，不得改名。
+
+    常量默认按 ``content/data`` 登记；基础设施数值常量显式传
+    ``layer="infra", contract="data"``。元数据会进入 ``runtime.catalog()``。
     """
+    _check_metadata(layer, contract, since)
     key = f"{scope}.{name}"
-    _DEFAULTS[key] = HookSpec(key=key, default=value, kind=KIND_CONST)
+    _DEFAULTS[key] = HookSpec(
+        key=key, default=value, kind=KIND_CONST, layer=layer,
+        contract=contract, since=since, deprecated=deprecated)
     return value

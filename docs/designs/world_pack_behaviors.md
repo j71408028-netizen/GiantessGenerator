@@ -115,6 +115,35 @@ data/worlds/<world_id>/
 | `runtime.resolve_value(key)` | 读取常量细度目标的有效值（覆盖实现可调用则调用取值；无覆盖返回默认值）。 |
 | `runtime.default(target)` | 返回被覆盖前的默认实现。覆盖函数内部如需复用默认逻辑，可调用 `runtime.default(target)(...)`。 |
 | `runtime.reset()` | 清空全部覆盖（一般由程序自动调用，模块内无需使用）。 |
+| `runtime.catalog()` | 返回全部可覆盖目标的元数据（见下节），供开发工具与行为包作者查询。 |
+
+### Hook 目录与层级
+
+`runtime.catalog()` 返回按 key 排序的元数据列表：
+
+| 字段 | 说明 |
+|------|------|
+| `key` | 稳定注册键 |
+| `scope` | key 的第一段 |
+| `kind` | `function` / `const` |
+| `layer` | `infra` / `module` / `content` |
+| `contract` | `point` / `strategy` / `data` |
+| `since` | 进入目录的版本 |
+| `deprecated` | 是否计划废弃 |
+| `params` | 函数细度的具名参数；常量为空列表 |
+
+层级按语义所有权划分，不按文件目录：
+
+| 层级 / 契约 | 开放方式 | 典型目标 |
+|------|------|------|
+| `infra/point` | 固定流程中的单个算法点或参数 | `logic.*` 数值核、`StateService` 坐标 / 行动点原语 |
+| `module/strategy` | 模块门面的决策策略，返回决策或计划 | `profile.*`；后续 `chat.*` / `news.*` / `offline.*` |
+| `content/data` | 数据表、文案、阈值 | `logic.PREDEFINED_TAGS`、`spatial.TAG_*` |
+| 核心不变式 | 不开放，不进入目录 | 坐标夹取、AP 上限、JSON 协议、消息状态机、持久化 |
+
+> `StateService.recover_evolution` 当前标为 `module/strategy`：它是模块级恢复流程，
+> 暂寄在 `StateService` 门面上。后续迁移到 `offline.*` 时，旧 key 保留为兼容
+> 适配器；新增行为包不应再把它当作基础设施原语。
 
 ### `CreationService`
 
@@ -143,7 +172,7 @@ data/worlds/<world_id>/
 | `decayed_coordinates`      | `(personality, intrusion, destruction, fraction) -> (float, float)` | 步进衰减的纯计算：仅当坐标越过性格边界（初始值 - 0.5 × 性格步长）时向边界回落 fraction 个步长。 |
 | `apply_negative_evolution` | `(state) -> None` | 行动点数不足（<50）时应用负向演化：介入度步进取 -1 - 0.5 × 性格敏感值（由敏感值直接控制），破坏性步进取 -1 - 0.5 × 性格重力；步长演化叠加不适应性衰减；有变化时向演化表追加一行（步进取本次负向步进之和）。 |
 | `apply_step_decay`         | `(state, fraction=0.1) -> None` | 步进衰减（角色面板逗留每分钟 fraction=0.1），有变化时向演化表追加一行。              |
-| `recover_evolution`        | `(state, now=None) -> None` | 离线恢复：行动点按分钟恢复、坐标按分钟衰减，宽限后按日间步进结算伤亡；有变化时追加演化表一行。         |
+| `recover_evolution`        | `(state, now=None) -> None` | 离线恢复：行动点按分钟恢复、坐标按分钟衰减，宽限后按日间步进结算伤亡；有变化时追加演化表一行。层级为 `module/strategy`：整段恢复流程暂寄在 `StateService`，后续迁移到 `offline.*`。         |
 | `consume_action_points`    | `(state, cost) -> bool` | 消耗行动点数；点数不足返回 `False`。                                  |
 | `receive_action_points`    | `(state, amount) -> int` | 自然回复行动点数（离线恢复、角色面板在线恢复），夹取到 0~100，返回实际变化量。 |
 | `refund_action_points`     | `(state, amount) -> int` | 返还行动点数（副本结算、报告解锁返还等），不设 100 上限，返回实际变化量。 |

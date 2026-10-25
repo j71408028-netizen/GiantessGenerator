@@ -63,7 +63,7 @@ def _env_now_wording(value: float) -> str:
 
 # ==================== 作息：历史结论 / 实时提示 ====================
 
-@behavior_hook("profile", "describe_rhythm")
+@behavior_hook("profile", "describe_rhythm", layer="module", contract="strategy")
 def describe_rhythm(evolution: list,
                     now: Optional[datetime.datetime] = None) -> str:
     """作息历史结论：整体活跃/安静时段 + 周末与工作日差异 + 成熟度措辞。
@@ -102,7 +102,7 @@ def describe_rhythm(evolution: list,
     return "\n".join(lines)
 
 
-@behavior_hook("profile", "rhythm_now_hint")
+@behavior_hook("profile", "rhythm_now_hint", layer="module", contract="strategy")
 def rhythm_now_hint(evolution: list,
                     now: Optional[datetime.datetime] = None) -> str:
     """作息实时提示：当前时刻落在活跃期 / 休整期才产生一行提示。
@@ -125,7 +125,7 @@ def rhythm_now_hint(evolution: list,
 
 # ==================== 空间：历史结论 / 实时提示 ====================
 
-@behavior_hook("profile", "describe_spatial")
+@behavior_hook("profile", "describe_spatial", layer="module", contract="strategy")
 def describe_spatial(profile: SpatialProfile, position: str = "") -> str:
     """空间偏好历史结论：常活动地带 + 环境偏好 + 手工活动区域。
 
@@ -156,7 +156,7 @@ def describe_spatial(profile: SpatialProfile, position: str = "") -> str:
     return "\n".join(lines)
 
 
-@behavior_hook("profile", "spatial_now_hint")
+@behavior_hook("profile", "spatial_now_hint", layer="module", contract="strategy")
 def spatial_now_hint(profile: SpatialProfile, position: str = "") -> str:
     """空间实时提示：当前位置相对偏好的评价 + 环境口语化描述。
 

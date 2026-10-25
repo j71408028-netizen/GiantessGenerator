@@ -61,7 +61,7 @@
 [check_import_graph] 已检查 194 个模块，779 条第一方依赖边
 [check_import_graph] PASSED：层间依赖方向与 UI 框架禁令均无未登记越界
 KNOWN_EXCEPTIONS = []          # 原 11 条已全部消除
-tests/run_checks.py            # 42/42
+tests/run_checks.py            # 43/43
 ```
 
 ---
@@ -86,6 +86,11 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 静默回退默认实现，不报错、不告警）。激活时的启用诊断（`load_pack` 产出
 `BehaviorLoadReport`）只能拦住行为包**写错 key** 这一类失效；运行时对未命中 key
 的回退语义不变，契约字面量仍然一个字都不能改。
+
+每个 hook 还带 `layer` / `contract` / `since` / `deprecated` 元数据，
+`runtime.catalog()` 可列出。`layer` 按语义所有权划分，不按目录：基础设施算法点、
+模块决策策略、内容数据；`StateService.recover_evolution` 标为 `module/strategy`
+（错层遗留，后续迁移到 `offline.*`）。
 
 ### 2.2 `data/` 是用户数据区
 

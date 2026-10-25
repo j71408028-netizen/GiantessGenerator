@@ -19,7 +19,7 @@ PREDEFINED_TAGS = behavior_const("logic", "PREDEFINED_TAGS", [
     "涩涩", "裙装", "制服", "旅行", "地理测量",
     "能躺着不站着", "四处走走", "摄影师请就位",
     "细节控", "尺寸焦虑症",
-])
+], layer="content", contract="data")
 
 
 def get_predefined_tags() -> List[str]:

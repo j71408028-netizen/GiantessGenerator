@@ -223,7 +223,8 @@ class StateService:
                                 source="apply_step_decay")
 
     @staticmethod
-    @behavior_hook("StateService", "recover_evolution")
+    @behavior_hook("StateService", "recover_evolution",
+                   layer="module", contract="strategy")
     def recover_evolution(state: CharacterSnapshot,
                           now: Optional[datetime.datetime] = None):
         """按加载间隔时长恢复：每分钟恢复行动点、坐标衰减，
