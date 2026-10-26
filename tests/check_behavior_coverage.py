@@ -4,7 +4,7 @@
 用法：``python tests/check_behavior_coverage.py``
 与 ``check_behavior_catalog``（元数据与文档覆盖）互补，遍历 ``catalog()``：
 
-- 每个 key 在行为包文档附录中有**专属表格行**（首列），仅在正文提及不算——
+- 每个 key 在 designs/ 组文档中有**专属表格行**（首列），仅在正文提及不算——
   防止「加了钩子没写文档」；
 - 函数 key 的默认实现可解析，且用默认实现本身注册覆盖能走通（签名校验、
   resolve 链路对全目录可用）；常量 key 的 ``resolve_value`` 默认值与同值
@@ -14,6 +14,7 @@
 """
 
 import os
+import pathlib
 import re
 import sys
 import tempfile
@@ -53,21 +54,23 @@ _catalog = _rt.catalog()
 
 # ---------------- 1. 文档行覆盖 ----------------
 
-_docs_path = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "docs", "designs", "world_pack_behaviors.md")
-with open(_docs_path, "r", encoding="utf-8") as f:
-    _docs = f.read()
+# 行为包钩子文档可分布在 designs/ 组内任意页面（机制可拆为目录多页），
+# 拼接全组 .md 后校验；表格行正则锚定钩子表首列，扫宽不会被正文提及误满足。
+_designs_dir = pathlib.Path(__file__).resolve().parents[1] / "docs" / "designs"
+_docs_paths = sorted(_designs_dir.rglob("*.md"))
+_docs = "\n\n".join(p.read_text(encoding="utf-8") for p in _docs_paths)
+check("行为包文档源非空", bool(_docs_paths), str(_designs_dir))
+print(f"  行为包文档源：{len(_docs_paths)} 篇（docs/designs/ 全组）")
 
 _missing_rows = []
 for entry in _catalog:
     key = entry["key"]
     name = key.split(".", 1)[1]
-    # 附录表格首列：`<key>` 或无 scope 前缀的 `<name>`（logic / StateService 组）
+    # 钩子表格首列：`<key>` 或无 scope 前缀的 `<name>`（logic / StateService 组）
     if not re.search(rf"^\| *`(?:{re.escape(key)}|{re.escape(name)})` *\|",
                      _docs, re.M):
         _missing_rows.append(key)
-check("每个 key 在附录中有专属表格行", not _missing_rows, str(_missing_rows))
+check("每个 key 在文档中有专属表格行", not _missing_rows, str(_missing_rows))
 
 # ---------------- 2. 默认 / 覆盖链路全覆盖 ----------------
 

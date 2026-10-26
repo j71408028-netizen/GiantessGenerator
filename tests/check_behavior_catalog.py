@@ -9,10 +9,11 @@
 - 层级与契约组合合法，scope 的默认归属符合登记表；
 - 已知例外（profile、内容常量）分类正确；
 - 已删 key（offline.model.* / spatial.TAG_* / recover_evolution）不回潮；
-- 目录按 key 排序，且每个 key 都能在行为包文档中找到。
+- 目录按 key 排序，且每个 key 都能在 designs/ 组文档中找到。
 """
 
 import os
+import pathlib
 import sys
 import tempfile
 
@@ -166,17 +167,18 @@ check("全目录 since 以 2.0 为基线", not _since_bad, str(_since_bad))
 
 # ---------------- 3. 文档覆盖 ----------------
 
-_docs_path = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "docs", "designs", "world_pack_behaviors.md")
+# 行为包钩子文档可分布在 designs/ 组内任意页面（机制可拆为目录多页），
+# 拼接全组 .md 后做 key 级覆盖校验。
+_designs_dir = pathlib.Path(__file__).resolve().parents[1] / "docs" / "designs"
+_docs_paths = sorted(_designs_dir.rglob("*.md"))
 try:
-    with open(_docs_path, "r", encoding="utf-8") as f:
-        _docs = f.read()
+    _docs = "\n\n".join(p.read_text(encoding="utf-8") for p in _docs_paths)
 except OSError as e:
     _docs = ""
-    check("行为包文档可读", False, str(e))
+    check("行为包文档源可读", False, str(e))
 else:
-    check("行为包文档可读", True)
+    check("行为包文档源可读", bool(_docs_paths), str(_designs_dir))
+    print(f"  行为包文档源：{len(_docs_paths)} 篇（docs/designs/ 全组）")
 
 _missing_docs = [
     entry["key"] for entry in _catalog
