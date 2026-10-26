@@ -2,7 +2,7 @@
 
 本文档汇总角色演化模型的完整设计：参与的量、每类行为的演化公式（与当前
 代码一致）、以及模拟验证已确认的动态特性。各机制的代码入口见
-[world_pack_behaviors.md](world_pack_behaviors.md) 的行为钩子表；副本侧的章节与触发器
+[行为包开发指南](behaviors/dev-guide.md) 的行为钩子分组；副本侧的章节与触发器
 见 [../Dungeon/script.md](../Dungeon/script.md)。
 
 ## 1. 参与的量
@@ -81,7 +81,7 @@
   不改执行与持久化；
 - 离线模型参数（步进率、残留活动、行动点/坐标恢复速率、噪声与窗口外汇总
   除数）来自角色出身烙印 `ModelTuning`（创建期经 `CreationService.derive_model_tuning`
-  派生，终身携带，详见 `world_pack_behaviors.md` 的三层开放模型）；72 小时窗口与
+  派生，终身携带，详见 [行为包开发指南](behaviors/dev-guide.md) 的三层开放模型）；72 小时窗口与
   2 小时精度是导出契约，保持固定；
 - 离线环境因子取演化表中的在线沉淀（同址聚合，距当前位置越近权重越高；
   步进越高邻域展开越大），证据少/旧时向精确度默认值收缩，无沉淀即取
@@ -164,4 +164,4 @@ python developer_tools/evolution_dump.py --list-packs          # 有哪些行为
 > **能力边界**：副本演化主体公式 `dungeon/rules.py::EvolutionRules.evolve_attributes`
 > **没有**行为钩子——副本路径只通过注入的 `StateService.decay_step_rates` 受行为包影响；
 > 报告路径用到的 `StateService` 坐标 / 步长方法则全部可覆盖（清单见
-> `docs/designs/world_pack_behaviors.md` 附录 A）。
+> [hooks-character.md](behaviors/hooks-character.md)）。

@@ -14,7 +14,7 @@ stuck_options 工具层。
 
 行为包开放面（scope ``report``）：车道窗口 / 联合分 / 近匹配提拔是
 模块策略，模型参数是 ``report.model.*`` 常量钩子；硬闸、物理走查与
-stuck 判定不开放。见 docs/designs/world_pack_behaviors.md 的 report 组。
+stuck 判定不开放。见 docs/designs/behaviors/hooks-report.md 的 report 组。
 """
 
 import math

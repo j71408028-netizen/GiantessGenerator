@@ -6,38 +6,36 @@
 
 ## 成员
 
-| 文档 | 主要读者 | 性质 |
+机制 = 目录：目录的 `README.md` 是全景页，细节页从那里进入；未拆分的机制仍是单篇。
+
+| 机制 | 入口 | 主要读者 |
 |---|---|---|
-| [address_system.md](address_system.md) | 资源开发者（地标 / 描述风格作者） | 现状 |
-| [report_selection.md](report_selection.md) | 玩家 + 资源开发者（地标 / 描述风格作者） | 现状 |
-| [character_evolution.md](character_evolution.md) | 核心开发者 + 行为包作者 | 现状 |
-| [world_pack_behaviors.md](world_pack_behaviors.md) | 世界包 / 行为包作者 | 现状 |
-| [minigame.md](minigame.md) | 小游戏作者 | 现状 |
+| 地址系统 | [address-system/](address-system/README.md) | 玩家 + 资源开发者（地标 / 描述风格作者） |
+| 报告生成 | [report_selection.md](report_selection.md) | 玩家 + 资源开发者（地标 / 描述风格作者） |
+| 角色演化 | [character_evolution.md](character_evolution.md) | 核心开发者 + 行为包作者 |
+| 行为包 | [behaviors/](behaviors/README.md) | 玩家 + 世界包 / 行为包作者 |
+| 小游戏 | [minigame.md](minigame.md) | 小游戏作者 |
 
-## 推荐阅读顺序
+## 按任务找入口
 
-1. 想改**地标 / 地址**：读 [address_system.md](address_system.md)。
-2. 想理解或调整**报告里地标与描述的选取 / 配对**：读
-   [report_selection.md](report_selection.md)。
-3. 想改**角色数值演化**：先读 [character_evolution.md](character_evolution.md)（全景），
-   再读 [world_pack_behaviors.md](world_pack_behaviors.md)（可覆盖的代码入口）。
-4. 想**扩展程序行为**而不改主程序：读 [world_pack_behaviors.md](world_pack_behaviors.md)。
-5. 想做**小游戏**：读 [minigame.md](minigame.md)。
+| 想做什么 | 从哪读 |
+|---|---|
+| 理解或调整**报告里地标与描述的选取 / 配对** | [report_selection.md](report_selection.md) |
+| 给**地标 / 描述风格**申领、注册地址 | [authoring.md](address-system/authoring.md)（地址格式与距离规则见 [matching.md](address-system/matching.md)） |
+| 改**角色数值演化** | 先读 [character_evolution.md](character_evolution.md)（全景），再看可覆盖的代码入口 [behaviors/dev-guide.md](behaviors/dev-guide.md) |
+| **扩展程序行为**而不改主程序 | [behaviors/README.md](behaviors/README.md)（玩家向）→ [behaviors/dev-guide.md](behaviors/dev-guide.md) |
+| 做**小游戏** | [minigame.md](minigame.md) |
 
-## 本组文档的写法：前半全景，后半开发事项
+## 本组文档的写法：机制 = 目录
 
-每一篇都分两半，读者按需读到一半即止：
-
-| 文档 | 全景（读到哪够） | 开发事项（从哪继续） | 谁能改 |
-|---|---|---|---|
-| [address_system.md](address_system.md) | §操作规程 | 附录 A–C：地址格式与距离规则 | 资源开发者 |
-| [report_selection.md](report_selection.md) | §1–§4：选取链条与车道 | 附录 A–C：代码地图与参数 | 玩家反馈 → 开发者调参 |
-| [character_evolution.md](character_evolution.md) | §1–§2：参与的量与分工 | §3–§6：公式、模拟工具 | 核心开发者 + 行为包作者 |
-| [world_pack_behaviors.md](world_pack_behaviors.md) | §开发流程 | 附录 A–C：注册 API 与示例 | 资源开发者 |
-| [minigame.md](minigame.md) | §1：两种后端 | §2+：包格式与作者 API | 小游戏作者 |
-
-写新篇时照这个体裁：**玩家 / 使用者读到前一半能理解系统怎么运作，资源开发者接着被引到
-「你能改哪里、改完怎么验证」。**
+- 单篇超过约 300 行，或一篇内出现 3 种以上不同查表任务（找流程 / 查签名 / 查格式规范）
+  → 拆为目录；
+- 目录的 `README.md` 独立成页，保持线性叙事（玩家 / 使用者读到这页为止）；细节页
+  才允许查表型，从全景页链接进入；
+- 未拆分的机制仍是单篇：前半写全景、后半写开发事项（见 [report_selection.md](report_selection.md)、
+  [character_evolution.md](character_evolution.md)、[minigame.md](minigame.md)）；
+- 拆分提交为纯移动（利于 git rename 跟踪），措辞修订另起提交；
+- 链接指文件不指标题（锚点跨生成器不稳定），跨组引用用相对链接，别复制正文。
 
 ### 改完怎么立刻看效果
 

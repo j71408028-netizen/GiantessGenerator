@@ -149,7 +149,7 @@ Linux 侧的兼容细节、限制与实测记录见 [docs/users/platforms/linux.
 
 - **角色（character）**：创建后的角色拥有长期档案—— HTML 历史档案、离线恢复（程序没开的时间里角色仍在按性格与作息曲线演化）、今日新闻。演化模型的完整设计见 [docs/designs/character_evolution.md](docs/designs/character_evolution.md)。
 - **聊天（chat）**：与角色持续对话。AI 按 JSON 协议回复（可一次多条消息、可沉默）；AI 可自主开启 / 切换话题，并把少量白名单属性写回角色档案。协议细节见 [docs/dev/chat_delivery.md](docs/dev/chat_delivery.md)。
-- **世界包（worlds）**：一键激活后，包内资源按类型**接管**各数据源（地标、描述、副本方案、静态表……），你的自由数据不受影响；停用即恢复。世界包还可携带**行为包**在激活期间改变核心算法（详见「包开发」）。
+- **世界包（worlds）**：一键激活后，包内资源按类型**接管**各数据源（地标、描述、副本方案、静态表……），你的自由数据不受影响；停用即恢复。世界包还可携带**行为包**在激活期间改变核心算法（[机制说明](docs/designs/behaviors/README.md)；开发见「包开发」）。
 
 ### 数据与存档
 
@@ -172,11 +172,11 @@ data/
 |---------------|--------------------------------------------------------|--------------------------------------------|
 | 地标、描述、副本方案    | 可供探索的资源                                                | 程序内编辑器（文本管理 / 副本编辑）即可                      |
 | 姓名、新闻、性格或身材预设 | 一次性抽取单条的资源，.csv格式                                      | 无程序内编辑器；推荐使用Excel                          |
-| 世界包           | 把资源包 + 静态表打成一个可一键激活的 `<world_id>.world.zip`，激活期间接管各数据源 | [世界包行为包开发指南](docs/designs/world_pack_behaviors.md) |
-| 行为包           | 世界包可选携带的 Python 代码包，激活期间覆盖角色创建                         | [世界包行为包开发指南](docs/designs/world_pack_behaviors.md) |
+| 世界包           | 把资源包 + 静态表打成一个可一键激活的 `<world_id>.world.zip`，激活期间接管各数据源 | [世界包行为包开发指南](docs/designs/behaviors/dev-guide.md) |
+| 行为包           | 世界包可选携带的 Python 代码包，激活期间覆盖核心算法                         | [世界包行为包开发指南](docs/designs/behaviors/dev-guide.md) |
 | 副本小游戏         | `mini_game` 触发器的运行时与作者 API                             | [小游戏框架](docs/designs/minigame.md)          |
 | 挑战包           | 把角色与资源打包成秘钥保护的加密 `.chal`，玩家在挑战模式中达成副本结局                | 程序内「挑战模式」打包                                |
-| 世界地址          | 为你的世界申领注册表地址，供地标 / 描述风格跨世界引用                           | [地址系统操作说明](docs/designs/address_system.md)         |
+| 世界地址          | 为你的世界申领注册表地址，供地标 / 描述风格跨世界引用                           | [地址系统作者指南](docs/designs/address-system/authoring.md)         |
 
 ---
 
@@ -225,8 +225,8 @@ data/
 
 **包开发**
 
-- [世界包行为包开发指南](docs/designs/world_pack_behaviors.md)：行为包的开发流程、注册 API 与可覆盖目标
-- [地址系统操作说明](docs/designs/address_system.md)：地标 / 描述风格的地址申领、注册与匹配规则
+- [世界包行为包开发指南](docs/designs/behaviors/dev-guide.md)：行为包的开发流程、注册 API 与可覆盖目标
+- [地址系统作者指南](docs/designs/address-system/authoring.md)：地标 / 描述风格的地址申领、注册与匹配规则
 - [副本文档索引](docs/Dungeon/README.md)：`docs/Dungeon/` 副本开发文档的入口与「按任务查」表（写方案从[数据模型](docs/Dungeon/script.md)进；小游戏框架见 [docs/designs/minigame.md](docs/designs/minigame.md)）
 
 **开发与架构**

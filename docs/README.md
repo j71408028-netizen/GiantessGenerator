@@ -26,7 +26,7 @@
 |---|---|---|
 | 玩家 | [`../README.md`](../README.md)「玩家指南」 | [`designs/README.md`](designs/README.md) |
 | 在 Linux 上跑 | [`users/platforms/linux.md`](users/platforms/linux.md) | [`users/platforms/linux-history.md`](users/platforms/linux-history.md) |
-| 做资源包 / 世界包 / 小游戏 | [`designs/README.md`](designs/README.md) | [`designs/world_pack_behaviors.md`](designs/world_pack_behaviors.md) |
+| 做资源包 / 世界包 / 小游戏 | [`designs/README.md`](designs/README.md) | [`designs/behaviors/dev-guide.md`](designs/behaviors/dev-guide.md) |
 | 写副本方案 / 改副本引擎 | [`Dungeon/README.md`](Dungeon/README.md)（子项目入口，按任务查表） | [`Dungeon/script.md`](Dungeon/script.md)、[`dev/architecture.md`](dev/architecture.md) |
 | 改代码 | [`dev/README.md`](dev/README.md) | [`dev/architecture.md`](dev/architecture.md) |
 | 发版 | [`ops/release.md`](ops/release.md) | [`ops/release.md`](ops/release.md) §9（v1.0.0 后的过渡点） |
@@ -35,5 +35,6 @@
 
 1. 每个子目录都有自己的 README，进入后先看它。
 2. 现状文档只写「现在是什么」；历史放 `history/` 或 `legacy/`，只放**指针**，不展开叙述。
-3. `designs/` 每篇是**两段式**：前半简介 / 全景，后半开发事项（详见该组 README）。
+3. `designs/` 按**机制目录式**组织：机制目录的 `README.md` 是全景页，细节页从那里
+   进入；未拆分的机制仍是单篇，前半全景、后半开发事项（详见该组 README）。
 4. 新增文档前先过上面四条判据；跨组引用用相对链接，别复制正文。

@@ -4,7 +4,7 @@
 > 挑出地标对比与描述事件的——谁跟谁配对、顺序由什么决定。读者：想知道
 > 报告为何出现这些内容的玩家，以及想知道自己的地标 / 描述风格何时会被
 > 触发的资源开发者。地址本身怎么表达（格式 / 注册 / 距离）见
-> [address_system.md](address_system.md)。
+> [matching.md](address-system/matching.md) 与 [authoring.md](address-system/authoring.md)。
 
 ## §1 选取链条：四步各管什么
 
@@ -91,7 +91,7 @@
 - 仲裁的决策面已开放为 `report` 组：车道窗口 / 联合分 / 近匹配提拔是
   模块策略钩子，模型参数（容差、提拔上限、联合分权重、可达范围等）是
   `report.model.*` 常量钩子；硬闸、物理走查与 stuck 判定不开放
-  （逐项见 `world_pack_behaviors.md` 附录 A 的 `report` 组）；
+  （逐项见 [hooks-report.md](behaviors/hooks-report.md)）；
 - 空间 / 环境先验的调制经**创建期烙印**（`CreationService.derive_model_tuning`
   返回 `ModelTuning`，创建时按 `services/character/spatial.py` 的 TAG 默认表
   合并烙进角色档案），不再是运行时常量钩子；已有角色的烙印终身携带，
@@ -111,7 +111,7 @@
 ## 附录 B：参数
 
 仲裁模型参数已注册为 `report.model.*` 常量钩子（行为包可覆盖，逐项说明见
-`world_pack_behaviors.md` 附录 A 的 `report` 组），默认值仍是
+[hooks-report.md](behaviors/hooks-report.md)），默认值仍是
 `services/exploration/arbiter.py` 顶部与 `quips.py` 的注册处：车道权重表
 `LANE_WEIGHTS`、近匹配容差 `NEAR_MATCH_TAU`、提拔上限除数、联合分权重
 `W_COVER` / `W_REGION` / `W_PATH`、充裕度池深饱和与邻域口径、可达范围
@@ -119,7 +119,7 @@
 钩子：调制经创建期烙印（`CreationService.derive_model_tuning`，见三层
 开放模型）进入档案；`_ENV_PRIOR_K` / `_ENV_PREFERENCE_SMOOTHING` 等学习层
 参数不开放——它们正是压住先验、保护角色身份稳定的阻尼
-（`world_pack_behaviors.md` 的「三层开放模型与角色身份稳定性」）。默认值是建议值，行为锁只锁语义不锁数值——调整后
+（[行为包开发指南](behaviors/dev-guide.md) 的「三层开放模型与角色身份稳定性」）。默认值是建议值，行为锁只锁语义不锁数值——调整后
 跑上述测试确认语义未破即可。
 
 ## 附录 C：开放点

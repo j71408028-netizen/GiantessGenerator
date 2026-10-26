@@ -140,7 +140,7 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 
 ### 2.5 行为包契约的 import 路径不能改名 ⚠️
 
-钩子 key（§2.1）与模块路径是**两回事**，但后者同样是契约：`docs/designs/world_pack_behaviors.md`
+钩子 key（§2.1）与模块路径是**两回事**，但后者同样是契约：`docs/designs/behaviors/dev-guide.md`
 的示例教行为包作者写 `from services.creation_service import CreationService`，
 `core/behavior_runtime.py` 的模块文档也引用了它——已部署行为包（用户数据区，git 不可见）
 可能照此 import。因此 **`services/creation_service.py` 与 `services/state_service.py`
@@ -167,7 +167,7 @@ data/static/behaviors/imperial_units/imperial_units.py:45
   （`CharacterSnapshot.model_tuning`，由 `CreationService.derive_model_tuning`
   派生）进入 `build_spatial_profile`，spatial 模块只保留 TAG 默认表与学习层，
   三层开放模型与「学习层不开放」的边界见
-  `docs/designs/world_pack_behaviors.md`。
+  `docs/designs/behaviors/dev-guide.md`。
 
 ---
 
