@@ -97,7 +97,7 @@ class StateService:
                          intrusion: Optional[float] = None,
                          destruction: Optional[float] = None,
                          ) -> Tuple[float, float]:
-        """不适应性衰减：坐标达到 0.5/4.5 边界后，对应步长每步向 0 移动（个性越强，衰减越弱）。
+        """不适应性衰减：坐标达到 0.5/4.5 边界后，对应步长每步向 0 移动（个性越强越适应，衰减越弱）。
 
         step_intr / step_destr 为本次的步进（取绝对值参与计算，正负均可）；
         未提供对应坐标时不衰减。仅衰减，不负责步长的敏感/重力扣除。

@@ -602,6 +602,88 @@ class ChatParams:
         return cls(**{k: v for k, v in data.items() if k in allowed})
 
 
+# 玩家身份（聊天线程的所有者）与她对当前身份的认知。
+DEFAULT_IDENTITY_ID = "default"
+DEFAULT_RELATIONSHIP_KIND = "stranger"
+RELATIONSHIP_KINDS = (
+    "stranger", "acquaintance", "friend", "close", "lover", "family",
+    "worshipper", "subject", "rival", "enemy", "prey",
+)
+
+
+@dataclass
+class PlayerIdentity:
+    """玩家可切换的身份；角色视角里每个身份都是不同的人。
+
+    id 是线程隔离的稳定键，默认身份固定为 ``default``；label 仅用于界面
+    显示。身份本身不知道、也不记录其他身份的存在。
+    """
+    id: str = DEFAULT_IDENTITY_ID
+    label: str = "默认身份"
+    description: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+    def __post_init__(self):
+        if not isinstance(self.id, str) or not self.id.strip():
+            self.id = DEFAULT_IDENTITY_ID
+        if not isinstance(self.label, str) or not self.label.strip():
+            self.label = "默认身份"
+        if not isinstance(self.description, str):
+            self.description = ""
+        now = datetime.datetime.now().isoformat()
+        if not isinstance(self.created_at, str) or not self.created_at.strip():
+            self.created_at = now
+        if not isinstance(self.updated_at, str) or not self.updated_at.strip():
+            self.updated_at = self.created_at
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "PlayerIdentity":
+        allowed = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in (data or {}).items() if k in allowed})
+
+
+@dataclass
+class Relationship:
+    """角色对某条聊天线程（某个玩家身份）的关系认知。
+
+    kind 是稳定枚举（见 ``RELATIONSHIP_KINDS``），用于映射紧张度；note 保留
+    「她把你当成什么」的细微语义。认知可以与好感背离，二者互不覆盖。
+    """
+    kind: str = DEFAULT_RELATIONSHIP_KIND
+    note: str = ""
+    since: str = ""
+    updated_at: str = ""
+
+    def __post_init__(self):
+        if self.kind not in RELATIONSHIP_KINDS:
+            self.kind = DEFAULT_RELATIONSHIP_KIND
+        if not isinstance(self.note, str):
+            self.note = ""
+        if not isinstance(self.since, str):
+            self.since = ""
+        if not isinstance(self.updated_at, str):
+            self.updated_at = ""
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Relationship":
+        allowed = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in (data or {}).items() if k in allowed})
+
+
+def _normalize_topic_coord(values) -> List[float]:
+    """话题坐标快照：只接受三元数值序列，零夹到 0~1；旧档/坏数据返回空。"""
+    if not isinstance(values, (list, tuple)) or len(values) != 3:
+        return []
+    try:
+        coord = [float(value) for value in values]
+    except (TypeError, ValueError):
+        return []
+    if not all(math.isfinite(value) for value in coord):
+        return []
+    return [max(0.0, min(1.0, value)) for value in coord]
+
+
 @dataclass
 class Topic:
     """聊天话题（docs/dev/chat_delivery.md 阶段三）。
@@ -612,9 +694,14 @@ class Topic:
     status 为 active（进行中）或 ended；end_reason 记录结束方式：
     natural（AI 主动收尾）/ switched（切换到新话题）/ stale（超时或
     超轮数被服务层强制收束）。
+
+    kind_id 为话题类型（TopicKind）的稳定 id，coord 为开题时的三轴坐标
+    快照 ``[affection, tension, size_state]``；旧档没有这两项，保持空值。
     """
     id: str = ""
     title: str = ""
+    kind_id: str = ""
+    coord: List[float] = field(default_factory=list)
     status: str = "active"
     source: str = ""           # user | character | event
     started_at: str = ""
@@ -626,6 +713,9 @@ class Topic:
     def __post_init__(self):
         if not self.id:
             self.id = uuid.uuid4().hex
+        if not isinstance(self.kind_id, str):
+            self.kind_id = ""
+        self.coord = _normalize_topic_coord(self.coord)
 
     @classmethod
     def from_dict(cls, data: dict) -> "Topic":
