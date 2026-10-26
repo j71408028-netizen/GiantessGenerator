@@ -18,9 +18,9 @@
   `offline.recover_plan` 与展示文案 `offline.report_text`；计划收到的模型参数
   快照来自角色出身烙印（见下文三层模型）。执行与持久化仍由服务层负责
   （见附录 A 的 `offline` 组）。
-- `select`（`services/exploration/arbiter.py`，报告选取仲裁）：车道窗口 /
-  联合分 / 近匹配提拔是模块策略，模型参数是 `select.model.*` 常量钩子；
-  硬闸、物理走查与 stuck 判定不开放（见附录 A 的 `select` 组）。
+- `report`（`services/exploration/arbiter.py`，报告选取仲裁）：车道窗口 /
+  联合分 / 近匹配提拔是模块策略，模型参数是 `report.model.*` 常量钩子；
+  硬闸、物理走查与 stuck 判定不开放（见附录 A 的 `report` 组）。
 
 离线模型参数与空间 / 环境先验的调制**不再是运行时钩子**：它们经
 `CreationService.derive_model_tuning` 在创建角色时烙印（出身层，见下文）。
@@ -43,7 +43,7 @@
 
 | 层 | 内容 | 生效方式 |
 |---|---|---|
-| 世界规则 | `select.*`（含 `select.model.*` 常量）、`StateService` 坐标/行动点、`logic.*`、`offline.recover_plan` / `report_text`、`profile.*` 文本化 | 运行时钩子，随世界包启停 |
+| 世界规则 | `report.*`（含 `report.model.*` 常量）、`StateService` 坐标/行动点、`logic.*`、`offline.recover_plan` / `report_text`、`profile.*` 文本化 | 运行时钩子，随世界包启停 |
 | 角色出身 | 离线结算参数与空间/环境先验的调制烙印（`ModelTuning`） | `CreationService.derive_model_tuning` 创建时烙印，终身携带 |
 | 角色习性 | rhythm / spatial 演化表学习 | 模型内部，参数封闭（不开放） |
 
@@ -55,7 +55,7 @@
 tuning 字段 → 读档回退默认 → 任何世界包启停都不再触及其离线/空间调制。
 
 - **世界规则可以换**（运行时层）。坐标演化（`StateService` 坐标 / 步长原语）
-  服务于资源匹配，世界包自带与演化动态匹配的资源；选取仲裁（`select.*`）
+  服务于资源匹配，世界包自带与演化动态匹配的资源；选取仲裁（`report.*`）
   配对的是世界内的资源供给；离线结算是把角色活动换算为世界效果的转换层
   （`offline.recover_plan`，收到的 model 即来自角色烙印）。覆盖这些改变
   「世界如何运转」，角色已学到的东西不被重新解释。
@@ -180,15 +180,16 @@ data/worlds/<world_id>/
 | 层级 / 契约 | 开放方式 | 典型目标 |
 |------|------|------|
 | `infra/point` | 固定流程中的单个算法点 | `logic.*` 数值核、`StateService` 坐标 / 行动点原语 |
-| `infra/data` | 固定流程中的模型参数（数值 / 表） | `select.model.*` |
-| `module/strategy` | 模块门面的决策策略，返回决策或计划 | `profile.*`、`offline.recover_plan`、`select.*`、`CreationService.derive_model_tuning`（创建期烙印）；后续 `chat.*` / `news.*` |
+| `infra/data` | 固定流程中的模型参数（数值 / 表） | `report.model.*` |
+| `module/strategy` | 模块门面的决策策略，返回决策或计划 | `profile.*`、`offline.recover_plan`、`report.*`、`CreationService.derive_model_tuning`（创建期烙印）；后续 `chat.*` / `news.*` |
 | `content/data` | 数据表、文案、阈值 | `logic.PREDEFINED_TAGS` |
 | 核心不变式 | 不开放，不进入目录 | 坐标夹取、AP 上限、JSON 协议、消息状态机、持久化、习性学习参数 |
 
 > 全目录 `since` 以 **2.0** 为基线（出身烙印基线在 2.0 alpha 窗口重定了整个
-> 开放面）；已删 key 不回潮：`offline.model.*`、`spatial.TAG_*`、
+> 开放面）；已删 / 改名 key 不回潮：`offline.model.*`、`spatial.TAG_*`、
 > `StateService.recover_evolution`（离线恢复入口已收敛为 `offline.recover_plan`
-> 与 `OfflineService` 直连）。
+> 与 `OfflineService` 直连）、`select.*`（域整体更名 `report`，更名时点无
+> 外部使用者）。
 
 ### `CreationService`
 
@@ -244,7 +245,7 @@ data/worlds/<world_id>/
 `StateService.receive_action_points`（自然上限 100），并按 `recover_evolution`
 来源标签记录演化（历史演化行的字符串标签，入口本身已删）；这些执行语义不开放。
 
-### `select`（报告选取仲裁）
+### `report`（报告选取仲裁）
 
 `SelectionArbiter` 在地标候选与描述风格供给之间做配对仲裁：车道资格窗口与
 近匹配提拔是裁定级输出，联合分是建议级（报告引擎的预算走步与坐标演化可
@@ -256,20 +257,20 @@ data/worlds/<world_id>/
 
 | 目标 | 类型 | 签名 / 默认 | 说明 |
 |------|------|------|------|
-| `select.lanes` | 函数 | `(landmark_addr, quip_registers) -> list` | 槽位 × 风格的车道表 `[(style, weight)]`（裁定级）：无地址地标全部风格 FREE；注册地址同址 EXACT、覆盖 COVER；不覆盖 / 私有名冲突不入窗口。 |
-| `select.joint_score` | 函数 | `(ruling, position, reach, profile) -> float` | 建议级联合分：尺寸匹配主导，覆盖收益 / 档案 / 路径只调制。 |
-| `select.promotions` | 函数 | `(order, cap) -> (list, list)` | 近匹配提拔（裁定级）：星槽在容差带内与有覆盖替代者交换位置，返回 `(新序, 提拔记录)`。 |
-| `select.model.lane_weights` | 常量 dict | `{exact: 1.0, cover: 0.8, free: 0.5}` | 车道权重表（只调制排序，不改变资格判定）。 |
-| `select.model.near_match_tau` | 常量 float | `0.35` | 近匹配容差（log 尺度）。 |
-| `select.model.cover_weight` | 常量 float | `0.5` | 联合分覆盖收益权重。 |
-| `select.model.region_weight` | 常量 float | `1.5` | 联合分活动区域命中增益。 |
-| `select.model.path_weight` | 常量 float | `0.3` | 联合分路径连贯惩罚权重。 |
-| `select.model.pool_saturation` | 常量 float | `2.0` | 充裕度池深饱和折算除数（`depth/(depth+k)`）。 |
-| `select.model.pool_neighborhood` | 常量 float | `2.0` | 充裕度坐标邻域口径（坐标距离上限）。 |
-| `select.model.promotion_cap_divisor` | 常量 float | `2.0` | 提拔上限 = 对比槽位数 / 该除数（除数下限 1.0）。 |
-| `select.model.reach_multiplier` | 常量 float | `10.0` | 可达范围 = 身高倍数；硬闸语义不开放，仅开放数值。 |
-| `select.model.env_consistency` | 常量 float | `0.5` | 描述文本环境一致性加分上限（消费于 `logic.select_quip_with_budget`）。 |
-| `select.model.env_dev_range` | 常量 float | `1.4` | 环境偏差归一分母（环境因子值域全宽）。 |
+| `report.lanes` | 函数 | `(landmark_addr, quip_registers) -> list` | 槽位 × 风格的车道表 `[(style, weight)]`（裁定级）：无地址地标全部风格 FREE；注册地址同址 EXACT、覆盖 COVER；不覆盖 / 私有名冲突不入窗口。 |
+| `report.joint_score` | 函数 | `(ruling, position, reach, profile) -> float` | 建议级联合分：尺寸匹配主导，覆盖收益 / 档案 / 路径只调制。 |
+| `report.promotions` | 函数 | `(order, cap) -> (list, list)` | 近匹配提拔（裁定级）：星槽在容差带内与有覆盖替代者交换位置，返回 `(新序, 提拔记录)`。 |
+| `report.model.lane_weights` | 常量 dict | `{exact: 1.0, cover: 0.8, free: 0.5}` | 车道权重表（只调制排序，不改变资格判定）。 |
+| `report.model.near_match_tau` | 常量 float | `0.35` | 近匹配容差（log 尺度）。 |
+| `report.model.cover_weight` | 常量 float | `0.5` | 联合分覆盖收益权重。 |
+| `report.model.region_weight` | 常量 float | `1.5` | 联合分活动区域命中增益。 |
+| `report.model.path_weight` | 常量 float | `0.3` | 联合分路径连贯惩罚权重。 |
+| `report.model.pool_saturation` | 常量 float | `2.0` | 充裕度池深饱和折算除数（`depth/(depth+k)`）。 |
+| `report.model.pool_neighborhood` | 常量 float | `2.0` | 充裕度坐标邻域口径（坐标距离上限）。 |
+| `report.model.promotion_cap_divisor` | 常量 float | `2.0` | 提拔上限 = 对比槽位数 / 该除数（除数下限 1.0）。 |
+| `report.model.reach_multiplier` | 常量 float | `10.0` | 可达范围 = 身高倍数；硬闸语义不开放，仅开放数值。 |
+| `report.model.env_consistency` | 常量 float | `0.5` | 描述文本环境一致性加分上限（消费于 `logic.select_quip_with_budget`）。 |
+| `report.model.env_dev_range` | 常量 float | `1.4` | 环境偏差归一分母（环境因子值域全宽）。 |
 
 ### `logic`（模块函数与常量）
 

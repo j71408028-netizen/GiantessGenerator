@@ -237,15 +237,15 @@ def get_comparisons(
 # 环境一致性软权重（选取仲裁器传入槽位估计，Q1 剩余①）：
 #   加分 = 权重 × (1 - |文本因子 - 槽位估计| / 值域全宽)，偏差越大越趋零；
 #   零证据时槽位估计为 None，软权重整体缺席（零证据零权重）。
-# 两参数是 select.model.* 常量钩子（行为包可覆盖，消费时读取有效值）
-behavior_const("select", "model.env_consistency", 0.5,
+# 两参数是 report.model.* 常量钩子（行为包可覆盖，消费时读取有效值）
+behavior_const("report", "model.env_consistency", 0.5,
                layer="infra", contract="data")
-behavior_const("select", "model.env_dev_range", 1.4,
+behavior_const("report", "model.env_dev_range", 1.4,
                layer="infra", contract="data")   # 因子值域 [0.1, 1.5] 全宽
 
 
-def _select_model(key: str) -> float:
-    """select.model.* 常量钩子的有效值（float）。"""
+def _report_model(key: str) -> float:
+    """report.model.* 常量钩子的有效值（float）。"""
     return float(get_runtime().resolve_value(key))
 
 
@@ -395,9 +395,9 @@ def select_quip_with_budget(
         env_bonus = 0.0
         if env_estimate is not None:
             dev = abs(compute_environment_factor(q.get("text", "")) - env_estimate)
-            env_bonus = (_select_model("select.model.env_consistency")
-                         * max(0.0, 1.0 - dev / _select_model(
-                             "select.model.env_dev_range")))
+            env_bonus = (_report_model("report.model.env_consistency")
+                         * max(0.0, 1.0 - dev / _report_model(
+                             "report.model.env_dev_range")))
         score = dist * 2.0 + step_score - lane_bonus - env_bonus
         scored.append((score, coord, q, dist))
 

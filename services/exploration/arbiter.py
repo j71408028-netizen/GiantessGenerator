@@ -12,9 +12,9 @@ stuck_options 工具层。
 （近匹配提拔 + 档案权重，裁定级）→ D 物理走查（可达演化 + 位置更新，
 逐行移植原规划器选点循环，含 pos_now 演化与 all_damaged 扫描）。
 
-行为包开放面（scope ``select``）：车道窗口 / 联合分 / 近匹配提拔是
-模块策略，模型参数是 ``select.model.*`` 常量钩子；硬闸、物理走查与
-stuck 判定不开放。见 docs/designs/world_pack_behaviors.md 的 select 组。
+行为包开放面（scope ``report``）：车道窗口 / 联合分 / 近匹配提拔是
+模块策略，模型参数是 ``report.model.*`` 常量钩子；硬闸、物理走查与
+stuck 判定不开放。见 docs/designs/world_pack_behaviors.md 的 report 组。
 """
 
 import math
@@ -36,35 +36,35 @@ LANE_FREE = "free"
 
 # 可被行为包覆盖的仲裁模型参数（常量钩子的 key 是公开契约；消费一律走
 # resolve_value，此处不保留模块级名字）。lane_weights 需要给测试引用，保留赋值。
-LANE_WEIGHTS = behavior_const("select", "model.lane_weights", {
+LANE_WEIGHTS = behavior_const("report", "model.lane_weights", {
     LANE_EXACT: 1.0, LANE_COVER: 0.8, LANE_FREE: 0.5,
 }, layer="infra", contract="data")
 # 近匹配容差（log 尺度）：提拔只发生在该带内——覆盖只破平局与近局，
 # 不推翻尺寸匹配的主导地位（"指令不是绝对的"在选取上的体现）
-behavior_const("select", "model.near_match_tau", 0.35,
+behavior_const("report", "model.near_match_tau", 0.35,
                layer="infra", contract="data")
 # 联合分权重（默认值仅为建议，测试不锁数值）
-behavior_const("select", "model.cover_weight", 0.5,
+behavior_const("report", "model.cover_weight", 0.5,
                layer="infra", contract="data")
-behavior_const("select", "model.region_weight", 1.5,
+behavior_const("report", "model.region_weight", 1.5,
                layer="infra", contract="data")
-behavior_const("select", "model.path_weight", 0.3,
+behavior_const("report", "model.path_weight", 0.3,
                layer="infra", contract="data")
 # 充裕度：池深饱和折算除数、坐标邻域口径
-behavior_const("select", "model.pool_saturation", 2.0,
+behavior_const("report", "model.pool_saturation", 2.0,
                layer="infra", contract="data")
-behavior_const("select", "model.pool_neighborhood", 2.0,
+behavior_const("report", "model.pool_neighborhood", 2.0,
                layer="infra", contract="data")
 # 提拔上限 = 对比槽位数 / 该除数（除数下限 1.0）
-behavior_const("select", "model.promotion_cap_divisor", 2.0,
+behavior_const("report", "model.promotion_cap_divisor", 2.0,
                layer="infra", contract="data")
 # 可达范围 = 身高倍数（硬闸语义不开放，仅开放数值）
-behavior_const("select", "model.reach_multiplier", 10.0,
+behavior_const("report", "model.reach_multiplier", 10.0,
                layer="infra", contract="data")
 
 
 def _model_value(key: str) -> float:
-    """select.model.* 常量钩子的有效值（覆盖优先于注册默认值）。"""
+    """report.model.* 常量钩子的有效值（覆盖优先于注册默认值）。"""
     return float(get_runtime().resolve_value(key))
 
 
@@ -77,7 +77,7 @@ class SlotRuling:
     改变同池相对顺序）；无描述内容时为空表。``starved`` 仅在有描述内容
     但充裕度为 0 时置位（纯地址内容不参与仲裁）。
     ``env_estimate`` 是槽位地址的环境估计（档案环境轴，None = 零证据），
-    供 select 做文本环境一致性软权重。
+    供 report 做文本环境一致性软权重。
     """
     cand: dict
     addr: str
@@ -88,7 +88,7 @@ class SlotRuling:
     env_estimate: Optional[float] = None
 
 
-@behavior_hook("select", "lanes", layer="module", contract="strategy")
+@behavior_hook("report", "lanes", layer="module", contract="strategy")
 def build_quip_lanes(landmark_addr: str, quip_registers: dict) -> list:
     """槽位 × 风格的车道表 ``[(style, weight)]``（任意序）。
 
@@ -98,7 +98,7 @@ def build_quip_lanes(landmark_addr: str, quip_registers: dict) -> list:
       覆盖（CONTAINS + chunk_ok）：COVER；
     - 其余（不覆盖 / 私有名冲突）：不入窗口。
     """
-    weights = dict(get_runtime().resolve_value("select.model.lane_weights"))
+    weights = dict(get_runtime().resolve_value("report.model.lane_weights"))
     if not landmark_addr:
         return [(s, weights[LANE_FREE]) for s in (quip_registers or {})]
     lanes = []
@@ -117,31 +117,31 @@ def build_quip_lanes(landmark_addr: str, quip_registers: dict) -> list:
     return lanes
 
 
-@behavior_hook("select", "joint_score", layer="module", contract="strategy")
+@behavior_hook("report", "joint_score", layer="module", contract="strategy")
 def joint_score(ruling: SlotRuling, position: str, reach: float,
                 profile: SpatialProfile) -> float:
     """建议级联合分：match 主导，覆盖 / 档案 / 路径只调制。"""
     cand = ruling.cand
     match_q = 1.0 / (1.0 + abs(1.0 - float(cand.get("ratio") or 1.0)))
-    score = match_q * (1.0 + _model_value("select.model.cover_weight")
+    score = match_q * (1.0 + _model_value("report.model.cover_weight")
                        * ruling.affordance)
     if ruling.addr:
         score *= 1.0 + profile.priors.anchored_bias      # 有地址内容
         score *= profile.region_factor(ruling.addr)
         score *= profile.env_preference_factor(ruling.addr)   # 环境偏好交点
         if profile.in_activity_region(ruling.addr):
-            score *= _model_value("select.model.region_weight")
+            score *= _model_value("report.model.region_weight")
         if position:
             interval = relate(position, ruling.addr).interval
             if interval is not None and reach > 0:
-                score /= 1.0 + (_model_value("select.model.path_weight")
+                score /= 1.0 + (_model_value("report.model.path_weight")
                                 * (interval[1] / reach))
     else:
         score *= 1.0 - profile.priors.anchored_bias       # portable 内容
     return score
 
 
-@behavior_hook("select", "promotions", layer="module", contract="strategy")
+@behavior_hook("report", "promotions", layer="module", contract="strategy")
 def apply_near_match_promotions(order: List[SlotRuling],
                                 cap: int) -> Tuple[list, list]:
     """近匹配提拔（裁定级）：星槽在容差带内与有覆盖的替代者交换位置。
@@ -150,7 +150,7 @@ def apply_near_match_promotions(order: List[SlotRuling],
     选中，届时按现状降级为纯地标对比）。每星槽至多提拔一次，总数
     受 cap 限制。
     """
-    tau = _model_value("select.model.near_match_tau")
+    tau = _model_value("report.model.near_match_tau")
     order = list(order)
     promotions = []
     if cap <= 0:
@@ -192,7 +192,7 @@ class SelectionArbiter:
                                         skip_base_prob=…, coords=(intr, dest),
                                         size_cat=size_cat)
         # stuck 早退口径与原 plan_address_comparisons 一致；
-        # 循环遍历 arbitration["chosen"]，逐槽把 ruling.lanes 传给 select。
+        # 循环遍历 arbitration["chosen"]，逐槽把 ruling.lanes 传给 select_quip_with_budget。
     """
 
     def __init__(self, catalog, addresses):
@@ -202,19 +202,19 @@ class SelectionArbiter:
     # ==================== 车道：描述配对分层的唯一口径 ====================
 
     def quip_lanes(self, landmark_addr: str, quip_registers: dict) -> list:
-        """车道表（``select.lanes`` 钩子的委托入口）。"""
+        """车道表（``report.lanes`` 钩子的委托入口）。"""
         return build_quip_lanes(landmark_addr, quip_registers)
 
     # ==================== 充裕度：描述供给的池深估计 ====================
 
     def _pool_depth(self, style: str, size_cat: Optional[str],
                     coords: Optional[Tuple[float, float]]) -> int:
-        """风格在 size_cat、坐标邻域（与 select 同口径）的可用条数。
+        """风格在 size_cat、坐标邻域（与 report 同口径）的可用条数。
 
         plan 期的估计（起始坐标）；报告内坐标漂移由消费时的窗口复核
-        （select 的池空回退）兜住。
+        （report 的池空回退）兜住。
         """
-        neighborhood = _model_value("select.model.pool_neighborhood")
+        neighborhood = _model_value("report.model.pool_neighborhood")
         matrix = (getattr(self.catalog, "quips", {}) or {}).get(size_cat or "", {})
         if not matrix or coords is None:
             return 0
@@ -230,7 +230,7 @@ class SelectionArbiter:
 
     def _affordance(self, lanes: list, size_cat, coords) -> float:
         """槽位充裕度 = 允许车道内 max(车道权重 × 池深饱和折算)。"""
-        saturation = _model_value("select.model.pool_saturation")
+        saturation = _model_value("report.model.pool_saturation")
         best = 0.0
         for style, weight in lanes:
             depth = self._pool_depth(style, size_cat, coords)
@@ -243,13 +243,13 @@ class SelectionArbiter:
 
     def _joint_score(self, ruling: SlotRuling, position: str, reach: float,
                      profile: SpatialProfile) -> float:
-        """建议级联合分（``select.joint_score`` 钩子的委托入口）。"""
+        """建议级联合分（``report.joint_score`` 钩子的委托入口）。"""
         return joint_score(ruling, position, reach, profile)
 
     @staticmethod
     def _apply_promotions(order: List[SlotRuling],
                           cap: int) -> Tuple[list, list]:
-        """近匹配提拔（``select.promotions`` 钩子的委托入口）。"""
+        """近匹配提拔（``report.promotions`` 钩子的委托入口）。"""
         return apply_near_match_promotions(order, cap)
 
     # ==================== 主入口 ====================
@@ -360,12 +360,12 @@ class SelectionArbiter:
         usable = [r for r in slots
                   if id(r.cand["landmark"]) not in invalid_ids
                   and durable_ok(r.cand, True)]
-        reach = _model_value("select.model.reach_multiplier") * height
+        reach = _model_value("report.model.reach_multiplier") * height
         order = self._order(usable, pos_text, reach, profile)
         promotions = []
         if has_quips:
             cap = max(0, int(limit / max(
-                1.0, _model_value("select.model.promotion_cap_divisor"))))
+                1.0, _model_value("report.model.promotion_cap_divisor"))))
             order, promotions = self._apply_promotions(order, cap)
 
         if pos_text and pos_world and (not content_worlds or pos_world in content_worlds):

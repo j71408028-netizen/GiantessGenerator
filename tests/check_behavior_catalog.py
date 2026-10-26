@@ -57,7 +57,7 @@ SCOPE_LAYERS = {
     "logic": {LAYER_INFRA, LAYER_CONTENT},
     "offline": {LAYER_MODULE},
     "profile": {LAYER_MODULE},
-    "select": {LAYER_INFRA, LAYER_MODULE},
+    "report": {LAYER_INFRA, LAYER_MODULE},
 }
 LAYER_CONTRACTS = {
     LAYER_INFRA: {CONTRACT_POINT, CONTRACT_DATA},
@@ -136,14 +136,14 @@ _classify("offline.report_text", LAYER_MODULE, CONTRACT_STRATEGY,
 check("offline.model.* / spatial.TAG_* 已随出身烙印基线删除", not [
     key for key in _by_key
     if key.startswith("offline.model.") or key.startswith("spatial.")])
-_classify("select.lanes", LAYER_MODULE, CONTRACT_STRATEGY, KIND_FUNCTION)
-_classify("select.joint_score", LAYER_MODULE, CONTRACT_STRATEGY,
+_classify("report.lanes", LAYER_MODULE, CONTRACT_STRATEGY, KIND_FUNCTION)
+_classify("report.joint_score", LAYER_MODULE, CONTRACT_STRATEGY,
           KIND_FUNCTION)
-_classify("select.promotions", LAYER_MODULE, CONTRACT_STRATEGY,
+_classify("report.promotions", LAYER_MODULE, CONTRACT_STRATEGY,
           KIND_FUNCTION)
-_classify("select.model.lane_weights", LAYER_INFRA, CONTRACT_DATA,
+_classify("report.model.lane_weights", LAYER_INFRA, CONTRACT_DATA,
           KIND_CONST)
-_classify("select.model.near_match_tau", LAYER_INFRA, CONTRACT_DATA,
+_classify("report.model.near_match_tau", LAYER_INFRA, CONTRACT_DATA,
           KIND_CONST)
 _classify("logic.compute_casualty", LAYER_INFRA, CONTRACT_POINT,
           KIND_FUNCTION)

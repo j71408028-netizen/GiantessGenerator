@@ -35,7 +35,7 @@ from services.character.spatial import SpatialProfile, priors_for_tags  # noqa: 
 from services.exploration.address_plan import AddressPlanner  # noqa: E402
 
 
-# ---------------- 1. select 的车道窗口（裁定级） ----------------
+# ---------------- 1. report 的车道窗口（裁定级） ----------------
 def _matrix(entries):
     """{(i,d): [(style, text), ...]} → quips_working 形状。"""
     return {"large": {coord: [{"text": t, "style": s, "step": 0.5}
@@ -213,7 +213,7 @@ _plan4 = _arb4.arbitrate(
 check("旅行先验把锚定内容排到 portable 之前",
       [c["landmark"].name for c in _plan4["comparisons"]][0] == "锚定地标")
 
-# ---------------- 5. select 组钩子覆盖生效 ----------------
+# ---------------- 5. report 组钩子覆盖生效 ----------------
 from core.behavior_runtime import get_runtime  # noqa: E402
 
 _RUNTIME = get_runtime()
@@ -225,7 +225,7 @@ def _free_lanes(landmark_addr, quip_registers):
 
 
 try:
-    _RUNTIME.override("select.lanes", _free_lanes)
+    _RUNTIME.override("report.lanes", _free_lanes)
     _catalog5, _s5, _c5 = _scene()
     _plan5 = _arbiter(_catalog5).arbitrate(
         [_cand(_s5, 1.0, 200), _cand(_c5, 1.25, 100)],
@@ -241,7 +241,7 @@ finally:
     _RUNTIME.reset()
 
 try:
-    _RUNTIME.override("select.model.near_match_tau", 0.0)
+    _RUNTIME.override("report.model.near_match_tau", 0.0)
     _catalog6, _s6, _c6 = _scene()
     _plan6 = _arbiter(_catalog6).arbitrate(
         [_cand(_s6, 1.0, 200), _cand(_c6, 1.25, 100)],
@@ -261,8 +261,8 @@ def _no_promotions(order, cap):
 
 
 try:
-    _RUNTIME.override("select.joint_score", _flat_score)
-    _RUNTIME.override("select.promotions", _no_promotions)
+    _RUNTIME.override("report.joint_score", _flat_score)
+    _RUNTIME.override("report.promotions", _no_promotions)
     _catalog7, _s7, _c7 = _scene("match")
     _plan7 = _arbiter(_catalog7).arbitrate(
         [_cand(_s7, 1.0, 200), _cand(_c7, 1.25, 100)],
