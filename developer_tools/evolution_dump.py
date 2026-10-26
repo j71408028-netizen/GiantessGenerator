@@ -38,6 +38,7 @@
     python developer_tools/evolution_dump.py --pack my_pack        # 带静态行为包模拟
     python developer_tools/evolution_dump.py --world my_world      # 带世界包行为包模拟
     python developer_tools/evolution_dump.py --list-packs          # 看有哪些包 / 表
+    python developer_tools/evolution_dump.py --list-hooks          # 看行为包能接管哪些 key
 
 输出：坐标跟踪图（PNG）+ 退化检测报告（report.md），写入 ``--out`` 目录
 （默认 ``developer_tools/_out/evolution/``；带 ``--pack`` / ``--world`` 时再嵌一层
@@ -982,10 +983,18 @@ def main():
                             help="先加载已部署世界包 data/worlds/<id> 声明的行为包再模拟")
     parser.add_argument("--list-packs", action="store_true",
                         help="列出可用的静态行为包 / 世界包 / 性格表后退出")
+    parser.add_argument("--list-hooks", action="store_true",
+                        help="列出行为包钩子目录（scope / 细度 / 层级 / 签名 /"
+                             " 默认值，格式化在 behavior_hooks_report）后退出")
     args = parser.parse_args()
 
     if args.list_packs:
         print_available()
+        return
+
+    if args.list_hooks:
+        from behavior_hooks_report import print_catalog
+        print_catalog()
         return
 
     presets = select_presets(args.group, args.table, args.only)

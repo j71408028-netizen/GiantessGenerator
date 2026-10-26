@@ -31,6 +31,7 @@
 | `minigame_preview.py` | 小游戏 | ✅ 小游戏改动可能来自资源开发者，直接可用 |
 | `archive_preview.py` | 角色档案导出 | ⏸ **HTML 档案模板暂不开放**——当前只服务核心开发者调模板，尚不作为资源开发者的扩写点 |
 | `evolution_dump.py` | 演化模型 | ✅ 可加载行为包（`--pack` / `--world`）——不用建世界包、不用开局，直接看行为包对演化的覆盖效果；不指定包时只反映核心演化模型自身的改动 |
+| `behavior_hooks_report.py` | 行为包钩子 | ✅ 写行为包前先看一眼：按 scope 列出全部可覆盖目标（细度 / 层级 / 签名 / 常量默认值），`--json` 给机器可读目录；`evolution_dump.py --list-hooks` 同一入口 |
 
 ## 命名：`<领域>_<输出>.py`
 
@@ -48,6 +49,7 @@
 | `archive_preview.py` | 角色档案导出 | 打开预览 | 改 `services/character/archive_export.py` 后起个小服务，F5 即用最新代码重渲染角色档案 |
 | `minigame_preview.py` | 小游戏舞台 | 打开预览 | 不进副本，直接在独立 imgui 窗口跑一个小游戏；帧时钟 / 输入层 / 纹理上传与副本同一套 |
 | `quip_report.py` | quip 语料 | 简略报告 | 检查 `data/packs/quips/` 的类型 meta、标记格式，以及类型替换的**组合级语法风险**并双向溯源。**一次只查一个风格的一个尺寸档** |
+| `behavior_hooks_report.py` | 行为包钩子 | 简略报告 | 把 `runtime.catalog()` 按 scope 分组打到 stdout（细度 / 层级 / 签名 / 常量默认值），可 `--scope` 过滤、`--json` 机器可读 |
 | `evolution_dump.py` | 演化模型 | 详细产物 | 演化模型二阶退化模拟（**角点 + 默认性格表**，可 `--pack` / `--world` 加载行为包），出 PNG 与 `report.md`；需要 matplotlib |
 
 ## 产物统一写 `_out/`（整目录不入库）
