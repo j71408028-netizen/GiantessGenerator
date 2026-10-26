@@ -16,12 +16,52 @@ import random
 import re
 from typing import List
 
+from core.behavior_runtime import behavior_const, get_runtime
 from core.logic import (
     ALL_PART_NAMES, format_size, get_size_category, replace_quip_tags,
     get_comparisons, compute_casualty, compute_environment_factor,
     select_quip_with_budget, comparison_lines,
 )
 from services.character.spatial import SpatialProfile, priors_for_tags
+
+# 报告引擎的伤亡 / 耐久模型参数（常量钩子的 key 是公开契约；消费一律走
+# resolve_value，此处不保留模块级名字）。终局坐标锁 (4, 4)、突破的 will
+# 门控与直通语义不开放（核心不变式 / 策略契约）。
+behavior_const("report", "model.breakthrough_scale", 1.0,
+               layer="infra", contract="data")
+behavior_const("report", "model.durability_damage_scale", 0.1,
+               layer="infra", contract="data")
+behavior_const("report", "model.worn_threshold", 0.5,
+               layer="infra", contract="data")
+behavior_const("report", "model.step_fallback", 0.05,
+               layer="infra", contract="data")
+behavior_const("report", "model.env_factor_fallback", 0.3,
+               layer="infra", contract="data")
+
+
+def _model_value(key: str) -> float:
+    """report.model.* 常量钩子的有效值（覆盖优先于注册默认值）。"""
+    return float(get_runtime().resolve_value(key))
+
+
+def breakthrough_prob(greed: float, will: bool, attempts: int) -> float:
+    """终局坐标突破概率：仅意愿角色参与，贪婪与已尝试次数线性抬升。"""
+    if not will:
+        return 0.0
+    return min(1.0, _model_value("report.model.breakthrough_scale")
+               * (greed / 100.0) * (attempts + 1))
+
+
+def durability_damage(ratio: float, height_ratio: float,
+                      destruction: float) -> float:
+    """独特地标单次耐久伤害：对比倍率 × 身高比² × 破坏性 × 伤害系数。"""
+    return (ratio * (height_ratio ** 2) * destruction
+            * _model_value("report.model.durability_damage_scale"))
+
+
+def is_worn(durability: float) -> bool:
+    """耐久是否低到标注「（残破的）」。"""
+    return durability < _model_value("report.model.worn_threshold")
 
 
 class ReportEngine:
@@ -158,10 +198,10 @@ class ReportEngine:
                     landmark_addresses[lm_key] = lm_addr
                 durability = landmark_durability.get(lm_key, 1.0)
                 height_ratio = height / lm.size
-                damage = ratio * (height_ratio ** 2) * curr_destruction * 0.1
+                damage = durability_damage(ratio, height_ratio, curr_destruction)
                 durability -= damage
                 landmark_durability[lm_key] = durability
-                durability_suffix = "（残破的）" if durability < 0.5 else ""
+                durability_suffix = "（残破的）" if is_worn(durability) else ""
                 compare_text = f"    └─ 约等于{lm.name}{durability_suffix}{suffix}度的{ratio:.2f}倍"
             else:
                 # 非唯一地标的措辞与挂件版共用一份，见 logic.comparison_lines
@@ -230,14 +270,16 @@ class ReportEngine:
                     if "涩涩" in selected_tags:
                         locked_coords.remove((4, 4))
                     else:
-                        prob = min(1.0, (greed / 100.0) * (breakthrough_attempts + 1)) if will else 0.0
+                        prob = breakthrough_prob(greed, will, breakthrough_attempts)
                         if random.random() < prob:
                             locked_coords.remove((4, 4))
                         else:
                             breakthrough_attempts += 1
 
-            effective_step = actual_step if actual_step > 0 else 0.05
-            env_factor = compute_environment_factor(quip_text) if quip_text else 0.3
+            effective_step = (actual_step if actual_step > 0
+                              else _model_value("report.model.step_fallback"))
+            env_factor = (compute_environment_factor(quip_text) if quip_text
+                          else _model_value("report.model.env_factor_fallback"))
             casualty_increase = compute_casualty(
                 height, effective_step, curr_destruction, quip_text or "", env_factor)
             total_casualties += casualty_increase

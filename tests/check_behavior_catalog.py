@@ -27,6 +27,7 @@ import core.logic  # noqa: E402,F401  注册 logic 函数与常量
 import services.character.offline  # noqa: E402,F401
 import services.character.profile_text  # noqa: E402,F401
 import services.exploration.arbiter  # noqa: E402,F401
+import services.exploration.report  # noqa: E402,F401  注册 report 引擎常量
 import services.creation_service  # noqa: E402,F401
 import services.state_service  # noqa: E402,F401
 
@@ -144,6 +145,8 @@ _classify("report.promotions", LAYER_MODULE, CONTRACT_STRATEGY,
 _classify("report.model.lane_weights", LAYER_INFRA, CONTRACT_DATA,
           KIND_CONST)
 _classify("report.model.near_match_tau", LAYER_INFRA, CONTRACT_DATA,
+          KIND_CONST)
+_classify("report.model.breakthrough_scale", LAYER_INFRA, CONTRACT_DATA,
           KIND_CONST)
 _classify("logic.compute_casualty", LAYER_INFRA, CONTRACT_POINT,
           KIND_FUNCTION)

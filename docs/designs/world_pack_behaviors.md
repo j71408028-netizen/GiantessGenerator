@@ -18,9 +18,11 @@
   `offline.recover_plan` 与展示文案 `offline.report_text`；计划收到的模型参数
   快照来自角色出身烙印（见下文三层模型）。执行与持久化仍由服务层负责
   （见附录 A 的 `offline` 组）。
-- `report`（`services/exploration/arbiter.py`，报告选取仲裁）：车道窗口 /
-  联合分 / 近匹配提拔是模块策略，模型参数是 `report.model.*` 常量钩子；
-  硬闸、物理走查与 stuck 判定不开放（见附录 A 的 `report` 组）。
+- `report`（`services/exploration/arbiter.py` 报告选取仲裁 +
+  `services/exploration/report.py` 报告引擎）：车道窗口 / 联合分 /
+  近匹配提拔是模块策略；仲裁模型参数与引擎的伤亡 / 耐久参数是
+  `report.model.*` 常量钩子。硬闸、物理走查与 stuck 判定不开放
+  （见附录 A 的 `report` 组）。
 
 离线模型参数与空间 / 环境先验的调制**不再是运行时钩子**：它们经
 `CreationService.derive_model_tuning` 在创建角色时烙印（出身层，见下文）。
@@ -245,7 +247,7 @@ data/worlds/<world_id>/
 `StateService.receive_action_points`（自然上限 100），并按 `recover_evolution`
 来源标签记录演化（历史演化行的字符串标签，入口本身已删）；这些执行语义不开放。
 
-### `report`（报告选取仲裁）
+### `report`（报告选取仲裁与引擎参数）
 
 `SelectionArbiter` 在地标候选与描述风格供给之间做配对仲裁：车道资格窗口与
 近匹配提拔是裁定级输出，联合分是建议级（报告引擎的预算走步与坐标演化可
@@ -254,6 +256,10 @@ data/worlds/<world_id>/
 `env_estimate`）。硬闸（可达 / 私有名 / 维度 / 耐久）、物理走查（位置
 演化）与 stuck 判定不开放。`logic.select_quip_with_budget` /
 `logic.get_comparisons` 的 key 不变（scope `logic` 是已部署契约）。
+
+报告引擎（`services/exploration/report.py`）的伤亡 / 耐久数值也在此组：
+突破概率缩放、耐久伤害系数、残破阈值与无事件兜底（见下表常量行）。
+终局坐标锁 `(4, 4)` 与突破的 `will` 门控、「涩涩」直通语义不开放。
 
 | 目标 | 类型 | 签名 / 默认 | 说明 |
 |------|------|------|------|
@@ -271,6 +277,11 @@ data/worlds/<world_id>/
 | `report.model.reach_multiplier` | 常量 float | `10.0` | 可达范围 = 身高倍数；硬闸语义不开放，仅开放数值。 |
 | `report.model.env_consistency` | 常量 float | `0.5` | 描述文本环境一致性加分上限（消费于 `logic.select_quip_with_budget`）。 |
 | `report.model.env_dev_range` | 常量 float | `1.4` | 环境偏差归一分母（环境因子值域全宽）。 |
+| `report.model.breakthrough_scale` | 常量 float | `1.0` | 终局坐标突破概率整体缩放（`0` = 永不突破）；`will` 门控与「涩涩」直通语义不开放。 |
+| `report.model.durability_damage_scale` | 常量 float | `0.1` | 独特地标单次耐久伤害系数（伤害 = 对比倍率 × 身高比² × 破坏性 × 本系数）。 |
+| `report.model.worn_threshold` | 常量 float | `0.5` | 耐久残破标注阈值（低于即标注「（残破的）」）。 |
+| `report.model.step_fallback` | 常量 float | `0.05` | 无有效步进事件时的伤亡估算兜底步长。 |
+| `report.model.env_factor_fallback` | 常量 float | `0.3` | 无事件文本时的伤亡环境系数兜底。 |
 
 ### `logic`（模块函数与常量）
 

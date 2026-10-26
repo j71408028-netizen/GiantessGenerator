@@ -91,8 +91,9 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 `runtime.catalog()` 可列出。`layer` 按语义所有权划分，不按目录：基础设施
 算法点 / 模型参数、模块决策策略、内容数据。离线恢复开放为 `offline` 组
 （`recover_plan` / `report_text`，执行走 `OfflineService` 直连）；报告选取
-仲裁开放为 `report` 组（车道 / 联合分 / 提拔与
-`report.model.*` 常量），硬闸与物理走查不开放。
+仲裁开放为 `report` 组（车道 / 联合分 / 提拔与仲裁 `report.model.*` 常量），
+硬闸与物理走查不开放；报告引擎的伤亡 / 耐久参数同为 `report.model.*`
+常量（突破缩放、耐久伤害系数、残破阈值、无事件兜底）。
 
 ### 2.2 `data/` 是用户数据区
 
