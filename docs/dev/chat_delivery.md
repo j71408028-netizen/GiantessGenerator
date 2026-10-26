@@ -64,7 +64,7 @@ chat_events（message_delivered / chat_updated）
 - 旧消息没有 `id` → 载入时补 UUID；
 - 旧角色消息没有 `status` → 视为 `read`（历史上早已完整展示过），
   避免迁移后全体误报未读；
-- `ChatRepo.save` 写入 `"schema_version": 2`；`ChatState.from_dict`
+- `ChatRepo.save` 写入 `"schema_version": 3`；`ChatState.from_dict`
   按字段名过滤，多余键静默忽略，向前兼容。
 
 状态迁移只有两条路径，均由服务层执行、AI 无法直接操纵：
@@ -75,6 +75,28 @@ queued  --到点(scheduler/controller)-->  delivered  --玩家读到-->  read
 
 "已读不回"不产生角色消息：玩家消息标记 `read=True, silent=True,
 seen_by_char_at=…`，与改造前一致。
+
+### 3.1 聊天线程存档（角色 × 玩家身份）
+
+一条线程由 `(giantess_id, identity_id)` 唯一确定，`ChatState.identity_id`
+是线程键。消息、态度、记忆、话题与已消费事件都只属于所在线程：
+
+```
+data/archives/<giantess_id>/
+├── info.json
+├── chat.json                 # 旧版单线程存档（只读回退，不删除）
+└── chats/
+    ├── default.json          # 默认身份，首次保存时生成
+    └── <identity_id>.json    # 其他身份各自独立
+```
+
+- 读取默认身份时先找 `chats/default.json`，不存在才回退 `chat.json`；
+  其他身份不会读取旧档。
+- 首次保存默认身份即写入 `chats/default.json`，此后新文件为准；旧
+  `chat.json` 保留原样，不自动删除，便于回滚。
+- 身份 id 经 URL 编码后作为文件名（`/` 等路径分隔符不会逃出 `chats/`）。
+- `ChatRepo.ids_with_queued()` 同时扫描旧档与 `chats/*.json`，返回
+  `(giantess_id, identity_id)` 线程键，同一逻辑线程只返回一次。
 
 ## 4. 协议 v2：一次决策多条消息
 
@@ -107,30 +129,33 @@ UI 不再自行模拟节奏。
 
 `ChatDeliveryScheduler`：模块级单例（`get_scheduler()`），daemon 线程。
 
-- `notify_queued(giantess_id, available_at)`：有消息入列时登记最早到点
-  时间并唤醒；
+- `notify_queued(giantess_id, identity_id, available_at)`：某条线程有消息
+  入列时登记最早到点时间并唤醒；
 - 启动时 `ChatRepo.ids_with_queued()` 扫描上次会话遗留的 `queued`
-  消息并接管——应用关闭期间到期的消息在下次启动时直接提升为
-  `delivered`（延迟结算，不做逐分钟后台模拟）；
-- 到点调用 `ChatService.deliver_due()`：`queued → delivered`、落盘、
-  广播 `message_delivered`；若仍有未到点消息则自动登记下一次唤醒。
+  消息，按 `(giantess_id, identity_id)` 线程键接管——应用关闭期间到期的
+  消息在下次启动时直接提升为 `delivered`（延迟结算，不做逐分钟后台模拟）；
+- 到点调用 `ChatService.deliver_due(giantess_id, identity_id)`：
+  `queued → delivered`、落盘、广播 `message_delivered`；若仍有未到点
+  消息则自动登记下一次唤醒。
 
 `ChatDeliveryController`：两套界面共用的节奏控制器（工具包无关）。
 界面提供 `after(delay_ms, fn)` 与两个回调：
 
-- `on_reload(chat_state)`：重载聊天域（含到点提升）后重渲染；
+- `on_reload(chat_state)`：重载聊天线程（含到点提升）后重渲染；
 - `on_status(kind)`：`"typing"`（还有 `queued` 消息）/ `""`。
 
-控制器每个 tick：`load_chat(blocking=False)` → 回调渲染 →
-`mark_char_messages_read()`（`delivered → read`）→ 若仍有 queued
-消息则按最早 `available_at` 安排下一次 after。attach / detach / refresh
-用 token 取消过期回调。
+控制器每个 tick：`load_chat(blocking=False, identity_id=…)` → 回调渲染 →
+`mark_char_messages_read(identity_id=…)`（`delivered → read`）→ 若仍有
+queued 消息则按最早 `available_at` 安排下一次 after。attach / detach /
+refresh 用 token 取消过期回调。`attach(state, identity_id)` 绑定一条线程；
+当前两套界面尚未接入身份选择器，均使用默认身份。
 
 ## 6. 并发与一致性
 
 - **角色级锁**：`chat_service` 模块级 `_CHAR_LOCKS`（跨实例共享，
   专业 / 挂件 / 调度器三方串行）。发送、补话、主动搭话、投递、标记已读
-  全部持锁执行；锁覆盖 AI 调用全程。
+  全部持锁执行；锁覆盖 AI 调用全程。线程之间暂时共享角色锁，避免角色
+  属性的并发写回；线程内的存档互不覆盖。
 - **主线程非阻塞**：UI 侧的 `load_chat / mark_char_messages_read`
   以 `blocking=False` 尝试；锁被占用（AI 进行中）时 `load_chat`
   返回 `None`，控制器保留旧状态 1 秒后重试，界面永不卡顿。

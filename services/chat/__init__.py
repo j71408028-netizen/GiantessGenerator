@@ -32,11 +32,13 @@
 - 离线恢复（旧版说明保留备查）：原 catchup_reply / proactive_message
   已并入 reconcile。
 
-每个角色的聊天历史天然按 giantess_id 隔离（chat.json 各自独立），
+聊天历史按 (giantess_id, identity_id) 线程隔离：同一角色的不同玩家身份
+各有独立的消息、态度、记忆与话题，互不可见。存储布局见 ChatRepo；
 ChatService.list_characters 供 UI 列出可切换的聊天角色。
 
 并发：同一角色的所有写操作经模块级角色锁串行（专业 / 挂件两套界面与
-投递调度器可能各持一个 ChatService 实例，锁在模块级共享才有效）。
+投递调度器可能各持一个 ChatService 实例，锁在模块级共享才有效；线程
+之间也暂时共享这把角色锁，避免角色属性的并发写回）。
 AI 调用全程持锁；UI 主线程只做 blocking=False 的非阻塞尝试
 （load_chat / mark_char_messages_read），锁被占用时立即返回，绝不阻塞
 界面。调用方（UI）负责把 send_message 放到后台线程执行。
@@ -52,8 +54,9 @@ from typing import Optional
 
 from core.address_model import format_addr_compact
 from core.ai import get_ai_client, describe_ai_error
-from core.models import (ChatMessage, ChatParams, ChatState, CharacterSnapshot,
-                    Topic)
+from core.models import (DEFAULT_IDENTITY_ID, ChatMessage, ChatParams,
+                         ChatState, CharacterSnapshot, Topic,
+                         normalize_identity_id)
 from persistence.character_repo import CharacterRepo
 from persistence.chat_repo import ChatRepo
 from services.chat import events as chat_events
@@ -618,50 +621,57 @@ class ChatService:
         self.character_repo = character_repo or CharacterRepo(data_dir)
         self.chat_repo = chat_repo or ChatRepo(data_dir)
 
-    def load_chat(self, giantess_id: str, blocking: bool = True) -> Optional[ChatState]:
-        """加载聊天域，并把已到点的 queued 消息提升为 delivered。
+    def load_chat(self, giantess_id: str, blocking: bool = True,
+                  identity_id: str = DEFAULT_IDENTITY_ID
+                  ) -> Optional[ChatState]:
+        """加载一条聊天线程，并把已到点的 queued 消息提升为 delivered。
 
         blocking=False 供 UI 主线程使用：角色锁被 AI 请求占用时返回
         None（而非等待），调用方保留旧状态稍后重试即可。
         """
+        identity_id = normalize_identity_id(identity_id)
         with _char_lock(giantess_id, blocking) as acquired:
             if not acquired:
                 return None
-            chat_state = self.chat_repo.load(giantess_id)
+            chat_state = self.chat_repo.load(giantess_id, identity_id)
             promoted = self._promote_due(chat_state)
             if promoted:
                 self.chat_repo.save(chat_state)
-                self._publish_delivered(giantess_id, promoted)
+                self._publish_delivered(giantess_id, identity_id, promoted)
             return chat_state
 
-    def deliver_due(self, giantess_id: str) -> list:
+    def deliver_due(self, giantess_id: str,
+                    identity_id: str = DEFAULT_IDENTITY_ID) -> list:
         """把所有到点的 queued 消息提升为 delivered（调度器到点入口）。
 
         返回本次提升的消息列表；若仍有未到点的 queued 消息，自动向
         调度器登记下一次唤醒。幂等：重复调用只处理未迁移的消息。
         """
+        identity_id = normalize_identity_id(identity_id)
         with _char_lock(giantess_id) as acquired:
             if not acquired:
                 return []
-            chat_state = self.chat_repo.load(giantess_id)
+            chat_state = self.chat_repo.load(giantess_id, identity_id)
             promoted = self._promote_due(chat_state)
             if promoted:
                 self.chat_repo.save(chat_state)
-                self._publish_delivered(giantess_id, promoted)
+                self._publish_delivered(giantess_id, identity_id, promoted)
             self._reenqueue(giantess_id, chat_state)
             return promoted
 
     def mark_char_messages_read(self, giantess_id: str,
-                                blocking: bool = True) -> int:
-        """把已投递（delivered）的角色消息统一标记为玩家已读。
+                                blocking: bool = True,
+                                identity_id: str = DEFAULT_IDENTITY_ID) -> int:
+        """把一条线程里已投递（delivered）的角色消息标记为玩家已读。
 
         打开聊天并渲染后由界面调用；锁被占用时（blocking=False）静默
         跳过，下次渲染周期会重新尝试。返回本次标记的条数。
         """
+        identity_id = normalize_identity_id(identity_id)
         with _char_lock(giantess_id, blocking) as acquired:
             if not acquired:
                 return 0
-            chat_state = self.chat_repo.load(giantess_id)
+            chat_state = self.chat_repo.load(giantess_id, identity_id)
             now = datetime.datetime.now().isoformat()
             changed = []
             for message in chat_state.messages:
@@ -672,7 +682,8 @@ class ChatService:
             if changed:
                 self.chat_repo.save(chat_state)
                 chat_events.publish({"type": "chat_updated",
-                                     "giantess_id": giantess_id})
+                                     "giantess_id": giantess_id,
+                                     "identity_id": identity_id})
             return len(changed)
 
     # ---------- 投递内部 ----------
@@ -698,9 +709,10 @@ class ChatService:
         return promoted
 
     @staticmethod
-    def _publish_delivered(giantess_id: str, promoted: list):
+    def _publish_delivered(giantess_id: str, identity_id: str, promoted: list):
         chat_events.publish({
             "type": "message_delivered", "giantess_id": giantess_id,
+            "identity_id": identity_id,
             "message_ids": [m.id for m in promoted],
         })
 
@@ -712,13 +724,14 @@ class ChatService:
             return
         earliest = min(m.available_at for m in queued if m.available_at)
         from services.chat.delivery import get_scheduler
-        get_scheduler().notify_queued(giantess_id, earliest)
+        get_scheduler().notify_queued(giantess_id, chat_state.identity_id,
+                                      earliest)
 
     def list_characters(self) -> list:
         """列出全部可聊天角色（快照列表），供 UI 做聊天对象切换。
 
-        每个角色的对话历史按 giantess_id 隔离在各自的 chat.json 中，
-        切换对象 = 重新 load 对应快照 + load_chat。
+        每个角色的对话历史按 (giantess_id, identity_id) 线程隔离；切换对象
+        = 重新 load 对应快照 + load_chat，切换身份另传 identity_id。
         """
         characters = []
         for giantess_id in self.character_repo.list_ids():
@@ -746,7 +759,8 @@ class ChatService:
             result["user_message"] = user_message
             self.chat_repo.save(chat_state)
             chat_events.publish({"type": "chat_updated",
-                                 "giantess_id": state.giantess_id})
+                                 "giantess_id": state.giantess_id,
+                                 "identity_id": chat_state.identity_id})
 
             parsed = self._request_parsed(state, chat_state, text)
             if isinstance(parsed, dict) and parsed.get("_error"):
@@ -795,7 +809,8 @@ class ChatService:
             chat_state.messages = kept
             self.chat_repo.save(chat_state)
             chat_events.publish({"type": "chat_updated",
-                                 "giantess_id": chat_state.giantess_id})
+                                 "giantess_id": chat_state.giantess_id,
+                                 "identity_id": chat_state.identity_id})
         return removed
 
     def reconcile(self, state: CharacterSnapshot, chat_state: ChatState) -> dict:
@@ -967,6 +982,7 @@ class ChatService:
             self.character_repo.save(state)
         chat_events.publish({
             "type": "chat_updated", "giantess_id": state.giantess_id,
+            "identity_id": chat_state.identity_id,
             "replied": bool(result["reply_messages"]),
             "ops_applied": result["ops_applied"],
         })

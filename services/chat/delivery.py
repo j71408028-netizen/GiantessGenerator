@@ -20,6 +20,7 @@ load_chat 返回 None，控制器保留旧状态 1 秒后重试，界面永不�
 import datetime
 import threading
 
+from core.models import DEFAULT_IDENTITY_ID, normalize_identity_id
 from persistence.chat_repo import ChatRepo
 
 
@@ -29,7 +30,8 @@ class ChatDeliveryScheduler:
     def __init__(self, chat_service):
         self._chat_service = chat_service
         self._condition = threading.Condition()
-        self._wake_at = {}          # giantess_id -> 最早 available_at（datetime）
+        # (giantess_id, identity_id) -> 最早 available_at（datetime）
+        self._wake_at = {}
         self._thread = None
         self._stopped = False
 
@@ -47,16 +49,19 @@ class ChatDeliveryScheduler:
         with self._condition:
             self._condition.notify_all()
 
-    def notify_queued(self, giantess_id: str, available_at: str):
-        """有消息以 queued 入列：登记最早到点时间并唤醒调度线程。"""
+    def notify_queued(self, giantess_id: str, identity_id: str,
+                      available_at: str):
+        """某条聊天线程有消息以 queued 入列：登记最早到点时间并唤醒。"""
+        identity_id = normalize_identity_id(identity_id)
         try:
             moment = datetime.datetime.fromisoformat(available_at)
         except (TypeError, ValueError):
             moment = datetime.datetime.now()
+        key = (giantess_id, identity_id)
         with self._condition:
-            current = self._wake_at.get(giantess_id)
+            current = self._wake_at.get(key)
             if current is None or moment < current:
-                self._wake_at[giantess_id] = moment
+                self._wake_at[key] = moment
             self._condition.notify_all()
 
     def _adopt_pending(self):
@@ -65,9 +70,9 @@ class ChatDeliveryScheduler:
         try:
             repo = ChatRepo() if self._chat_service is None else \
                 self._chat_service.chat_repo
-            for giantess_id in repo.ids_with_queued():
-                self.notify_queued(giantess_id,
-                                   datetime.datetime.now().isoformat())
+            now = datetime.datetime.now().isoformat()
+            for giantess_id, identity_id in repo.ids_with_queued():
+                self.notify_queued(giantess_id, identity_id, now)
         except Exception:
             # 接管失败不影响本次运行：打开聊天时 load_chat 仍会兜底提升
             pass
@@ -80,19 +85,19 @@ class ChatDeliveryScheduler:
                     self._condition.wait(timeout=30)
                     continue
                 now = datetime.datetime.now()
-                due = [gid for gid, moment in self._wake_at.items()
+                due = [key for key, moment in self._wake_at.items()
                        if moment <= now]
-                for gid in due:
-                    self._wake_at.pop(gid, None)
+                for key in due:
+                    self._wake_at.pop(key, None)
                 if not due:
                     earliest = min(self._wake_at.values())
                     delay = max(0.0, (earliest - now).total_seconds())
                     self._condition.wait(timeout=min(delay, 30.0))
-            for giantess_id in due:
+            for giantess_id, identity_id in due:
                 try:
-                    self._chat_service.deliver_due(giantess_id)
+                    self._chat_service.deliver_due(giantess_id, identity_id)
                 except Exception:
-                    # 单个角色投递失败不拖垮线程；deliver_due 内部
+                    # 单条线程投递失败不拖垮线程；deliver_due 内部
                     # _reenqueue 会在存档仍有 queued 时重新登记
                     pass
 
@@ -112,15 +117,18 @@ class ChatDeliveryController:
         self._on_reload = on_reload
         self._on_status = on_status
         self._giantess_id = None
+        self._identity_id = DEFAULT_IDENTITY_ID
         self._token = 0
 
-    def attach(self, state):
-        """开始跟随一个角色：立即重载并接管其 queued 消息的展示节奏。"""
+    def attach(self, state, identity_id: str = DEFAULT_IDENTITY_ID):
+        """开始跟随一个角色的一条聊天线程：立即重载并接管其展示节奏。"""
         self._giantess_id = state.giantess_id if state is not None else None
+        self._identity_id = normalize_identity_id(identity_id)
         self.refresh()
 
     def detach(self):
         self._giantess_id = None
+        self._identity_id = DEFAULT_IDENTITY_ID
         self._token += 1
 
     def refresh(self):
@@ -134,13 +142,16 @@ class ChatDeliveryController:
         if token != self._token or not self._giantess_id:
             return
         giantess_id = self._giantess_id
-        chat_state = self._chat_service.load_chat(giantess_id, blocking=False)
+        identity_id = self._identity_id
+        chat_state = self._chat_service.load_chat(
+            giantess_id, blocking=False, identity_id=identity_id)
         if chat_state is None:
             # AI 请求占用角色锁：保留旧状态，稍后重试
             self._after(1000, lambda: self._tick(token))
             return
         self._on_reload(chat_state)
-        self._chat_service.mark_char_messages_read(giantess_id, blocking=False)
+        self._chat_service.mark_char_messages_read(
+            giantess_id, blocking=False, identity_id=identity_id)
         from services.chat import queued_char_messages
         queued = queued_char_messages(chat_state)
         if queued:

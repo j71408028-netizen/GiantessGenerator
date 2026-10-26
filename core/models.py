@@ -611,6 +611,13 @@ RELATIONSHIP_KINDS = (
 )
 
 
+def normalize_identity_id(identity_id) -> str:
+    """身份 id 归一：空值/非字符串回退默认身份，其余去首尾空白。"""
+    if not isinstance(identity_id, str) or not identity_id.strip():
+        return DEFAULT_IDENTITY_ID
+    return identity_id.strip()
+
+
 @dataclass
 class PlayerIdentity:
     """玩家可切换的身份；角色视角里每个身份都是不同的人。
@@ -625,8 +632,7 @@ class PlayerIdentity:
     updated_at: str = ""
 
     def __post_init__(self):
-        if not isinstance(self.id, str) or not self.id.strip():
-            self.id = DEFAULT_IDENTITY_ID
+        self.id = normalize_identity_id(self.id)
         if not isinstance(self.label, str) or not self.label.strip():
             self.label = "默认身份"
         if not isinstance(self.description, str):
@@ -725,8 +731,12 @@ class Topic:
 
 @dataclass
 class ChatState:
-    """角色的聊天域数据，独立存档于 data/archives/<giantess_id>/chat.json
-    （聊天写入频繁，与主档案 info.json 分离，避免频繁重写演化表）。
+    """角色聊天域中的一条线程（角色 × 玩家身份）的数据。
+
+    线程独立存档于 ``data/archives/<giantess_id>/chats/<identity_id>.json``；
+    默认身份在首次保存时写 ``chats/default.json``，旧 ``chat.json`` 只在
+    读取默认身份时作为回退，不删除。identity_id 是线程键，消息、态度、
+    记忆、话题与已消费事件都只属于这条线程。
 
     attitude 为聊天态度值（-100~100）：驱动角色的回复意愿与语气，
     低于 REVEAL_ATTITUDE（见 services.chat）时不注入隐藏介绍；
@@ -738,6 +748,7 @@ class ChatState:
     services.chat.experience_events），防止同一新闻/经历被反复提起。
     """
     giantess_id: str
+    identity_id: str = DEFAULT_IDENTITY_ID
     messages: List[ChatMessage] = field(default_factory=list)
     memory: str = ""
     attitude: int = 0
@@ -749,6 +760,7 @@ class ChatState:
     consumed_event_ids: List[str] = field(default_factory=list)
 
     def __post_init__(self):
+        self.identity_id = normalize_identity_id(self.identity_id)
         self.messages = [
             m if isinstance(m, ChatMessage) else ChatMessage.from_dict(m)
             for m in (self.messages or [])
