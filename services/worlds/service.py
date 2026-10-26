@@ -31,7 +31,9 @@ from persistence.style_addr import save_address as _save_style_addr
 from dungeon.terms import (LEGACY_SCENARIO_RESOURCE_KEY, SCENARIO_RESOURCE_KEY,
                            is_default_scenario)
 from core.address_model import world_of
-from core.behavior_runtime import get_runtime, resolve_behavior_source
+from core.behavior_runtime import (
+    BEHAVIOR_API_VERSION, get_runtime, resolve_behavior_source,
+)
 from persistence.json_store import write_json_atomic
 
 _MEMBER_TRAVERSAL_RE = re.compile(r"(^|/)\s*\.\.\s*(/|$)")
@@ -492,6 +494,9 @@ class WorldManager:
                                     name_repo, news_service,
                                     challenge_mgr,
                                     selected_resources)
+            if manifest.owns("behaviors"):
+                # 程序内创建的包按当前运行时契约盖章，激活时不产版本警告
+                manifest.behavior_api = BEHAVIOR_API_VERSION
             for key in ("world_setting", "seed"):
                 if key in settings and settings.get(key) is not None:
                     manifest.settings[key] = settings[key]

@@ -110,6 +110,9 @@ class WorldPackManifest:
     """
 
     format_version: int = WORLD_FORMAT_VERSION
+    # 行为包 API 契约版本（整数，见 core.behavior_runtime.BEHAVIOR_API_VERSION）。
+    # None = 未声明（按 1 处理）；激活时与运行时版本不符只警告不阻断。
+    behavior_api: Optional[int] = None
     world_id: str = ""
     name: str = ""
     version: str = "1.0"
@@ -128,7 +131,7 @@ class WorldPackManifest:
     # ---------- 序列化 ----------
 
     def to_dict(self) -> dict:
-        return {
+        data = {
             "format_version": self.format_version,
             "world_id": self.world_id,
             "name": self.name,
@@ -141,6 +144,9 @@ class WorldPackManifest:
             "settings": dict(self.settings),
             "resources": dict(self.resources),
         }
+        if self.behavior_api is not None:
+            data["behavior_api"] = self.behavior_api
+        return data
 
     @classmethod
     def from_dict(cls, data: dict) -> "WorldPackManifest":
@@ -153,6 +159,7 @@ class WorldPackManifest:
             resources[SCENARIO_RESOURCE_KEY] = legacy
         return cls(
             format_version=data.get("format_version", WORLD_FORMAT_VERSION),
+            behavior_api=data.get("behavior_api"),
             world_id=data.get("world_id", ""),
             name=data.get("name", ""),
             version=data.get("version", "1.0"),
@@ -177,6 +184,12 @@ class WorldPackManifest:
                 1 <= self.format_version <= WORLD_FORMAT_VERSION):
             errors.append(
                 f"不支持的清单版本 {self.format_version!r}（当前支持 {WORLD_FORMAT_VERSION}）")
+        if self.behavior_api is not None and (
+                not isinstance(self.behavior_api, int)
+                or isinstance(self.behavior_api, bool)
+                or self.behavior_api < 1):
+            errors.append(
+                f"behavior_api 必须为正整数或省略（实际: {self.behavior_api!r}）")
         if not isinstance(self.name, str) or not self.name.strip():
             errors.append("name 不能为空")
         for key in self.settings:

@@ -112,6 +112,7 @@ def register(runtime):
 ```json
 {
   "format_version": 1,
+  "behavior_api": 2,
   "world_id": "my_world",
   "name": "我的世界",
   "version": "1.0",
@@ -120,6 +121,10 @@ def register(runtime):
   }
 }
 ```
+
+`behavior_api` 声明包面向的行为包契约版本（整数，当前为 `2`）。未声明按
+`1` 处理；低于 / 高于当前版本都只在激活诊断中警告、不阻断。程序内
+「从当前世界创建」的世界包会自动盖章当前版本。
 
 目录结构：
 
@@ -176,6 +181,7 @@ data/worlds/<world_id>/
 | `since` | 进入目录的版本 |
 | `deprecated` | 是否计划废弃 |
 | `params` | 函数细度的具名参数；常量为空列表 |
+| `default` | 常量为注册默认值；函数为默认实现的函数名 |
 
 层级按语义所有权划分，不按文件目录：
 
@@ -389,7 +395,10 @@ def register(runtime):
 - **启用诊断**：激活行为包时，`load_pack` 逐条校验注册并产出诊断报告
   （`BehaviorLoadReport`）：接管了哪些 key、未知 key / 签名或类型不符的拒绝原因、
   模块加载失败等，经 `[BehaviorPack]` 通道打印；导航栏会显示接管项数或诊断异常
-  计数。坏注册只拒绝该条，不影响包内其余注册。
+  计数，悬停世界包信息可展开完整诊断（接管清单 / API 版本 / 警告）。坏注册只
+  拒绝该条，不影响包内其余注册。
+- **API 版本**：`world.json` 的 `behavior_api` 声明包面向的契约版本（当前
+  `2`）。未声明按 `1` 处理并提示；低于 / 高于当前版本只警告不阻断。
 - **能力边界（副本）**：副本演化主体公式 `dungeon/rules.py::evolve_attributes`
   没有行为钩子——副本路径只通过注入的 `StateService.decay_step_rates` 受行为包
   影响；段步进、转移矩阵与章节敏感效果属于方案配置，不应由行为包重复表达。

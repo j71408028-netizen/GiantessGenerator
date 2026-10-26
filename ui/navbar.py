@@ -88,6 +88,33 @@ class NavigationBar(ctk.CTkFrame):
             self._frames["packloaded"], text="", font=ui_fonts.ui_font(11, "bold"),
             text_color=NAV_WORLD_GREEN)
         self.packloaded_label.pack(side="left", padx=14, pady=2)
+        # 悬停展开行为包启用诊断（接管清单 / API 版本 / 异常与警告）
+        self._behavior_tip_text = ""
+        self._behavior_tip = None
+        self.packloaded_label.bind("<Enter>", self._show_behavior_tip)
+        self.packloaded_label.bind("<Leave>", self._hide_behavior_tip)
+
+    def _show_behavior_tip(self, event=None):
+        """在标签旁弹出诊断全文；无诊断内容时不弹。"""
+        if not self._behavior_tip_text or self._behavior_tip is not None:
+            return
+        tip = ctk.CTkToplevel(self)
+        tip.overrideredirect(True)
+        tip.attributes("-topmost", True)
+        label = ctk.CTkLabel(
+            tip, text=self._behavior_tip_text, justify="left",
+            font=ui_fonts.ui_font(11), text_color=NAV_TEXT,
+            wraplength=420)
+        label.pack(padx=10, pady=8)
+        lx = self.packloaded_label.winfo_rootx()
+        ly = self.packloaded_label.winfo_rooty()
+        tip.geometry(f"+{lx + 30}+{ly - 8}")
+        self._behavior_tip = tip
+
+    def _hide_behavior_tip(self, event=None):
+        if self._behavior_tip is not None:
+            self._behavior_tip.destroy()
+            self._behavior_tip = None
 
     def _on_ui_switch_clicked(self):
         """「ME模式」按钮：只负责转发，确认框与拦截都在主窗口管理器里。"""
@@ -107,6 +134,10 @@ class NavigationBar(ctk.CTkFrame):
         并在包含行为包时按启用诊断报告提示接管项数或诊断异常。
         """
         self._world_active = bool(active)
+        tip_lines = (list(behavior_report.log_lines())
+                     if behavior_report is not None else [])
+        self._behavior_tip_text = "\n".join(tip_lines)
+        self._hide_behavior_tip()
         if active:
             self.worldpack_version_label.configure(
                 text=f"世界包版本：v{world_version}" if world_version else "世界包版本：未知")

@@ -93,7 +93,10 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 （`recover_plan` / `report_text`，执行走 `OfflineService` 直连）；报告选取
 仲裁开放为 `report` 组（车道 / 联合分 / 提拔与仲裁 `report.model.*` 常量），
 硬闸与物理走查不开放；报告引擎的伤亡 / 耐久参数同为 `report.model.*`
-常量（突破缩放、耐久伤害系数、残破阈值、无事件兜底）。
+常量（突破缩放、耐久伤害系数、残破阈值、无事件兜底）。世界包在 world.json
+用 `behavior_api`（整数，未声明按 1）声明面向的契约版本，与运行时
+`BEHAVIOR_API_VERSION` 不符时仅在启用诊断中警告；导航栏悬停世界包信息可
+展开完整诊断。
 
 ### 2.2 `data/` 是用户数据区
 

@@ -70,6 +70,12 @@ _LAYER_CONTRACTS = {
 # 开放面，全目录 since 以此为基线；此后新增条目按实际版本显式标注。
 _CATALOG_SINCE = "2.0"
 
+# 行为包 API 契约版本：目录 key 开放面的分代号。2 = 2.0 出身烙印基线
+# （删除 offline.model.* / spatial.TAG_* / recover_evolution，select 域
+# 更名 report）。世界包在 world.json 里用 behavior_api 声明面向的版本，
+# 与此不符时只在启用诊断里警告、不阻断（先软后硬）。
+BEHAVIOR_API_VERSION = 2
+
 
 @dataclass
 class HookSpec:
@@ -99,6 +105,20 @@ class BehaviorLoadReport:
     overridden: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    # 世界包声明的 behavior_api（None = 未声明，按 1 处理）与本进程
+    # 注册表可见的 key 数，供诊断展示（导航栏 tooltip / 日志）。
+    declared_api: Optional[int] = None
+    available_keys: int = 0
+
+    def api_line(self) -> str:
+        """API 版本诊断行（未启用行为包时为空串）。"""
+        if not self.pack_name:
+            return ""
+        declared = (str(self.declared_api) if self.declared_api is not None
+                    else "未声明（按 1 处理）")
+        return (f"behavior_api：包声明 {declared}，"
+                f"运行时 {BEHAVIOR_API_VERSION}；"
+                f"本进程可接管 key 共 {self.available_keys} 项")
 
     def log_lines(self) -> List[str]:
         """供 ``[BehaviorPack]`` 通道打印的诊断行。"""
@@ -109,6 +129,9 @@ class BehaviorLoadReport:
                              f"接管 {len(self.overridden)} 项：{', '.join(self.overridden)}")
             elif not self.errors:
                 lines.append(f"已启用行为包 '{self.pack_name}'，未接管任何行为")
+            api = self.api_line()
+            if api:
+                lines.append(api)
         for e in self.errors:
             lines.append(f"诊断异常：{e}")
         for w in self.warnings:
@@ -246,7 +269,8 @@ class BehaviorRuntime:
         """返回全部可覆盖目标的元数据，按 key 排序。
 
         每项含 ``key`` / ``scope`` / ``kind`` / ``layer`` / ``contract`` /
-        ``since`` / ``deprecated`` / ``params``。行为包作者据此判断目标属于
+        ``since`` / ``deprecated`` / ``params`` / ``default``（常量为注册
+        默认值，函数为默认实现的函数名）。行为包作者据此判断目标属于
         基础设施点、模块策略还是内容，以及它是否已废弃。
         """
         return [
@@ -259,6 +283,8 @@ class BehaviorRuntime:
                 "since": spec.since,
                 "deprecated": spec.deprecated,
                 "params": list(spec.param_names),
+                "default": (spec.default if spec.kind == KIND_CONST
+                            else getattr(spec.default, "__name__", "")),
             }
             for spec in sorted(_DEFAULTS.values(), key=lambda s: s.key)
         ]
@@ -281,12 +307,16 @@ class BehaviorRuntime:
         """清空现有覆盖，按清单声明加载行为包模块，产出启用诊断报告。"""
         self.reset()
         packs = manifest.resources.get("behaviors") or []
+        declared_api = getattr(manifest, "behavior_api", None)
         report = BehaviorLoadReport(
             pack_name=packs[0] if packs else "",
-            world_id=manifest.world_id or "unknown")
+            world_id=manifest.world_id or "unknown",
+            declared_api=declared_api,
+            available_keys=len(_DEFAULTS))
         self._pending = report
         try:
             if packs:
+                _check_api_version(declared_api, report)
                 self._load_pack_modules(packs[0], installed, report)
         finally:
             self._pending = None
@@ -325,6 +355,25 @@ class BehaviorRuntime:
         if not report.overridden and not report.errors:
             report.warnings.append(
                 f"行为包 '{pack_name}' 未注册任何覆盖，激活后无效果")
+
+
+def _check_api_version(declared: Optional[int],
+                       report: BehaviorLoadReport) -> None:
+    """核对包声明的 behavior_api 与运行时契约版本，只警告不阻断。"""
+    current = BEHAVIOR_API_VERSION
+    if declared is None:
+        report.warnings.append(
+            f"包未声明 behavior_api（按 1 处理）；当前运行时契约为 {current}，"
+            f"旧版 key 可能已被删除或改名，建议在 world.json 声明"
+            f" \"behavior_api\": {current}")
+    elif declared > current:
+        report.warnings.append(
+            f"包声明 behavior_api {declared}，高于当前运行时 {current}；"
+            f"请升级程序后再启用本包")
+    elif declared < current:
+        report.warnings.append(
+            f"包声明 behavior_api {declared}，低于当前运行时 {current}；"
+            f"旧版 key 可能已被删除或改名，未知 key 会在激活时被拒绝并记入诊断")
 
 
 def _python_files(root: str):

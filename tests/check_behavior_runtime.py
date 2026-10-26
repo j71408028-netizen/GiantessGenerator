@@ -11,7 +11,9 @@
   不符时回退默认值并记入诊断；数值常量允许 int/float 互通；
 - load_pack：正常包产出接管清单；坏注册逐条记入诊断不整包失效；
   缺失包 / 模块加载异常 / 无 register 模块 / 未注册任何覆盖均有诊断；
-  重复注册保留最后一条并告警；reset 清覆盖、报告保留。
+  重复注册保留最后一条并告警；reset 清覆盖、报告保留；
+- behavior_api：未声明 / 低于 / 高于运行时版本都只警告不阻断，声明当前
+  版本无警告；目录含 default 字段（常量为默认值，函数为默认实现名）。
 """
 
 import os
@@ -21,8 +23,8 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.behavior_runtime import (  # noqa: E402
-    BehaviorLoadReport, behavior_const, behavior_hook, get_runtime,
-    reset_runtime,
+    BEHAVIOR_API_VERSION, BehaviorLoadReport, behavior_const,
+    behavior_hook, get_runtime, reset_runtime,
 )
 from persistence.world_pack import WorldPackManifest  # noqa: E402
 
@@ -142,8 +144,9 @@ for pack, src in (("goodpack", _good_src), ("badpack", _bad_src),
         f.write(src)
 
 
-def _load(pack):
+def _load(pack, behavior_api=BEHAVIOR_API_VERSION):
     manifest = WorldPackManifest(world_id="diag", name=pack,
+                                 behavior_api=behavior_api,
                                  resources={"behaviors": [pack]})
     return _rt.load_pack(manifest, _base)
 
@@ -196,12 +199,44 @@ check("模块加载失败带异常原因",
       and "boom" in report.errors[0], str(report.errors))
 
 
+# ---------------- 3b. behavior_api 版本诊断与目录 default ----------------
+
+_catalog = _rt.catalog()
+_entry = next(e for e in _catalog if e["key"] == "diag.NUM")
+check("目录含 default（常量为注册默认值）", _entry["default"] == 5)
+_entry = next(e for e in _catalog if e["key"] == "diag.fn2")
+check("目录含 default（函数为默认实现名）", _entry["default"] == "_fn2")
+
+report = _load("goodpack")
+check("声明当前版本无 API 警告",
+      not [w for w in report.warnings if "behavior_api" in w],
+      str(report.warnings))
+check("available_keys 为目录规模",
+      report.available_keys == len(_catalog))
+check("诊断行含 API 版本", "behavior_api" in report.api_line())
+
+report = _load("goodpack", behavior_api=None)
+check("未声明 behavior_api 记警告",
+      any("未声明 behavior_api" in w for w in report.warnings),
+      str(report.warnings))
+check("API 版本行标注未声明", "未声明" in report.api_line())
+
+report = _load("goodpack", behavior_api=BEHAVIOR_API_VERSION - 1)
+check("低版本只警告不阻断",
+      any("低于当前运行时" in w for w in report.warnings)
+      and not report.errors, str(report.warnings))
+
+report = _load("goodpack", behavior_api=99)
+check("高版本警告提示升级",
+      any("高于当前运行时" in w for w in report.warnings))
+
+
 # ---------------- 4. reset 语义 ----------------
 
+_before_reset = _rt.last_report
 reset_runtime()
 check("reset 清空覆盖", _fn2(3) == (3, 1) and _fn(2) == (2, 1))
-check("reset 保留诊断报告", _rt.last_report is not None
-      and _rt.last_report.pack_name == "badload")
+check("reset 保留诊断报告", _rt.last_report is _before_reset)
 
 # ---------------- 结论 ----------------
 
