@@ -31,6 +31,7 @@
 | `decayed_coordinates`      | `(personality, intrusion, destruction, fraction) -> (float, float)` | 步进衰减的纯计算：仅当坐标越过性格边界（初始值 - 0.5 × 性格步长）时向边界回落 fraction 个步长。 |
 | `apply_negative_evolution` | `(state) -> None` | 行动点数不足（<50）时应用负向演化：介入度步进取 -1 - 0.5 × 性格敏感值（由敏感值直接控制），破坏性步进取 -1 - 0.5 × 性格重力；步长演化叠加不适应性衰减；有变化时向演化表追加一行（步进取本次负向步进之和）。 |
 | `apply_step_decay`         | `(state, fraction=0.1) -> None` | 步进衰减（角色面板逗留每分钟 fraction=0.1），有变化时向演化表追加一行。              |
+| `nudge_step_rates`         | `(state, axis, direction, amount=0.02) -> Optional[(float, float)]` | 聊天 effect 的步长微调：`axis` 取 intrusion/destruction，`direction` 取 -1/0/1；单次幅度很小，接近 ±5 时衰减；只改步长、不写演化表，返回 `(旧值, 新值)` 或 `None`。 |
 | `consume_action_points`    | `(state, cost) -> bool` | 消耗行动点数；点数不足返回 `False`。                                  |
 | `receive_action_points`    | `(state, amount) -> int` | 自然回复行动点数（离线恢复、角色面板在线恢复），夹取到 0~100，返回实际变化量。 |
 | `refund_action_points`     | `(state, amount) -> int` | 返还行动点数（副本结算、报告解锁返还等），不设 100 上限，返回实际变化量。 |

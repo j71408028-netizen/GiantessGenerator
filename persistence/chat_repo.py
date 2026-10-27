@@ -2,7 +2,7 @@ import datetime
 import os
 from urllib.parse import quote, unquote
 
-from core.models import (DEFAULT_IDENTITY_ID, ChatState,
+from core.models import (APPLIED_EFFECT_LIMIT, DEFAULT_IDENTITY_ID, ChatState,
                          normalize_identity_id)
 from persistence.json_store import (BACKUP_SUFFIX, load_json_with_backup,
                                     write_json_atomic)
@@ -71,6 +71,8 @@ class ChatRepo:
         chat_state.topics = chat_state.topics[-TOPIC_KEEP_LIMIT:]
         chat_state.consumed_event_ids = \
             chat_state.consumed_event_ids[-CONSUMED_EVENT_LIMIT:]
+        chat_state.applied_effects = \
+            chat_state.applied_effects[-APPLIED_EFFECT_LIMIT:]
         chat_state.last_active_at = (chat_state.last_active_at
                                      or datetime.datetime.now().isoformat())
         chat_state.identity_id = normalize_identity_id(chat_state.identity_id)
@@ -84,6 +86,7 @@ class ChatRepo:
             "attitude": chat_state.attitude,
             "user_nick": chat_state.user_nick,
             "relationship": chat_state.relationship.__dict__,
+            "applied_effects": [e.__dict__ for e in chat_state.applied_effects],
             "last_active_at": chat_state.last_active_at,
             "chat_params": (chat_state.chat_params.__dict__
                             if chat_state.chat_params is not None else None),

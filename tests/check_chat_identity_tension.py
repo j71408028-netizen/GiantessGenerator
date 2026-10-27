@@ -37,7 +37,7 @@ from services.chat import (  # noqa: E402
 )
 from services.chat.coordinates import (  # noqa: E402
     DEFAULT_WORLD_STANCE, WORLD_STANCE_VALUES,
-    tension_events_from_evolution,
+    tension_events_from_endings, tension_events_from_evolution,
 )
 
 NOW = datetime.datetime(2026, 10, 27, 12, 0, 0)
@@ -154,6 +154,27 @@ def check_evolution_events() -> list:
     ]
     _check(problems, "只有衰减行时应没有事件",
            tension_events_from_evolution(decay_only, now=now) == [])
+
+    report = tension_events_from_evolution(
+        [_event_record(recent, intrusion=2.5, destruction=2.5),
+         _event_record(recent, intrusion=2.6, destruction=2.5)], now=now)
+    chat = tension_events_from_evolution(
+        [_event_record(recent, intrusion=2.5, destruction=2.5),
+         _event_record(recent, source="chat", intrusion=2.6,
+                       destruction=2.5)], now=now)
+    _check(problems, "旧聊天来源的世界事实应低权重计入",
+           report and chat and chat[0].weight < report[0].weight,
+           (report, chat))
+
+    endings = [
+        {"name": "旧结局", "achieved_at": old},
+        {"name": "新结局", "achieved_at": recent},
+        {"name": "坏时间", "achieved_at": "not-a-time"},
+    ]
+    ending_events = tension_events_from_endings(endings, now=now)
+    _check(problems, "结局应进入事件压力且过滤窗口外/坏时间",
+           len(ending_events) == 1
+           and ending_events[0].weight > 0.0, ending_events)
     return problems
 
 

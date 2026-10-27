@@ -2,7 +2,8 @@
 
 协议要点（对应 docs/dev/chat_delivery.md）：
 - AI 严格输出 JSON：messages（1~4 条，一次可发多条消息）/ silent_reason /
-  ops / nick / memory_note；messages 缺失时回退读旧协议的 reply；
+  ops / identity_update / effect / nick / memory_note；messages 缺失时回退
+  读旧协议的 reply；
 - 已读不回：read 恒为 True（看到即已读）；messages 为空时不出角色气泡，
   只把用户消息标记 silent，silent_reason 仅写入记忆、不展示给玩家；
   API 拒绝敏感请求时通常不返回协议 JSON——凡解析不出 JSON 的回复一律
@@ -21,11 +22,10 @@
   与主动搭话——一次 AI 决策，或回应、或开题、或沉默；成功后才标记
   已读与消费事件，失败保持原状下次继续；
 - 属性操作白名单（轻度）：attitude（聊天态度，聊天域内）、
-  action_points（经 StateService 消耗/恢复）、intrusion / destruction
-  （坐标微移，经 StateService.shift_coordinates 夹取 0.5~4.5 并向演化表
-  追加 source="chat" 的记录行）、casualties（仅允许增加）。greed 是角色
-  生成期的身高计算参数，暂不开放（复用前需谨慎排查其派生影响）；
-  其余属性一律不开放，保持数值体系单一入口；
+  action_points（经 StateService 消耗/恢复）；世界影响不再直接写
+  intrusion / destruction / casualties，统一走至多一个 effect
+  （services.chat.effects：v1 开放 self_view 与 step_nudge），
+  效果失败只记日志、不影响已生成的回复；
 - AI 可用 nick 自主改变对玩家的称呼（聊天域内 user_nick，不改主档案）；
 - 聊天参数：介入度/破坏性（决定谈及人类时的态度）与行动点数（决定此刻
   的活力）直接复用主档案字段；在线强度/预热速率/聊天边界为纯聊天参数
@@ -68,7 +68,9 @@ from services.chat.coordinates import (DEFAULT_WORLD_STANCE, ChatCoord,
                                        build_chat_coord,
                                        describe_affection,
                                        describe_size_state, describe_tension,
+                                       tension_events_from_endings,
                                        tension_events_from_evolution)
+from services.chat.effects import effect_tools_text, run_effect
 from services.chat.persona import build_character_persona
 from services.chat.experience_events import (collect_experience_events,
                                         consume_experience_events,
@@ -88,9 +90,6 @@ CHAT_WINDOW_SIZE = 20
 # ops 每档（-1/0/1）对应的数值步长
 ATTITUDE_STEP = 5        # 聊天态度，夹取 -100~100
 ACTION_POINT_STEP = 3    # 行动点，经 StateService 消耗/恢复（0~100 自然上限）
-INTRUSION_STEP = 0.1     # 介入度坐标微移，经 StateService.shift_coordinates 夹取 0.5~4.5
-DESTRUCTION_STEP = 0.1   # 破坏性坐标微移，同上
-CASUALTIES_STEP = 1.0    # 伤亡只增不减（轻度量级），经 record_change 追加演化行
 # memory 累积上限（字符）：超出后从最旧处截断；正式的 AI 压缩在后续版本接入
 MEMORY_LIMIT = 2000
 # 回复节奏模拟：先"看到"（读延迟），再"打字"（随回复长度增长）
@@ -170,17 +169,17 @@ CHAT_PARAM_TEXTS = {
 }
 
 # 属性操作白名单：解析时按此过滤，白名单外的键一律丢弃
-CHAT_OPS_WHITELIST = {"attitude", "action_points",
-                      "intrusion", "destruction", "casualties"}
+CHAT_OPS_WHITELIST = {"attitude", "action_points"}
 
 _OUTPUT_RULE = """你必须严格按照以下 JSON 格式输出，不要包含任何额外注释或文字：
 {
     "topic": {"action": "continue", "kind": "切换或开新话题时的候选类型 id（其余可省略）", "title": "新话题的简短标题（start/switch 时必填，其余可省略）"},
     "messages": ["你要发出的一条消息", "可选：紧接着再发一条"],
     "silent_reason": "决定已读不回时的真实原因（会记录但不会展示给对方）；正常回复时省略",
-    "ops": {"attitude": 0, "action_points": 0, "intrusion": 0, "destruction": 0, "casualties": 0},
-    "nick": "你对对方的称呼（仅当想改变称呼时给出，否则省略本键）",
+    "ops": {"attitude": 0, "action_points": 0},
     "identity_update": {"kind": "可选：话题结束时你对他认知的变化", "note": "可选：一句补充"},
+    "effect": {"tool": "可选：本轮最多一个世界效果", "args": {}},
+    "nick": "你对对方的称呼（仅当想改变称呼时给出，否则省略本键）",
     "memory_note": "可选：值得长期记住的关于对方的事"
 }
 topic 说明（action 四选一，省略整个 topic 键等同 continue）：
@@ -197,17 +196,18 @@ messages 说明：
 - 决定已读不回时 messages 填 []。
 ops 各项取值均为 -1、0 或 1，含义：
 - attitude：你对对方的态度（1 更亲近，-1 更疏远，0 不变）；
-- action_points：你的行动余裕（-1 这次聊天消耗了精力，1 得到了放松，0 不变）；
-- intrusion：你对人类环境的介入程度（1 这次的言行更高调张扬，-1 更收敛低调，0 不变）；
-- destruction：你的破坏性（1 这次的言行更具破坏倾向，-1 更克制，0 不变）；
-- casualties：仅当这次聊天内容涉及你造成人员伤亡时取 1，否则 0。
+- action_points：你的行动余裕（-1 这次聊天消耗了精力，1 得到了放松，0 不变）。
 没有提到的项填 0。ops 完全由你根据聊天内容自主决定，但幅度都是轻度的。
 identity_update 说明：
 - 只在你要结束当前话题（end 或 switch）时填写；其他时候会被忽略；
 - kind 可选：stranger / acquaintance / friend / close / lover / family /
   worshipper / subject / rival / enemy / prey；只能沿自然的关系变化逐步改变，
   不能一轮从陌生人跳到恋人/敌人；
-- note 可选：一句你对他新的判断，会保留下来供以后参考。"""
+- note 可选：一句你对他新的判断，会保留下来供以后参考。
+effect 说明：
+- 每轮最多一个，也可以完全不用；大多数普通聊天不需要世界效果；
+- tool 与 args 只能从系统给出的工具列表里选；未知工具或非法参数会被忽略；
+- 不要试图直接修改好感、紧张度或状态，这些只能由你的言行与世界事实自然派生。"""
 
 _SYSTEM_TEMPLATE = """你正在手机聊天软件里与「{user_nick}」私聊。你要完全扮演{name}，以她的第一人称发消息，而不是叙述故事。
 
@@ -227,12 +227,16 @@ _SYSTEM_TEMPLATE = """你正在手机聊天软件里与「{user_nick}」私聊�
 【当前话题】（由你自主决定延续、切换、结束或已读不回）
 {topic_context}
 
+【你可以对世界做的事】（每轮最多一个，也可以不做）
+{effect_tools}
+
 【规则】
 1. 回复要像聊天软件消息：口语化、简短（每条一般不超过两三句话），符合你的性格、人设与当前状态，可以不按对方期望回应；想多说时可以按顺序发多条。
 2. 每条消息你都会看到，但看不看回是你的自由。如果以你的性格和当前好感（{affection_text}）不愿意回复——比如对方追问你不想回答的问题、反复纠缠、冒犯了你、或你懒得理会——就"已读不回"（messages 填 []）。
 3. 话题由你主导：可以自然延续当前话题，聊完了可以自然结束（end），或者从候选类型里挑一个换话题（switch/start，kind 与 title 都要给）；也可以直接已读不回。话题结束（end/switch）时可以顺手更新你对他的认知（identity_update）。
 4. 不要把好感、紧张度、状态这些内部判断说出口，也不要提到坐标或数值。
 5. 不要跳出角色，不要解释你是 AI，不要替对方说话。
+6. 世界效果要克制：只有聊天内容确实改变了世界时才用，且每轮最多一个。
 
 {output_rule}"""
 
@@ -324,7 +328,9 @@ def chat_coord(state: CharacterSnapshot, chat_state: ChatState,
         attitude=chat_state.attitude,
         world_stance=world_stance,
         relationship_kind=getattr(chat_state.relationship, "kind", None),
-        events=tension_events_from_evolution(state.evolution, now=now),
+        events=(tension_events_from_evolution(state.evolution, now=now)
+                + tension_events_from_endings(state.achieved_endings,
+                                              now=now)),
         intrusion=state.intrusion,
         destruction=state.destruction,
         action_points=state.action_points,
@@ -647,6 +653,7 @@ def build_chat_system_prompt(state: CharacterSnapshot, chat_state: ChatState,
         chat_habits=chat_habits_text(chat_state.chat_params),
         topic_context=topic_context_text(
             chat_state, coord, topic_candidates(chat_state, coord)),
+        effect_tools=effect_tools_text(),
         output_rule=_OUTPUT_RULE,
     )
 
@@ -692,14 +699,15 @@ def parse_chat_response(response_text: str) -> dict:
     {"messages": [str, ...], "topic": {"action", "kind", "title"},
      "silent_reason": str, "refused": bool,
      "ops": {属性: -1/0/1}, "nick": str|None, "memory_note": str,
-     "identity_update": {"kind", "note"}}
+     "identity_update": {"kind", "note"}, "effect": {"tool", "args"}}
 
     协议要求严格 JSON，messages 为 1~4 条消息（一次决策可发多条）；
     缺失时回退读旧协议的 reply 字段。topic.action 夹取到
     continue/start/switch/end 之一（缺省 continue），kind 只做去空白与
     长度截断（候选校验在服务层落地时进行），title 截断保留。
     identity_update 只保留 kind/note，是否允许更新由服务层按话题结束方式
-    与冷却判断。
+    与冷却判断。effect 最多一个；给成数组视为多个，整条丢弃；tool/args
+    的合法性由 effects 注册表在落地时判断。
     解析不出 JSON 对象的回复（典型为
     API 拒绝敏感请求时的自然语言道歉/拒绝文本）一律视为已读不回：
     messages=[]、refused=True，原文截断后记入 silent_reason 供排查，
@@ -710,7 +718,7 @@ def parse_chat_response(response_text: str) -> dict:
               "topic": {"action": "continue", "kind": "", "title": ""},
               "silent_reason": "", "refused": False,
               "ops": {}, "nick": None, "memory_note": "",
-              "identity_update": {}}
+              "identity_update": {}, "effect": {}}
     cleaned = (response_text or "").strip()
     if cleaned.startswith("```json"):
         cleaned = cleaned[7:]
@@ -792,6 +800,16 @@ def parse_chat_response(response_text: str) -> dict:
         if clean_kind or clean_note:
             result["identity_update"] = {"kind": clean_kind,
                                          "note": clean_note}
+    effect = data.get("effect")
+    if isinstance(effect, dict):
+        tool = effect.get("tool")
+        args = effect.get("args")
+        tool = tool.strip().lower()[:32] if isinstance(tool, str) else ""
+        if tool:
+            result["effect"] = {
+                "tool": tool,
+                "args": args if isinstance(args, dict) else {},
+            }
     return result
 
 
@@ -828,10 +846,9 @@ def apply_chat_ops(state: CharacterSnapshot, chat_state: ChatState,
     """把白名单内的属性操作写回聊天域与角色快照，返回实际生效的变化。
 
     attitude / user_nick 写聊天域；attitude 的步长按预热速率分档缩放
-    （慢热减半、来得快加倍）；action_points 经 StateService 消耗/
-    恢复；intrusion / destruction 为轻度坐标微移（StateService 夹取
-    0.5~4.5），有变化时向演化表追加一行（步进记 0.0，source="chat"）；
-    casualties 只增不减。返回 {"attitude": 新值, ...}。
+    （慢热减半、来得快加倍）；action_points 经 StateService 消耗/恢复。
+    世界影响不在这里写：intrusion/destruction/casualties 已从 ops 移除，
+    统一走 effect（services.chat.effects）。返回 {"attitude": 新值, ...}。
     """
     applied = {}
     ops = parsed.get("ops") or {}
@@ -849,21 +866,6 @@ def apply_chat_ops(state: CharacterSnapshot, chat_state: ChatState,
     elif direction < 0:
         if StateService.consume_action_points(state, ACTION_POINT_STEP):
             applied["action_points"] = state.action_points
-    intrusion_delta = ops.get("intrusion", 0) * INTRUSION_STEP
-    destruction_delta = ops.get("destruction", 0) * DESTRUCTION_STEP
-    if intrusion_delta or destruction_delta:
-        intrusion, destruction = StateService.shift_coordinates(
-            state.intrusion, state.destruction,
-            intrusion_delta, destruction_delta)
-        if intrusion != state.intrusion or destruction != state.destruction:
-            state.record_change(intrusion=intrusion, destruction=destruction,
-                                source="chat")
-            applied["intrusion"] = intrusion
-            applied["destruction"] = destruction
-    if ops.get("casualties", 0) > 0:
-        state.record_change(casualties=state.total_casualties + CASUALTIES_STEP,
-                            source="chat")
-        applied["casualties"] = state.total_casualties
     if parsed.get("nick"):
         chat_state.user_nick = parsed["nick"]
         applied["user_nick"] = chat_state.user_nick
@@ -1223,7 +1225,10 @@ class ChatService:
     def _finish_exchange(self, state: CharacterSnapshot, chat_state: ChatState,
                          parsed: dict, topic_source: str = "user") -> dict:
         """协议解析结果的统一落地：ops 写回、回复批量入列（queued）、
-        话题状态机落地、记忆与存档、事件、调度器登记。
+        世界效果、话题状态机落地、记忆与存档、事件、调度器登记。
+
+        落地顺序：ops → memory → effect → topic → identity_update → 保存。
+        坐标快照在 ops/effect 生效前取得，效果从下一轮才影响坐标。
 
         角色回复不直接可见：每条以 status="queued" 入列并按在线档排定
         available_at（batch_id = 本次决策的 request_id），由投递调度器
@@ -1236,7 +1241,8 @@ class ChatService:
         """
         request_id = uuid.uuid4().hex
         result = {"reply_messages": [], "reply_message": None,
-                  "ops_applied": {}, "refused": bool(parsed.get("refused")),
+                  "ops_applied": {}, "effect_applied": None,
+                  "refused": bool(parsed.get("refused")),
                   "error": None, "batch_id": request_id}
         # 坐标在 ops 生效前快照：AI 是按看到的状态选的话题类型，
         # 校验与落盘都用同一份，效果从下一轮才影响坐标。
@@ -1259,6 +1265,13 @@ class ChatService:
             result["reply_message"] = result["reply_messages"][0]
         if parsed.get("memory_note"):
             self._append_memory(chat_state, parsed["memory_note"])
+        effect_record, effect_changed = run_effect(
+            state, chat_state, parsed.get("effect"))
+        if effect_record is not None:
+            result["effect_applied"] = {
+                "tool": effect_record.tool,
+                "result": effect_record.result,
+            }
         outcome = apply_topic_decision(
             chat_state, parsed.get("topic"), had_reply=bool(texts),
             source=topic_source, coord=coord, candidates=candidates)
@@ -1267,14 +1280,15 @@ class ChatService:
                                   outcome.get("ended_reason", ""))
         chat_state.last_active_at = datetime.datetime.now().isoformat()
         self.chat_repo.save(chat_state)
-        if result["ops_applied"]:
-            # 介入度/破坏性/伤亡/行动点写到了主档案，需要一并落盘
+        if result["ops_applied"] or effect_changed:
+            # 行动点/世界效果写到了主档案，需要一并落盘
             self.character_repo.save(state)
         chat_events.publish({
             "type": "chat_updated", "giantess_id": state.giantess_id,
             "identity_id": chat_state.identity_id,
             "replied": bool(result["reply_messages"]),
             "ops_applied": result["ops_applied"],
+            "effect_applied": result["effect_applied"],
         })
         if result["reply_messages"]:
             # 登记最早到点时间，调度器到点自动投递

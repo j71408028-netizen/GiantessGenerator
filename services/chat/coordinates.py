@@ -39,6 +39,11 @@ EVENT_WINDOW_HOURS = 24.0 * 7
 EVENT_WEIGHT_CASUALTY = 1.0
 EVENT_WEIGHT_COORD = 0.5
 EVENT_EXCLUDED_SOURCES = {"apply_step_decay"}
+# 旧聊天行若确实写过世界事实，按低权重计入，避免聊天反馈回路过强
+EVENT_SOURCE_WEIGHTS = {"chat": 0.25}
+# 结局事件：最近若干条、同样按窗口过滤
+EVENT_ENDING_LIMIT = 5
+EVENT_ENDING_WEIGHT = 1.0
 
 # 世界态势的语义值；尺度（appear / abs_giant / rel_giant）不参与映射。
 WORLD_STANCE_VALUES = {
@@ -253,12 +258,45 @@ def tension_events_from_evolution(evolution: Iterable[Any],
                               + (destruction - last_destruction) ** 2)
             weight = (EVENT_WEIGHT_CASUALTY * casualty_delta
                       + EVENT_WEIGHT_COORD * shift)
+            weight *= EVENT_SOURCE_WEIGHTS.get(source, 1.0)
         previous = record
         if weight <= 0.0 or changed is None:
             continue
         if _age_seconds(changed, moment) > hours * 3600.0:
             continue
         events.append(TensionEvent(weight=weight, changed_at=changed))
+    return events
+
+
+def tension_events_from_endings(endings: Iterable[Any],
+                                now: Optional[datetime.datetime] = None,
+                                limit: int = EVENT_ENDING_LIMIT,
+                                window_hours: float = EVENT_WINDOW_HOURS,
+                                weight: float = EVENT_ENDING_WEIGHT) -> list:
+    """从已达成结局提取紧张度事件（只看最近几条与时间窗口）。"""
+    try:
+        count = max(0, int(limit))
+    except (TypeError, ValueError):
+        count = EVENT_ENDING_LIMIT
+    if count == 0:
+        return []
+    moment = _now(now)
+    hours = _safe_float(window_hours, EVENT_WINDOW_HOURS)
+    if hours <= 0.0:
+        hours = EVENT_WINDOW_HOURS
+    value = _safe_float(weight, EVENT_ENDING_WEIGHT)
+    if value <= 0.0:
+        return []
+    events = []
+    for ending in list(endings or [])[-count:]:
+        if not isinstance(ending, Mapping):
+            continue
+        changed = _as_datetime(ending.get("achieved_at"))
+        if changed is None:
+            continue
+        if _age_seconds(changed, moment) > hours * 3600.0:
+            continue
+        events.append(TensionEvent(weight=value, changed_at=changed))
     return events
 
 

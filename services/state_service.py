@@ -221,6 +221,45 @@ class StateService:
             state.record_change(intrusion=intrusion, destruction=destruction,
                                 source="apply_step_decay")
 
+    @staticmethod
+    @behavior_hook("StateService", "nudge_step_rates")
+    def nudge_step_rates(state: CharacterSnapshot, axis: str, direction: int,
+                         amount: float = 0.02
+                         ) -> Optional[Tuple[float, float]]:
+        """按聊天意图轻微调整某一路步长，返回 ``(旧值, 新值)``。
+
+        ``axis`` 为 intrusion/destruction，``direction`` 只接受 -1/0/1。
+        单次幅度很小，并随步长绝对值接近上限而衰减，避免连续聊天把步长
+        推到极端。不写演化表：只改进化参数，不改坐标。
+        """
+        if axis not in ("intrusion", "destruction"):
+            return None
+        try:
+            direction = int(direction)
+        except (TypeError, ValueError):
+            return None
+        if direction not in (-1, 0, 1) or direction == 0:
+            return None
+        try:
+            step = float(amount)
+        except (TypeError, ValueError):
+            return None
+        if not step > 0.0:
+            return None
+        field_name = f"step_{axis}"
+        current = getattr(state, f"current_{field_name}", None)
+        if current is None:
+            current = getattr(state, field_name, 0.0) or 0.0
+        current = float(current)
+        ceiling = 5.0
+        factor = max(0.0, 1.0 - abs(current) / ceiling)
+        new_value = max(-ceiling, min(ceiling,
+                                      current + direction * step * factor))
+        if new_value == current:
+            return None
+        setattr(state, field_name, new_value)
+        return current, new_value
+
     # ==================== 行动点数 ====================
 
     @staticmethod

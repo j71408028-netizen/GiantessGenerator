@@ -106,8 +106,10 @@ data/archives/<giantess_id>/
 {
     "messages": ["第一条", "可选：紧跟着再发一条"],
     "silent_reason": "已读不回时的真实原因；正常回复时省略",
-    "ops": {"attitude": 0, "action_points": 0, "intrusion": 0,
-             "destruction": 0, "casualties": 0},
+    "ops": {"attitude": 0, "action_points": 0},
+    "identity_update": {"kind": "可选：话题结束时的新认知",
+                        "note": "可选：一句补充"},
+    "effect": {"tool": "可选：本轮最多一个世界效果", "args": {}},
     "nick": "可选：改变对玩家的称呼",
     "memory_note": "可选：值得长期记住的事"
 }
@@ -118,7 +120,9 @@ data/archives/<giantess_id>/
 - `messages` 缺失时回退读 `reply`（兼容弱模型与旧协议）；
 - 空数组 / null = 已读不回；
 - 非 JSON 回复仍视为 API 拒绝（`refused=True`），保留一次重试，
-  与"角色主观沉默"区分。
+  与"角色主观沉默"区分；
+- `ops` 只保留聊天域字段；世界影响走后文的效果层，旧档里的
+  `intrusion / destruction / casualties` 解析时忽略。
 
 排程（`schedule_batch_available_at`）：第一条 = 当前时间 + 读延迟 +
 其打字延迟；之后每条在前一条的 `available_at` 上加自己的打字延迟。
@@ -259,7 +263,8 @@ Topic
   hostile，缺省 coexist，可由 `ChatService(..., world_stance_provider=...)`
   注入覆盖）；关系认知取当前身份的 `Relationship.kind`；事件压力扫描最近
   50 行演化记录与 7 天窗口，按伤亡增量与坐标位移计权，排除纯步长衰减行，
-  再按 48 小时半衰期衰减；
+  旧聊天来源的世界事实按低权重计入，已达成结局也作为事件；所有事件再按
+  48 小时半衰期衰减；
 - 状态：演化坐标贴边、行动点不足、个性强度（越高越适应）。
 
 注入提示词的只有定性描述（好感/紧张度/接纳程度）、当前身份认知与类型名，
@@ -276,6 +281,28 @@ Topic
 沉默轮都不更新。`kind` 必须沿白名单转移图逐步变化（不允许一轮从陌生人
 跳到恋人/敌人），非法 kind 连同 note 整条丢弃；note 单独也可更新。每个
 身份有 72 小时冷却，冷却期内再次提交会被忽略。
+
+### 世界效果（services/chat/effects.py）
+
+AI 只输出 `effect: {tool, args}`，服务层按注册表校验、夹取、执行并记录。
+每轮最多一个；给成数组视为多个，整条丢弃。v1 只开放：
+
+- `self_view {"text": "..."}`：追加到 `intro_visible`，不改写已有介绍与
+  `intro_hidden`，单条截断到 500 字；重复内容不重复追加。
+- `step_nudge {"axis": "intrusion|destruction", "direction": -1|0|1}`：
+  经 `StateService.nudge_step_rates` 微调步长（单次约 ±0.02，接近 ±5
+  上限时衰减），不写演化表、不改坐标。
+
+每次执行（含失败）都向 `ChatState.applied_effects` 追加
+`{id, tool, args, applied_at, result}`，保留最近 50 条并随线程落盘；
+未知工具或非法参数只记日志，不重试、不回滚已经生成的回复。
+`move` / `casualty` 后置。
+
+一次交流的落地顺序固定为：ops（attitude / action_points / nick）→
+memory_note → effect → 话题状态机 → identity_update → 保存 chat（线程）
+与 character（行动点或世界效果有改动时）。坐标快照在 ops/effect 之前
+取得，所以效果从下一轮才影响话题选择；沉默轮同样应用 ops / memory /
+effect / 话题状态，只是不排队消息。
 
 ### 服务层硬约束（粗糙实现，够用为先）
 

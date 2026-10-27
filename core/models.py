@@ -690,6 +690,41 @@ def _normalize_topic_coord(values) -> List[float]:
     return [max(0.0, min(1.0, value)) for value in coord]
 
 
+# 效果日志保留条数（ChatRepo 与服务层共用）
+APPLIED_EFFECT_LIMIT = 50
+
+
+@dataclass
+class ChatEffect:
+    """一次世界效果的审计记录（见设计文档 §7.2）。
+
+    AI 只输出 tool + args，服务层校验并执行；无论成功、被忽略还是失败都
+    留一条记录，便于排查与以后回滚。result 是执行结果或失败原因。
+    """
+    id: str = ""
+    tool: str = ""
+    args: Dict[str, Any] = field(default_factory=dict)
+    applied_at: str = ""
+    result: str = ""
+
+    def __post_init__(self):
+        if not isinstance(self.id, str) or not self.id:
+            self.id = uuid.uuid4().hex
+        if not isinstance(self.tool, str):
+            self.tool = ""
+        if not isinstance(self.args, dict):
+            self.args = {}
+        if not isinstance(self.applied_at, str):
+            self.applied_at = ""
+        if not isinstance(self.result, str):
+            self.result = ""
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ChatEffect":
+        allowed = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in (data or {}).items() if k in allowed})
+
+
 @dataclass
 class Topic:
     """聊天话题（docs/dev/chat_delivery.md 阶段三）。
@@ -744,6 +779,7 @@ class ChatState:
     user_nick 为角色对玩家的称呼（聊天域内独立，不改主档案 nick）；
     relationship 为角色对当前身份的关系认知（见 Relationship），用于紧张度
     映射与提示词；
+    applied_effects 为最近的世界效果审计日志（见 ChatEffect）；
     chat_params 为纯聊天参数（首次聊天前由 AI 一次性决定，见 ChatParams）；
     topics / active_topic_id 为话题状态机（见 Topic）；
     consumed_event_ids 为已消费经历事件的确定性 id（见
@@ -756,6 +792,7 @@ class ChatState:
     attitude: int = 0
     user_nick: str = ""
     relationship: Relationship = field(default_factory=Relationship)
+    applied_effects: List[ChatEffect] = field(default_factory=list)
     last_active_at: str = ""
     chat_params: Optional[ChatParams] = None
     topics: List[Topic] = field(default_factory=list)
@@ -778,6 +815,11 @@ class ChatState:
             self.relationship = Relationship.from_dict(self.relationship)
         elif not isinstance(self.relationship, Relationship):
             self.relationship = Relationship()
+        self.applied_effects = [
+            e if isinstance(e, ChatEffect) else ChatEffect.from_dict(e)
+            for e in (self.applied_effects or [])
+            if isinstance(e, (ChatEffect, dict))
+        ]
 
     @classmethod
     def from_dict(cls, data: dict) -> "ChatState":
