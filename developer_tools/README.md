@@ -40,7 +40,7 @@
 
 | 输出类别 | 后缀 | 形态 | 落盘 |
 |---|---|---|---|
-| 打开预览 | `_preview` | 起窗口 / 起本地 HTTP，人眼看、可实时刷新 | 无 |
+| 打开预览 | `_preview` | 起窗口 / 起本地 HTTP / 控制台交互，人眼看、可实时刷新 | 无 |
 | 简略报告 | `_report` | 往 stdout 打结论（可 `--json`） | 无 |
 | 详细产物 | `_dump` | 出文件：PNG / md / txt / dmp / json | 写 `_out/` |
 
@@ -50,6 +50,8 @@
 | `minigame_preview.py` | 小游戏舞台 | 打开预览 | 不进副本，直接在独立 imgui 窗口跑一个小游戏；帧时钟 / 输入层 / 纹理上传与副本同一套 |
 | `quip_report.py` | quip 语料 | 简略报告 | 检查 `data/packs/quips/` 的类型 meta、标记格式，以及类型替换的**组合级语法风险**并双向溯源。**一次只查一个风格的一个尺寸档** |
 | `behavior_hooks_report.py` | 行为包钩子 | 简略报告 | 把 `runtime.catalog()` 按 scope 分组打到 stdout（细度 / 层级 / 签名 / 常量默认值），可 `--scope` 过滤、`--json` 机器可读 |
+| `lens_preview.py` | 聊天话题视角 | 简略报告 | 改完 `services/chat/topic_kinds.py`（类型定义）或 `topic_lens.py`（字段目录）后，对真实存档逐类型打印"此刻给 AI 的信息"，附取用/挡掉账本；`--kind X --full` 可看整份系统提示词，`--out` 另存到 `_out/lens_preview/` |
+| `chat_session_preview.py` | 聊天会话 | 打开预览（控制台） | 在控制台里跟角色**实际聊天**，每轮打印视角账本（取用/挡掉/预算）、话题变化、属性与原始 JSON；`/topic` 锁定类型、`/attitude` 验证隐藏介绍门槛、`/reroll` 同前提重掷。默认在 `_out/` 沙盒里聊，**不写 `data/`** |
 | `evolution_dump.py` | 演化模型 | 详细产物 | 演化模型二阶退化模拟（**角点 + 默认性格表**，可 `--pack` / `--world` 加载行为包），出 PNG 与 `report.md`；需要 matplotlib |
 
 ## 产物统一写 `_out/`（整目录不入库）
@@ -59,13 +61,17 @@
 | 子目录 | 来源 |
 |---|---|
 | `_out/evolution/` | `evolution_dump.py`（`--out` 可改写别处；带 `--pack` / `--world` 时嵌一层 `pack_<名>/`，与基线目录并排对比） |
+| `_out/lens_preview/` | `lens_preview.py --out <文件名>`（不传 `--out` 时只打 stdout） |
+| `_out/chat_session_preview/` | `chat_session_preview.py`：`sandbox/<角色ID>/` 是会话用的数据副本（档案 + 聊天记录，`--fake` 另开 `sandbox_fake/`），`logs/` 存放 `--log` 写出的会话记录 |
 
 好处：根 `.gitignore` **一行**就够（`/developer_tools/_out/`）——新增工具无论写多少种后缀
 的产物都不必再动忽略规则。`_out/` 本身不入库，克隆后不存在，首次运行时由脚本自动创建
 （`evolution_dump.py` 靠 `--out` 目录的 `mkdir(parents=True, exist_ok=True)`）。
 
 **预览 / 报告类工具不落盘**：`archive_preview.py` 只起 HTTP 服务、`quip_report.py` 只打
-stdout，都不产生需要排除的文件。
+stdout，都不产生需要排除的文件。例外是 `chat_session_preview.py`：它需要一份可写的
+数据副本才能真聊，默认把档案复制到 `_out/chat_session_preview/sandbox/`（仍在 `_out/`
+之内，不碰 `data/`），`--data-dir` 才会改用别处。
 
 ## 新增文件请照这 8 条
 
@@ -103,7 +109,7 @@ stdout，都不产生需要排除的文件。
 
 ## 附录：现有文件的 module docstring 覆盖
 
-规范第 1 条是硬要求，本目录 4 个 `.py` 目前 **全部有模块 docstring**，新增文件请保持。
+规范第 1 条是硬要求，本目录 7 个 `.py` 目前 **全部有模块 docstring**，新增文件请保持。
 核对方法：
 
 ```bash
