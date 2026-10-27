@@ -6,8 +6,10 @@
   读旧协议的 reply；
 - 已读不回：read 恒为 True（看到即已读）；messages 为空时不出角色气泡，
   只把用户消息标记 silent，silent_reason 仅写入记忆、不展示给玩家；
-  API 拒绝敏感请求时通常不返回协议 JSON——凡解析不出 JSON 的回复一律
-  视为已读不回（refused=True，原文截断记入 silent_reason 供排查）；
+  API 拒绝敏感请求时通常不返回协议 JSON——解析不出 JSON 的回复先按行
+  救回成正常消息（弱模型常直接输出角色扮演纯文本）；只有文本像 API
+  拒绝或残破 JSON 时才算已读不回（refused=True，原文截断记入
+  silent_reason 供排查），绝不把角色的话塞进 silent_reason；
 - 消息生命周期：角色回复一律以 status="queued" 入列并按在线档排定
   available_at，由投递调度器（services.chat.delivery）到点提升为
   delivered，玩家读到后再标记 read——AI 已生成 ≠ 已送达 ≠ 玩家已读；
@@ -54,6 +56,7 @@ AI 调用全程持锁；UI 主线程只做 blocking=False 的非阻塞尝试
 import datetime
 import json
 import random
+import re
 import threading
 import uuid
 from contextlib import contextmanager
@@ -717,6 +720,53 @@ def build_chat_messages(state: CharacterSnapshot, chat_state: ChatState,
     return messages
 
 
+# 非 JSON 输出里"这是 API 拒绝而不是角色的话"的判别线索。弱模型跑格式时
+# 输出的是角色扮演纯文本（含引号、动作、分行对话），拒绝文本则几乎必然
+# 提到自己是模型、或直说不能配合——两类文本的用词几乎不重叠。
+_REFUSAL_HINTS = (
+    "作为一个", "作为人工智能", "作为语言模型", "作为 ai", "作为ai",
+    "ai 助手", "ai助手", "语言模型", "as an ai", "ai assistant",
+    "无法协助", "无法提供此类", "不能提供此类", "无法满足这个请求",
+    "无法完成这个请求", "i can't assist", "i cannot assist",
+    "i can't help with", "i cannot help with",
+)
+_REFUSAL_MAX_CHARS = 400
+# 纯文本回复里的角色名前缀：**林砚**： / 【林砚】 / 林砚：「……
+_SPEAKER_PREFIX_RE = re.compile(r"^(?:\*\*[^*\n]{1,16}\*\*|【[^】\n]{1,16}】)\s*[：:]?\s*")
+
+
+def _looks_like_refusal(text: str) -> bool:
+    """判断非 JSON 输出是不是 API 拒绝（而不是跑格式的角色扮演文本）。"""
+    probe = text.strip().lower()
+    if not probe or len(probe) > _REFUSAL_MAX_CHARS:
+        return False
+    return any(hint in probe for hint in _REFUSAL_HINTS)
+
+
+def _salvage_plain_reply(text: str) -> list:
+    """从非 JSON 输出里救回角色的话，返回消息列表（空表示救不回来）。
+
+    弱模型跑格式时会把本该进 messages 的内容按行直接吐出来，一行就是
+    一条消息；这里按行切分，行数超过 MAX_BATCH_MESSAGES 时把余下的并成
+    最后一条。以 ``{`` / ``[`` 开头的视为残破 JSON，不猜。
+    """
+    if not text or text.lstrip().startswith(("{", "[")) or '"messages"' in text:
+        return []
+    lines = []
+    for raw in text.splitlines():
+        line = _SPEAKER_PREFIX_RE.sub("", raw.strip()).strip()
+        line = line.strip("“”\"「」『』").strip()
+        if line:
+            lines.append(line)
+    if not lines:
+        return []
+    if len(lines) > MAX_BATCH_MESSAGES:
+        head = lines[:MAX_BATCH_MESSAGES - 1]
+        tail = "\n".join(lines[MAX_BATCH_MESSAGES - 1:])
+        lines = head + [tail]
+    return [line[:SINGLE_MESSAGE_CHAR_LIMIT] for line in lines]
+
+
 def parse_chat_response(response_text: str) -> dict:
     """解析聊天协议响应，返回统一结构：
 
@@ -732,11 +782,12 @@ def parse_chat_response(response_text: str) -> dict:
     identity_update 只保留 kind/note，是否允许更新由服务层按话题结束方式
     与冷却判断。effect 最多一个；给成数组视为多个，整条丢弃；tool/args
     的合法性由 effects 注册表在落地时判断。
-    解析不出 JSON 对象的回复（典型为
-    API 拒绝敏感请求时的自然语言道歉/拒绝文本）一律视为已读不回：
-    messages=[]、refused=True，原文截断后记入 silent_reason 供排查，
-    不展示给玩家。messages 为空/缺失 同样是已读不回（refused=False，
-    角色主观不想回）。
+    解析不出 JSON 对象的回复分两种：弱模型跑格式、直接输出角色扮演
+    纯文本时，按行救回成 messages（refused=False，照常投递）；文本像
+    API 拒绝（提到自己是模型、直说不能配合）或是残破 JSON 时，才按
+    已读不回处理：messages=[]、refused=True，原文截断后记入
+    silent_reason 供排查，不展示给玩家。messages 为空/缺失 同样是已读
+    不回（refused=False，角色主观不想回）。
     """
     result = {"messages": [],
               "topic": {"action": "continue", "kind": "", "title": ""},
@@ -762,7 +813,12 @@ def parse_chat_response(response_text: str) -> dict:
         except json.JSONDecodeError:
             data = None
     if not isinstance(data, dict):
-        # 非 JSON 回复：视为 API 拒绝（已读不回），原文留档排查
+        # 非 JSON：弱模型跑格式时输出的是角色扮演纯文本，先按行救回成
+        # 正常回复；只有像 API 拒绝、或残破 JSON 救不回来时才算已读不回。
+        salvaged = _salvage_plain_reply(cleaned)
+        if salvaged and not _looks_like_refusal(cleaned):
+            result["messages"] = salvaged
+            return result
         result["refused"] = True
         result["silent_reason"] = cleaned[:100]
         return result
@@ -798,6 +854,13 @@ def parse_chat_response(response_text: str) -> dict:
     reason = data.get("silent_reason")
     if isinstance(reason, str):
         result["silent_reason"] = reason.strip()
+    if not result["messages"] and "\n" in result["silent_reason"]:
+        # messages 空着、理由却写了多行：同样是跑格式的回复被塞进了理由
+        # 字段（真实的已读不回理由只有一句话），照跑格式救回成消息。
+        rescued = _salvage_plain_reply(result["silent_reason"])
+        if rescued:
+            result["messages"] = rescued
+            result["silent_reason"] = ""
     ops = data.get("ops")
     if isinstance(ops, dict):
         for key, value in ops.items():
@@ -1271,9 +1334,9 @@ class ChatService:
                 temperature=0.8)
             parsed = parse_chat_response(raw)
             if parsed.get("refused"):
-                # 非 JSON 未必是 API 拒绝：弱模型偶发跑格式（直接输出
-                # 角色扮演纯文本）也会落到这里。重试一次，仍是非 JSON
-                # 才按已读不回处理。
+                # 跑格式的纯文本已在解析时就救回成消息，落到这里的多为
+                # API 拒绝；仍重试一次，避免判别过宽时白白吞掉一轮回复。
+                # 重试后仍拒绝才按已读不回处理。
                 raw = client.generate_once(
                     build_chat_messages(state, chat_state, pending_text,
                                         world_stance=world_stance),

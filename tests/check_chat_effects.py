@@ -301,8 +301,44 @@ def check_apply_ops_only_chat_domain() -> list:
     return problems
 
 
+def check_plain_text_reply() -> list:
+    """非 JSON 输出：角色的话要留成回复，不能变成已读不回的理由。"""
+    problems = []
+    plain = parse_chat_response("知道啊，一千多米，怎么了\n你说呢")
+    _check(problems, "纯文本应救回为多条消息",
+           plain.get("messages") == ["知道啊，一千多米，怎么了", "你说呢"],
+           plain.get("messages"))
+    _check(problems, "纯文本不应记为已读不回",
+           plain.get("refused") is False and plain.get("silent_reason") == "",
+           plain.get("silent_reason"))
+
+    refusal = parse_chat_response("作为一个 AI 助手，我无法协助这个请求。")
+    _check(problems, "API 拒绝仍应是已读不回",
+           refusal.get("refused") is True and not refusal.get("messages"),
+           refusal)
+
+    broken = parse_chat_response('{"messages": ["还没说完')
+    _check(problems, "残破 JSON 不应被当成角色的话",
+           broken.get("refused") is True and not broken.get("messages"),
+           broken)
+
+    stuffed = parse_chat_response(json.dumps({
+        "messages": [], "silent_reason": "第一句\n第二句"}, ensure_ascii=False))
+    _check(problems, "多行理由应救回为消息并清空理由",
+           stuffed.get("messages") == ["第一句", "第二句"]
+           and stuffed.get("silent_reason") == "", stuffed)
+
+    quiet = parse_chat_response(json.dumps({
+        "messages": [], "silent_reason": "懒得理"}, ensure_ascii=False))
+    _check(problems, "单行理由应保持已读不回",
+           not quiet.get("messages") and quiet.get("silent_reason") == "懒得理",
+           quiet)
+    return problems
+
+
 def main() -> int:
-    problems = (check_parse_effect() + check_self_view() + check_step_nudge()
+    problems = (check_parse_effect() + check_plain_text_reply()
+                + check_self_view() + check_step_nudge()
                 + check_log_and_persistence() + check_prompt()
                 + check_finish_exchange() + check_apply_ops_only_chat_domain())
     if problems:

@@ -144,8 +144,10 @@ data/archives/<giantess_id>/
   （`SINGLE_MESSAGE_CHAR_LIMIT`）；
 - `messages` 缺失时回退读 `reply`（兼容弱模型与旧协议）；
 - 空数组 / null = 已读不回；
-- 非 JSON 回复仍视为 API 拒绝（`refused=True`），保留一次重试，
-  与"角色主观沉默"区分；
+- 非 JSON 回复先按行救回成 `messages`（弱模型跑格式、直接输出角色扮演
+  纯文本，一行即一条）；只有文本像 API 拒绝（自述模型身份、直说不能
+  配合）或是残破 JSON 时才记为 `refused=True` 并保留一次重试，与
+  "角色主观沉默"区分。角色的话不会写进 `silent_reason`；
 - `ops` 只保留聊天域字段；世界影响走后文的效果层，旧档里的
   `intrusion / destruction / casualties` 解析时忽略。
 
