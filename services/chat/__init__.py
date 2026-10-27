@@ -13,6 +13,9 @@
 - 话题状态机（阶段三）：AI 通过协议里的 topic.action
   （continue/start/switch/end）自主开启、切换与结束话题；服务层注入
   当前话题上下文，并施加硬约束（最大轮数、超时收束、容量截断）；
+- 话题类型（阶段三）：开题/切换时按三轴坐标（好感/紧张度/状态）筛选候选
+  类型（services.chat.topic_kinds），只把定性状态、类型名与候选 id 给 AI；
+  AI 可在候选里选择，非法/太远回退第一个候选，坐标快照存进 Topic.coord；
 - 离线恢复统一入口 reconcile（阶段四）：打开聊天时合并处理回复积压、
   未消费的经历事件（新闻/位置/演化/结局，见 services.chat.experience_events）
   与主动搭话——一次 AI 决策，或回应、或开题、或沉默；成功后才标记
@@ -60,10 +63,18 @@ from core.models import (DEFAULT_IDENTITY_ID, ChatMessage, ChatParams,
 from persistence.character_repo import CharacterRepo
 from persistence.chat_repo import ChatRepo
 from services.chat import events as chat_events
+from services.chat.coordinates import (ChatCoord, build_chat_coord,
+                                       describe_affection,
+                                       describe_size_state, describe_tension)
 from services.chat.persona import build_character_persona
 from services.chat.experience_events import (collect_experience_events,
                                         consume_experience_events,
                                         events_for_prompt)
+from services.chat.topic_kinds import (TOPIC_CANDIDATE_LIMIT,
+                                       TOPIC_KIND_RADIUS,
+                                       candidate_topic_kinds,
+                                       fallback_topic_kind, find_topic_kind,
+                                       topic_kind_hint)
 from services.character.profile_text import build_live_context
 from services.state_service import StateService
 
@@ -93,6 +104,8 @@ SINGLE_MESSAGE_CHAR_LIMIT = 200
 MAX_TOPIC_TURNS = 20
 TOPIC_EXPIRE_HOURS = 6
 TOPIC_TITLE_LIMIT = 30
+# 重复惩罚回看的最近话题数（新到旧）
+TOPIC_RECENT_LIMIT = 5
 # 主动搭话的间隔门槛（分钟），按聊天边界分档；1 档为缺省值
 BOUNDARY_PROACTIVE_GAP = {0: 240, 1: 30, 2: 10}
 
@@ -128,7 +141,7 @@ CHAT_OPS_WHITELIST = {"attitude", "action_points",
 
 _OUTPUT_RULE = """你必须严格按照以下 JSON 格式输出，不要包含任何额外注释或文字：
 {
-    "topic": {"action": "continue", "title": "新话题的简短标题（start/switch 时必填，其余可省略）"},
+    "topic": {"action": "continue", "kind": "切换或开新话题时的候选类型 id（其余可省略）", "title": "新话题的简短标题（start/switch 时必填，其余可省略）"},
     "messages": ["你要发出的一条消息", "可选：紧接着再发一条"],
     "silent_reason": "决定已读不回时的真实原因（会记录但不会展示给对方）；正常回复时省略",
     "ops": {"attitude": 0, "action_points": 0, "intrusion": 0, "destruction": 0, "casualties": 0},
@@ -137,9 +150,10 @@ _OUTPUT_RULE = """你必须严格按照以下 JSON 格式输出，不要包含�
 }
 topic 说明（action 四选一，省略整个 topic 键等同 continue）：
 - continue：延续当前话题继续聊；
-- start：开启 title 指定的新话题（当前没有进行中的话题时用）；
-- switch：当前话题已经聊完，自然收尾并开启 title 指定的新话题；
+- start：开启 title 与 kind 指定的新话题（当前没有进行中的话题时用）；
+- switch：当前话题已经聊完，自然收尾并用 kind/title 开启新话题；
 - end：这条回复之后话题自然结束（比如互道了晚安、话题聊尽）。
+kind 只能从系统给出的候选话题类型 id 里选；省略时系统会按坐标挑最接近的一个。
 messages 说明：
 - 数组里每一项都是你单独发出的一条聊天消息，按顺序发出，1~4 条；
 - 像真实聊天一样：多数时候一条就够；兴致高、话多或对方连发多条时，
@@ -161,19 +175,22 @@ _SYSTEM_TEMPLATE = """你正在手机聊天软件里与「{user_nick}」私聊�
 
 【你当前的状态】
 行动点（精力余裕）：{action_points}/100
-聊天态度：{attitude}（范围 -100~100，越高越亲近；你以此为依据决定回复意愿与语气）
+她对你的好感：{affection_text}
+此刻的紧张度：{tension_text}
+对自身尺寸的接纳：{size_state_text}
 {live_context}
 【你的聊天习惯】（由你的性格决定，固定不变）
 {chat_habits}
 
-【当前话题】（由你自主决定延续、切换或结束）
+【当前话题】（由你自主决定延续、切换、结束或已读不回）
 {topic_context}
 
 【规则】
 1. 回复要像聊天软件消息：口语化、简短（每条一般不超过两三句话），符合你的性格、人设与当前状态，可以不按对方期望回应；想多说时可以按顺序发多条。
-2. 每条消息你都会看到，但看不看回是你的自由。如果以你的性格和当前态度（{attitude}）不愿意回复——比如对方追问你不想回答的问题、反复纠缠、冒犯了你、或你懒得理会——就"已读不回"（messages 填 []）。
-3. 话题由你主导：想聊就自然延续，聊完了可以自然结束（end）或换个新话题（switch/start），不要硬撑着同一个话题。
-4. 不要跳出角色，不要解释你是 AI，不要替对方说话。
+2. 每条消息你都会看到，但看不看回是你的自由。如果以你的性格和当前好感（{affection_text}）不愿意回复——比如对方追问你不想回答的问题、反复纠缠、冒犯了你、或你懒得理会——就"已读不回"（messages 填 []）。
+3. 话题由你主导：可以自然延续当前话题，聊完了可以自然结束（end），或者从候选类型里挑一个换话题（switch/start，kind 与 title 都要给）；也可以直接已读不回。
+4. 不要把好感、紧张度、状态这些内部判断说出口，也不要提到坐标或数值。
+5. 不要跳出角色，不要解释你是 AI，不要替对方说话。
 
 {output_rule}"""
 
@@ -250,14 +267,86 @@ def should_reconcile(state: CharacterSnapshot, chat_state: ChatState) -> bool:
 
 
 # ---------- 话题状态机（阶段三，服务层硬约束） ----------
+def active_topic(chat_state: ChatState) -> Optional[Topic]:
+    """当前进行中的话题；没有时返回 None。"""
+    return next((t for t in (chat_state.topics or [])
+                 if t.id == chat_state.active_topic_id
+                 and t.status == "active"), None)
+
+
+def chat_coord(state: CharacterSnapshot, chat_state: ChatState,
+               now: Optional[datetime.datetime] = None) -> ChatCoord:
+    """按线程态度与角色当前世界事实算一次三轴坐标。
+
+    紧张度的世界态势与关系认知、事件压力在后续阶段接入；这里先用中性值，
+    保证话题选择与提示词已经走同一条坐标链路。
+    """
+    return build_chat_coord(
+        attitude=chat_state.attitude,
+        intrusion=state.intrusion,
+        destruction=state.destruction,
+        action_points=state.action_points,
+        personality=state.personality,
+        now=now,
+    )
+
+
+def recent_topic_kind_ids(chat_state: ChatState,
+                          limit: int = TOPIC_RECENT_LIMIT) -> list:
+    """最近用过的话题类型 id（新到旧），给重复惩罚用。"""
+    ids = [t.kind_id for t in reversed(chat_state.topics or [])
+           if t.kind_id]
+    try:
+        count = max(0, int(limit))
+    except (TypeError, ValueError):
+        count = TOPIC_RECENT_LIMIT
+    return ids[:count]
+
+
+def topic_candidates(chat_state: ChatState, coord: ChatCoord,
+                     limit: int = TOPIC_CANDIDATE_LIMIT) -> list:
+    """半径内的候选类型；一个都没有时回退 daily 兜底。"""
+    kinds = candidate_topic_kinds(
+        coord, recent_kind_ids=recent_topic_kind_ids(chat_state), limit=limit)
+    if kinds:
+        return kinds
+    fallback = fallback_topic_kind()
+    return [fallback] if fallback is not None else []
+
+
+def topic_deviation(chat_state: ChatState, coord: ChatCoord) -> bool:
+    """当前话题是否已严重偏离它自己的类型半径。"""
+    topic = active_topic(chat_state)
+    if topic is None or not topic.coord:
+        return False
+    kind = find_topic_kind(topic.kind_id) if topic.kind_id else None
+    radius = kind.radius if kind is not None else TOPIC_KIND_RADIUS
+    return ChatCoord.from_values(topic.coord).distance(coord) > radius
+
+
+def resolve_topic_kind(requested: str,
+                       candidates: Optional[list] = None) -> str:
+    """校验 AI 给的 kind：只按候选集合判断，不重算半径。
+
+    ``candidates=None`` 表示不做候选校验（兼容旧调用），只要求是注册类型。
+    非法/太远 → 回退候选中的第一个；没有候选时返回空串。
+    """
+    requested = requested.strip().lower() if isinstance(requested, str) else ""
+    if candidates is None:
+        kind = find_topic_kind(requested)
+        return kind.id if kind is not None else ""
+    ids = [kind.id for kind in candidates]
+    if requested and requested in ids:
+        return requested
+    return ids[0] if ids else ""
+
+
 def expire_stale_topic(chat_state: ChatState) -> bool:
     """进行中的话题超过 TOPIC_EXPIRE_HOURS 无人续聊 → 强制收束。
 
     服务端规则，不需要 AI 参与；返回是否有话题被收束。
     """
-    active = next((t for t in chat_state.topics
-                   if t.id == chat_state.active_topic_id and t.status == "active"),
-                  None)
+    active = active_topic(chat_state)
     if active is None or not active.last_activity_at:
         return False
     try:
@@ -274,23 +363,30 @@ def expire_stale_topic(chat_state: ChatState) -> bool:
 
 
 def apply_topic_decision(chat_state: ChatState, decision: dict,
-                         had_reply: bool, source: str = "user"):
+                         had_reply: bool, source: str = "user",
+                         coord: Optional[ChatCoord] = None,
+                         candidates: Optional[list] = None):
     """把协议里的 topic 决策落地到话题状态机（含硬约束）。
 
     - end：结束当前话题（end_reason=natural）；
     - start/switch 且有 title：结束旧话题（switched）并开启新话题；
+      kind 只从候选集合里取，非法/太远回退第一个候选；
     - continue / 未表态：活跃话题计数 +1；无活跃话题但有回复时，
       兜底开启一个隐式话题（粗糙实现，避免对话游离在状态机之外）；
     - 单个话题达到 MAX_TOPIC_TURNS 强制收束（stale）；列表容量由
       repo 侧截断兜底。
+
+    ``coord`` 是本次决策生效前的坐标快照，开新话题时写入 Topic.coord；
+    沉默轮（had_reply=False）不计数，但 end/switch 仍然落地。
     """
     now_iso = datetime.datetime.now().isoformat()
     topics = chat_state.topics
-    active = next((t for t in topics
-                   if t.id == chat_state.active_topic_id and t.status == "active"),
-                  None)
-    action = (decision or {}).get("action", "continue")
-    title = (decision or {}).get("title", "")
+    active = active_topic(chat_state)
+    decision = decision or {}
+    action = decision.get("action", "continue")
+    title = decision.get("title", "")
+    kind_id = resolve_topic_kind(decision.get("kind", ""), candidates)
+    snapshot = coord.as_list() if isinstance(coord, ChatCoord) else []
 
     def end_active(reason: str):
         nonlocal active
@@ -301,25 +397,26 @@ def apply_topic_decision(chat_state: ChatState, decision: dict,
             chat_state.active_topic_id = ""
             active = None
 
+    def start_topic(topic_title: str):
+        nonlocal active
+        topic = Topic(title=topic_title, kind_id=kind_id, coord=snapshot,
+                      status="active", source=source, started_at=now_iso,
+                      last_activity_at=now_iso, turn_count=1)
+        topics.append(topic)
+        chat_state.active_topic_id = topic.id
+        active = topic
+
     if action == "end":
         end_active("natural")
         return
     if action in ("start", "switch") and title:
         end_active("switched")
-        topic = Topic(title=title, status="active", source=source,
-                      started_at=now_iso, last_activity_at=now_iso,
-                      turn_count=1)
-        topics.append(topic)
-        chat_state.active_topic_id = topic.id
+        start_topic(title)
         return
     if active is None:
         if had_reply:
             # 隐式话题：AI 没有明确开题但产生了对话
-            topic = Topic(title=title or "自由闲聊", status="active",
-                          source=source, started_at=now_iso,
-                          last_activity_at=now_iso, turn_count=1)
-            topics.append(topic)
-            chat_state.active_topic_id = topic.id
+            start_topic(title or "自由闲聊")
         return
     if had_reply:
         active.last_activity_at = now_iso
@@ -375,24 +472,39 @@ def _char_lock(giantess_id: str, blocking: bool = True):
             lock.release()
 
 
-def topic_context_text(chat_state: ChatState) -> str:
-    """把话题状态机渲染为注入系统提示词的"当前话题"段落。"""
+def topic_context_text(chat_state: ChatState,
+                       coord: Optional[ChatCoord] = None,
+                       candidates: Optional[list] = None) -> str:
+    """把话题状态机与候选类型渲染为注入系统提示词的"当前话题"段落。
+
+    只给类型名、轮数、候选 id 与一句区别；不给坐标、半径等可优化数值。
+    """
     topics = chat_state.topics or []
-    active = next((t for t in topics
-                   if t.id == chat_state.active_topic_id and t.status == "active"),
-                  None)
+    active = active_topic(chat_state)
     lines = []
     if active is not None:
-        lines.append(f"- 进行中的话题：{active.title}"
+        kind = find_topic_kind(active.kind_id) if active.kind_id else None
+        label = f"（类型：{kind.label}）" if kind is not None else ""
+        lines.append(f"- 进行中的话题：{active.title}{label}"
                      f"（已聊 {active.turn_count} 轮）")
+        if coord is not None and topic_deviation(chat_state, coord):
+            lines.append("- 注意：现在的状态已经明显偏离这个话题类型的适用"
+                         "范围，可以自然结束它，或从候选里换一个更合适的类型。")
     else:
         lines.append("- 当前没有进行中的话题；聊得起来就可以开启一个"
-                     "（action=start，并给 title）")
+                     "（action=start，kind 从候选里选，并给 title）")
     recent = [t for t in topics if t.id != chat_state.active_topic_id][-3:]
     if recent:
         lines.append("- 最近结束的话题："
                      + "、".join(t.title for t in recent if t.title)
                      + "（避免重复聊同样的内容）")
+    if candidates:
+        lines.append("- 可选话题类型（topic.kind 只能填这些 id）：")
+        for kind in candidates:
+            lines.append(f"  - {kind.id}（{kind.label}）：{topic_kind_hint(kind)}")
+    else:
+        lines.append("- 此刻没有合适的候选类型；可以继续当前话题、结束它，"
+                     "或者已读不回。")
     return "\n".join(lines)
 
 
@@ -400,16 +512,20 @@ def build_chat_system_prompt(state: CharacterSnapshot, chat_state: ChatState,
                              now: Optional[datetime.datetime] = None) -> str:
     """组装聊天系统提示词：统一人设（按态度门槛注入隐藏介绍）+ 状态 +
     聊天习惯 + 话题上下文 + 输出协议。``now`` 供测试注入固定时钟。"""
+    coord = chat_coord(state, chat_state, now=now)
     return _SYSTEM_TEMPLATE.format(
         user_nick=chat_state.user_nick or "一个普通人类",
         name=state.name,
         persona=build_character_persona(
             state, include_hidden=chat_state.attitude >= REVEAL_ATTITUDE),
         action_points=state.action_points,
-        attitude=chat_state.attitude,
+        affection_text=describe_affection(coord.affection),
+        tension_text=describe_tension(coord.tension),
+        size_state_text=describe_size_state(coord.size_state),
         live_context=live_context_block(state, now=now),
         chat_habits=chat_habits_text(chat_state.chat_params),
-        topic_context=topic_context_text(chat_state),
+        topic_context=topic_context_text(
+            chat_state, coord, topic_candidates(chat_state, coord)),
         output_rule=_OUTPUT_RULE,
     )
 
@@ -449,20 +565,22 @@ def build_chat_messages(state: CharacterSnapshot, chat_state: ChatState,
 def parse_chat_response(response_text: str) -> dict:
     """解析聊天协议响应，返回统一结构：
 
-    {"messages": [str, ...], "topic": {"action", "title"},
+    {"messages": [str, ...], "topic": {"action", "kind", "title"},
      "silent_reason": str, "refused": bool,
      "ops": {属性: -1/0/1}, "nick": str|None, "memory_note": str}
 
     协议要求严格 JSON，messages 为 1~4 条消息（一次决策可发多条）；
     缺失时回退读旧协议的 reply 字段。topic.action 夹取到
-    continue/start/switch/end 之一（缺省 continue），title 截断保留。
+    continue/start/switch/end 之一（缺省 continue），kind 只做去空白与
+    长度截断（候选校验在服务层落地时进行），title 截断保留。
     解析不出 JSON 对象的回复（典型为
     API 拒绝敏感请求时的自然语言道歉/拒绝文本）一律视为已读不回：
     messages=[]、refused=True，原文截断后记入 silent_reason 供排查，
     不展示给玩家。messages 为空/缺失 同样是已读不回（refused=False，
     角色主观不想回）。
     """
-    result = {"messages": [], "topic": {"action": "continue", "title": ""},
+    result = {"messages": [],
+              "topic": {"action": "continue", "kind": "", "title": ""},
               "silent_reason": "", "refused": False,
               "ops": {}, "nick": None, "memory_note": ""}
     cleaned = (response_text or "").strip()
@@ -509,8 +627,11 @@ def parse_chat_response(response_text: str) -> dict:
         if action not in ("continue", "start", "switch", "end"):
             action = "continue"
         title = topic.get("title")
+        kind = topic.get("kind")
         result["topic"] = {
             "action": action,
+            "kind": (kind.strip().lower()[:32]
+                     if isinstance(kind, str) else ""),
             "title": (title.strip()[:TOPIC_TITLE_LIMIT]
                       if isinstance(title, str) else ""),
         }
@@ -957,6 +1078,10 @@ class ChatService:
         result = {"reply_messages": [], "reply_message": None,
                   "ops_applied": {}, "refused": bool(parsed.get("refused")),
                   "error": None, "batch_id": request_id}
+        # 坐标在 ops 生效前快照：AI 是按看到的状态选的话题类型，
+        # 校验与落盘都用同一份，效果从下一轮才影响坐标。
+        coord = chat_coord(state, chat_state)
+        candidates = topic_candidates(chat_state, coord)
         result["ops_applied"] = apply_chat_ops(state, chat_state, parsed)
         texts = parsed.get("messages") or []
         if texts:
@@ -972,7 +1097,8 @@ class ChatService:
                 result["reply_messages"].append(reply_message)
             result["reply_message"] = result["reply_messages"][0]
         apply_topic_decision(chat_state, parsed.get("topic"),
-                             had_reply=bool(texts), source=topic_source)
+                             had_reply=bool(texts), source=topic_source,
+                             coord=coord, candidates=candidates)
         if parsed.get("memory_note"):
             self._append_memory(chat_state, parsed["memory_note"])
         chat_state.last_active_at = datetime.datetime.now().isoformat()

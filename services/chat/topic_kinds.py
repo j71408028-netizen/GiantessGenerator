@@ -141,6 +141,17 @@ def topic_kind_distance(coord, kind: TopicKind) -> float:
     return _coord(coord).distance(kind.coord)
 
 
+def topic_kind_hint(kind: TopicKind) -> str:
+    """候选列表里的一句区别：取增量提示词的第一句，太长再截断。"""
+    prompt = kind.prompt.strip()
+    for separator in ("。", "；", "\n"):
+        index = prompt.find(separator)
+        if index != -1:
+            prompt = prompt[:index]
+            break
+    return prompt[:40]
+
+
 def repeat_penalty(kind_id: str,
                    recent_kind_ids: Sequence[str] = (),
                    base: float = TOPIC_REPEAT_PENALTY,

@@ -218,6 +218,8 @@ refresh 用 token 取消过期回调。`attach(state, identity_id)` 绑定一条
 ```text
 Topic
 - id / title（≤30 字）
+- kind_id：话题类型 id（见下节；旧档为空串）
+- coord：开题时的三轴坐标快照 [好感, 紧张度, 状态]（旧档为空）
 - status: active | ended
 - source: user | character | event
 - started_at / last_activity_at / ended_at
@@ -234,12 +236,30 @@ Topic
 输出协议增加 `topic` 键（省略等同 `continue`）：
 
 ```json
-{"action": "continue|start|switch|end", "title": "新话题标题（start/switch 必填）"}
+{"action": "continue|start|switch|end", "kind": "候选类型 id（切换/开题时）",
+ "title": "新话题标题（start/switch 必填）"}
 ```
 
-系统提示词新增【当前话题】段落：进行中的话题及轮数、最近结束的
-话题（避免重复）、以及"话题由你主导"的规则；AI 自主决定延续、
-切换或结束。
+系统提示词新增【当前话题】段落：进行中的话题、类型名与轮数、最近结束的
+话题（避免重复）、候选类型（3~5 个 id + 名称 + 一句区别），以及"话题由你
+主导"的规则；AI 自主决定延续、切换、结束或已读不回。
+
+### 三轴坐标与话题类型（services/chat/coordinates.py、topic_kinds.py）
+
+话题选择时按当前事实算一次坐标，作为 `Topic.coord` 快照；一次交流里即使
+`ops` 改了态度或行动点，本轮的 kind 校验与快照仍用 `ops` 生效前的坐标，
+下一轮才按新坐标筛选。坐标分量：
+
+- 好感：`attitude` 归一到 0~1；
+- 紧张度：世界态势 + 关系认知 + 近期事件压力（本阶段先接默认世界态势，
+  关系与事件衰减在后续阶段接入）；
+- 状态：演化坐标贴边、行动点不足、个性强度（越高越适应）。
+
+注入提示词的只有定性描述（好感/紧张度/接纳程度）与类型名，不给坐标、
+半径或原始小数。候选按三轴欧氏距离与类型半径过滤，同分看优先级，并对
+最近用过的类型加重复惩罚；一个候选都没有时回退 `daily` 兜底。AI 给出的
+`topic.kind` 只接受候选集合内的 id，非法/太远回退第一个候选；当前话题
+坐标超出自身类型半径时，提示词会提醒 AI 可以结束或换类型。
 
 ### 服务层硬约束（粗糙实现，够用为先）
 
@@ -247,8 +267,8 @@ Topic
 - `expire_stale_topic()`：进行中话题超过 `TOPIC_EXPIRE_HOURS = 6`
   小时未续聊，服务端直接收束（不需 AI 参与），reconcile 开头执行；
 - 无活跃话题但 AI 产生了回复时，兜底建立隐式话题（title 取
-  AI 给出的 title 或"自由闲聊"），保证对话不游离在状态机之外；
-- 非回复型决策（已读不回）不计轮数。
+  AI 给出的 title 或"自由闲聊"），同样写入 kind 与坐标快照；
+- 非回复型决策（已读不回）不计轮数，但 `end` / `switch` 仍照常落地。
 
 ## 10. 经历事件与 reconcile
 

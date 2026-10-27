@@ -278,3 +278,48 @@ def build_chat_coord(attitude: Any,
         size_state=compute_size_state(intrusion, destruction, action_points,
                                       personality),
     )
+
+
+# 注入提示词的定性描述：只传达"此刻适合什么语气"，不暴露可优化的数值。
+_AFFECTION_TEXTS = (
+    (0.20, "冷淡、疏远，对你没什么兴趣"),
+    (0.40, "谈不上亲近，保持距离"),
+    (0.60, "平常，还谈不上亲近"),
+    (0.80, "有好感，愿意靠近一些"),
+    (1.01, "很亲近，几乎不设防"),
+)
+_TENSION_TEXTS = (
+    (0.30, "平静，没什么事在逼她"),
+    (0.50, "大致安稳，但有一点警觉"),
+    (0.70, "紧绷，气氛不太对"),
+    (1.01, "高度紧张，随时可能出事"),
+)
+_SIZE_STATE_TEXTS = (
+    (0.30, "很不适应，甚至有些厌恶自己的尺寸"),
+    (0.50, "不太舒服，还在勉强撑着"),
+    (0.70, "勉强接受，谈不上享受"),
+    (1.01, "坦然接纳，甚至有些享受"),
+)
+
+
+def _describe(value: Any, texts) -> str:
+    level = _clamp01(value, 0.5)
+    for threshold, text in texts:
+        if level < threshold:
+            return text
+    return texts[-1][1]
+
+
+def describe_affection(value: Any) -> str:
+    """好感（0~1）的定性描述。"""
+    return _describe(value, _AFFECTION_TEXTS)
+
+
+def describe_tension(value: Any) -> str:
+    """紧张度（0~1）的定性描述。"""
+    return _describe(value, _TENSION_TEXTS)
+
+
+def describe_size_state(value: Any) -> str:
+    """状态（0~1，高 = 接纳）的定性描述。"""
+    return _describe(value, _SIZE_STATE_TEXTS)
