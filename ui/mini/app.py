@@ -18,7 +18,6 @@ from tkinter import filedialog
 from core.ai import resolve_ai_config
 from core.models import BodyPreset, CharacterSnapshot, Personality
 from services.chat import events as chat_events
-from services.chat import pending_char_messages
 from services.challenges import ChallengeService
 from core import appearance
 from ui.mini import pixel as px
@@ -349,13 +348,17 @@ class MiniApp:
                 and self.current_state is not None
                 and giantess_id == self.current_state.giantess_id):
             return
-        # 徽标按存档重算：已投递但玩家未读的角色消息数（事件只是触发器）
-        chat_state = self.chat_service().load_chat(giantess_id, blocking=False)
-        if chat_state is None:
-            return
-        unread = len(pending_char_messages(chat_state))
-        if unread:
-            self._unread_chat[giantess_id] = unread
+        # 徽标按存档重算：各身份线程里已投递但玩家未读的消息之和（事件只是触发器）
+        self.refresh_chat_unread(giantess_id)
+
+    def refresh_chat_unread(self, giantess_id: str):
+        """重算某角色的未读（所有身份线程聚合）并刷新角色卡徽标。
+
+        聚合只用于显示：各身份线程自己的未读仍互不相通。
+        """
+        total = self.chat_service().unread_total(giantess_id)
+        if total:
+            self._unread_chat[giantess_id] = total
         else:
             self._unread_chat.pop(giantess_id, None)
         self._refresh_chat_badge()
@@ -556,12 +559,9 @@ class MiniApp:
         self.report_view.clear()
         self.state_card.update_state(state)
         self._set_mode("state")
-        # 离线积压的已投递未读回复：点亮角色卡「聊天」键上的未读点（按存档重算）
-        chat_state = self.chat_service().load_chat(giantess_id, blocking=False)
-        self._unread_chat[giantess_id] = (
-            len(pending_char_messages(chat_state))
-            if chat_state is not None else 0)
-        self._refresh_chat_badge()
+        # 离线积压的已投递未读回复：点亮角色卡「聊天」键上的未读点（按存档重算，
+        # 聚合所有身份线程）
+        self.refresh_chat_unread(giantess_id)
         self._set_status(f"载入 {state.name}　{state.height:.1f} 米　"
                          f"行动点 {state.action_points}")
 

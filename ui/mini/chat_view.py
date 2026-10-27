@@ -12,13 +12,18 @@
 AI 应答完成之前（角色已"看到"即关闭，物理删除）。打开时先后台预热聊天参数再自动
 补话（有未读→回复未读；间隔够久→可能主动搭话）。AI 请求都在后台线程执行。
 
+标题条上的身份键是「玩家身份」而非角色：每个身份在角色眼里都是另一个人，各有
+独立的消息、好感、记忆与话题。点开是原生菜单（每项带自己的未读数，末尾可新建
+身份），切换只是换线程，旧线程暂停。角色卡上的未读徽标取所有身份的总和。
+
 聊天对象就是主界面当前载入的角色：换人先回角色档案屏载入另一位。
 """
 
 import threading
 import tkinter as tk
+from tkinter import simpledialog
 
-from core.models import ChatMessage
+from core.models import DEFAULT_IDENTITY_ID, ChatMessage, normalize_identity_id
 from services.chat import should_reconcile
 from services.chat.delivery import ChatDeliveryController
 from ui.mini import pixel as px
@@ -46,6 +51,9 @@ class MiniChatView(px.Panel):
         self.app = app
         self.state = None
         self.chat_state = None
+        self.identity_id = DEFAULT_IDENTITY_ID
+        self._identity_var = tk.StringVar(value=DEFAULT_IDENTITY_ID)
+        self._identity_menu = None        # 弹出中的菜单（防 GC）
         self._pending = False
         self._recall_requested = False
         self._pending_row = None
@@ -76,6 +84,12 @@ class MiniChatView(px.Panel):
         self._attitude_label = px.label(header, "", tone="text_dim",
                                         size=MARK_SIZE)
         self._attitude_label.pack(side='right', padx=4)
+        # 身份键：当前身份短名（带自己的未读数），点开是身份菜单
+        self._identity_btn = px.PixelButton(header, "身份",
+                                            self._show_identity_menu,
+                                            tone="text_dim", size=MARK_SIZE,
+                                            width=64, height=20)
+        self._identity_btn.pack(side='right', padx=2, pady=2)
 
         container = px.transparent(self)
         container.pack(fill='both', expand=True, padx=4, pady=(0, 2))
@@ -118,21 +132,98 @@ class MiniChatView(px.Panel):
             return
 
         nick = f"（{state.nick}）" if state.nick else ""
-        self.chat_state = self.app.chat_service().load_chat(state.giantess_id)
+        service = self.app.chat_service()
+        # 沿用上次选中的身份；身份是全局的，不随角色变
+        self.identity_id = service.active_identity_id()
+        self.chat_state = service.load_chat(state.giantess_id,
+                                           identity_id=self.identity_id)
         self._title_label.configure(text=f"✉ 与 {state.name} 聊天{nick}")
         self._attitude_label.configure(text=f"态度 {self.chat_state.attitude:+d}")
+        self._refresh_identity_button()
         self._render_messages()
 
         # 投递节奏控制器：到点重载/重渲染/"正在输入"/标记已读
         self._delivery = ChatDeliveryController(
-            self.app.chat_service(), after=self.after,
+            service, after=self.after,
             on_reload=self._on_delivery_reload,
             on_status=self._on_delivery_status)
-        self._delivery.attach(state)
+        self._delivery.attach(state, self.identity_id)
         # 打开聊天时先后台预热聊天参数（首次聊天前由 AI 一次性决定，失败
         # 静默——发送时会正式报错），再自动补话：
         # 有未读→回复未读；无未读且间隔够久→可能主动搭话
         self.after(80, self._prewarm_then_catchup)
+
+    # ---------- 身份 ----------
+    def switch_identity(self, identity_id):
+        """切到另一个身份：换一条独立线程，重载、重绘并重新补话。"""
+        identity_id = normalize_identity_id(identity_id)
+        if self.state is None or identity_id == self.identity_id:
+            return
+        service = self.app.chat_service()
+        self.identity_id = identity_id
+        service.set_active_identity(identity_id)
+        self._pending = False
+        self._recall_requested = False
+        self._expire_recall()
+        self.send_btn.configure(state='normal')
+        self._rendered_keys = None
+        self._set_status("")
+        self.chat_state = service.load_chat(self.state.giantess_id,
+                                            identity_id=identity_id)
+        self._attitude_label.configure(text=f"态度 {self.chat_state.attitude:+d}")
+        self._render_messages()
+        self._refresh_identity_button()
+        self._delivery.attach(self.state, identity_id)
+        self.after(80, self._prewarm_then_catchup)
+
+    def _refresh_identity_button(self):
+        """标题条身份键：当前身份短名 + 它自己的未读数。"""
+        service = self.app.chat_service()
+        identity = next((item for item in service.identities()
+                         if item.id == self.identity_id), None)
+        label = identity.label if identity is not None else "身份"
+        short = label if len(label) <= 5 else label[:4] + "…"
+        count = (service.unread_by_identity(self.state.giantess_id)
+                 .get(self.identity_id, 0)) if self.state is not None else 0
+        self._identity_btn.configure(text=f"{short} •{count}" if count else short)
+        self._identity_var.set(self.identity_id)
+
+    def _show_identity_menu(self):
+        """身份菜单：每项带自己的未读数，末尾可新建身份。"""
+        if self.state is None:
+            return
+        service = self.app.chat_service()
+        unread = service.unread_by_identity(self.state.giantess_id)
+        menu = tk.Menu(self, tearoff=0)
+        for identity in service.identities():
+            count = unread.get(identity.id, 0)
+            text = f"{identity.label} •{count}" if count else identity.label
+            menu.add_radiobutton(
+                label=text, value=identity.id, variable=self._identity_var,
+                command=lambda target=identity.id: self.switch_identity(target))
+        menu.add_separator()
+        menu.add_command(label="＋ 新建身份", command=self._create_identity)
+        self._identity_menu = menu      # 持有引用，避免回调前被回收
+        try:
+            menu.tk_popup(self._identity_btn.winfo_rootx(),
+                          self._identity_btn.winfo_rooty()
+                          + self._identity_btn.winfo_height())
+        finally:
+            menu.grab_release()
+
+    def _create_identity(self):
+        """新建身份：挂件没有输入屏，借系统输入框取名字（与导出对话框同理）。"""
+        label = simpledialog.askstring(
+            "新建身份", "给这个身份起个名字\n（她不会知道这与别的身份是同一个人）",
+            parent=self)
+        label = (label or "").strip()
+        if not label:
+            return
+        identity = self.app.chat_service().create_identity(label)
+        if identity is None:
+            self._set_status("身份数量已达上限", tone="danger")
+            return
+        self.switch_identity(identity.id)
 
     def _write_hint(self):
         px.label(self.listing.body, "还没有载入角色。", tone="text_dim",
@@ -146,9 +237,8 @@ class MiniChatView(px.Panel):
             return
         self.chat_state = chat_state
         self._render_delta(chat_state)
-        # 已投递消息已在本屏渲染：清掉角色卡上的未读点
-        self.app._unread_chat.pop(self.state.giantess_id, None)
-        self.app._refresh_chat_badge()
+        # 本屏消息已渲染并标记已读：按存档重算该角色的未读（可能还剩别的身份）
+        self.app.refresh_chat_unread(self.state.giantess_id)
 
     def _render_delta(self, chat_state):
         """控制器重载聊天域后重绘：已渲染前缀原样保留时只追加新气泡。

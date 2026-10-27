@@ -18,22 +18,30 @@ AI 应答完成之前（角色已"看到"即关闭），撤回后消息从历史
 AI 请求在后台线程执行（ChatService 同步完成解析与写回），完成后经 ``after``
 投递回主线程；属性操作生效后通过 host 回调通知探索页刷新状态面板。
 未读徽标由 host（ExplorationPanel）统一管理（按存档重算）。
+
+顶栏的身份下拉是「玩家身份」而非角色：每个身份是角色眼里的不同的人，各自
+一条完全独立的线程（消息、好感、记忆、话题都不共享）。切换身份只是换线程，
+旧线程暂停；下拉项后面的 •N 是该身份自己的未读，角色卡徽标取所有身份的
+总和（聚合只用于显示）。
 """
 
 import threading
 
 import customtkinter as ctk
 
-from core.models import ChatMessage, CharacterSnapshot
+from core.models import (DEFAULT_IDENTITY_ID, ChatMessage, CharacterSnapshot,
+                         normalize_identity_id)
 from services.chat.delivery import ChatDeliveryController
 from services.chat import (ChatService, should_reconcile,
                                    unread_messages)
 from ui.ctk.avatar import AvatarFrame, COMPACT_AVATAR_SIZE
 from ui.ctk.chat_time import message_moment, time_marker_text
+from ui.ctk.dialogs import InputDialog
 from ui.ctk.theme import (
     FB_BLUE, FB_BTN, FB_BTN_HOVER, FB_CARD_BG, FB_CHIP_BG, FB_CHIP_HOVER,
     FB_MUTED, INTRO_BORDER,
 )
+from ui.ctk.widgets import OptionButton
 from ui.ctk import fonts as ui_fonts
 
 
@@ -53,6 +61,9 @@ class ChatPanel(ctk.CTkFrame):
         self.host = host
         self.state: CharacterSnapshot = None
         self.chat_state = None
+        # 当前绑定的玩家身份与下拉项（显示文本 → 身份 id，随未读点一起重建）
+        self.identity_id = DEFAULT_IDENTITY_ID
+        self._identity_pairs = []
         self._pending = False
         self._recall_requested = False
         self._pending_row = None          # 待撤回的玩家消息气泡行
@@ -89,6 +100,19 @@ class ChatPanel(ctk.CTkFrame):
                       fg_color=FB_CHIP_BG, text_color=FB_MUTED,
                       hover_color=FB_CHIP_HOVER, corner_radius=12,
                       command=self._close).pack(side='right')
+        # 身份选择器：换身份 = 换一条互不相通的聊天线（角色眼里是另一个人）
+        self.identity_btn = OptionButton(
+            header, values=[], command=self._on_identity_pick,
+            width=96, height=24, corner_radius=12,
+            border_color=INTRO_BORDER, font=ui_fonts.ui_font(11),
+            placeholder="身份")
+        self.identity_btn.pack(side='right', padx=(0, 4))
+        ctk.CTkButton(header, text="＋", width=24, height=24,
+                      font=ui_fonts.ui_font(11),
+                      fg_color=FB_CHIP_BG, text_color=FB_MUTED,
+                      hover_color=FB_CHIP_HOVER, corner_radius=12,
+                      command=self._create_identity).pack(side='right',
+                                                          padx=(0, 2))
         self.title_label = ctk.CTkLabel(header, text="💬 聊天",
                                         font=ui_fonts.ui_font(14, "bold"),
                                         text_color=FB_BLUE, anchor="w")
@@ -139,13 +163,75 @@ class ChatPanel(ctk.CTkFrame):
             self.chat_state = None
             self._render_messages()
             return
+        # 打开聊天沿用上次选中的身份；换角色/换身份都要重新拉一次身份列表
+        self.identity_id = self._chat_service.active_identity_id()
+        self._reset_thread()
+        self._refresh_identities()
         # attach 会立即 load_chat（含到点提升）→ on_reload 渲染并标记已读
-        self._rendered_keys = None  # 换聊天对象：旧对话不能参与前缀比对
-        self._delivery.attach(state)
+        self._delivery.attach(state, self.identity_id)
         # 打开聊天时先后台预热聊天参数（首次聊天前由 AI 一次性决定，
         # 失败静默——发送时会正式报错），再自动补话：
         # 有未读→回复未读；无未读且间隔够久→可能主动搭话
         self.after(80, self._prewarm_then_catchup)
+
+    def switch_identity(self, identity_id: str):
+        """切到另一个玩家身份：旧线程暂停，新线程重载并自动补话。"""
+        identity_id = normalize_identity_id(identity_id)
+        if self.state is None or identity_id == self.identity_id:
+            return
+        self.identity_id = identity_id
+        self._chat_service.set_active_identity(identity_id)
+        self._reset_thread()
+        self._refresh_identities()
+        self._delivery.attach(self.state, identity_id)
+        self.after(80, self._prewarm_then_catchup)
+
+    def _reset_thread(self):
+        """换线程（换角色/换身份）后的界面复位：撤回窗口、输入锁、渲染前缀。"""
+        self._rendered_keys = None
+        self._last_moment = None
+        self._pending = False
+        self._recall_requested = False
+        self._expire_recall()
+        self.send_btn.configure(state='normal', text="发送")
+
+    def _refresh_identities(self):
+        """重建身份下拉：标签 + 该身份自己的未读点；重名补 id 片段以便区分。"""
+        identities = self._chat_service.identities()
+        unread = (self._chat_service.unread_by_identity(self.state.giantess_id)
+                  if self.state is not None else {})
+        pairs, used = [], set()
+        for identity in identities:
+            label = identity.label
+            if label in used:
+                label = f"{label}·{identity.id[:4]}"
+            used.add(label)
+            count = unread.get(identity.id, 0)
+            pairs.append((f"{label} •{count}" if count else label, identity.id))
+        self._identity_pairs = pairs
+        self.identity_btn.configure(values=[text for text, _ in pairs])
+        for text, identity_id in pairs:
+            if identity_id == self.identity_id:
+                self.identity_btn.set(text)
+                break
+
+    def _on_identity_pick(self, choice: str):
+        self.switch_identity(dict(self._identity_pairs).get(
+            choice, DEFAULT_IDENTITY_ID))
+
+    def _create_identity(self):
+        """新建一个玩家身份并立刻切过去（新建后通常就要以它开聊）。"""
+        dialog = InputDialog(
+            self, title="新建玩家身份",
+            prompt="给这个身份起个名字\n她不会知道这和别的身份是同一个人")
+        label = (dialog.get_input() or "").strip()
+        if not label:
+            return
+        identity = self._chat_service.create_identity(label)
+        if identity is None:
+            self._set_status("身份数量已达上限")
+            return
+        self.switch_identity(identity.id)
 
     def _refresh_avatar(self):
         """顶部紧凑头像框：取介绍卡解析好的同一份头像母本，按本框尺寸显示。
@@ -163,11 +249,11 @@ class ChatPanel(ctk.CTkFrame):
         self.avatar_frame.set_image(pil_img)
 
     def unread_count(self) -> int:
-        """当前角色的未读玩家消息数（角色尚未看到的积压）。"""
+        """当前角色、当前身份的未读（角色尚未看到的积压）。"""
         if self.state is None:
             return 0
-        return len(unread_messages(
-            self._chat_service.load_chat(self.state.giantess_id)))
+        return len(unread_messages(self._chat_service.load_chat(
+            self.state.giantess_id, identity_id=self.identity_id)))
 
     # ---------- 投递节奏（与挂件模式共用 ChatDeliveryController） ----------
     def _on_delivery_reload(self, chat_state):
@@ -201,8 +287,13 @@ class ChatPanel(ctk.CTkFrame):
             self._set_status("对方正在输入…" if kind == "typing" else "")
 
     # ---------- 自动补话 ----------
-    def _prewarm_then_catchup(self):
+    def _prewarm_then_catchup(self, retry: int = 0):
         if self.state is None or self.chat_state is None:
+            return
+        if self.chat_state.identity_id != self.identity_id:
+            # 刚切过线程但重载还没拿到（角色锁被占用）：有限次重试
+            if retry < 5:
+                self.after(600, lambda: self._prewarm_then_catchup(retry + 1))
             return
         if self.chat_state.chat_params is not None:
             self._auto_catchup()
@@ -220,6 +311,8 @@ class ChatPanel(ctk.CTkFrame):
         事件与主动搭话，一次合并处理；无事可做则静默。"""
         if self._pending or self.state is None or self.chat_state is None:
             return
+        if self.chat_state.identity_id != self.identity_id:
+            return
         if should_reconcile(self.state, self.chat_state):
             self._run_reconcile()
 
@@ -231,11 +324,14 @@ class ChatPanel(ctk.CTkFrame):
 
         def worker():
             result = self._chat_service.reconcile(state, chat_state)
-            self.after(0, lambda: self._catchup_done(result))
+            self.after(0, lambda: self._catchup_done(result, chat_state))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _catchup_done(self, result: dict):
+    def _catchup_done(self, result: dict, chat_state=None):
+        if chat_state is not None and chat_state is not self.chat_state:
+            # 期间切了身份/角色：这次结果属于另一条线程，不再动本界面
+            return
         self._pending = False
         self.send_btn.configure(state='normal', text="发送")
         if self.state is None:
@@ -362,7 +458,7 @@ class ChatPanel(ctk.CTkFrame):
             except Exception as e:  # 网络层之外的意外异常也兜住
                 result = {"user_message": None, "reply_messages": [],
                           "ops_applied": {}, "refused": False, "error": str(e)}
-            self.after(0, lambda: self._send_done(result))
+            self.after(0, lambda: self._send_done(result, chat_state))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -376,7 +472,10 @@ class ChatPanel(ctk.CTkFrame):
             self._pending_row = None
         self._set_status("撤回中…")
 
-    def _send_done(self, result: dict):
+    def _send_done(self, result: dict, chat_state=None):
+        if chat_state is not None and chat_state is not self.chat_state:
+            # 期间切了身份/角色：结果已写进旧线程，本界面不该再渲染它
+            return
         self._pending = False
         self.send_btn.configure(state='normal', text="发送")
         if self.state is None:

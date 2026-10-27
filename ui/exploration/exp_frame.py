@@ -13,7 +13,7 @@ from ui.exploration.intro import IntroPanel
 from ui.exploration.report import ReportPanel
 from ui.exploration.chat_panel import ChatPanel
 from services.chat import events as chat_events
-from services.chat import ChatService, pending_char_messages
+from services.chat import ChatService
 from ui.ctk.dialogs import BaseDialog
 from ui.ctk.theme import (
     EXP_BG, EXP_BORDER, EXP_BORDER_STRONG, EXP_HOVER,
@@ -277,16 +277,29 @@ class ExplorationPanel(ctk.CTkFrame):
         self.intro_panel.toggle_chat()
 
     def on_chat_expanded(self):
-        """介绍面板展开聊天区：绑定当前角色并清未读徽标。"""
+        """介绍面板展开聊天区：绑定当前角色与当前身份，未读只保留别的身份的。"""
         self._chat_open = True
-        self._unread_chat = 0
-        self.intro_panel.set_chat_badge(0)
         self.chat_panel.set_state(self.current_state)
+        self._refresh_chat_badge()
 
     def on_chat_collapsed(self):
         """介绍面板收起聊天区：摘掉投递控制器，后续回复由未读徽标体现。"""
         self._chat_open = False
         self.chat_panel.set_state(None)
+        self._refresh_chat_badge()
+
+    def _refresh_chat_badge(self):
+        """未读徽标 = 各身份线程未读之和，减去正在看的那条线程。"""
+        if self.current_state is None:
+            self._unread_chat = 0
+            self.intro_panel.set_chat_badge(0)
+            return
+        counts = self._chat_service.unread_by_identity(
+            self.current_state.giantess_id)
+        if self._chat_open:
+            counts.pop(self.chat_panel.identity_id, None)
+        self._unread_chat = sum(counts.values())
+        self.intro_panel.set_chat_badge(self._unread_chat)
 
     def close_chat_panel(self):
         """收起聊天（聊天面板的「✕」调用）。"""
@@ -320,13 +333,9 @@ class ExplorationPanel(ctk.CTkFrame):
         if event.get("ops_applied") and self.current_panel == "state":
             self.state_panel.update_state(self.current_state)
             self.intro_panel.refresh_display()
-        # 聊天面板关闭时：按存档重算玩家未读的角色消息（徽标唯一依据）
+        # 聊天面板关闭时：按存档重算未读徽标（所有身份线程聚合，只用于显示）
         if not self._chat_open:
-            chat_state = self._chat_service.load_chat(
-                self.current_state.giantess_id, blocking=False)
-            if chat_state is not None:
-                self._unread_chat = len(pending_char_messages(chat_state))
-                self.intro_panel.set_chat_badge(self._unread_chat)
+            self._refresh_chat_badge()
 
     def _on_chat_events_detach(self, event):
         if str(event.type) == "Destroy" and event.widget is self:
@@ -414,18 +423,11 @@ class ExplorationPanel(ctk.CTkFrame):
         if self.current_state is not None:
             self.intro_panel.refresh_display()
             self.intro_panel.refresh_image_display()
-        # 换了角色：未读徽标按存档重算（已投递但玩家未读的角色消息）；
+        # 换了角色：未读徽标按存档重算（所有身份线程聚合，正在看的那条不计）；
         # 聊天面板开着时重载为新角色的历史
-        pending = 0
-        if self.current_state is not None:
-            chat_state = self._chat_service.load_chat(
-                self.current_state.giantess_id, blocking=False)
-            pending = len(pending_char_messages(chat_state)) \
-                if chat_state is not None else 0
-        self._unread_chat = pending
-        self.intro_panel.set_chat_badge(pending)
         if self._chat_open and self.current_state is not None:
             self.chat_panel.set_state(self.current_state)
+        self._refresh_chat_badge()
 
     def switch_to_select_panel(self):
         self._loading_character = False
