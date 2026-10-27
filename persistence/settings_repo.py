@@ -24,6 +24,7 @@ class SettingsRepo:
             "comparison_count": 5,
             "comparison_order": "match",
             "world_setting": "appear",
+            "world_stance": "coexist",
             "seed": 0,
             "theme_mode": "Light",
             "color_theme": "blue",

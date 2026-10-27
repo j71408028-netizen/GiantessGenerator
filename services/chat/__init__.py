@@ -57,15 +57,18 @@ from typing import Optional
 
 from core.address_model import format_addr_compact
 from core.ai import get_ai_client, describe_ai_error
-from core.models import (DEFAULT_IDENTITY_ID, ChatMessage, ChatParams,
-                         ChatState, CharacterSnapshot, Topic,
+from core.models import (DEFAULT_IDENTITY_ID, RELATIONSHIP_KINDS,
+                         ChatMessage, ChatParams, ChatState,
+                         CharacterSnapshot, Relationship, Topic,
                          normalize_identity_id)
 from persistence.character_repo import CharacterRepo
 from persistence.chat_repo import ChatRepo
 from services.chat import events as chat_events
-from services.chat.coordinates import (ChatCoord, build_chat_coord,
+from services.chat.coordinates import (DEFAULT_WORLD_STANCE, ChatCoord,
+                                       build_chat_coord,
                                        describe_affection,
-                                       describe_size_state, describe_tension)
+                                       describe_size_state, describe_tension,
+                                       tension_events_from_evolution)
 from services.chat.persona import build_character_persona
 from services.chat.experience_events import (collect_experience_events,
                                         consume_experience_events,
@@ -108,6 +111,37 @@ TOPIC_TITLE_LIMIT = 30
 TOPIC_RECENT_LIMIT = 5
 # 主动搭话的间隔门槛（分钟），按聊天边界分档；1 档为缺省值
 BOUNDARY_PROACTIVE_GAP = {0: 240, 1: 30, 2: 10}
+# 身份认知更新：只在话题自然结束/切换时允许，且每个身份有冷却
+IDENTITY_UPDATE_COOLDOWN_HOURS = 72
+IDENTITY_NOTE_LIMIT = 200
+# 关系认知的白名单转移图：不允许一轮从陌生人直接跳到恋人/敌人
+IDENTITY_TRANSITIONS = {
+    "stranger": {"acquaintance", "subject", "prey", "worshipper"},
+    "acquaintance": {"stranger", "friend", "subject", "prey", "worshipper",
+                     "rival"},
+    "friend": {"acquaintance", "close", "rival", "subject"},
+    "close": {"friend", "lover", "family", "rival"},
+    "lover": {"close", "family"},
+    "family": {"close", "lover"},
+    "worshipper": {"acquaintance", "friend", "subject"},
+    "subject": {"acquaintance", "worshipper", "prey", "rival"},
+    "prey": {"acquaintance", "subject", "rival", "enemy"},
+    "rival": {"acquaintance", "friend", "subject", "enemy"},
+    "enemy": {"rival", "prey"},
+}
+RELATIONSHIP_KIND_TEXTS = {
+    "stranger": "一个刚认识、还谈不上了解的陌生人",
+    "acquaintance": "打过几次交道、有点印象的人",
+    "friend": "聊得来的朋友",
+    "close": "亲近、可以放心说些私事的人",
+    "lover": "恋人",
+    "family": "家人一样的人",
+    "worshipper": "崇拜她的人",
+    "subject": "被她支配、听她话的人",
+    "rival": "旗鼓相当的对手",
+    "enemy": "敌人",
+    "prey": "可以随意摆弄的猎物",
+}
 
 # ---------- 纯聊天参数档位表（0/1/2，首次聊天前由 AI 一次性决定） ----------
 # 在线强度：回复延迟的档位倍率（低在线慢悠悠，高在线接近秒回）
@@ -146,6 +180,7 @@ _OUTPUT_RULE = """你必须严格按照以下 JSON 格式输出，不要包含�
     "silent_reason": "决定已读不回时的真实原因（会记录但不会展示给对方）；正常回复时省略",
     "ops": {"attitude": 0, "action_points": 0, "intrusion": 0, "destruction": 0, "casualties": 0},
     "nick": "你对对方的称呼（仅当想改变称呼时给出，否则省略本键）",
+    "identity_update": {"kind": "可选：话题结束时你对他认知的变化", "note": "可选：一句补充"},
     "memory_note": "可选：值得长期记住的关于对方的事"
 }
 topic 说明（action 四选一，省略整个 topic 键等同 continue）：
@@ -166,7 +201,13 @@ ops 各项取值均为 -1、0 或 1，含义：
 - intrusion：你对人类环境的介入程度（1 这次的言行更高调张扬，-1 更收敛低调，0 不变）；
 - destruction：你的破坏性（1 这次的言行更具破坏倾向，-1 更克制，0 不变）；
 - casualties：仅当这次聊天内容涉及你造成人员伤亡时取 1，否则 0。
-没有提到的项填 0。ops 完全由你根据聊天内容自主决定，但幅度都是轻度的。"""
+没有提到的项填 0。ops 完全由你根据聊天内容自主决定，但幅度都是轻度的。
+identity_update 说明：
+- 只在你要结束当前话题（end 或 switch）时填写；其他时候会被忽略；
+- kind 可选：stranger / acquaintance / friend / close / lover / family /
+  worshipper / subject / rival / enemy / prey；只能沿自然的关系变化逐步改变，
+  不能一轮从陌生人跳到恋人/敌人；
+- note 可选：一句你对他新的判断，会保留下来供以后参考。"""
 
 _SYSTEM_TEMPLATE = """你正在手机聊天软件里与「{user_nick}」私聊。你要完全扮演{name}，以她的第一人称发消息，而不是叙述故事。
 
@@ -178,6 +219,7 @@ _SYSTEM_TEMPLATE = """你正在手机聊天软件里与「{user_nick}」私聊�
 她对你的好感：{affection_text}
 此刻的紧张度：{tension_text}
 对自身尺寸的接纳：{size_state_text}
+她对「{user_nick}」的认知：{relationship_text}
 {live_context}
 【你的聊天习惯】（由你的性格决定，固定不变）
 {chat_habits}
@@ -188,7 +230,7 @@ _SYSTEM_TEMPLATE = """你正在手机聊天软件里与「{user_nick}」私聊�
 【规则】
 1. 回复要像聊天软件消息：口语化、简短（每条一般不超过两三句话），符合你的性格、人设与当前状态，可以不按对方期望回应；想多说时可以按顺序发多条。
 2. 每条消息你都会看到，但看不看回是你的自由。如果以你的性格和当前好感（{affection_text}）不愿意回复——比如对方追问你不想回答的问题、反复纠缠、冒犯了你、或你懒得理会——就"已读不回"（messages 填 []）。
-3. 话题由你主导：可以自然延续当前话题，聊完了可以自然结束（end），或者从候选类型里挑一个换话题（switch/start，kind 与 title 都要给）；也可以直接已读不回。
+3. 话题由你主导：可以自然延续当前话题，聊完了可以自然结束（end），或者从候选类型里挑一个换话题（switch/start，kind 与 title 都要给）；也可以直接已读不回。话题结束（end/switch）时可以顺手更新你对他的认知（identity_update）。
 4. 不要把好感、紧张度、状态这些内部判断说出口，也不要提到坐标或数值。
 5. 不要跳出角色，不要解释你是 AI，不要替对方说话。
 
@@ -275,20 +317,29 @@ def active_topic(chat_state: ChatState) -> Optional[Topic]:
 
 
 def chat_coord(state: CharacterSnapshot, chat_state: ChatState,
-               now: Optional[datetime.datetime] = None) -> ChatCoord:
-    """按线程态度与角色当前世界事实算一次三轴坐标。
-
-    紧张度的世界态势与关系认知、事件压力在后续阶段接入；这里先用中性值，
-    保证话题选择与提示词已经走同一条坐标链路。
-    """
+               now: Optional[datetime.datetime] = None,
+               world_stance: str = DEFAULT_WORLD_STANCE) -> ChatCoord:
+    """按线程态度、关系认知与角色当前世界事实算一次三轴坐标。"""
     return build_chat_coord(
         attitude=chat_state.attitude,
+        world_stance=world_stance,
+        relationship_kind=getattr(chat_state.relationship, "kind", None),
+        events=tension_events_from_evolution(state.evolution, now=now),
         intrusion=state.intrusion,
         destruction=state.destruction,
         action_points=state.action_points,
         personality=state.personality,
         now=now,
     )
+
+
+def relationship_text(chat_state: ChatState) -> str:
+    """把当前身份的关系认知渲染为提示词里的一行。"""
+    relationship = chat_state.relationship or Relationship()
+    text = RELATIONSHIP_KIND_TEXTS.get(
+        relationship.kind, RELATIONSHIP_KIND_TEXTS["stranger"])
+    note = (relationship.note or "").strip()
+    return f"{text}（{note}）" if note else text
 
 
 def recent_topic_kind_ids(chat_state: ChatState,
@@ -378,6 +429,8 @@ def apply_topic_decision(chat_state: ChatState, decision: dict,
 
     ``coord`` 是本次决策生效前的坐标快照，开新话题时写入 Topic.coord；
     沉默轮（had_reply=False）不计数，但 end/switch 仍然落地。
+    返回 ``{"ended_reason", "kind_id", "started"}``，供身份更新判断本次是否
+    自然结束/切换了话题。
     """
     now_iso = datetime.datetime.now().isoformat()
     topics = chat_state.topics
@@ -387,6 +440,7 @@ def apply_topic_decision(chat_state: ChatState, decision: dict,
     title = decision.get("title", "")
     kind_id = resolve_topic_kind(decision.get("kind", ""), candidates)
     snapshot = coord.as_list() if isinstance(coord, ChatCoord) else []
+    outcome = {"ended_reason": "", "kind_id": kind_id, "started": False}
 
     def end_active(reason: str):
         nonlocal active
@@ -396,6 +450,7 @@ def apply_topic_decision(chat_state: ChatState, decision: dict,
             active.end_reason = reason
             chat_state.active_topic_id = ""
             active = None
+            outcome["ended_reason"] = reason
 
     def start_topic(topic_title: str):
         nonlocal active
@@ -405,24 +460,87 @@ def apply_topic_decision(chat_state: ChatState, decision: dict,
         topics.append(topic)
         chat_state.active_topic_id = topic.id
         active = topic
+        outcome["started"] = True
 
     if action == "end":
         end_active("natural")
-        return
+        return outcome
     if action in ("start", "switch") and title:
         end_active("switched")
         start_topic(title)
-        return
+        return outcome
     if active is None:
         if had_reply:
             # 隐式话题：AI 没有明确开题但产生了对话
             start_topic(title or "自由闲聊")
-        return
+        return outcome
     if had_reply:
         active.last_activity_at = now_iso
         active.turn_count += 1
         if active.turn_count >= MAX_TOPIC_TURNS:
             end_active("stale")
+    return outcome
+
+
+def identity_update_allowed(chat_state: ChatState,
+                            now: Optional[datetime.datetime] = None) -> bool:
+    """当前线程是否已过身份认知更新冷却（按 Relationship.updated_at）。"""
+    updated = (chat_state.relationship.updated_at
+               if chat_state.relationship else "")
+    if not updated:
+        return True
+    try:
+        moment = datetime.datetime.fromisoformat(updated)
+    except ValueError:
+        return True
+    current = now or datetime.datetime.now()
+    try:
+        elapsed = (current - moment).total_seconds()
+    except TypeError:
+        elapsed = (current.replace(tzinfo=None)
+                   - moment.replace(tzinfo=None)).total_seconds()
+    return elapsed >= IDENTITY_UPDATE_COOLDOWN_HOURS * 3600
+
+
+def apply_identity_update(chat_state: ChatState, update: dict,
+                          ended_reason: str,
+                          now: Optional[datetime.datetime] = None) -> bool:
+    """在话题自然结束/切换时更新当前身份的关系认知。
+
+    只在 ``ended_reason`` 为 natural/switched 时生效；stale 强制收束不更新。
+    kind 必须沿白名单转移图逐步变化，非法即整条丢弃；note 单独也可更新。
+    每个身份受 ``IDENTITY_UPDATE_COOLDOWN_HOURS`` 冷却约束。
+    """
+    if not isinstance(update, dict) or not update:
+        return False
+    if ended_reason not in ("natural", "switched"):
+        return False
+    if not identity_update_allowed(chat_state, now=now):
+        return False
+    relationship = chat_state.relationship or Relationship()
+    requested = update.get("kind", "")
+    requested = (requested.strip().lower()
+                 if isinstance(requested, str) else "")
+    note = update.get("note", "")
+    note = note.strip()[:IDENTITY_NOTE_LIMIT] if isinstance(note, str) else ""
+    if requested:
+        if requested not in RELATIONSHIP_KINDS:
+            return False
+        if (requested != relationship.kind
+                and requested not in IDENTITY_TRANSITIONS.get(
+                    relationship.kind, set())):
+            return False
+    if not requested and not note:
+        return False
+    now_iso = (now or datetime.datetime.now()).isoformat()
+    if requested and requested != relationship.kind:
+        relationship.kind = requested
+        relationship.since = now_iso
+    if note:
+        relationship.note = note
+    relationship.updated_at = now_iso
+    chat_state.relationship = relationship
+    return True
 
 
 def schedule_batch_available_at(texts: list, online: int = 1) -> list:
@@ -509,10 +627,12 @@ def topic_context_text(chat_state: ChatState,
 
 
 def build_chat_system_prompt(state: CharacterSnapshot, chat_state: ChatState,
-                             now: Optional[datetime.datetime] = None) -> str:
+                             now: Optional[datetime.datetime] = None,
+                             world_stance: str = DEFAULT_WORLD_STANCE) -> str:
     """组装聊天系统提示词：统一人设（按态度门槛注入隐藏介绍）+ 状态 +
-    聊天习惯 + 话题上下文 + 输出协议。``now`` 供测试注入固定时钟。"""
-    coord = chat_coord(state, chat_state, now=now)
+    聊天习惯 + 话题上下文 + 输出协议。``now`` 供测试注入固定时钟；
+    ``world_stance`` 由调用方（ChatService）从设置读取。"""
+    coord = chat_coord(state, chat_state, now=now, world_stance=world_stance)
     return _SYSTEM_TEMPLATE.format(
         user_nick=chat_state.user_nick or "一个普通人类",
         name=state.name,
@@ -522,6 +642,7 @@ def build_chat_system_prompt(state: CharacterSnapshot, chat_state: ChatState,
         affection_text=describe_affection(coord.affection),
         tension_text=describe_tension(coord.tension),
         size_state_text=describe_size_state(coord.size_state),
+        relationship_text=relationship_text(chat_state),
         live_context=live_context_block(state, now=now),
         chat_habits=chat_habits_text(chat_state.chat_params),
         topic_context=topic_context_text(
@@ -547,10 +668,13 @@ _OUTPUT_REMINDER = ("输出提醒：你的下一条回复必须是且仅是一�
 
 
 def build_chat_messages(state: CharacterSnapshot, chat_state: ChatState,
-                        pending_text: str) -> list:
+                        pending_text: str,
+                        world_stance: str = DEFAULT_WORLD_STANCE) -> list:
     """组装完整的对话消息列表：system + 记忆摘要 + 滑动窗口 + 待发消息
     + 收尾 JSON 提醒（见 _OUTPUT_REMINDER）。"""
-    messages = [{"role": "system", "content": build_chat_system_prompt(state, chat_state)}]
+    messages = [{"role": "system",
+                 "content": build_chat_system_prompt(
+                     state, chat_state, world_stance=world_stance)}]
     if chat_state.memory:
         messages.append({"role": "system",
                          "content": f"更早的聊天留下的记忆摘要：\n{chat_state.memory}"})
@@ -567,12 +691,15 @@ def parse_chat_response(response_text: str) -> dict:
 
     {"messages": [str, ...], "topic": {"action", "kind", "title"},
      "silent_reason": str, "refused": bool,
-     "ops": {属性: -1/0/1}, "nick": str|None, "memory_note": str}
+     "ops": {属性: -1/0/1}, "nick": str|None, "memory_note": str,
+     "identity_update": {"kind", "note"}}
 
     协议要求严格 JSON，messages 为 1~4 条消息（一次决策可发多条）；
     缺失时回退读旧协议的 reply 字段。topic.action 夹取到
     continue/start/switch/end 之一（缺省 continue），kind 只做去空白与
     长度截断（候选校验在服务层落地时进行），title 截断保留。
+    identity_update 只保留 kind/note，是否允许更新由服务层按话题结束方式
+    与冷却判断。
     解析不出 JSON 对象的回复（典型为
     API 拒绝敏感请求时的自然语言道歉/拒绝文本）一律视为已读不回：
     messages=[]、refused=True，原文截断后记入 silent_reason 供排查，
@@ -582,7 +709,8 @@ def parse_chat_response(response_text: str) -> dict:
     result = {"messages": [],
               "topic": {"action": "continue", "kind": "", "title": ""},
               "silent_reason": "", "refused": False,
-              "ops": {}, "nick": None, "memory_note": ""}
+              "ops": {}, "nick": None, "memory_note": "",
+              "identity_update": {}}
     cleaned = (response_text or "").strip()
     if cleaned.startswith("```json"):
         cleaned = cleaned[7:]
@@ -653,6 +781,17 @@ def parse_chat_response(response_text: str) -> dict:
     note = data.get("memory_note")
     if isinstance(note, str) and note.strip():
         result["memory_note"] = note.strip()
+    update = data.get("identity_update")
+    if isinstance(update, dict):
+        kind = update.get("kind")
+        note = update.get("note")
+        clean_kind = (kind.strip().lower()[:32]
+                      if isinstance(kind, str) else "")
+        clean_note = (note.strip()[:IDENTITY_NOTE_LIMIT]
+                      if isinstance(note, str) else "")
+        if clean_kind or clean_note:
+            result["identity_update"] = {"kind": clean_kind,
+                                         "note": clean_note}
     return result
 
 
@@ -735,12 +874,30 @@ class ChatService:
     """聊天功能的门面：加载存档、收发消息、写回与事件广播。"""
 
     def __init__(self, data_dir: str = None,
-                 character_repo: CharacterRepo = None, chat_repo: ChatRepo = None):
+                 character_repo: CharacterRepo = None, chat_repo: ChatRepo = None,
+                 world_stance_provider=None):
         if data_dir is None:
             from paths import data_dir as _data_dir
             data_dir = _data_dir()
+        self.data_dir = data_dir
         self.character_repo = character_repo or CharacterRepo(data_dir)
         self.chat_repo = chat_repo or ChatRepo(data_dir)
+        # 世界态势来源：优先用注入的 provider（测试/世界包），否则读全局设置
+        self.world_stance_provider = world_stance_provider
+
+    def _world_stance(self) -> str:
+        """当前世界态势的语义值；读设置在失败时回退 coexist。"""
+        if callable(self.world_stance_provider):
+            try:
+                return self.world_stance_provider()
+            except Exception:
+                return DEFAULT_WORLD_STANCE
+        try:
+            from persistence.settings_repo import SettingsRepo
+            settings = SettingsRepo(self.data_dir).load()
+            return settings.get("world_stance", DEFAULT_WORLD_STANCE)
+        except Exception:
+            return DEFAULT_WORLD_STANCE
 
     def load_chat(self, giantess_id: str, blocking: bool = True,
                   identity_id: str = DEFAULT_IDENTITY_ID
@@ -1044,8 +1201,10 @@ class ChatService:
         if client is None:
             return {"_error": "未配置 AI 客户端，请在设置中填写 API 信息"}
         try:
+            world_stance = self._world_stance()
             raw = client.generate_once(
-                build_chat_messages(state, chat_state, pending_text),
+                build_chat_messages(state, chat_state, pending_text,
+                                    world_stance=world_stance),
                 temperature=0.8)
             parsed = parse_chat_response(raw)
             if parsed.get("refused"):
@@ -1053,7 +1212,8 @@ class ChatService:
                 # 角色扮演纯文本）也会落到这里。重试一次，仍是非 JSON
                 # 才按已读不回处理。
                 raw = client.generate_once(
-                    build_chat_messages(state, chat_state, pending_text),
+                    build_chat_messages(state, chat_state, pending_text,
+                                        world_stance=world_stance),
                     temperature=0.8)
                 parsed = parse_chat_response(raw)
             return parsed
@@ -1080,7 +1240,8 @@ class ChatService:
                   "error": None, "batch_id": request_id}
         # 坐标在 ops 生效前快照：AI 是按看到的状态选的话题类型，
         # 校验与落盘都用同一份，效果从下一轮才影响坐标。
-        coord = chat_coord(state, chat_state)
+        coord = chat_coord(state, chat_state,
+                           world_stance=self._world_stance())
         candidates = topic_candidates(chat_state, coord)
         result["ops_applied"] = apply_chat_ops(state, chat_state, parsed)
         texts = parsed.get("messages") or []
@@ -1096,11 +1257,14 @@ class ChatService:
                 chat_state.messages.append(reply_message)
                 result["reply_messages"].append(reply_message)
             result["reply_message"] = result["reply_messages"][0]
-        apply_topic_decision(chat_state, parsed.get("topic"),
-                             had_reply=bool(texts), source=topic_source,
-                             coord=coord, candidates=candidates)
         if parsed.get("memory_note"):
             self._append_memory(chat_state, parsed["memory_note"])
+        outcome = apply_topic_decision(
+            chat_state, parsed.get("topic"), had_reply=bool(texts),
+            source=topic_source, coord=coord, candidates=candidates)
+        if parsed.get("identity_update"):
+            apply_identity_update(chat_state, parsed["identity_update"],
+                                  outcome.get("ended_reason", ""))
         chat_state.last_active_at = datetime.datetime.now().isoformat()
         self.chat_repo.save(chat_state)
         if result["ops_applied"]:

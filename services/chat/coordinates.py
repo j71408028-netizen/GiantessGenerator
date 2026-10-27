@@ -33,6 +33,13 @@ TENSION_W_IDENTITY = 0.4
 TENSION_W_EVENT = 0.3
 DEFAULT_WORLD_STANCE = "coexist"
 
+# 事件扫描窗口：只看最近 N 条演化行与 7 天；纯衰减行不计入。
+EVENT_SCAN_LIMIT = 50
+EVENT_WINDOW_HOURS = 24.0 * 7
+EVENT_WEIGHT_CASUALTY = 1.0
+EVENT_WEIGHT_COORD = 0.5
+EVENT_EXCLUDED_SOURCES = {"apply_step_decay"}
+
 # 世界态势的语义值；尺度（appear / abs_giant / rel_giant）不参与映射。
 WORLD_STANCE_VALUES = {
     "worship": 0.10,
@@ -200,6 +207,59 @@ def event_pressure(events: Iterable[Any],
         age = _age_seconds(changed, moment)
         total += weight * math.exp(-age / (tau * 3600.0))
     return total
+
+
+def tension_events_from_evolution(evolution: Iterable[Any],
+                                  now: Optional[datetime.datetime] = None,
+                                  limit: int = EVENT_SCAN_LIMIT,
+                                  window_hours: float = EVENT_WINDOW_HOURS
+                                  ) -> list:
+    """从演化表提取紧张度事件（纯函数）。
+
+    只看最近 ``limit`` 行与 ``window_hours`` 窗口；用相邻两行的伤亡增量与
+    坐标位移作为权重。纯步长衰减（``apply_step_decay``）不计入，聊天行若
+    没有改动世界事实（位移/伤亡为 0）也自然得到 0 权重。
+    """
+    records = list(evolution or [])
+    try:
+        count = max(0, int(limit))
+    except (TypeError, ValueError):
+        count = EVENT_SCAN_LIMIT
+    if count == 0 or not records:
+        return []
+    moment = _now(now)
+    hours = _safe_float(window_hours, EVENT_WINDOW_HOURS)
+    if hours <= 0.0:
+        hours = EVENT_WINDOW_HOURS
+    start = max(0, len(records) - count)
+    previous = records[start - 1] if start > 0 else None
+    events = []
+    for record in records[start:]:
+        source = getattr(record, "source", "") or ""
+        changed = _as_datetime(getattr(record, "changed_at", None))
+        weight = 0.0
+        if previous is not None and source not in EVENT_EXCLUDED_SOURCES:
+            casualties = _safe_float(getattr(record, "casualties", 0.0), 0.0)
+            last_casualties = _safe_float(
+                getattr(previous, "casualties", 0.0), 0.0)
+            casualty_delta = max(0.0, casualties - last_casualties)
+            intrusion = _safe_float(getattr(record, "intrusion", 0.0), 0.0)
+            destruction = _safe_float(getattr(record, "destruction", 0.0), 0.0)
+            last_intrusion = _safe_float(
+                getattr(previous, "intrusion", 0.0), 0.0)
+            last_destruction = _safe_float(
+                getattr(previous, "destruction", 0.0), 0.0)
+            shift = math.sqrt((intrusion - last_intrusion) ** 2
+                              + (destruction - last_destruction) ** 2)
+            weight = (EVENT_WEIGHT_CASUALTY * casualty_delta
+                      + EVENT_WEIGHT_COORD * shift)
+        previous = record
+        if weight <= 0.0 or changed is None:
+            continue
+        if _age_seconds(changed, moment) > hours * 3600.0:
+            continue
+        events.append(TensionEvent(weight=weight, changed_at=changed))
+    return events
 
 
 def compute_tension(world_stance: Any = DEFAULT_WORLD_STANCE,

@@ -742,6 +742,8 @@ class ChatState:
     低于 REVEAL_ATTITUDE（见 services.chat）时不注入隐藏介绍；
     memory 为早期对话的压缩摘要与 AI 留下的 memory_note 累积；
     user_nick 为角色对玩家的称呼（聊天域内独立，不改主档案 nick）；
+    relationship 为角色对当前身份的关系认知（见 Relationship），用于紧张度
+    映射与提示词；
     chat_params 为纯聊天参数（首次聊天前由 AI 一次性决定，见 ChatParams）；
     topics / active_topic_id 为话题状态机（见 Topic）；
     consumed_event_ids 为已消费经历事件的确定性 id（见
@@ -753,6 +755,7 @@ class ChatState:
     memory: str = ""
     attitude: int = 0
     user_nick: str = ""
+    relationship: Relationship = field(default_factory=Relationship)
     last_active_at: str = ""
     chat_params: Optional[ChatParams] = None
     topics: List[Topic] = field(default_factory=list)
@@ -771,6 +774,10 @@ class ChatState:
         ]
         if isinstance(self.chat_params, dict):
             self.chat_params = ChatParams.from_dict(self.chat_params)
+        if isinstance(self.relationship, dict):
+            self.relationship = Relationship.from_dict(self.relationship)
+        elif not isinstance(self.relationship, Relationship):
+            self.relationship = Relationship()
 
     @classmethod
     def from_dict(cls, data: dict) -> "ChatState":

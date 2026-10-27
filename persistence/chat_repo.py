@@ -83,6 +83,7 @@ class ChatRepo:
             "memory": chat_state.memory,
             "attitude": chat_state.attitude,
             "user_nick": chat_state.user_nick,
+            "relationship": chat_state.relationship.__dict__,
             "last_active_at": chat_state.last_active_at,
             "chat_params": (chat_state.chat_params.__dict__
                             if chat_state.chat_params is not None else None),
