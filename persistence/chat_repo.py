@@ -103,6 +103,35 @@ class ChatRepo:
         return (identity_id == DEFAULT_IDENTITY_ID
                 and self._path_exists(self._legacy_path(giantess_id)))
 
+    def _thread_file_keys(self, giantess_id: str) -> set:
+        """``chats/`` 下落过盘的身份文件名键（URL 编码后的形式）。"""
+        threads_dir = self._threads_dir(giantess_id)
+        keys = set()
+        if not os.path.isdir(threads_dir):
+            return keys
+        for filename in os.listdir(threads_dir):
+            if filename.endswith(".json"):
+                keys.add(filename[:-len(".json")])
+            elif filename.endswith(".json" + BACKUP_SUFFIX):
+                keys.add(filename[:-len(".json" + BACKUP_SUFFIX)])
+        return keys
+
+    def thread_ids(self, giantess_id: str) -> list:
+        """该角色已存在的聊天线程身份 id（默认身份排第一）。
+
+        只报「落过盘」的线程：从没打开过的身份还没有存档，也就没有未读。
+        旧 ``chat.json`` 计为默认身份的线程。
+        """
+        ids = {normalize_identity_id(unquote(key))
+               for key in self._thread_file_keys(giantess_id)}
+        if self._path_exists(self._legacy_path(giantess_id)):
+            ids.add(DEFAULT_IDENTITY_ID)
+        ordered = sorted(ids)
+        if DEFAULT_IDENTITY_ID in ordered:
+            ordered.remove(DEFAULT_IDENTITY_ID)
+            ordered.insert(0, DEFAULT_IDENTITY_ID)
+        return ordered
+
     @staticmethod
     def _has_queued(data) -> bool:
         messages = data.get("messages") if isinstance(data, dict) else None
@@ -132,13 +161,7 @@ class ChatRepo:
             threads_dir = self._threads_dir(name)
             if not os.path.isdir(threads_dir):
                 continue
-            file_keys = set()
-            for filename in os.listdir(threads_dir):
-                if filename.endswith(".json"):
-                    file_keys.add(filename[:-len(".json")])
-                elif filename.endswith(".json" + BACKUP_SUFFIX):
-                    file_keys.add(filename[:-len(".json" + BACKUP_SUFFIX)])
-            for key in file_keys:
+            for key in self._thread_file_keys(name):
                 data = load_json_with_backup(
                     os.path.join(threads_dir, key + ".json"))
                 if self._has_queued(data):
