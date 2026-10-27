@@ -63,6 +63,7 @@ from core.models import (DEFAULT_IDENTITY_ID, RELATIONSHIP_KINDS,
                          normalize_identity_id)
 from persistence.character_repo import CharacterRepo
 from persistence.chat_repo import ChatRepo
+from persistence.player_identity_repo import PlayerIdentityRepo
 from services.chat import events as chat_events
 from services.chat.coordinates import (DEFAULT_WORLD_STANCE, ChatCoord,
                                        build_chat_coord,
@@ -877,13 +878,15 @@ class ChatService:
 
     def __init__(self, data_dir: str = None,
                  character_repo: CharacterRepo = None, chat_repo: ChatRepo = None,
-                 world_stance_provider=None):
+                 world_stance_provider=None,
+                 identity_repo: PlayerIdentityRepo = None):
         if data_dir is None:
             from paths import data_dir as _data_dir
             data_dir = _data_dir()
         self.data_dir = data_dir
         self.character_repo = character_repo or CharacterRepo(data_dir)
         self.chat_repo = chat_repo or ChatRepo(data_dir)
+        self.identity_repo = identity_repo or PlayerIdentityRepo(data_dir)
         # 世界态势来源：优先用注入的 provider（测试/世界包），否则读全局设置
         self.world_stance_provider = world_stance_provider
 
@@ -965,6 +968,41 @@ class ChatService:
                                      "giantess_id": giantess_id,
                                      "identity_id": identity_id})
             return len(changed)
+
+    # ---------- 玩家身份 ----------
+    def identities(self) -> list:
+        """全部玩家身份（默认身份恒在且排第一）。"""
+        return self.identity_repo.load()
+
+    def active_identity_id(self) -> str:
+        """界面打开聊天时应绑定的身份：上次选中的那个。"""
+        return self.identity_repo.active_id()
+
+    def set_active_identity(self, identity_id: str) -> str:
+        """记住当前身份；未知 id 保持原值，返回实际生效的 id。"""
+        return self.identity_repo.set_active(identity_id)
+
+    def create_identity(self, label: str, description: str = ""):
+        """新建身份并设为当前身份；数量超限或名字全空返回 None。"""
+        return self.identity_repo.create(label, description)
+
+    def unread_by_identity(self, giantess_id: str) -> dict:
+        """该角色各身份线程的未读数；0 条的线程不出现在结果里。
+
+        只统计已落盘的线程——从没打开过的身份还没有存档，也就没有未读。
+        界面用它给身份选择器点小红点，角色卡上的徽标取总和。
+        """
+        counts = {}
+        for identity_id in self.chat_repo.thread_ids(giantess_id):
+            chat_state = self.chat_repo.load(giantess_id, identity_id)
+            count = len(pending_char_messages(chat_state))
+            if count:
+                counts[identity_id] = count
+        return counts
+
+    def unread_total(self, giantess_id: str) -> int:
+        """角色卡徽标：所有身份线程的未读之和（跨身份聚合只用于显示）。"""
+        return sum(self.unread_by_identity(giantess_id).values())
 
     # ---------- 投递内部 ----------
     @staticmethod
