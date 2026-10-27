@@ -55,13 +55,13 @@
 → `normalize` → `validate`）；音频端到端链（说话人分档 / 三条引擎路径 / 降级 /
 播放收尾）在 `check_audio_chain.py`。加字段时别漏，见 §5.4。
 
-### 1.3 当前实测数字（2026-10-26）
+### 1.3 当前实测数字（2026-10-27）
 
 ```
-[check_import_graph] 已检查 194 个模块，782 条第一方依赖边
+[check_import_graph] 已检查 198 个模块，798 条第一方依赖边
 [check_import_graph] PASSED：层间依赖方向与 UI 框架禁令均无未登记越界
 KNOWN_EXCEPTIONS = []          # 原 11 条已全部消除
-tests/run_checks.py            # 44/44
+tests/run_checks.py            # 55/55
 ```
 
 ---

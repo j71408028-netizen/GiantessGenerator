@@ -23,7 +23,7 @@
 ## 相关组
 
 - 要在副本内部工作：见 [`../Dungeon/README.md`](../Dungeon/README.md)。
-- 要理解某机制的设计（地址、演化、行为包、小游戏）：见
+- 要理解某机制的设计（地址、演化、聊天、行为包、小游戏）：见
   [`../designs/README.md`](../designs/README.md)。
 - 自检与打包：`tests/run_checks.py`；发版见 [`../ops/release.md`](../ops/release.md)。
 - 本机组特有的仓库维护事项（git 故障排查等）不入库，见本机 `.workbuddy/`。

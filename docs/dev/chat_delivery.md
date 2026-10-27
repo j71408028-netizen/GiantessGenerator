@@ -97,6 +97,31 @@ data/archives/<giantess_id>/
 - 身份 id 经 URL 编码后作为文件名（`/` 等路径分隔符不会逃出 `chats/`）。
 - `ChatRepo.ids_with_queued()` 同时扫描旧档与 `chats/*.json`，返回
   `(giantess_id, identity_id)` 线程键，同一逻辑线程只返回一次。
+- `ChatRepo.thread_ids(giantess_id)` 列出该角色**落过盘**的线程身份 id（默认
+  身份排第一；旧 `chat.json` 计为默认身份）。没打开过的身份还没有存档，
+  因此也不会出现在未读统计里。
+
+### 3.2 玩家身份列表（`persistence/player_identity_repo.py`）
+
+身份本身存在 `data/user/identities.json`（与角色无关，全局一份）：
+
+```json
+{"identities": [{"id": "default", "label": "默认身份", "description": ""}],
+ "active_identity_id": "default"}
+```
+
+- 默认身份永远存在：读到的数据里没有它就补一个，所以界面不必处理
+  「还没建过身份」的首次启动；只读不会写盘。
+- 新建身份会同时把 `active_identity_id` 指向它（新建后通常立刻以它开聊），
+  数量上限 `IDENTITY_LIMIT`、名字长度上限 `IDENTITY_LABEL_LIMIT`。
+- `active_identity_id` 指向不存在的身份时回退 `default`；坏档同样回退，
+  不影响启动。
+- 角色完全不知道多个身份是同一个人：身份列表只服务于「玩家切视角」，
+  不进提示词、不跨线程共享任何数据。
+
+`ChatService` 上的入口：`identities()` / `active_identity_id()` /
+`set_active_identity()` / `create_identity()` / `unread_by_identity()` /
+`unread_total()`。两套界面都只通过它取身份与未读。
 
 ## 4. 协议 v2：一次决策多条消息
 
@@ -202,9 +227,25 @@ refresh 用 token 取消过期回调。`attach(state, identity_id)` 绑定一条
 
 徽标宿主（`exp_frame.py`、`ui/mini/app.py`）：
 
-- 收到任意聊天事件时按存档重算 `pending_char_messages` 数量；
+- 收到任意聊天事件时按存档重算未读数（`ChatService.unread_total`）；
 - 语义统一为"玩家未读的角色消息"；角色未读玩家消息的红点逻辑
   不再混入（离线积压仍由打开聊天时的自动补话处理）。
+
+身份选择器（两套界面）：
+
+- **专业模式**：聊天面板顶栏 `OptionButton`（`ui.ctk.widgets`）+「＋」新建
+  身份；下拉项是 `标签 •N`，N 是该身份线程自己的未读。选中即
+  `switch_identity`：写回 `active_identity_id`、复位撤回窗口与渲染前缀，
+  再 `controller.attach(state, identity_id)` 重载新线程并触发一次补话。
+- **挂件模式**：标题条上的身份键（`MiniChatView._identity_btn`）点开是原生
+  `tk.Menu`（同样是 `标签 •N`，末尾可新建）；新增身份用系统输入框取名
+  （挂件没有输入屏，`ui/mini` 也不能引入 `ui/ctk`）。
+- 切换身份只是换线程：旧线程不结束、不删除，超过 `TOPIC_EXPIRE_HOURS`
+  自然过期；旧线程里在途的回复仍按自己的 `available_at` 到期投递。
+- 角色卡徽标 = 各身份线程未读之和（`unread_total`）。聚合只用于显示：
+  打开某条线程时只清那一条（`exp_frame` 会减掉正在看的身份），域内隔离不变。
+- 切线程期间还在飞请求：面板在回调里比对 `chat_state` 对象身份，不属于当前
+  线程的结果不再渲染（结果早在服务层写进了各自线程的存档）。
 
 ## 8. 事件
 
