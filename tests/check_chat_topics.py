@@ -25,9 +25,10 @@ from services.chat.coordinates import (  # noqa: E402
     ChatCoord, RELATIONSHIP_TENSION_OFFSETS,
 )
 from services.chat.topic_kinds import (  # noqa: E402
-    FALLBACK_KIND, TOPIC_KINDS, TopicKind,
+    FALLBACK_KIND, NO_TOPIC_LENS, TOPIC_KINDS, TopicKind,
     candidate_topic_kinds, eligible_topic_kinds, fallback_topic_kind,
     find_topic_kind, kind_is_eligible, rank_topic_kinds, repeat_penalty,
+    validate_topic_kinds,
 )
 
 CENTER = ChatCoord(0.5, 0.5, 0.5)
@@ -39,18 +40,11 @@ def _kind(kind_id, coord, radius=0.4, priority=0, prompt="提示"):
 
 
 def check_registry() -> list:
-    problems = []
+    problems = [f"类型表结构问题：{item}"
+                for item in validate_topic_kinds(TOPIC_KINDS, NO_TOPIC_LENS)]
     ids = [kind.id for kind in TOPIC_KINDS]
     if len(ids) != len(set(ids)):
         problems.append("初始类型集的 id 必须唯一")
-    if any(not kind.id for kind in TOPIC_KINDS):
-        problems.append("初始类型不能有空的 id")
-    if any(not isinstance(kind.coord, ChatCoord) for kind in TOPIC_KINDS):
-        problems.append("初始类型的坐标必须是 ChatCoord")
-    if any(kind.radius <= 0 for kind in TOPIC_KINDS):
-        problems.append("初始类型的半径必须为正")
-    if any(not kind.prompt.strip() for kind in TOPIC_KINDS):
-        problems.append("初始类型都应带增量提示词")
     fallback = fallback_topic_kind()
     if fallback is None or fallback.id != FALLBACK_KIND:
         problems.append(f"注册表必须提供兜底类型 {FALLBACK_KIND!r}")

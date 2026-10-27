@@ -95,29 +95,54 @@ size_state = clamp(0.5 + 0.4 × resilience − 0.5 × edge − 0.5 × ap_deficit
 
 ## 4. 话题类型
 
-`services/chat/topic_kinds.py` 的注册表是坐标上的「格点」。每个类型有坐标、半径、
-增量提示词、标签、优先级与冷却字段；提示词是**叠加在人设之上的片段**，不是完整人设。
+`services/chat/topic_kinds.py` 的注册表是坐标上的「格点」，也是每个类型的全部
+定义：坐标、半径、标签、优先级、注意力框架（`frame`）、体裁（`prompt`）与信息视角
+（`opens` / `denies` / `budget` / `disclosure`）都在同一条 `TopicKind` 里——增删
+一个话题只动一处。坐标决定"能不能选"，视角决定"选了给什么"（视角的字段目录与预算见
+[`chat_topic_lens.md`](chat_topic_lens.md)）。
 
 初始注册表（坐标顺序：好感 / 紧张度 / 状态）：
 
-| id | 名称 | 坐标 | 语气方向 |
-|---|---|---|---|
-| `daily` | 初识/日常 | 0.50 / 0.35 / 0.75 | 轻松寒暄、观察、轻量试探；兜底类型 |
-| `spar` | 博弈/施压 | 0.25 / 0.75 / 0.80 | 规则、挑衅、用尺寸压人，先停在言语层面 |
-| `flirt` | 暧昧/亲昵 | 0.80 / 0.30 / 0.85 | 放松、调情、距离近但不讨好 |
-| `reflect` | 思辨/抽离 | 0.70 / 0.30 / 0.30 | 用抽象讨论回避身体的不适 |
-| `body` | 身体尺寸 | 0.80 / 0.75 / 0.85 | 尺寸、触及、占有，强调掌控感 |
-| `memory` | 回忆/沉重 | 0.75 / 0.75 / 0.30 | 共同经历、创伤，语气沉、不强解 |
-| `guard` | 戒备/恐惧 | 0.20 / 0.75 / 0.25 | 警告、驱逐、试探，随时可能结束 |
-| `aloof` | 疏离/客套 | 0.20 / 0.25 / 0.30 | 冷淡、公事公办、回避私事 |
-| `showoff` | 自得/炫耀 | 0.25 / 0.25 / 0.80 | 享受尺寸、带炫耀、保持距离 |
+| id | 名称 | 类别 | 坐标 | 话题落点（视角与体裁见 chat_topic_lens） |
+|---|---|---|---|---|
+| `daily` | 初识/日常 | 关系状态 | 0.50 / 0.35 / 0.75 | 轻松寒暄、观察、轻量试探；兜底类型 |
+| `spar` | 博弈/施压 | 关系状态 | 0.25 / 0.75 / 0.80 | 规则、挑衅、用尺寸压人，先停在言语层面 |
+| `flirt` | 暧昧/亲昵 | 关系状态 | 0.80 / 0.30 / 0.85 | 放松、调情、距离近但不讨好 |
+| `reflect` | 思辨/抽离 | 话题 | 0.70 / 0.30 / 0.30 | 用抽象讨论回避身体的不适 |
+| `body` | 身体/尺寸 | 话题 | 0.76 / 0.55 / 0.82 | 尺寸、触及、身体感受；疼痛与不适也算在这里 |
+| `memory` | 回忆/沉重 | 关系状态 | 0.75 / 0.75 / 0.30 | 共同经历、创伤，停在没说完的地方 |
+| `guard` | 戒备/恐惧 | 关系状态 | 0.20 / 0.75 / 0.25 | 警告、驱逐、试探，随时可能结束 |
+| `aloof` | 疏离/客套 | 关系状态 | 0.20 / 0.25 / 0.30 | 冷淡、公事公办、回避私事 |
+| `showoff` | 自得/炫耀 | 关系状态 | 0.25 / 0.25 / 0.80 | 享受尺寸、带炫耀、保持距离 |
+
+**试运行批次**（2026-10-28 加入，未定版；判定标准是「一条类型要么是一类事，要么
+是一种交流状态」，半径按类型单独设，0.24~0.28）：
+
+| id | 名称 | 类别 | 坐标 | 话题落点 |
+|---|---|---|---|---|
+| `sharing` | 分享/发梗 | 话题 | 0.66 / 0.20 / 0.72 | 游戏进度、梗图、刚看到的怪东西；不等接话 |
+| `talk` | 闲谈/看法 | 话题 | 0.56 / 0.26 / 0.40 | 跟她无关但她有看法的事：视频、画、说法、别人怎么看巨大娘 |
+| `mundane` | 学习/工作 | 话题 | 0.50 / 0.33 / 0.56 | 上课、上班、通勤、吃什么；不升华、不往尺寸拐 |
+| `elders` | 客套/应答 | 关系状态 | 0.28 / 0.20 / 0.58 | 被长辈式地问近况，客气、简短、不展开 |
+| `plan` | 打算/规划 | 话题 | 0.72 / 0.38 / 0.60 | 接下来想去哪、还想不想再长、哪些事放到以后 |
+| `encounter` | 异界见闻 | 话题 | 0.42 / 0.52 / 0.50 | 别处传来的留言、旅居过的世界、路上碰见的人 |
+| `observation` | 个人观察 | 话题 | 0.48 / 0.58 / 0.72 | 城市与山川怎么长出来、人遇到危险先做什么；只描述看见的 |
+| `hobby` | 个人爱好 | 话题 | 0.86 / 0.24 / 0.48 | 常待的地方、手边摆弄的东西、看得下去的东西；不新编设定 |
+| `desire` | 个人欲望 | 话题 | 0.82 / 0.52 / 0.35 | 说不清也未必拿得到的东西：想被怎么对待、想变成什么样 |
+
+**软分类**：每条 `TopicKind` 的 `tags` 只标一个类别——`relation`（关系状态：由两人
+此刻的距离与位置决定，不指向具体事）或 `topic`（话题：指向某件具体的事、东西或
+看法）。它不参与半径过滤、排序、候选数量，也不进提示词；`kinds_with_tag("relation")`
+/ `kinds_with_tag("topic")` 只是查阅与统计的入口。当前 8 条关系状态、10 条话题。
 
 选择规则（`rank_topic_kinds` / `candidate_topic_kinds`）：
 
-- 只保留**三轴欧氏距离 ≤ 该类型半径**（默认 0.35）的类型；坐标相近或完全重叠时多个
-  类型同时入候选，**不强制选最近**。
+- 只保留**三轴欧氏距离 ≤ 该类型半径**的类型；半径默认 0.35，可按类型单独设（试运行
+  批次用 0.24~0.28，只在状态特别贴合时出现）；坐标相近或完全重叠时多个类型同时入候选，
+  **不强制选最近**。
 - 排序看 `距离 + 重复惩罚`，再看优先级。重复惩罚对最近用过的类型按 0.08、逐次半衰叠加。
-- 注入提示词的候选最多 5 个，每个只给名称与一句区别（`topic_kind_hint` 取提示词首句）。
+- 注入提示词的候选最多 5 个，每行给名称、一句信息预告（视角的 `focus`）与一句姿态
+  （`topic_kind_hint`，取 `frame` 的第一小句）——AI 选类型同时等于选一套信息与姿态。
 - 无候选时回退 `daily`；AI 给出的 `topic.kind` 不在候选内就回退第一个候选。
 - 当前话题坐标超出自身类型半径时，提示词会告诉 AI 可以结束或换类型。
 
@@ -180,7 +205,10 @@ size_state = clamp(0.5 + 0.4 × resilience − 0.5 × edge − 0.5 × ap_deficit
 | 紧张度权重与衰减 | `services/chat/coordinates.py`：`TENSION_W_*`、`TENSION_TAU_HOURS`、`EVENT_SCAN_LIMIT`、`EVENT_SOURCE_WEIGHTS` |
 | 状态权重与阈值 | 同文件：`AP_LOW`、`EDGE_MARGIN`、`W_R / W_E / W_A` |
 | 关系认知的紧急度映射 | 同文件：`RELATIONSHIP_TENSION_OFFSETS` |
-| 话题类型集 / 坐标 / 半径 / 提示词 | `services/chat/topic_kinds.py`：`TOPIC_KINDS`、`TOPIC_KIND_RADIUS`、`TOPIC_REPEAT_PENALTY`、`TOPIC_CANDIDATE_LIMIT` |
+| 话题类型集 / 坐标 / 半径 / 框架 / 体裁 / 视角 | `services/chat/topic_kinds.py`：`TOPIC_KINDS` 里的一条 `TopicKind`（常量 `TOPIC_KIND_RADIUS`、`TOPIC_REPEAT_PENALTY`、`TOPIC_CANDIDATE_LIMIT` 同文件） |
+| 按类别查阅话题（关系状态 / 话题） | 同文件：`tags` + `kinds_with_tag(KIND_TAG_RELATION / KIND_TAG_TOPIC)`；只影响查阅，不影响筛选 |
+| 某类话题下 AI 知道什么（字段 / 预算 / 是否透露） | 同一条 `TopicKind` 的 `opens` / `denies` / `budget` / `disclosure`；字段目录在 `services/chat/topic_lens.py`，见 [`chat_topic_lens.md`](chat_topic_lens.md) |
+| 世界包增删话题（尚未接线） | `install_topic_kinds` / `topic_kind_from_dict`，见 [`chat_topic_lens.md`](chat_topic_lens.md) §7.1 |
 | 关系转移图与冷却 | `services/chat/__init__.py`：`IDENTITY_TRANSITIONS`、`IDENTITY_UPDATE_COOLDOWN_HOURS` |
 | 话题轮数上限 / 过期 | 同文件：`MAX_TOPIC_TURNS`、`TOPIC_EXPIRE_HOURS` |
 | 效果工具与幅度 | `services/chat/effects.py`：`EFFECT_HANDLERS`、`SELF_VIEW_CHAR_LIMIT`、`STEP_NUDGE_AMOUNT` |
@@ -189,8 +217,8 @@ size_state = clamp(0.5 + 0.4 × resilience − 0.5 × edge − 0.5 × ap_deficit
 
 ```bash
 python tests/run_checks.py check_chat_coordinates check_chat_topics \
-    check_chat_topic_selection check_chat_effects check_chat_identity_tension \
-    check_chat_identities check_chat_threads
+    check_chat_topic_selection check_chat_topic_lens check_chat_effects \
+    check_chat_identity_tension check_chat_identities check_chat_threads
 ```
 
 ## 9. 已知边界
@@ -202,6 +230,17 @@ python tests/run_checks.py check_chat_coordinates check_chat_topics \
   下每个身份可能各决定一次聊天习惯）。
 - 状态长期偏高是待观察的调参问题：若实测贴住 1，把 `W_E / W_A` 调大或把状态中心从 0.5
   下调。
+- **敌意与后果类不扩**：`EFFECT_HANDLERS` 只有 `self_view` / `step_nudge`，没有任何
+  制裁通道；玩家身份只是马甲，世界也罚不到她。写出来的威胁没有落点，说多了反而不可
+  信，所以对抗向只保留 `spar`（言语施压）与 `guard`（戒备）两条，高紧张区（≥0.75）
+  刻意稀疏——那里本来只在世界敌对且刚出大事时才到得了。
+- **个人状态不单独成类型**：疼痛、不适、硬撑、走神、困倦是 `size_state` 与体裁的取值，
+  不是「聊什么」；它们并入 `body` / `reflect` 的 `frame`，或交给投递节奏（短回复、
+  间隔长）。告别、已读不回同属话题生命周期，由 `topic.status` / `silent_reason` 承担。
+- **「关于她自己」与「她的状态」分开**：`observation` / `hobby` / `desire` 指向的是她
+  愿意说出口的一件事（看见的地貌与人、愿意花时间的事、想要的东西），不是当下的身体
+  感受或情绪；后者仍归 `size_state` 与 `body`。三者的信息源分别是位置与空间档案、
+  作息与环境偏好、隐藏介绍与 `greed`。
 - 跨身份认知（「她知道 A 和 B 是同一个人」）明确不做，属于未来功能。
 
 ## 相关

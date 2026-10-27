@@ -17,6 +17,10 @@
 - 话题类型（阶段三）：开题/切换时按三轴坐标（好感/紧张度/状态）筛选候选
   类型（services.chat.topic_kinds），只把定性状态、类型名与候选 id 给 AI；
   AI 可在候选里选择，非法/太远回退第一个候选，坐标快照存进 Topic.coord；
+- 信息视角（2026-10 调整）：话题类型同时是"存档 → 提示词"的翻译器
+  （services.chat.topic_lens）。系统提示词只含最小身份层（public 字段），
+  其余存档内容必须由当前类型的视角开放、且装进该视角的字符预算才会出现；
+  每次渲染产出 LensTrace 供自检/预览审计。设计见 docs/designs/chat_topic_lens.md；
 - 离线恢复统一入口 reconcile（阶段四）：打开聊天时合并处理回复积压、
   未消费的经历事件（新闻/位置/演化/结局，见 services.chat.experience_events）
   与主动搭话——一次 AI 决策，或回应、或开题、或沉默；成功后才标记
@@ -72,10 +76,12 @@ from services.chat.coordinates import (DEFAULT_WORLD_STANCE, ChatCoord,
                                        tension_events_from_endings,
                                        tension_events_from_evolution)
 from services.chat.effects import effect_tools_text, run_effect
-from services.chat.persona import build_character_persona
+from services.chat.persona import build_character_persona, build_identity_frame
 from services.chat.experience_events import (collect_experience_events,
                                         consume_experience_events,
                                         events_for_prompt)
+from services.chat.topic_lens import (HIDDEN_INTRO_ATTITUDE, LensContext,
+                                      render_topic_lens)
 from services.chat.topic_kinds import (TOPIC_CANDIDATE_LIMIT,
                                        TOPIC_KIND_RADIUS,
                                        candidate_topic_kinds,
@@ -84,8 +90,10 @@ from services.chat.topic_kinds import (TOPIC_CANDIDATE_LIMIT,
 from services.character.profile_text import build_live_context
 from services.state_service import StateService
 
-# 隐藏介绍的透露门槛：聊天态度达到该值后人设里才注入 intro_hidden
-REVEAL_ATTITUDE = 40
+# 隐藏介绍的透露门槛：聊天态度达到该值后，允许透露的视角（disclosure）才会
+# 看到 intro_hidden。判据本体在 services.chat.topic_lens，这里保留同名常量
+# 供外部引用与一次性聊天参数判定使用。
+REVEAL_ATTITUDE = HIDDEN_INTRO_ATTITUDE
 # 送入 AI 的最近消息条数（滑动窗口，更长历史靠 memory 摘要衔接）
 CHAT_WINDOW_SIZE = 20
 # ops 每档（-1/0/1）对应的数值步长
@@ -193,7 +201,7 @@ messages 说明：
 - 数组里每一项都是你单独发出的一条聊天消息，按顺序发出，1~4 条；
 - 像真实聊天一样：多数时候一条就够；兴致高、话多或对方连发多条时，
   才连发两三条短消息；不要把一条长回复硬拆成没有意义的碎片；
-- 每条都要口语化、简短，符合你的性格与当前状态；
+- 每条简短（一般不超过两三句），句长与用词照当前话题的体裁；符合你的性格与当前状态；
 - 决定已读不回时 messages 填 []。
 ops 各项取值均为 -1、0 或 1，含义：
 - attitude：你对对方的态度（1 更亲近，-1 更疏远，0 不变）；
@@ -212,8 +220,10 @@ effect 说明：
 
 _SYSTEM_TEMPLATE = """你正在手机聊天软件里与「{user_nick}」私聊。你要完全扮演{name}，以她的第一人称发消息，而不是叙述故事。
 
-【你的人设】
-{persona}
+【你是谁】
+{identity}
+
+{lens_block}
 
 【你当前的状态】
 行动点（精力余裕）：{action_points}/100
@@ -221,7 +231,7 @@ _SYSTEM_TEMPLATE = """你正在手机聊天软件里与「{user_nick}」私聊�
 此刻的紧张度：{tension_text}
 对自身尺寸的接纳：{size_state_text}
 她对「{user_nick}」的认知：{relationship_text}
-{live_context}
+
 【你的聊天习惯】（由你的性格决定，固定不变）
 {chat_habits}
 
@@ -232,12 +242,14 @@ _SYSTEM_TEMPLATE = """你正在手机聊天软件里与「{user_nick}」私聊�
 {effect_tools}
 
 【规则】
-1. 回复要像聊天软件消息：口语化、简短（每条一般不超过两三句话），符合你的性格、人设与当前状态，可以不按对方期望回应；想多说时可以按顺序发多条。
+1. 回复要像聊天软件消息：简短为主（每条一般不超过两三句话），句长与用词照【此刻你注意到的事】末尾那行"说话的体裁"，符合你的性格、人设与当前状态，可以不按对方期望回应；想多说时可以按顺序发多条。
 2. 每条消息你都会看到，但看不看回是你的自由。如果以你的性格和当前好感（{affection_text}）不愿意回复——比如对方追问你不想回答的问题、反复纠缠、冒犯了你、或你懒得理会——就"已读不回"（messages 填 []）。
 3. 话题由你主导：可以自然延续当前话题，聊完了可以自然结束（end），或者从候选类型里挑一个换话题（switch/start，kind 与 title 都要给）；也可以直接已读不回。话题结束（end/switch）时可以顺手更新你对他的认知（identity_update）。
 4. 不要把好感、紧张度、状态这些内部判断说出口，也不要提到坐标或数值。
 5. 不要跳出角色，不要解释你是 AI，不要替对方说话。
-6. 世界效果要克制：只有聊天内容确实改变了世界时才用，且每轮最多一个。
+6. 你只知道上面交代给你的信息。没写到的部分此刻不在你心上——不要为它编造具体数字、经历或别人的话；需要时可以不接这个话头。
+7. 世界效果要克制：只有聊天内容确实改变了世界时才用，且每轮最多一个。
+8. 体裁只管"怎么打字"，不改变你在聊什么；两者冲突时，以【此刻你注意到的事】开头那段框架为准。
 
 {output_rule}"""
 
@@ -602,7 +614,8 @@ def topic_context_text(chat_state: ChatState,
                        candidates: Optional[list] = None) -> str:
     """把话题状态机与候选类型渲染为注入系统提示词的"当前话题"段落。
 
-    只给类型名、轮数、候选 id 与一句区别；不给坐标、半径等可优化数值。
+    只给类型名、轮数、候选 id 与两句区别（会关注什么 / 聊起来的姿态）；
+    不给坐标、半径等可优化数值。
     """
     topics = chat_state.topics or []
     active = active_topic(chat_state)
@@ -624,9 +637,13 @@ def topic_context_text(chat_state: ChatState,
                      + "、".join(t.title for t in recent if t.title)
                      + "（避免重复聊同样的内容）")
     if candidates:
-        lines.append("- 可选话题类型（topic.kind 只能填这些 id）：")
+        lines.append("- 可选话题类型（topic.kind 只能填这些 id；前半是会关注的"
+                     "信息，后半是聊起来的姿态——换类型等于换一套信息和写法）：")
         for kind in candidates:
-            lines.append(f"  - {kind.id}（{kind.label}）：{topic_kind_hint(kind)}")
+            brief = "｜".join(part for part in (kind.focus.strip(),
+                                               topic_kind_hint(kind)) if part)
+            lines.append(f"  - {kind.id}（{kind.label}）：{brief}" if brief
+                         else f"  - {kind.id}（{kind.label}）")
     else:
         lines.append("- 此刻没有合适的候选类型；可以继续当前话题、结束它，"
                      "或者已读不回。")
@@ -636,21 +653,27 @@ def topic_context_text(chat_state: ChatState,
 def build_chat_system_prompt(state: CharacterSnapshot, chat_state: ChatState,
                              now: Optional[datetime.datetime] = None,
                              world_stance: str = DEFAULT_WORLD_STANCE) -> str:
-    """组装聊天系统提示词：统一人设（按态度门槛注入隐藏介绍）+ 状态 +
-    聊天习惯 + 话题上下文 + 输出协议。``now`` 供测试注入固定时钟；
-    ``world_stance`` 由调用方（ChatService）从设置读取。"""
+    """组装聊天系统提示词：最小身份层 + 话题视角开放的存档字段 + 状态 +
+    聊天习惯 + 话题上下文 + 输出协议。
+
+    存档内容不再整段注入：只有当前话题类型的视角开放且放得下的字段才会
+    出现在【此刻你注意到的事】里（见 services.chat.topic_lens）。``now``
+    供测试注入固定时钟；``world_stance`` 由调用方（ChatService）从设置读取。
+    """
     coord = chat_coord(state, chat_state, now=now, world_stance=world_stance)
+    lens_block, _trace = render_topic_lens(LensContext(
+        state=state, chat_state=chat_state, coord=coord,
+        world_stance=world_stance, now=now, topic=active_topic(chat_state)))
     return _SYSTEM_TEMPLATE.format(
         user_nick=chat_state.user_nick or "一个普通人类",
         name=state.name,
-        persona=build_character_persona(
-            state, include_hidden=chat_state.attitude >= REVEAL_ATTITUDE),
+        identity=build_identity_frame(state),
+        lens_block=lens_block,
         action_points=state.action_points,
         affection_text=describe_affection(coord.affection),
         tension_text=describe_tension(coord.tension),
         size_state_text=describe_size_state(coord.size_state),
         relationship_text=relationship_text(chat_state),
-        live_context=live_context_block(state, now=now),
         chat_habits=chat_habits_text(chat_state.chat_params),
         topic_context=topic_context_text(
             chat_state, coord, topic_candidates(chat_state, coord)),

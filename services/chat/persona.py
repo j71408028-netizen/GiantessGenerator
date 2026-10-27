@@ -17,6 +17,18 @@ from services.character.profile_text import describe_rhythm, describe_spatial
 from services.character.spatial import build_spatial_profile
 
 
+def build_identity_frame(state: CharacterSnapshot) -> str:
+    """聊天用的最小身份层（只含 public 字段：名字 / 性格 / 公开介绍 / 标签）。
+
+    聊天的存档注入由话题类型的"视角"按需开放（services.chat.topic_lens）；
+    这里刻意不给隐藏介绍、尺寸、位置、作息等——它们必须经过某个话题类型
+    才能到达 AI。完整人设仍用 build_character_persona（报告 / 导出 / 一次性
+    参数判定）。
+    """
+    from services.chat.topic_lens import identity_frame
+    return identity_frame(state)
+
+
 def build_character_persona(state: CharacterSnapshot,
                             include_hidden: bool = False) -> str:
     """把角色快照组装为一份完整人设文本。

@@ -14,6 +14,7 @@
 | 报告生成 | [report_selection.md](report_selection.md) | 玩家 + 资源开发者（地标 / 描述风格作者） |
 | 角色演化 | [character_evolution.md](character_evolution.md) | 核心开发者 + 行为包作者 |
 | 角色聊天 | [chat_topics.md](chat_topics.md) | 玩家 + 资源开发者（话题类型 / 世界态势作者） |
+| 聊天话题的信息视角 | [chat_topic_lens.md](chat_topic_lens.md) | 核心开发者 + 话题类型作者（存档字段 / 预算） |
 | 行为包 | [behaviors/](behaviors/README.md) | 玩家 + 世界包 / 行为包作者 |
 | 小游戏 | [minigame.md](minigame.md) | 小游戏作者 |
 
@@ -25,6 +26,7 @@
 | 给**地标 / 描述风格**申领、注册地址 | [authoring.md](address-system/authoring.md)（地址格式与距离规则见 [matching.md](address-system/matching.md)） |
 | 改**角色数值演化** | 先读 [character_evolution.md](character_evolution.md)（全景），再看可覆盖的代码入口 [behaviors/dev-guide.md](behaviors/dev-guide.md) |
 | 调整**角色聊天**的话题类型、好感/紧张度/状态的手感 | [chat_topics.md](chat_topics.md)（实现细节转到 [dev/chat_delivery.md](../dev/chat_delivery.md)） |
+| 调整**某类话题下 AI 知道什么 / 不知道什么** | [chat_topic_lens.md](chat_topic_lens.md)（改完用 `python developer_tools/lens_preview.py` 静态看账，或 `chat_session_preview.py` 边聊边看） |
 | **扩展程序行为**而不改主程序 | [behaviors/README.md](behaviors/README.md)（玩家向）→ [behaviors/dev-guide.md](behaviors/dev-guide.md) |
 | 做**小游戏** | [minigame.md](minigame.md) |
 
