@@ -22,6 +22,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 import core.logic  # noqa: E402,F401  注册全部钩子模块
+import services.chat  # noqa: E402,F401
 import services.character.offline  # noqa: E402,F401
 import services.character.profile_text  # noqa: E402,F401
 import services.exploration.arbiter  # noqa: E402,F401

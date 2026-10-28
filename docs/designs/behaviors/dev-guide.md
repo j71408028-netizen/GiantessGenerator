@@ -26,6 +26,10 @@
   近匹配提拔是模块策略；仲裁模型参数与引擎的伤亡 / 耐久参数是
   `report.model.*` 常量钩子。硬闸、物理走查与 stuck 判定不开放
   （见 [hooks-report.md](hooks-report.md) 的 `report` 组）。
+- `chat`（`services/chat/`，聊天提示词与投递节奏）：世界语境、话题候选 /
+  措辞、关系与聊天习惯文案、三轴坐标、主动搭话门槛与回复延迟是模块策略，
+  节奏数值是 `chat.model.*` 常量钩子。JSON 协议、消息状态机、话题状态机、
+  持久化与关系转移图不开放（见 [hooks-chat.md](hooks-chat.md) 的 `chat` 组）。
 
 离线模型参数与空间 / 环境先验的调制**不再是运行时钩子**：它们经
 `CreationService.derive_model_tuning` 在创建角色时烙印（出身层，见下文）。
@@ -45,10 +49,10 @@
 
 ## 钩子分组
 
-可覆盖目标按 scope 分三页：[hooks-character.md](hooks-character.md)（`CreationService`、
+可覆盖目标按 scope 分组：[hooks-character.md](hooks-character.md)（`CreationService`、
 `StateService`、`offline`、`spatial`）、[hooks-report.md](hooks-report.md)（`report`）、
-[hooks-logic.md](hooks-logic.md)（`logic`、`profile`）。完整示例见
-[example-imperial.md](example-imperial.md)。
+[hooks-logic.md](hooks-logic.md)（`logic`、`profile`）、[hooks-chat.md](hooks-chat.md)
+（`chat`）。完整示例见 [example-imperial.md](example-imperial.md)。
 
 ## 开放边界：三层开放模型与角色身份稳定性
 
@@ -82,9 +86,10 @@ tuning 字段 → 读档回退默认 → 任何世界包启停都不再触及其
   成熟度阻尼等——**不开放**：它们决定「从角色历史里学出什么样的她」，覆盖
   会让已有角色在加载世界包后性情大变。
 
-后续开放的新域（如 `chat.*` 人设相关）同样遵守：世界包可以追加世界语境，
-不可改写角色的既有身份事实（名字、性格、学到的习惯、达成的经历）；出身与
-履历文本可经 persona 注入，但同样只追加语境。
+聊天域（`chat.*`）已按同一原则开放：世界包可以追加世界语境、改话题候选与
+措辞、调整聊天手感，但不可改写角色的既有身份事实（名字、性格、学到的习惯、
+达成的经历）；详见 [hooks-chat.md](hooks-chat.md)。后续开放的新域同样遵守
+「只追加语境，不改写身份」。
 
 ## 开发流程
 
@@ -115,7 +120,7 @@ def register(runtime):
 覆盖实现必须与被覆盖函数保持**相同的参数顺序、默认值与返回约定**，否则会导致
 运行时参数错位或下游解析失败。可覆盖的目标及签名见下文各分组页
 （[hooks-character.md](hooks-character.md)、[hooks-report.md](hooks-report.md)、
-[hooks-logic.md](hooks-logic.md)）。
+[hooks-logic.md](hooks-logic.md)、[hooks-chat.md](hooks-chat.md)）。
 
 ### 第 2 步：把行为包声明进世界包
 
@@ -200,7 +205,7 @@ data/worlds/<world_id>/
 |------|------|------|
 | `infra/point` | 固定流程中的单个算法点 | `logic.*` 数值核、`StateService` 坐标 / 行动点原语 |
 | `infra/data` | 固定流程中的模型参数（数值 / 表） | `report.model.*` |
-| `module/strategy` | 模块门面的决策策略，返回决策或计划 | `profile.*`、`offline.recover_plan`、`report.*`、`CreationService.derive_model_tuning`（创建期烙印）；后续 `chat.*` / `news.*` |
+| `module/strategy` | 模块门面的决策策略，返回决策或计划 | `profile.*`、`offline.recover_plan`、`report.*`、`chat.*`、`CreationService.derive_model_tuning`（创建期烙印）；后续 `news.*` |
 | `content/data` | 数据表、文案、阈值 | `logic.PREDEFINED_TAGS` |
 | 核心不变式 | 不开放，不进入目录 | 坐标夹取、AP 上限、JSON 协议、消息状态机、持久化、习性学习参数 |
 

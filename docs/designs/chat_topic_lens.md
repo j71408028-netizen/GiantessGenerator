@@ -322,8 +322,9 @@ reset_topic_kinds()          # 还原代码里的默认表
   她"忘了自己在哪"，把它挂到该视角即可，不是机制缺陷。
 - **世界包还没有 `topics` 资源类型**：整表替换与 JSON 解析的入口已就位
   （§7.1），但世界包清单（`persistence/world_pack.py`）还没声明这一类型、
-  也没接进加载流程；目前增删话题只能改 `TOPIC_KINDS`。`chat.*` 行为包钩子
-  同样还等接口稳定。
+  也没接进加载流程；目前增删话题只能改 `TOPIC_KINDS`。提示词内容与节奏的
+  `chat.*` 行为包钩子已开放（见 `behaviors/hooks-chat.md`），话题表整表替换
+  仍等 `topics` 资源类型或行为运行时的清理生命周期。
 - **trace 只进测试与预览工具**：界面里还没有调试面板，排查线上穿帮要手动跑
   `lens_preview.py`（静态看账）或 `chat_session_preview.py`（真聊、逐轮看账）。
 

@@ -19,6 +19,7 @@
 | 离线恢复 | 回到程序时离线结算的恢复量、坐标变化与明细文案 |
 | 报告选取 | 地标与描述的配对、事件描述的挑选、伤亡与耐久估算 |
 | 档案文本 | 「作息与活动范围观察」、实时提示的措辞 |
+| 聊天 | 通讯媒介、世界背景、话题候选与措辞、回复节奏与主动搭话门槛 |
 
 它**不会**改写角色已经成立的东西：名字、性格、学到的作息与活动习惯、履历。
 世界包对角色出身参数的影响只发生在**创建角色时**，已有角色不会因为启停
@@ -57,5 +58,6 @@
 
 - 想做行为包：[dev-guide.md](dev-guide.md)（开发流程、注册 API、分发）
 - 查某个域能覆盖什么：[hooks-character.md](hooks-character.md)、
-  [hooks-report.md](hooks-report.md)、[hooks-logic.md](hooks-logic.md)
+  [hooks-report.md](hooks-report.md)、[hooks-logic.md](hooks-logic.md)、
+  [hooks-chat.md](hooks-chat.md)
 - 看一个完整示例：[example-imperial.md](example-imperial.md)

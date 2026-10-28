@@ -154,7 +154,10 @@ data/archives/<giantess_id>/
 排程（`schedule_batch_available_at`）：第一条 = 当前时间 + 读延迟 +
 其打字延迟；之后每条在前一条的 `available_at` 上加自己的打字延迟。
 读 / 打字延迟沿用原函数与在线强度分档倍率，服务层统一计算，
-UI 不再自行模拟节奏。
+UI 不再自行模拟节奏。该函数是行为包钩子 `chat.schedule_batch`：覆盖必须
+返回与 `texts` 等长的递增 ISO 时间列表，长度、类型或顺序不符时服务层回退
+默认实现；节奏数值可由 `chat.model.*` 常量覆盖，见
+[hooks-chat.md](../designs/behaviors/hooks-chat.md)。
 
 ## 5. 投递调度器（services/chat/delivery.py）
 

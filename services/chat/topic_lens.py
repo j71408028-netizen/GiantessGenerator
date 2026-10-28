@@ -32,6 +32,8 @@ from dataclasses import dataclass, field
 from typing import Callable, Iterable, List, Optional, Tuple
 
 from core.address_model import format_addr_compact
+from core.behavior_runtime import (CONTRACT_STRATEGY, LAYER_MODULE,
+                                   behavior_hook)
 from core.logic import format_size
 from core.models import CharacterSnapshot, ChatState, Topic
 from core.scale_reference import (destruction_level_text,
@@ -367,8 +369,14 @@ def render_lens(kind: TopicKind, ctx: LensContext) -> Tuple[str, LensTrace]:
     return body, trace
 
 
+@behavior_hook("chat", "topic_lens", layer=LAYER_MODULE,
+               contract=CONTRACT_STRATEGY)
 def render_topic_lens(ctx: LensContext) -> Tuple[str, LensTrace]:
-    """按当前活跃话题渲染（无话题时用无话题视角）。"""
+    """按当前活跃话题渲染（无话题时用无话题视角）。
+
+    行为包可通过 ``chat.topic_lens`` 替换整个视角段落（返回值必须是
+    ``(text, trace)``）；提示词组装发现返回类型不符时回退默认实现。
+    """
     kind_id = getattr(ctx.topic, "kind_id", "") if ctx.topic is not None else ""
     return render_lens(lens_for(kind_id), ctx)
 

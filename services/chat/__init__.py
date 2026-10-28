@@ -55,6 +55,7 @@ AI 调用全程持锁；UI 主线程只做 blocking=False 的非阻塞尝试
 
 import datetime
 import json
+import math
 import random
 import re
 import threading
@@ -64,6 +65,9 @@ from typing import Optional
 
 from core.address_model import format_addr_compact
 from core.ai import get_ai_client, describe_ai_error
+from core.behavior_runtime import (CONTRACT_DATA, CONTRACT_STRATEGY,
+                                   LAYER_INFRA, LAYER_MODULE, behavior_const,
+                                   behavior_hook, get_runtime)
 from core.models import (DEFAULT_IDENTITY_ID, RELATIONSHIP_KINDS,
                          ChatMessage, ChatParams, ChatState,
                          CharacterSnapshot, Relationship, Topic,
@@ -87,6 +91,7 @@ from services.chat.topic_lens import (HIDDEN_INTRO_ATTITUDE, LensContext,
                                       render_topic_lens)
 from services.chat.topic_kinds import (TOPIC_CANDIDATE_LIMIT,
                                        TOPIC_KIND_RADIUS,
+                                       TopicKind,
                                        candidate_topic_kinds,
                                        fallback_topic_kind, find_topic_kind,
                                        topic_kind_hint)
@@ -104,10 +109,19 @@ ATTITUDE_STEP = 5        # 聊天态度，夹取 -100~100
 ACTION_POINT_STEP = 3    # 行动点，经 StateService 消耗/恢复（0~100 自然上限）
 # memory 累积上限（字符）：超出后从最旧处截断；正式的 AI 压缩在后续版本接入
 MEMORY_LIMIT = 2000
+# 世界背景段落字符上限（chat.world_context 的默认渲染会截断）
+WORLD_CONTEXT_LIMIT = 1200
 # 回复节奏模拟：先"看到"（读延迟），再"打字"（随回复长度增长）
-READ_DELAY_RANGE = (1.0, 2.5)      # 拿起手机到看到消息的随机延迟（秒）
-TYPING_DELAY_PER_CHAR = 0.05       # 每字打字延迟（秒）
-TYPING_DELAY_RANGE = (0.5, 8.0)    # 打字延迟上下限（秒）
+# 这些数值是 behavior_const 细度目标，行为包可用 chat.model.* 覆盖。
+READ_DELAY_RANGE = behavior_const(
+    "chat", "model.read_delay_range", (1.0, 2.5),
+    layer=LAYER_INFRA, contract=CONTRACT_DATA)
+TYPING_DELAY_PER_CHAR = behavior_const(
+    "chat", "model.typing_delay_per_char", 0.05,
+    layer=LAYER_INFRA, contract=CONTRACT_DATA)
+TYPING_DELAY_RANGE = behavior_const(
+    "chat", "model.typing_delay_range", (0.5, 8.0),
+    layer=LAYER_INFRA, contract=CONTRACT_DATA)
 # 离线补话：单次最多带去 AI 的未读条数
 OFFLINE_REPLY_LIMIT = 10
 # 协议 v2：一次决策最多几条消息、单条消息长度上限
@@ -121,7 +135,9 @@ TOPIC_TITLE_LIMIT = 30
 # 重复惩罚回看的最近话题数（新到旧）
 TOPIC_RECENT_LIMIT = 5
 # 主动搭话的间隔门槛（分钟），按聊天边界分档；1 档为缺省值
-BOUNDARY_PROACTIVE_GAP = {0: 240, 1: 30, 2: 10}
+BOUNDARY_PROACTIVE_GAP = behavior_const(
+    "chat", "model.boundary_proactive_gap", {0: 240, 1: 30, 2: 10},
+    layer=LAYER_INFRA, contract=CONTRACT_DATA)
 # 身份认知更新：只在话题自然结束/切换时允许，且每个身份有冷却
 IDENTITY_UPDATE_COOLDOWN_HOURS = 72
 IDENTITY_NOTE_LIMIT = 200
@@ -156,8 +172,12 @@ RELATIONSHIP_KIND_TEXTS = {
 
 # ---------- 纯聊天参数档位表（0/1/2，首次聊天前由 AI 一次性决定） ----------
 # 在线强度：回复延迟的档位倍率（低在线慢悠悠，高在线接近秒回）
-ONLINE_READ_SCALE = {0: 3.0, 1: 1.0, 2: 0.4}
-ONLINE_TYPING_SCALE = {0: 1.8, 1: 1.0, 2: 0.6}
+ONLINE_READ_SCALE = behavior_const(
+    "chat", "model.online_read_scale", {0: 3.0, 1: 1.0, 2: 0.4},
+    layer=LAYER_INFRA, contract=CONTRACT_DATA)
+ONLINE_TYPING_SCALE = behavior_const(
+    "chat", "model.online_typing_scale", {0: 1.8, 1: 1.0, 2: 0.6},
+    layer=LAYER_INFRA, contract=CONTRACT_DATA)
 # 预热速率：聊天态度 ops 的步长倍率（慢热减半，来得快加倍）
 WARMUP_ATTITUDE_SCALE = {0: 0.5, 1: 1.0, 2: 2.0}
 
@@ -182,6 +202,44 @@ CHAT_PARAM_TEXTS = {
 
 # 属性操作白名单：解析时按此过滤，白名单外的键一律丢弃
 CHAT_OPS_WHITELIST = {"attitude", "action_points"}
+
+
+def _chat_model(name: str):
+    """读取 chat.model.* 的有效值；未覆盖时返回 behavior_const 的默认值。"""
+    return get_runtime().resolve_value(f"chat.model.{name}")
+
+
+def _model_number(name: str, fallback: float) -> float:
+    """读取非负有限数值常量；坏值回退 ``fallback``。"""
+    try:
+        value = float(_chat_model(name))
+    except (TypeError, ValueError):
+        return fallback
+    return value if math.isfinite(value) and value >= 0 else fallback
+
+
+def _model_pair(name: str, fallback: tuple) -> tuple:
+    """读取非负有限数值区间；坏值或反向区间回退 ``fallback``。"""
+    value = _chat_model(name)
+    try:
+        low, high = float(value[0]), float(value[1])
+    except (TypeError, ValueError, IndexError, KeyError):
+        return fallback
+    if (not math.isfinite(low) or not math.isfinite(high)
+            or low < 0 or high < 0 or low > high):
+        return fallback
+    return (low, high)
+
+
+def _model_scale(name: str, online: int, fallback: float) -> float:
+    """读取在线强度倍率；缺档 / 坏值回退 ``fallback``。"""
+    table = _chat_model(name)
+    try:
+        value = float(table.get(online, fallback))
+    except (AttributeError, TypeError, ValueError):
+        return fallback
+    return value if math.isfinite(value) and value >= 0 else fallback
+
 
 _OUTPUT_RULE = """你必须严格按照以下 JSON 格式输出，不要包含任何额外注释或文字：
 {
@@ -221,11 +279,11 @@ effect 说明：
 - tool 与 args 只能从系统给出的工具列表里选；未知工具或非法参数会被忽略；
 - 不要试图直接修改好感、紧张度或状态，这些只能由你的言行与世界事实自然派生。"""
 
-_SYSTEM_TEMPLATE = """你正在手机聊天软件里与「{user_nick}」私聊。你要完全扮演{name}，以她的第一人称发消息，而不是叙述故事。
+_SYSTEM_TEMPLATE = """{framing}
 
 【你是谁】
 {identity}
-
+{world_context}
 {lens_block}
 
 【你当前的状态】
@@ -271,6 +329,39 @@ _PARAM_SYSTEM_TEMPLATE = """你要为角色「{name}」设定她的手机聊天�
 判断只依据她的人设与性格，输出其他任何内容都无效。"""
 
 
+def _default_framing(state: CharacterSnapshot, chat_state: ChatState) -> str:
+    """默认的聊天媒介与扮演要求（chat.framing 的默认实现）。"""
+    user_nick = chat_state.user_nick or "一个普通人类"
+    return (f"你正在手机聊天软件里与「{user_nick}」私聊。"
+            f"你要完全扮演{state.name}，以她的第一人称发消息，而不是叙述故事。")
+
+
+@behavior_hook("chat", "framing", layer=LAYER_MODULE,
+               contract=CONTRACT_STRATEGY)
+def chat_framing(state: CharacterSnapshot, chat_state: ChatState) -> str:
+    """聊天开场设定：在什么媒介里、以谁的口吻说话。
+
+    世界包可通过 ``chat.framing`` 改成传讯术、终端、信件等；只改媒介与
+    开场，不改扮演对象。返回值非字符串或为空时由提示词组装回退默认。
+    """
+    return _default_framing(state, chat_state)
+
+
+@behavior_hook("chat", "world_context", layer=LAYER_MODULE,
+               contract=CONTRACT_STRATEGY)
+def chat_world_context(state: CharacterSnapshot, chat_state: ChatState,
+                       world_stance: str = DEFAULT_WORLD_STANCE) -> str:
+    """追加世界背景段落（默认空，不改变原有提示词）。
+
+    这是世界包追加语境的窄口子：文本会以「【世界背景】」块放在身份层
+    之后、话题视角之前，并受 ``WORLD_CONTEXT_LIMIT`` 截断。它不负责
+    改写角色身份事实（名字、性格、介绍、履历），也不承载输出协议。
+    """
+    return ""
+
+
+@behavior_hook("chat", "habits_text", layer=LAYER_MODULE,
+               contract=CONTRACT_STRATEGY)
 def chat_habits_text(chat_params: ChatParams = None) -> str:
     """把聊天参数渲染为注入系统提示词的"聊天习惯"段落（未决定按中档）。"""
     params = chat_params or ChatParams()
@@ -281,17 +372,25 @@ def chat_habits_text(chat_params: ChatParams = None) -> str:
 
 
 def read_delay_seconds(online: int = 1) -> float:
-    """角色"拿起手机到看到消息"的随机延迟（秒），按在线强度分档缩放。"""
-    return random.uniform(*READ_DELAY_RANGE) * ONLINE_READ_SCALE.get(online, 1.0)
+    """角色"拿起手机到看到消息"的随机延迟（秒），按在线强度分档缩放。
+
+    数值来自 ``chat.model.*``；行为包覆盖了非法值域时回退注册默认值。
+    """
+    low, high = _model_pair("read_delay_range", READ_DELAY_RANGE)
+    scale = _model_scale("online_read_scale", online,
+                         ONLINE_READ_SCALE.get(online, 1.0))
+    return random.uniform(low, high) * scale
 
 
 def typing_delay_seconds(reply_text: str, online: int = 1) -> float:
     """按回复长度估算"打字"延迟（秒），长回复更久，封顶防拖沓；
     在线强度分档缩放（高在线打字也快，下限随档位放低）。"""
-    scale = ONLINE_TYPING_SCALE.get(online, 1.0)
-    base = random.uniform(0.3, 0.9) + TYPING_DELAY_PER_CHAR * len(reply_text or "")
-    return max(TYPING_DELAY_RANGE[0] * scale,
-               min(TYPING_DELAY_RANGE[1], base * scale))
+    low, high = _model_pair("typing_delay_range", TYPING_DELAY_RANGE)
+    per_char = _model_number("typing_delay_per_char", TYPING_DELAY_PER_CHAR)
+    scale = _model_scale("online_typing_scale", online,
+                         ONLINE_TYPING_SCALE.get(online, 1.0))
+    base = random.uniform(0.3, 0.9) + per_char * len(reply_text or "")
+    return max(low * scale, min(high, base * scale))
 
 
 def unread_messages(chat_state: ChatState) -> list:
@@ -299,10 +398,13 @@ def unread_messages(chat_state: ChatState) -> list:
     return [m for m in chat_state.messages if m.role == "user" and not m.read]
 
 
+@behavior_hook("chat", "should_proactive", layer=LAYER_MODULE,
+               contract=CONTRACT_STRATEGY)
 def should_proactive(chat_state: ChatState) -> bool:
     """是否满足"角色主动搭话"的条件：已有对话史，且距上次交流超过门槛
     分钟数——门槛由聊天边界分档（弱边界更常主动开口）；last_active_at
-    在每次交流后刷新，天然限频。
+    在每次交流后刷新，天然限频。门槛表可被 ``chat.model.boundary_proactive_gap``
+    覆盖，坏值回退默认。
     """
     if not chat_state.messages:
         return False
@@ -314,7 +416,16 @@ def should_proactive(chat_state: ChatState) -> bool:
         return False
     gap = datetime.datetime.now() - last
     boundary = chat_state.chat_params.boundary if chat_state.chat_params else 1
-    gap_minutes = BOUNDARY_PROACTIVE_GAP.get(boundary, BOUNDARY_PROACTIVE_GAP[1])
+    try:
+        gaps = _chat_model("boundary_proactive_gap")
+        gap_minutes = float(gaps.get(
+            boundary, gaps.get(1, BOUNDARY_PROACTIVE_GAP[1])))
+    except (AttributeError, TypeError, ValueError):
+        gap_minutes = float(BOUNDARY_PROACTIVE_GAP.get(
+            boundary, BOUNDARY_PROACTIVE_GAP[1]))
+    if not math.isfinite(gap_minutes) or gap_minutes < 0:
+        gap_minutes = float(BOUNDARY_PROACTIVE_GAP.get(
+            boundary, BOUNDARY_PROACTIVE_GAP[1]))
     return gap.total_seconds() >= gap_minutes * 60
 
 
@@ -336,10 +447,16 @@ def active_topic(chat_state: ChatState) -> Optional[Topic]:
                  and t.status == "active"), None)
 
 
+@behavior_hook("chat", "coord", layer=LAYER_MODULE,
+               contract=CONTRACT_STRATEGY)
 def chat_coord(state: CharacterSnapshot, chat_state: ChatState,
                now: Optional[datetime.datetime] = None,
                world_stance: str = DEFAULT_WORLD_STANCE) -> ChatCoord:
-    """按线程态度、关系认知与角色当前世界事实算一次三轴坐标。"""
+    """按线程态度、关系认知与角色当前世界事实算一次三轴坐标。
+
+    世界包可覆盖 ``chat.coord`` 改变坐标语义；返回值不是 ``ChatCoord``
+    时，提示词组装与话题落地会经 ``ChatCoord.from_values`` 兜底。
+    """
     return build_chat_coord(
         attitude=chat_state.attitude,
         world_stance=world_stance,
@@ -355,8 +472,10 @@ def chat_coord(state: CharacterSnapshot, chat_state: ChatState,
     )
 
 
+@behavior_hook("chat", "relationship_text", layer=LAYER_MODULE,
+               contract=CONTRACT_STRATEGY)
 def relationship_text(chat_state: ChatState) -> str:
-    """把当前身份的关系认知渲染为提示词里的一行。"""
+    """把当前身份的关系认知渲染为提示词里的一行（措辞可被行为包覆盖）。"""
     relationship = chat_state.relationship or Relationship()
     text = RELATIONSHIP_KIND_TEXTS.get(
         relationship.kind, RELATIONSHIP_KIND_TEXTS["stranger"])
@@ -376,9 +495,14 @@ def recent_topic_kind_ids(chat_state: ChatState,
     return ids[:count]
 
 
+@behavior_hook("chat", "topic_candidates", layer=LAYER_MODULE,
+               contract=CONTRACT_STRATEGY)
 def topic_candidates(chat_state: ChatState, coord: ChatCoord,
                      limit: int = TOPIC_CANDIDATE_LIMIT) -> list:
-    """半径内的候选类型；一个都没有时回退 daily 兜底。"""
+    """半径内的候选类型；一个都没有时回退 daily 兜底。
+
+    行为包只能过滤/重排已注册类型；新增类型需要整表替换（第三批）。
+    """
     kinds = candidate_topic_kinds(
         coord, recent_kind_ids=recent_topic_kind_ids(chat_state), limit=limit)
     if kinds:
@@ -565,13 +689,16 @@ def apply_identity_update(chat_state: ChatState, update: dict,
     return True
 
 
+@behavior_hook("chat", "schedule_batch", layer=LAYER_MODULE,
+               contract=CONTRACT_STRATEGY)
 def schedule_batch_available_at(texts: list, online: int = 1) -> list:
     """为一批回复逐条排定 available_at（ISO 时间）。
 
     第一条 = 当前时间 + 读延迟 + 自己的打字延迟；之后每条在前一条的
     到达时刻上追加自己的打字延迟（长消息打字更久）。延迟函数与在线
     档倍率沿用 read_delay_seconds / typing_delay_seconds，由服务层统一
-    计算，UI 不再自行模拟节奏。
+    计算，UI 不再自行模拟节奏。行为包可覆盖 ``chat.schedule_batch``，
+    但返回值必须与 texts 等长；服务层发现长度或类型不符时回退默认。
     """
     moment = datetime.datetime.now() + datetime.timedelta(
         seconds=read_delay_seconds(online))
@@ -612,13 +739,15 @@ def _char_lock(giantess_id: str, blocking: bool = True):
             lock.release()
 
 
+@behavior_hook("chat", "topic_context", layer=LAYER_MODULE,
+               contract=CONTRACT_STRATEGY)
 def topic_context_text(chat_state: ChatState,
                        coord: Optional[ChatCoord] = None,
                        candidates: Optional[list] = None) -> str:
     """把话题状态机与候选类型渲染为注入系统提示词的"当前话题"段落。
 
     只给类型名、轮数、候选 id 与两句区别（会关注什么 / 聊起来的姿态）；
-    不给坐标、半径等可优化数值。
+    不给坐标、半径等可优化数值。措辞可由 ``chat.topic_context`` 覆盖。
     """
     topics = chat_state.topics or []
     active = active_topic(chat_state)
@@ -653,6 +782,35 @@ def topic_context_text(chat_state: ChatState,
     return "\n".join(lines)
 
 
+def _text_or_empty(value) -> str:
+    """钩子返回的文本；非字符串或空白按空处理。"""
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _safe_topic_candidates(chat_state: ChatState, coord: ChatCoord) -> list:
+    """过滤掉非 TopicKind / 没有 id 的候选，避免坏元素污染提示词。"""
+    kinds = topic_candidates(chat_state, coord)
+    if not isinstance(kinds, (list, tuple)):
+        return []
+    return [kind for kind in kinds
+            if isinstance(kind, TopicKind) and getattr(kind, "id", "")]
+
+
+def _safe_schedule_batch(texts: list, online: int = 1) -> list:
+    """执行 chat.schedule_batch；长度、类型或时间顺序不合法时回退默认。"""
+    available = schedule_batch_available_at(texts, online)
+    if isinstance(available, (list, tuple)) and len(available) == len(texts):
+        try:
+            moments = [datetime.datetime.fromisoformat(item)
+                       for item in available]
+            if moments and all(earlier <= later
+                               for earlier, later in zip(moments, moments[1:])):
+                return list(available)
+        except (TypeError, ValueError):
+            pass
+    return get_runtime().default("chat.schedule_batch")(texts, online)
+
+
 def build_chat_system_prompt(state: CharacterSnapshot, chat_state: ChatState,
                              now: Optional[datetime.datetime] = None,
                              world_stance: str = DEFAULT_WORLD_STANCE) -> str:
@@ -662,13 +820,34 @@ def build_chat_system_prompt(state: CharacterSnapshot, chat_state: ChatState,
     存档内容不再整段注入：只有当前话题类型的视角开放且放得下的字段才会
     出现在【此刻你注意到的事】里（见 services.chat.topic_lens）。``now``
     供测试注入固定时钟；``world_stance`` 由调用方（ChatService）从设置读取。
+
+    行为包入口都是窄口子：``chat.framing`` 改媒介开场，``chat.world_context``
+    追加世界背景，``chat.topic_lens`` 改视角渲染，其余替换段落的钩子见
+    各自函数。返回类型异常的钩子会退回默认实现，不会破坏 JSON 输出协议。
     """
-    coord = chat_coord(state, chat_state, now=now, world_stance=world_stance)
-    lens_block, _trace = render_topic_lens(LensContext(
+    coord = ChatCoord.from_values(
+        chat_coord(state, chat_state, now=now, world_stance=world_stance))
+    lens_ctx = LensContext(
         state=state, chat_state=chat_state, coord=coord,
-        world_stance=world_stance, now=now, topic=active_topic(chat_state)))
+        world_stance=world_stance, now=now, topic=active_topic(chat_state))
+    lens_result = render_topic_lens(lens_ctx)
+    if (isinstance(lens_result, tuple) and len(lens_result) == 2
+            and isinstance(lens_result[0], str)):
+        lens_block, _trace = lens_result
+    else:
+        lens_block, _trace = get_runtime().default("chat.topic_lens")(lens_ctx)
+    world_text = _text_or_empty(
+        chat_world_context(state, chat_state, world_stance=world_stance))
+    world_text = world_text[:WORLD_CONTEXT_LIMIT].strip()
+    world_block = f"\n【世界背景】\n{world_text}\n" if world_text else ""
+    user_nick = chat_state.user_nick or "一个普通人类"
+    framing = _text_or_empty(
+        chat_framing(state, chat_state)) or _default_framing(state, chat_state)
+    candidates = _safe_topic_candidates(chat_state, coord)
     return _SYSTEM_TEMPLATE.format(
-        user_nick=chat_state.user_nick or "一个普通人类",
+        framing=framing,
+        world_context=world_block,
+        user_nick=user_nick,
         name=state.name,
         identity=build_identity_frame(state),
         lens_block=lens_block,
@@ -678,8 +857,7 @@ def build_chat_system_prompt(state: CharacterSnapshot, chat_state: ChatState,
         size_state_text=describe_size_state(coord.size_state),
         relationship_text=relationship_text(chat_state),
         chat_habits=chat_habits_text(chat_state.chat_params),
-        topic_context=topic_context_text(
-            chat_state, coord, topic_candidates(chat_state, coord)),
+        topic_context=topic_context_text(chat_state, coord, candidates),
         effect_tools=effect_tools_text(),
         output_rule=_OUTPUT_RULE,
     )
@@ -1370,15 +1548,15 @@ class ChatService:
                   "error": None, "batch_id": request_id}
         # 坐标在 ops 生效前快照：AI 是按看到的状态选的话题类型，
         # 校验与落盘都用同一份，效果从下一轮才影响坐标。
-        coord = chat_coord(state, chat_state,
-                           world_stance=self._world_stance())
-        candidates = topic_candidates(chat_state, coord)
+        coord = ChatCoord.from_values(
+            chat_coord(state, chat_state, world_stance=self._world_stance()))
+        candidates = _safe_topic_candidates(chat_state, coord)
         result["ops_applied"] = apply_chat_ops(state, chat_state, parsed)
         texts = parsed.get("messages") or []
         if texts:
             online = (chat_state.chat_params.online
                       if chat_state.chat_params else 1)
-            available = schedule_batch_available_at(texts, online)
+            available = _safe_schedule_batch(texts, online)
             for sequence, (text, available_at) in enumerate(zip(texts, available)):
                 reply_message = ChatMessage(
                     role="char", text=text, batch_id=request_id,

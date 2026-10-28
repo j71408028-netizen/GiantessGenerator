@@ -25,6 +25,7 @@ from core.behavior_runtime import (  # noqa: E402
     LAYER_CONTENT, LAYER_INFRA, LAYER_MODULE, get_runtime,
 )
 import core.logic  # noqa: E402,F401  注册 logic 函数与常量
+import services.chat  # noqa: E402,F401  注册 chat 提示词 / 节奏钩子
 import services.character.offline  # noqa: E402,F401
 import services.character.profile_text  # noqa: E402,F401
 import services.exploration.arbiter  # noqa: E402,F401
@@ -56,6 +57,7 @@ def check(name, ok, extra=""):
 SCOPE_LAYERS = {
     "CreationService": {LAYER_INFRA, LAYER_MODULE},
     "StateService": {LAYER_INFRA, LAYER_MODULE},
+    "chat": {LAYER_INFRA, LAYER_MODULE},
     "logic": {LAYER_INFRA, LAYER_CONTENT},
     "offline": {LAYER_MODULE},
     "profile": {LAYER_MODULE},
@@ -155,6 +157,14 @@ _classify("logic.PREDEFINED_TAGS", LAYER_CONTENT, CONTRACT_DATA,
           KIND_CONST)
 _classify("profile.describe_rhythm", LAYER_MODULE, CONTRACT_STRATEGY,
           KIND_FUNCTION)
+_classify("chat.framing", LAYER_MODULE, CONTRACT_STRATEGY, KIND_FUNCTION)
+_classify("chat.world_context", LAYER_MODULE, CONTRACT_STRATEGY,
+          KIND_FUNCTION)
+_classify("chat.topic_lens", LAYER_MODULE, CONTRACT_STRATEGY,
+          KIND_FUNCTION)
+_classify("chat.coord", LAYER_MODULE, CONTRACT_STRATEGY, KIND_FUNCTION)
+_classify("chat.model.read_delay_range", LAYER_INFRA, CONTRACT_DATA,
+          KIND_CONST)
 
 _state_module = [entry["key"] for entry in _catalog
                  if entry["scope"] == "StateService"
