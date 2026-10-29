@@ -127,7 +127,7 @@ class ScenarioEditor(ctk.CTkFrame):
 
         # 进入副本所需行动点数（0 表示免费）
         self.entry_action_cost = 0
-        # 进入准入：方案地址 / 距离上限（None=不限）/ 身高区间（None=不限）
+        # 进入准入：入口地址（主世界锚点）/ 距离上限（None=不限）/ 身高区间（None=不限）
         self.entry_address = ""
         self.entry_address_max_distance = None
         self.entry_height_min = None
@@ -392,7 +392,7 @@ class ScenarioEditor(ctk.CTkFrame):
             fg_color=SC_PANEL_BG, border_color=SC_BORDER_STRONG)
         self.protagonist_entry.pack(side='right')
 
-        # ---- 进入准入：方案地址（距离上限）与身高区间 ----
+        # ---- 进入准入：入口地址（主世界锚点，距离上限）与身高区间 ----
         admission_card = ctk.CTkFrame(left_inner, fg_color=SC_PANEL_BG,
                                       border_width=1, border_color=SC_BORDER,
                                       corner_radius=8)
@@ -400,7 +400,7 @@ class ScenarioEditor(ctk.CTkFrame):
 
         addr_row = ctk.CTkFrame(admission_card, fg_color="transparent")
         addr_row.pack(fill='x', padx=8, pady=(6, 2))
-        ctk.CTkLabel(addr_row, text="方案地址", font=ui_fonts.ui_font(_F_SMALL),
+        ctk.CTkLabel(addr_row, text="入口地址", font=ui_fonts.ui_font(_F_SMALL),
                      text_color=_TITLE, width=64, anchor='w').pack(side='left')
         self.entry_address_var = ctk.StringVar()
         self.entry_address_entry = ctk.CTkEntry(
@@ -845,12 +845,13 @@ class ScenarioEditor(ctk.CTkFrame):
         })
 
     def _pick_entry_address(self):
-        """选择方案地址（复用地址注册表对话框；消除 = 不做地址准入）。"""
+        """选择入口地址（主世界锚点；复用地址注册表对话框；消除 = 不做地址准入）。"""
         dialog = AddressTextDialog(
-            self, "副本方案地址",
-            description=("角色有地址时，进入副本需要与这里选择的地址满足距离上限，"
-                         "只能选择已申领的地址（详见 docs/designs/address-system/authoring.md）；"
-                         "点「消除」表示不做地址准入。"),
+            self, "副本入口地址（主世界）",
+            description=("入口是主世界里的一扇门：角色有地址时，进入副本需要与这里选择的"
+                         "地址满足距离上限，只能选择已申领的地址（详见 "
+                         "docs/designs/address-system/authoring.md）；点「消除」表示不做地址准入。"
+                         "它与副本内章节的取景地址无关。"),
             initial=self.entry_address, allow_empty=True)
         if dialog.result is None:
             return

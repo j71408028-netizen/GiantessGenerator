@@ -689,7 +689,7 @@ class MiniApp:
         if payload is None:
             return
 
-        # 进入准入：角色有地址时检查与方案地址的距离，同时检查身高区间。
+        # 进入准入：角色有地址时检查与入口地址（主世界锚点）的距离，同时检查身高区间。
         from dungeon.admission import check_entry_requirements
         admission_error = check_entry_requirements(
             config,

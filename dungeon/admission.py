@@ -2,8 +2,10 @@
 
 方案可以在 ``config.json`` 里声明三项准入条件：
 
-- ``entry_address``：方案所在地址（完整地址文本，见 ``core.address_model``）；
-- ``entry_address_max_distance_m``：角色地址与方案地址的最大距离（米）；
+- ``entry_address``：方案入口在主世界中的锚点地址（完整地址文本，见
+  ``core.address_model``）；它只是主世界里的一扇门，与副本内章节的取景地址
+  （章节 ``address``）互不相干；
+- ``entry_address_max_distance_m``：角色地址与入口锚点的最大距离（米）；
   留空 / ``None`` = 不限，``0`` = 必须同址；
 - ``entry_height_min_m`` / ``entry_height_max_m``：角色身高的允许区间（米）。
   留空 / ``None`` = 该侧不限。
@@ -90,9 +92,9 @@ def check_entry_requirements(config, *, position: str = "",
         if parse_full(position) is not None:
             rel = relate(position, address)
             if rel.kind == "world_mismatch":
-                return (f"该副本要求角色位于地址「{format_addr_verbose(address)}」附近，"
+                return (f"该副本的入口位于「{format_addr_verbose(address)}」，"
                         f"但角色当前地址「{format_addr_verbose(position)}」"
-                        f"与方案地址不在同一维度，无法进入。")
+                        f"与入口地址不在同一维度，无法进入。")
             nearest, farthest = rel.interval
             if farthest > max_distance:
                 if nearest == farthest:
@@ -100,8 +102,8 @@ def check_entry_requirements(config, *, position: str = "",
                 else:
                     distance_text = (f"角色当前距离在 {format_size(nearest)} 到 "
                                      f"{format_size(farthest)} 之间（位置精度不足）")
-                return (f"该副本要求角色与方案地址「{format_addr_verbose(address)}」"
-                        f"的距离不超过 {format_size(max_distance)}，"
+                return (f"该副本的入口位于「{format_addr_verbose(address)}」，"
+                        f"要求距离不超过 {format_size(max_distance)}；"
                         f"{distance_text}，无法进入。")
 
     if height is not None:

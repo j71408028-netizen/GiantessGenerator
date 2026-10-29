@@ -170,6 +170,17 @@ def normalize_chapter(raw, index: int = 0) -> dict:
     chapter["ending"] = bool(chapter.get("ending", False))
     chapter["note"] = str(chapter.get("note") or "")
 
+    # 地点与参照物：章节地址是作者的声明（展示 / 筛地标 / 结局传送），缺省空值
+    chapter["place"] = str(chapter.get("place") or "").strip()
+    chapter["address"] = str(chapter.get("address") or "").strip()
+    chapter["exit_address"] = str(chapter.get("exit_address") or "").strip()
+    landmarks = chapter.get("landmarks")
+    # None = 全清单；[] = 本章不用清单（两者语义不同，不能合并）
+    chapter["landmarks"] = (
+        [str(item).strip() for item in landmarks
+         if isinstance(item, str) and item.strip()]
+        if isinstance(landmarks, list) else None)
+
     # 最大段落数：超出后自动跳转；结束章节固定走“终止”
     try:
         max_paragraphs = int(chapter.get("max_paragraphs", DEFAULT_MAX_PARAGRAPHS))

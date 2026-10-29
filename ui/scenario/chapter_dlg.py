@@ -990,6 +990,12 @@ class ChapterEditDialog(BaseDialog):
                 return
             result["icon_path"] = self.ending_icon_var.get().strip()
 
+        # 地点/取景地址/出口地址目前只能在 config.json 里手写：编辑其他字段保存时
+        # 原样带过去，避免一轮编辑把已经写好的地址悄悄抹掉（表单接入后删掉这段）。
+        for key in ("place", "address", "landmarks", "exit_address"):
+            if key in self.chapter:
+                result[key] = self.chapter[key]
+
         self.result = normalize_chapter(result)
         self.destroy()
 

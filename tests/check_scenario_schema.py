@@ -53,7 +53,8 @@ from dungeon.validate import (  # noqa: E402
 _GOLDEN_EMPTY_KEYS = {
     "initial_prompt", "coupling_level", "protagonist_title", "text_component",
     "entry_action_cost", "entry_address", "entry_address_max_distance_m",
-    "entry_height_min_m", "entry_height_max_m", "ending_policy",
+    "entry_height_min_m", "entry_height_max_m", "scene_landmarks",
+    "ending_policy",
     "section_prompts", "evolution_attrs", "chapters", "triggers", "voice",
 }
 _empty = schema.empty_scenario_config()
@@ -80,6 +81,15 @@ declared = set(schema.field_map(schema.CHAPTER_FIELDS))
 check("normalize_chapter 产出的字段都被 schema 声明",
       set(normalized) <= declared, set(normalized) - declared)
 check("schema 声明的必填字段存在", schema.field_map(schema.CHAPTER_FIELDS)["name"].required)
+_SCENE_FIELDS = {"place", "address", "landmarks", "exit_address"}
+check("章节地点与参照物字段已在 schema 声明且被 normalize 产出",
+      _SCENE_FIELDS <= declared and _SCENE_FIELDS <= set(normalized),
+      _SCENE_FIELDS - declared | (_SCENE_FIELDS - set(normalized)))
+check("章节 landmarks 的默认 None 与显式空列表语义不同",
+      normalized["landmarks"] is None
+      and normalize_chapter({"name": "示例", "landmarks": []})["landmarks"] == [])
+check("章节地点/地址缺省为空串（旧方案逐字不变）",
+      all(normalized[key] == "" for key in ("place", "address", "exit_address")))
 check("章节背景音乐字段已在 schema 声明", "bgm" in declared
       and "bgm" in normalized, set(normalized) - declared)
 check("bgm 字段声明与 normalize 产出的键一致",
