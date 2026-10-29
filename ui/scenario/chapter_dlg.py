@@ -4,6 +4,7 @@ import tkinter as tk
 import customtkinter as ctk
 
 import ui.ctk.dialogs
+from core.address_model import format_addr_compact, validate_address_text
 from dungeon.actions import VISUAL_FILTERS
 from dungeon.audio import buses
 from dungeon.audio.chapters import (
@@ -17,6 +18,7 @@ from dungeon.audio.voice_fx import (DEFAULT_INTENSITY, MAX_INTENSITY, PRESET_NON
                               SLOT_HER, SLOT_LABELS, SLOTS, label_of,
                               preset_keys_for)
 from dungeon.script_text import parse_script
+from ui.ctk.address_dlg import AddressTextDialog
 from ui.ctk.dialogs import BaseDialog
 from ui.ctk.widgets import CollapsibleBlock, OptionButton
 from ui.ctk.theme import (
@@ -34,14 +36,18 @@ from ui.scenario.text_editor_dlg import ScriptTextDialog
 
 NO_FILTER_LABEL = "（不使用滤镜）"
 OVERFLOW_LEAVE_LABEL = "（离开章节）"
+LANDMARK_WHOLE_LABEL = "整份清单（默认）"
+LANDMARK_NONE_LABEL = "本章不用清单"
+LANDMARK_PICK_LABEL = "指定地标"
 
 
 class ChapterEditDialog(BaseDialog):
     """章节编辑对话框。
 
     章节没有条件字段：进入与离开都由触发器的「跳转章节」动作执行。
-    这里只编辑“身处其中时的环境”——特定背景、背景音乐、对话语音的物理效果与
-    持续敏感效果，外加编辑器配色。
+    这里只编辑“身处其中时的环境”——地点与取景（地点名、取景地址、本章地标、
+    结局出口）、特定背景、背景音乐、对话语音的物理效果与持续敏感效果，外加编辑器
+    配色。
 
     版面沿用触发器编辑对话框确立的风格：底部按钮固定，整张表单（基础信息、
     结束结算与章节环境）一起滚动；章节环境内各项按折叠块分组，每个折叠块
@@ -183,9 +189,9 @@ class ChapterEditDialog(BaseDialog):
         return ctk.CTkLabel(parent, text=text, font=self.UI_FONT,
                             text_color=CHAPTER_LABEL, anchor='w', width=width or 0)
 
-    def _checkbox_field(self, parent, text, variable, command=None):
+    def _checkbox_field(self, parent, text, variable, command=None, width=None):
         return ctk.CTkCheckBox(parent, text=text, variable=variable,
-                               width=100 if text else 24,
+                               width=width if width is not None else (100 if text else 24),
                                font=self.UI_FONT, text_color=CHAPTER_TEXT,
                                fg_color=CHAPTER_CHECK_BG,
                                hover_color=CHAPTER_CHECK_BG_HOVER,
@@ -279,6 +285,12 @@ class ChapterEditDialog(BaseDialog):
         self._section_blocks = []
         # 编辑已有章节时全部收起；新建时除固定文本外默认展开
         default_open = self.is_new
+
+        # 地点与取景：这一章发生在哪儿（展示名、取景地址、本章地标、结局出口）
+        block = self._add_section(area, "地点与取景", expanded=default_open,
+                                  status=self._place_status)
+        self._build_place_section(block.body)
+        self._refresh_section_status(block)
 
         # 固定文本：不进 AI 生成，默认收起（多数章节用不到）
         block = self._add_section(area, "固定文本", expanded=False,
@@ -418,6 +430,235 @@ class ChapterEditDialog(BaseDialog):
         attrs = [a for a in attrs if a]
         text = f"持续敏感：{len(self.sens_rows)} 条"
         return text + (f"（{'、'.join(attrs)}）" if attrs else "")
+
+    # ---------- 地点与取景 ----------
+    def _build_place_section(self, parent):
+        """地点 / 取景地址 / 本章地标 / 结局出口：副本里"这是哪儿"全由作者写死。
+
+        字段语义见 ``docs/designs/dungeon_scene.md`` §3：地点只影响展示与提示词，
+        取景地址用来筛"这一带"的全局地标，地标白名单决定本章从方案清单里取哪几个，
+        出口地址只在结束章节生效（结局后写回主世界位置）。
+        """
+        frame = self._form_grid(ctk.CTkFrame(parent, fg_color="transparent"))
+        frame.pack(fill='x')
+
+        control = self._form_row(frame, 0, "地点", fill=True)
+        self.place_var = tk.StringVar(value=str(self.chapter.get("place") or ""))
+        self._entry_field(control, self.place_var,
+                          placeholder="如：黑塔脚下的集市").pack(
+            side='left', fill='x', expand=True)
+        ctk.CTkLabel(control, text="留空则不显示", font=self.UI_FONT_SMALL,
+                     text_color=CHAPTER_HINT).pack(side='left', padx=(8, 0))
+
+        control = self._form_row(frame, 1, "取景地址", fill=True)
+        self.address_var = tk.StringVar(value=str(self.chapter.get("address") or ""))
+        self._entry_field(control, self.address_var).pack(
+            side='left', fill='x', expand=True, padx=(0, 6))
+        self._small_button(control, "选…",
+                           lambda: self._pick_address(self.address_var),
+                           width=52).pack(side='left')
+        self._small_button(control, "清除", lambda: self.address_var.set(""),
+                           width=52, danger=True).pack(side='left', padx=(6, 0))
+
+        self.address_hint = ctk.CTkLabel(
+            frame, text="", anchor='w', justify='left', wraplength=520,
+            font=self.UI_FONT_SMALL, text_color=CHAPTER_HINT)
+        self.address_hint.grid(row=2, column=0, columnspan=2, sticky='w',
+                               padx=10, pady=(0, 8))
+
+        control = self._form_row(frame, 3, "本章地标", fill=True)
+        self.landmark_mode_var = tk.StringVar(value=self._landmark_mode())
+        self._option_field(control, [LANDMARK_WHOLE_LABEL, LANDMARK_NONE_LABEL,
+                                     LANDMARK_PICK_LABEL],
+                           variable=self.landmark_mode_var, width=150,
+                           command=self._sync_landmark_rows).pack(side='left')
+
+        # 白名单勾选：方案清单里的名字 + 本章已引用但清单里没有的名字（不丢作者数据）
+        self.landmark_box = ctk.CTkFrame(frame, fg_color="transparent")
+        self._landmark_vars = {}
+        names = self._scene_landmark_names()
+        if names:
+            selected = set(self.chapter.get("landmarks") or [])
+            for index, name in enumerate(names):
+                var = tk.BooleanVar(value=name in selected)
+                var.trace_add("write", lambda *_a: self._refresh_all_section_status())
+                self._landmark_vars[name] = var
+                self._checkbox_field(self.landmark_box, name, var, width=180).grid(
+                    row=index // 2, column=index % 2, sticky='w',
+                    padx=(0, 10), pady=2)
+        else:
+            ctk.CTkLabel(self.landmark_box, anchor='w', justify='left',
+                         wraplength=420, font=self.UI_FONT_SMALL,
+                         text_color=CHAPTER_HINT,
+                         text="方案还没有场景地标：清单为空时本章没有可勾的条目，"
+                              "要么选「本章不用清单」，要么先在方案配置里写 "
+                              "scene_landmarks。").pack(anchor='w')
+
+        # 出口地址：只在结束章节出现（结局后角色落到的主世界地址）
+        self.exit_label = ctk.CTkLabel(
+            frame, text="出口地址", anchor='w', font=self.UI_FONT,
+            text_color=CHAPTER_LABEL, width=self.FORM_LABEL_WIDTH)
+        self.exit_label.grid(row=5, column=0, sticky='w', padx=(10, 12), pady=(0, 8))
+        self._exit_control = ctk.CTkFrame(frame, fg_color="transparent")
+        self._exit_control.grid_columnconfigure(0, weight=1)
+        self.exit_address_var = tk.StringVar(
+            value=str(self.chapter.get("exit_address") or ""))
+        self._entry_field(self._exit_control, self.exit_address_var).pack(
+            side='left', fill='x', expand=True, padx=(0, 6))
+        self._small_button(self._exit_control, "选…",
+                           lambda: self._pick_address(self.exit_address_var),
+                           width=52).pack(side='left')
+        self._small_button(self._exit_control, "清除",
+                           lambda: self.exit_address_var.set(""),
+                           width=52, danger=True).pack(side='left', padx=(6, 0))
+        self.exit_hint = ctk.CTkLabel(
+            frame, text="", anchor='w', justify='left', wraplength=520,
+            font=self.UI_FONT_SMALL, text_color=CHAPTER_HINT)
+        self.exit_hint.grid(row=6, column=0, columnspan=2, sticky='w',
+                            padx=10, pady=(0, 8))
+
+        for var in (self.place_var, self.address_var, self.landmark_mode_var,
+                    self.exit_address_var):
+            var.trace_add("write", lambda *_a: self._refresh_all_section_status())
+        self.address_var.trace_add("write", lambda *_a: self._refresh_address_hint())
+        self.exit_address_var.trace_add("write", lambda *_a: self._refresh_exit_hint())
+        self._refresh_address_hint()
+        self._refresh_exit_hint()
+        self._sync_landmark_rows()
+        self._sync_exit_row()
+
+    def _scene_landmark_names(self) -> list:
+        """可选的地标名：方案 ``scene_landmarks`` + 本章已引用但清单里没有的名字。
+
+        后一半是为了"编辑一轮不丢作者数据"：清单里删掉某条之后，引用了它的章节
+        仍能看见并取消勾选，而不是保存时被静默抹掉。
+        """
+        names = []
+        if self._scenario_repo is not None and self.scenario_id:
+            try:
+                config = self._scenario_repo.load_config(self.scenario_id) or {}
+                for item in config.get("scene_landmarks") or []:
+                    if isinstance(item, dict):
+                        name = str(item.get("name") or "").strip()
+                        if name and name not in names:
+                            names.append(name)
+            except Exception:
+                pass
+        for name in (self.chapter.get("landmarks") or []):
+            if isinstance(name, str) and name and name not in names:
+                names.append(name)
+        return names
+
+    def _landmark_mode(self) -> str:
+        """三态取用方式：``None`` = 整份清单，``[]`` = 本章不用，列表 = 指定。"""
+        current = self.chapter.get("landmarks")
+        if not isinstance(current, list):
+            return LANDMARK_WHOLE_LABEL
+        return LANDMARK_PICK_LABEL if current else LANDMARK_NONE_LABEL
+
+    def _landmarks_from_ui(self):
+        mode = self.landmark_mode_var.get()
+        if mode == LANDMARK_WHOLE_LABEL:
+            return None
+        if mode == LANDMARK_NONE_LABEL:
+            return []
+        return [name for name, var in self._landmark_vars.items() if var.get()]
+
+    def _sync_landmark_rows(self, *_a):
+        """只有「指定地标」才摊开勾选行，其余两态各占一行下拉。"""
+        if self.landmark_mode_var.get() == LANDMARK_PICK_LABEL:
+            self.landmark_box.grid(row=4, column=0, columnspan=2, sticky='w',
+                                   padx=(self.FORM_LABEL_WIDTH + 22, 10),
+                                   pady=(0, 8))
+        else:
+            self.landmark_box.grid_remove()
+
+    def _sync_exit_row(self):
+        """出口地址只在结束章节有意义：跟着章节角色一起显隐。"""
+        widgets = (getattr(self, "exit_label", None),
+                   getattr(self, "_exit_control", None),
+                   getattr(self, "exit_hint", None))
+        if any(widget is None for widget in widgets):
+            return
+        if self._is_ending():
+            widgets[0].grid()
+            widgets[1].grid(row=5, column=1, sticky='ew', padx=(0, 10), pady=(0, 8))
+            widgets[2].grid()
+        else:
+            for widget in widgets:
+                widget.grid_remove()
+
+    def _refresh_address_hint(self, *_a):
+        """取景地址的即时反馈：能解析就给出紧凑描述，解不出就说明问题。"""
+        label = getattr(self, "address_hint", None)
+        if label is None:
+            return
+        text = self.address_var.get().strip()
+        if not text:
+            label.configure(
+                text="留空 = 不限定范围：候选池只用方案清单（没有清单就是全局全量）。",
+                text_color=CHAPTER_HINT)
+            return
+        problem = validate_address_text(text)
+        if problem:
+            label.configure(text=f"⚠ 无法解析：{problem}（运行时会当作没有地址）",
+                            text_color=CHAPTER_ERR)
+        else:
+            label.configure(text=f"✅ {format_addr_compact(text)}",
+                            text_color=CHAPTER_ACCENT)
+
+    def _refresh_exit_hint(self, *_a):
+        label = getattr(self, "exit_hint", None)
+        if label is None:
+            return
+        text = self.exit_address_var.get().strip()
+        if not text:
+            label.configure(text="留空 = 结局后位置不变（绝大多数结局的默认行为）。",
+                            text_color=CHAPTER_HINT)
+            return
+        problem = validate_address_text(text)
+        if problem:
+            label.configure(text=f"⚠ 无法解析：{problem}（运行时会保持位置不变）",
+                            text_color=CHAPTER_ERR)
+        else:
+            label.configure(text=f"✅ 结局后写回主世界位置：{format_addr_compact(text)}",
+                            text_color=CHAPTER_ACCENT)
+
+    def _place_status(self) -> str:
+        """折叠状态行摘要：地点、地址、地标取用方式三样都没配就不显示。"""
+        place_var = getattr(self, "place_var", None)
+        if place_var is None:
+            return ""
+        place_text = place_var.get().strip()
+        address = self.address_var.get().strip()
+        landmarks = self._landmarks_from_ui()
+        if not place_text and not address and landmarks is None:
+            return ""
+        parts = []
+        if place_text:
+            parts.append(place_text)
+        if address:
+            parts.append(address)
+        if landmarks is None:
+            parts.append("整份清单")
+        elif not landmarks:
+            parts.append("不用清单")
+        else:
+            parts.append(f"{len(landmarks)} 个地标")
+        return "地点与取景：" + " · ".join(parts)
+
+    def _pick_address(self, var):
+        """选一个已申领的注册地址填进文本框（抄文本、不建引用）。"""
+        try:
+            dialog = AddressTextDialog(
+                self, "选择地址",
+                "从已申领的注册地址里选一个，文本会填进输入框；之后可以继续手改。",
+                initial=var.get().strip(), allow_empty=True)
+        except Exception as exc:  # 注册表不可用不该把章节对话框一起带走
+            ui.ctk.dialogs.showerror("错误", f"无法打开地址选择器：{exc}")
+            return
+        if dialog.result:
+            var.set(dialog.result)
 
     # ---------- 固定文本 ----------
     def _build_script_section(self, parent):
@@ -804,6 +1045,8 @@ class ChapterEditDialog(BaseDialog):
         else:
             self.ending_frame.pack_forget()
             self.overflow_combo.configure(state="normal")
+        # 出口地址只在结束章节里有意义，跟着章节角色一起显隐
+        self._sync_exit_row()
 
     def _import_ending_icon(self):
         rel = import_ending_icon(self, self._scenario_repo, self.scenario_id)
@@ -946,6 +1189,24 @@ class ChapterEditDialog(BaseDialog):
             "" if self.overflow_var.get() == OVERFLOW_LEAVE_LABEL
             else self.overflow_var.get())
 
+        # 地点与取景：地址存盘前先确认可解析（运行期遇到坏地址会当作没写）
+        place = self.place_var.get().strip()
+        address = self.address_var.get().strip()
+        if address:
+            problem = validate_address_text(address)
+            if problem:
+                ui.ctk.dialogs.showerror("错误", f"取景地址无法解析：{problem}")
+                return
+        landmarks = self._landmarks_from_ui()
+        exit_address = ""
+        if is_ending:
+            exit_address = self.exit_address_var.get().strip()
+            if exit_address:
+                problem = validate_address_text(exit_address)
+                if problem:
+                    ui.ctk.dialogs.showerror("错误", f"出口地址无法解析：{problem}")
+                    return
+
         fixed_text = {}
         script_rel = self._script_rel_path()
         if script_rel:
@@ -970,6 +1231,9 @@ class ChapterEditDialog(BaseDialog):
             "fixed_text": fixed_text,
             "sensitivity": sensitivity,
             "note": self.note_var.get().strip(),
+            "place": place,
+            "address": address,
+            "landmarks": landmarks,
         }
         if is_ending:
             delta_fields = {"介入度增量": "intrusion_delta",
@@ -989,12 +1253,8 @@ class ChapterEditDialog(BaseDialog):
                 ui.ctk.dialogs.showerror("错误", "结局结算的行动点数返还必须是数字")
                 return
             result["icon_path"] = self.ending_icon_var.get().strip()
-
-        # 地点/取景地址/出口地址目前只能在 config.json 里手写：编辑其他字段保存时
-        # 原样带过去，避免一轮编辑把已经写好的地址悄悄抹掉（表单接入后删掉这段）。
-        for key in ("place", "address", "landmarks", "exit_address"):
-            if key in self.chapter:
-                result[key] = self.chapter[key]
+            # 出口地址只在结束章节写：改了角色就不再是结局，旧值没有意义
+            result["exit_address"] = exit_address
 
         self.result = normalize_chapter(result)
         self.destroy()
