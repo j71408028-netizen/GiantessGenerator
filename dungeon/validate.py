@@ -23,7 +23,8 @@ from dungeon import script_text
 from dungeon.admission import (FIELD_ADDRESS, FIELD_HEIGHT_MAX,
                                FIELD_HEIGHT_MIN, FIELD_MAX_DISTANCE,
                                coerce_distance, coerce_height)
-from core.address_model import format_addr_verbose, validate_address_text
+from core.address_model import (REL_DIVERGENT, REL_WORLD_MISMATCH, format_addr_verbose,
+                                relate, validate_address_text)
 from dungeon.actions import (VISUAL_FILTER_KEYS, WINDOW_FX_KEYS,
                              normalize_action_type)
 from dungeon.graph_lint import lint_graph
@@ -211,6 +212,7 @@ def validate_scenario_config(config, *, scenario_dir: str = None) -> list:
                        terminating, scenario_dir, add,
                        coupling_level=config.get("coupling_level"),
                        custom_attrs=custom_attrs)
+    _validate_scene(config, chapters, add)
     _validate_triggers(config.get("triggers"), chapter_names, terminating,
                        trigger_names, custom_attrs, scenario_dir, add,
                        coupling_level=config.get("coupling_level"),
@@ -749,6 +751,99 @@ def _validate_chapters(chapters_raw, effective, chapter_names, terminating,
             if key != "name" and key not in known:
                 add("info", f"chapters[{index}].{key}",
                     "未知章节字段（normalize 会原样保留，编辑器不识别）")
+
+
+#: 地标名直接进提示词，过长或带换行会污染这一行的结构
+_MAX_SCENE_NAME_LEN = 40
+
+
+def _validate_scene(config: dict, chapters, add) -> None:
+    """场景地标清单与章节地点字段（见 ``docs/designs/dungeon_scene.md`` §9）。
+
+    运行时对写坏的一条是「跳过 / 回落默认 / 按没写地址处理」，全部不吭声；
+    作者要能从诊断里知道哪一条没生效。地址解析失败报 error：它会让整章的
+    候选池退回「只有清单」，与作者本意（限定范围）正好相反。
+    """
+    raw = config.get("scene_landmarks")
+    if raw is not None and not isinstance(raw, list):
+        add("warning", "scene_landmarks", "场景地标清单必须是数组，已按空清单处理")
+        raw = []
+    raw = raw or []
+    scene_names = set()
+    dimensions = set()
+    for index, item in enumerate(raw):
+        path = f"scene_landmarks[{index}]"
+        if not isinstance(item, dict):
+            add("error", path, "地标条目必须是对象")
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            add("error", path + ".name", "地标缺少名称")
+        elif "\n" in name or "\r" in name:
+            add("error", path + ".name", "地标名称含换行（会直接进提示词）")
+        elif len(name) > _MAX_SCENE_NAME_LEN:
+            add("error", path + ".name",
+                f"地标名称超过 {_MAX_SCENE_NAME_LEN} 字（会直接进提示词）")
+        elif name in scene_names:
+            add("error", path + ".name", f"地标「{name}」在清单里重名（只取第一条）")
+        scene_names.add(name)
+
+        size = item.get("size")
+        if not _is_number(size) or size <= 0:
+            add("error", path + ".size", "尺寸必须是大于 0 的数字（米）")
+        dimension = str(item.get("dimension")
+                        or schema.DEFAULT_SCENE_LANDMARK_DIMENSION).strip().lower()
+        if dimension not in schema.SCENE_LANDMARK_DIMENSIONS:
+            add("error", path + ".dimension",
+                f"维度「{dimension}」无效"
+                f"（允许：{', '.join(schema.SCENE_LANDMARK_DIMENSIONS)}）")
+        else:
+            dimensions.add(dimension)
+        frequency = str(item.get("frequency") or "").strip().lower()
+        if frequency and frequency not in schema.SCENE_LANDMARK_FREQUENCIES:
+            add("warning", path + ".frequency",
+                f"出现频率「{frequency}」无效"
+                f"（允许：{', '.join(schema.SCENE_LANDMARK_FREQUENCIES)}），"
+                f"按 {schema.DEFAULT_SCENE_LANDMARK_FREQUENCY} 处理")
+        horizontal_type = str(item.get("horizontal_type") or "").strip().lower()
+        if (dimension == "horizontal" and horizontal_type
+                and horizontal_type not in schema.SCENE_LANDMARK_HORIZONTAL_TYPES):
+            add("warning", path + ".horizontal_type",
+                f"横向类型「{horizontal_type}」无效"
+                f"（允许：{', '.join(schema.SCENE_LANDMARK_HORIZONTAL_TYPES)}），"
+                f"按 {schema.DEFAULT_SCENE_LANDMARK_HORIZONTAL_TYPE} 处理")
+
+    if len(raw) >= 2 and len(dimensions) == 1:
+        only = "竖向" if "vertical" in dimensions else "横向"
+        add("warning", "scene_landmarks",
+            f"清单里只有{only}地标：另一种体位的尺寸换算句会没有参照物")
+
+    entry = str(config.get(FIELD_ADDRESS) or "").strip()
+    entry_ok = bool(entry) and not validate_address_text(entry)
+    for index, chapter in enumerate(chapters or []):
+        path = f"chapters[{index}]"
+        for key in ("address", "exit_address"):
+            text = str(chapter.get(key) or "").strip()
+            if not text:
+                continue
+            error = validate_address_text(text)
+            if error:
+                add("error", f"{path}.{key}",
+                    f"地址无法解析：{error}（运行时会按没写地址处理）")
+        address = str(chapter.get("address") or "").strip()
+        if entry_ok and address and not validate_address_text(address):
+            relation = relate(entry, address)
+            if relation.kind == REL_WORLD_MISMATCH:
+                add("warning", f"{path}.address",
+                    "取景地址与入口地址不在同一维度：取景不必与门同处，"
+                    "确认是有意为之")
+            elif relation.kind == REL_DIVERGENT and relation.diverge_level == 0:
+                add("warning", f"{path}.address",
+                    "取景地址与入口地址不在同一一级地域：确认是有意为之")
+        for name in chapter.get("landmarks") or []:
+            if name not in scene_names:
+                add("error", f"{path}.landmarks",
+                    f"本章引用了清单里不存在的地标「{name}」")
 
 
 def _validate_triggers(triggers, chapter_names, terminating, trigger_names,

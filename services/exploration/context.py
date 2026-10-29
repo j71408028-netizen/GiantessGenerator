@@ -151,6 +151,10 @@ class ExplorationContext:
     def _landmark_styles(self) -> dict:
         return self.catalog._landmark_styles
 
+    def landmarks_for_dungeon(self) -> list:
+        """副本启动载荷用：每条地标都带解析好的完整地址（见 address_plan）。"""
+        return self._addresses.landmarks_for_export()
+
     @property
     def quips(self) -> dict:
         return self.catalog.quips

@@ -21,6 +21,9 @@
 - ``personality`` / ``preset`` / ``character`` 是 dataclass，落成 ``asdict``，
   还原时用各自的 ``from_dict`` / 字段过滤构造（与仓库的存档序列化同一套
   往返，见 ``persistence/character_repo.py``）；
+- ``merged_landmarks`` 里的 ``Landmark`` 同样落成纯数据再还原：父进程已把
+  ``address`` 换成**完整地址**（子进程没有仓库与风格注册表，解析不了相对后缀，
+  见 ``docs/designs/dungeon_scene.md`` §6）；
 - 其余参数本来就是 JSON 安全的纯数据，原样透传。
 
 结果对象（:class:`~dungeon.window.result.SessionResult`）走同一条管道返回，
@@ -29,7 +32,7 @@
 
 from dataclasses import asdict, fields
 
-from core.models import BodyPreset, CharacterSnapshot, Personality
+from core.models import BodyPreset, CharacterSnapshot, Landmark, Personality
 
 #: 宿主侧概念参数：序列化时剔除，由子进程侧自行提供（host/仓库）或不再需要
 _HOST_SIDE_KEYS = ("parent", "host", "gui", "scenario_repo", "character_repo",
@@ -40,6 +43,30 @@ _DATACLASS_KEYS = {
     "personality": Personality.from_dict,
     "character": CharacterSnapshot.from_dict,
 }
+
+#: ``Landmark`` 的字段名（还原时按字段过滤，容忍未来新增字段）
+_LANDMARK_FIELDS = frozenset(f.name for f in fields(Landmark))
+
+
+def _landmarks_to_data(value):
+    """``list[Landmark]`` -> ``list[dict]``；其它形态原样返回。"""
+    if not isinstance(value, (list, tuple)):
+        return value
+    return [asdict(item) if isinstance(item, Landmark) else item for item in value]
+
+
+def _landmarks_from_data(value):
+    """``list[dict]`` -> ``list[Landmark]``；非条目原样保留。"""
+    if not isinstance(value, (list, tuple)):
+        return value
+    restored = []
+    for item in value:
+        if isinstance(item, dict):
+            restored.append(Landmark(**{k: v for k, v in item.items()
+                                        if k in _LANDMARK_FIELDS}))
+        else:
+            restored.append(item)
+    return restored
 
 
 def serialize_launch(kwargs: dict) -> dict:
@@ -52,6 +79,8 @@ def serialize_launch(kwargs: dict) -> dict:
             payload[key] = None
         elif key == "preset":
             payload[key] = asdict(value)
+        elif key == "merged_landmarks":
+            payload[key] = _landmarks_to_data(value)
         elif key in _DATACLASS_KEYS:
             payload[key] = asdict(value)
         else:
@@ -67,6 +96,8 @@ def deserialize_launch(payload: dict) -> dict:
             kwargs[key] = restore(kwargs[key])
     if isinstance(kwargs.get("preset"), dict):
         kwargs["preset"] = _from_fields(BodyPreset, kwargs["preset"])
+    if "merged_landmarks" in kwargs:
+        kwargs["merged_landmarks"] = _landmarks_from_data(kwargs["merged_landmarks"])
     return kwargs
 
 

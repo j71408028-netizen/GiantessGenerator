@@ -591,7 +591,7 @@ class ChallengeModePanel(ctk.CTkFrame):
             original_height=original_height, intro_hidden=intro_hidden,
             intro_visible=intro_visible, tags=tags, uploaded_image=None,
             scenario_config=scenario_config,
-            merged_landmarks=self.gui.context.merged_landmarks, merged_quips=self.gui.context.quips,
+            merged_landmarks=self.gui.context.landmarks_for_dungeon(), merged_quips=self.gui.context.quips,
             selected_styles=landmark_styles, selected_quip_styles=quip_styles_data,
             detail_pools=self.gui.context.detail_pools, height=height,
             ai_config=ai_config,

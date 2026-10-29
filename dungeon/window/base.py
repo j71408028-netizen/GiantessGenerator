@@ -42,8 +42,9 @@ from dungeon.audio.speech import (SpeechDirector, VoiceCaster, normalize_voice,
                                  set_proxy as set_speech_proxy)
 from dungeon.window.background import DungeonBackground
 from dungeon.window.fx import WindowFx
-from dungeon.audio.chapters import normalize_chapters
+from dungeon.audio.chapters import find_chapter, normalize_chapters
 from dungeon.coupling import normalize_coupling_level
+from dungeon.scene import landmarks_for_chapter
 from dungeon.window.frame import FrameScheduler
 from dungeon.window.host import HostPort
 from dungeon.window.result import (REASON_ALREADY_RUNNING, REASON_ENTRY_CANCELLED,
@@ -205,6 +206,8 @@ class DungeonWindowBase:
         self.current_replay_index = 0
         self.triggers = (scenario_config or {}).get("triggers", []) if not is_replay else []
         self.chapters = normalize_chapters((scenario_config or {}).get("chapters", []))
+        # 当前章节的尺寸换算候选池：章节名 -> 池子（切章失效，见 chapter_landmarks）
+        self._chapter_landmark_cache = None
         # 章节运行时状态：当前章节、章节持续敏感效果、章节效果的短暂覆盖
         self.current_chapter = None
         self.chapter_sensitivity_effects = []
@@ -475,6 +478,24 @@ class DungeonWindowBase:
 
         # 解除在宿主上的登记（恢复宿主时可能用得到活动窗口列表，故放在最后）
         self._unregister_with_parent()
+
+    # ---------------- 会话访问器 ----------------
+    def chapter_landmarks(self) -> list:
+        """本章的尺寸换算候选池（提示词与窗口共用）。
+
+        章节没写地址也没取清单时返回 ``merged_landmarks`` 全量——旧方案因此与
+        改动前逐字一致；写了地址就只留地址相配的全局地标，取清单则以清单为准
+        （组装规则见 ``dungeon/scene.py``）。按章节名缓存，切章失效。
+        """
+        key = self.current_chapter or ""
+        cached = self._chapter_landmark_cache
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        chapter = find_chapter(self.chapters, self.current_chapter)
+        pool = landmarks_for_chapter(self.scenario_config, chapter,
+                                     self.merged_landmarks)
+        self._chapter_landmark_cache = (key, pool)
+        return pool
 
     # ---------------- 会话内容初始化 ----------------
     def _current_action_points(self):

@@ -11,6 +11,8 @@ P4a 之后本类收敛为**地址解析 + stuck_options 工具层**：选点循�
 陈旧（见 ``catalog`` 模块的说明）。
 """
 
+from dataclasses import replace
+
 from core.address_model import (
     compose_address_ex, world_of, resolve_full_address,
 )
@@ -79,6 +81,27 @@ class AddressPlanner:
             if reg is None:
                 reg = self.catalog.landmark_repo.load_style_address(style)
         return resolve_full_address(reg, getattr(landmark, "address", "") or "")
+
+    def landmarks_for_export(self) -> list:
+        """副本启动载荷用的地标：每条都带解析好的**完整地址**。
+
+        副本会话在子进程里跑，那里没有地标仓库也没有风格注册表，``Landmark.address``
+        的相对后缀解析不出来，所以地址必须在父进程组合好再进载荷（见
+        ``docs/designs/dungeon_scene.md`` §6）。解析不了的地标照样导出（名字与
+        尺寸不变），只是标成 ``portable``——不参与副本内的地址相配。
+        """
+        registers = self.catalog.landmark_repo.load_style_registers(
+            self.catalog.selected_styles)
+        exported = []
+        for landmark in self.catalog.merged_landmarks:
+            address = self.landmark_address(landmark, registers)
+            if address:
+                exported.append(replace(landmark, address=address,
+                                        address_mode="exact"))
+            else:
+                exported.append(replace(landmark, address="",
+                                        address_mode="portable"))
+        return exported
 
     def stuck_options(self, state, stuck: dict) -> dict:
         """无路可走时可供角色选择的目标：当前/其它维度内的地标地址，以及可切换的维度。

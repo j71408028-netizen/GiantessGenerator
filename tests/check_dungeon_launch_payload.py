@@ -20,7 +20,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.models import BodyPreset, Personality
+from core.models import BodyPreset, Landmark, Personality
 from dungeon.window.launch_payload import (deserialize_launch, result_from_dict,
                                            result_to_dict, serialize_launch)
 from dungeon.window.result import (REASON_ALREADY_RUNNING, REASON_ENTRY_CANCELLED,
@@ -71,7 +71,10 @@ def main():
         "tags": ["高挑", "温柔"],
         "uploaded_image": "data/archives/测试娘/avatar/avatar.png",
         "scenario_config": None, "scenario_repo": object(),   # 宿主侧：剔除
-        "merged_landmarks": {"风格A": [{"name": "地标1", "size": 3.0}]},
+        "merged_landmarks": [Landmark(name="地标1", size=3.0, dimension="vertical",
+                                      frequency="unique",
+                                      address="1e3_1e2_1e1@RW-CN1-HD",
+                                      address_mode="exact")],
         "merged_quips": {"风格A": ["台词1"]},
         "selected_styles": ["风格A"], "selected_quip_styles": ["风格A"],
         "detail_pools": {"细节池": ["条目"]},

@@ -593,7 +593,7 @@ class ExplorationPanel(ctk.CTkFrame):
             tags=data.get("selected_tags", []),
             uploaded_image=data.get("uploaded_image"),
             scenario_config=None,
-            merged_landmarks=self.context.merged_landmarks,
+            merged_landmarks=self.context.landmarks_for_dungeon(),
             merged_quips=self.context.quips,
             selected_styles=self.context.selected_styles,
             selected_quip_styles=self.context.selected_quip_styles,

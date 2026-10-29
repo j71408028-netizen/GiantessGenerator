@@ -205,12 +205,24 @@ class DungeonPromptBuilder:
                     index=option_choice.get('index', 0), prompt=choice_prompt)
         return result
 
+    def _landmark_pool(self) -> list:
+        """本章的尺寸换算候选池（章节地址过滤后的全局池）。
+
+        会话提供 ``chapter_landmarks()`` 时以它为准——空池也是答案（作者把
+        范围限死了，不该回落到全量）；脱离窗口的调用方只有 ``merged_landmarks``，
+        按改动前的全量处理。
+        """
+        getter = getattr(self.context, "chapter_landmarks", None)
+        if callable(getter):
+            return getter()
+        return getattr(self.context, "merged_landmarks", None) or []
+
     def _get_height_match(self):
         session = self.context
         if not session.body_parts or "身高" not in session.body_parts:
             return ""
         comparisons = get_comparisons(
-            session.merged_landmarks, {"身高": session.body_parts["身高"]},
+            self._landmark_pool(), {"身高": session.body_parts["身高"]},
             order="match", limit=1, selected_tags=[], skip_base_prob=0.0,
             blocked_words=self._blocked_words())
         if not comparisons:
@@ -284,7 +296,7 @@ class DungeonPromptBuilder:
         if not part or part not in session.body_parts:
             return ""
         comparisons = get_comparisons(
-            session.merged_landmarks, {part: session.body_parts[part]},
+            self._landmark_pool(), {part: session.body_parts[part]},
             order="match", limit=1, selected_tags=[], skip_base_prob=0.0,
             blocked_words=self._blocked_words())
         if not comparisons:
