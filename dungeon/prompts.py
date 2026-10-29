@@ -9,6 +9,7 @@ from .coupling import (COMMON_OUTPUT_RULE, DEFAULT_COUPLING_LEVEL, coupling_prom
                        normalize_coupling_level, section_instruction)
 from .details import search_replay_details
 from .models import DungeonTextType
+from .scene import place_label
 
 
 # 部位名 → 触发正则：正文中出现即视为"注意到该部位"。
@@ -155,6 +156,11 @@ class DungeonPromptBuilder:
             chapter = find_chapter(getattr(session, "chapters", None), chapter_name)
             note = str((chapter or {}).get("note") or "").strip()
             chapter_line = f"当前章节：{chapter_name}" + (f"（{note}）" if note else "") + "\n"
+            # 当前地点：写实副本要的是"她在一座真城市里"，模型知道地名才写得相称；
+            # 虚构副本不写地址，这一行就不出现，没有可漏的东西
+            place = place_label(chapter)
+            if place:
+                chapter_line += f"当前地点：{place}\n"
         # 细节补充：AI 在上一段生成后提出的疑问，从回放缓存检索原文解答
         detail_block = ""
         pending_queries = getattr(session, "_detail_queries", None)

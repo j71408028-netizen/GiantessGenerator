@@ -613,6 +613,8 @@ class DungeonStoryEngine:
             "action_points_refund": chapter.get("action_points_refund", 0),
             "custom_deltas": dict(chapter.get("custom_deltas") or {}),
             "icon_path": chapter.get("icon_path", ""),
+            # 与结局触发器的 action_data 同键：结局决定她出来后站在哪
+            "exit_address": chapter.get("exit_address", ""),
         }
         self.pending_ending = {"name": name, "action_data": action_data,
                                "trigger_index": -1, "chapter": chapter.get("name")}

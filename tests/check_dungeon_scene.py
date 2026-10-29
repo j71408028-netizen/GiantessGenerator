@@ -10,9 +10,11 @@
 3. ``landmarks`` 白名单的三种写法（缺省 / 空列表 / 名字子集）；
 4. 坏地址只留清单、**不**回落全量，且校验器报 error；
 5. 会话访问器与提示词读同一个池子，按章节缓存、切章失效；
-6. 父进程把地标解析成完整地址再过载荷，副本内的地址相配才可能成立。
+6. 父进程把地标解析成完整地址再过载荷，副本内的地址相配才可能成立；
+7. 展示：``place`` / 紧凑地址 / 空三种形态，以及提示词的「当前地点」行；
+8. 结局传送：写回 ``position``、坏地址不动位置、未建角色时暂存。
 
-结局传送与坐标带出预算属于后续阶段，不在本文件断言。
+坐标带出预算属于后续阶段，不在本文件断言。
 """
 
 import json
@@ -190,7 +192,8 @@ _clean_scene_config = {
     "chapters": [
         {"name": "一", "start": True, "place": "黑塔脚下",
          "address": _CITY, "landmarks": ["黑塔"]},
-        {"name": "二", "ending": True, "address": _CELL},
+        {"name": "二", "ending": True, "address": _CELL,
+         "exit_address": _CELL},
     ],
 }
 _clean_diags = validate_scenario_config(_clean_scene_config)
@@ -324,6 +327,155 @@ check("载荷：还原成 Landmark 且地址保留",
 check("载荷：还原后的地址仍能配对",
       _names(scene.ambient_landmarks(_restored["merged_landmarks"], _CITY))
       == ["黑塔"])
+
+# ---------------- 8. 展示：当前地点 ----------------
+from core.models import CharacterSnapshot  # noqa: E402
+from dungeon.models import DungeonState, DungeonTextType  # noqa: E402
+from dungeon.window.engine import DungeonStoryEngine  # noqa: E402
+from dungeon.window.persistence import DungeonPersistence  # noqa: E402
+
+check("地点：place 优先于地址",
+      scene.place_label({"place": "黑塔脚下", "address": _CITY}) == "黑塔脚下")
+_compact = scene.place_label({"address": _CITY})
+check("地点：没写 place 时退回紧凑地址", "CN1" in _compact and _compact != _CITY,
+      _compact)
+check("地点：两处都空返回空串", scene.place_label({}) == "")
+check("地点：坏地址照原样展示（校验器负责报错，展示不做静默吞掉）",
+      scene.place_label({"address": "乱写"}) == "乱写")
+
+
+def _place_session(chapters, current):
+    session = types.SimpleNamespace(chapters=chapters, current_chapter=current)
+    session.current_place = types.MethodType(DungeonWindowBase.current_place, session)
+    return session
+
+
+_place_state = _place_session(
+    [{"name": "城里", "address": _CITY}, {"name": "空章"}, {"name": "有地名",
+                                                         "place": "集市"}], "城里")
+check("访问器：current_place 读章节地址",
+      _place_state.current_place() == _compact, _place_state.current_place())
+_place_state.current_chapter = "有地名"
+check("访问器：写了 place 就用 place", _place_state.current_place() == "集市")
+_place_state.current_chapter = "空章"
+check("访问器：没地点的章节返回空串", _place_state.current_place() == "")
+
+
+def _prompt_session(chapters, current):
+    session = types.SimpleNamespace(
+        chapters=chapters, current_chapter=current,
+        name="测试", nick="", coupling_level=None, protagonist_title="",
+        prompted_parts=set(), keyword_match_given=set(), last_ai_text="",
+        option_choice=None, story_summary=None, replay_data=[], _detail_queries=None,
+        pending_insertions=[], selected_quip_styles=[],
+        settings={"blocked_words": []}, scenario_config={},
+        merged_landmarks=[], _chapter_landmark_cache=None,
+        body_parts={}, dungeon_state=DungeonState(intrusion=2.0, destruction=2.0),
+    )
+    session.chapter_landmarks = types.MethodType(
+        DungeonWindowBase.chapter_landmarks, session)
+    return session
+
+
+_text_type = list(DungeonTextType)[0]
+_place_prompt = DungeonPromptBuilder(
+    _prompt_session([{"name": "城里", "address": _CITY, "place": "黑塔脚下"}],
+                    "城里")).build_user_prompt(_text_type)
+check("提示词：章节行之后给出当前地点",
+      "当前章节：城里" in _place_prompt and "当前地点：黑塔脚下" in _place_prompt,
+      _place_prompt[-300:])
+check("提示词：地点行紧跟章节行",
+      _place_prompt.index("当前地点：") > _place_prompt.index("当前章节："))
+_no_place_prompt = DungeonPromptBuilder(
+    _prompt_session([{"name": "城里", "address": _CITY}], "城里")
+).build_user_prompt(_text_type)
+check("提示词：只写地址的章节用紧凑地址当地点",
+      f"当前地点：{_compact}" in _no_place_prompt, _no_place_prompt[-300:])
+_bare_prompt = DungeonPromptBuilder(
+    _prompt_session([{"name": "城里"}], "城里")).build_user_prompt(_text_type)
+check("提示词：虚构章节不出现地点行", "当前地点" not in _bare_prompt,
+      _bare_prompt[-300:])
+
+# ---------------- 9. 结局传送 ----------------
+check("传送：合法地址原样返回", scene.landing_position(_CELL) == _CELL)
+check("传送：空 / 坏地址一律不动位置",
+      scene.landing_position("") == "" and scene.landing_position("乱写") == ""
+      and scene.landing_position(None) == "")
+
+
+def _ending_session(exit_text="", char=None):
+    session = types.SimpleNamespace(
+        character=char,
+        dungeon_state=DungeonState(intrusion=2.0, destruction=2.0),
+        height=100.0, ending_text="", name="测试", nick="",
+        body_parts={},
+        original_height=1.6, personality=None, greed=0.0, tags=[],
+        intro_hidden="", intro_visible="", character_repo=None,
+        _pending_exit_position="",
+        ending_effects={"exit_address": exit_text},
+    )
+    session._apply_ending_effects = types.MethodType(
+        DungeonPersistence._apply_ending_effects, session)
+    session._create_character_from_session = types.MethodType(
+        DungeonPersistence._create_character_from_session, session)
+    return session
+
+
+def _char(position=""):
+    return CharacterSnapshot(giantess_id="g1", name="测试", position=position)
+
+
+_moved = _ending_session(_CELL, _char(_CITY))
+_moved._apply_ending_effects()
+check("传送：结算把位置写回 exit_address", _moved.character.position == _CELL,
+      _moved.character.position)
+check("传送：追加的演化行带上到访地址",
+      _moved.character.evolution[-1].position == _CELL,
+      _moved.character.evolution[-1].position)
+
+_kept = _ending_session("", _char(_CITY))
+_kept._apply_ending_effects()
+check("传送：没写 exit_address 时位置不变",
+      _kept.character.position == _CITY and _kept.character.evolution[-1].position == "")
+
+_bad_exit = _ending_session("乱写", _char(_CITY))
+_bad_exit._apply_ending_effects()
+check("传送：坏地址不写位置（校验器报 error，运行期保持原位）",
+      _bad_exit.character.position == _CITY)
+
+_pending = _ending_session(_CELL, None)
+_pending._apply_ending_effects()
+check("传送：尚未建角色时先暂存", _pending._pending_exit_position == _CELL)
+_new_char = _pending._create_character_from_session()
+check("传送：暂存值成为新角色的初始位置", _new_char.position == _CELL,
+      _new_char.position)
+check("传送：新角色的初始演化行同样带位置",
+      _new_char.evolution[-1].position == _CELL)
+check("传送：暂存只消费一次", _pending._pending_exit_position == "")
+
+_new_plain = _ending_session("", None)
+_new_plain._apply_ending_effects()
+check("传送：没有传送目的地时新角色位置为空",
+      _new_plain._create_character_from_session().position == "")
+
+# 传送的唯一入口是结束章节（`ending` 动作已删除，触发器路径不再读 exit_address）
+def _ending_chapter_session():
+    session = types.SimpleNamespace()
+    session._start_ending_generation = lambda: None   # 只验结算字段，不生成结局文本
+    return session
+
+
+_from_chapter = _ending_chapter_session()
+DungeonStoryEngine._terminate_from_ending_chapter(
+    _from_chapter, {"name": "终章", "ending": True, "exit_address": _CELL})
+check("传送：结束章节把 exit_address 带进结算字段",
+      _from_chapter.pending_ending["action_data"]["exit_address"] == _CELL,
+      _from_chapter.pending_ending)
+_no_exit = _ending_chapter_session()
+DungeonStoryEngine._terminate_from_ending_chapter(
+    _no_exit, {"name": "终章", "ending": True})
+check("传送：没写 exit_address 的结束章节结算字段为空",
+      _no_exit.pending_ending["action_data"]["exit_address"] == "")
 
 # ---------------- 结论 ----------------
 _log.flush()

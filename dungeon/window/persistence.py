@@ -10,6 +10,7 @@ from paths import data_dir
 from core.logic import compute_casualty
 from core.models import CharacterSnapshot
 from persistence.json_store import load_json_with_backup, write_json_atomic, write_text_atomic
+from dungeon.scene import landing_position
 from dungeon.terms import scenario_id_of
 from services.state_service import StateService
 
@@ -144,6 +145,9 @@ class DungeonPersistence:
                 pass
 
         char = self.character
+        # 结局传送：副本改写主世界位置的唯一入口（见 docs/designs/dungeon_scene.md §8）。
+        # 空 / 解不出的地址一律不动位置——那是绝大多数结局的默认行为。
+        exit_position = landing_position(effects.get("exit_address"))
         if char is not None:
             StateService.refund_action_points(char, refund)
             # 结局结算记为一行完整演化：步进取结局配置的伤亡步进；
@@ -156,7 +160,12 @@ class DungeonPersistence:
                 destruction=dest_after,
                 casualties=char.total_casualties + cas_d,
                 source="_apply_ending_effects",
+                # 到访地址供空间档案学习区域；未传送则为空（不作为到访证据）
+                position=exit_position,
             )
+            if exit_position:
+                char.position = exit_position
+                process_log.log(f"[Ending] 结局传送：位置写回 {exit_position}")
             # 副本会话内演化的步长同步到角色存储（未演化为 None 时保留角色现值）
             ds = self.dungeon_state
             if getattr(ds, "step_intrusion", None) is not None:
@@ -168,6 +177,10 @@ class DungeonPersistence:
                     self.character_repo.save(char)
                 except Exception as e:
                     process_log.log(f"[Ending] 角色数据保存失败: {e}")
+        elif exit_position:
+            # 本局还没建角色（挑战模式 / 入口阶段）：先记下，
+            # 由 _create_character_from_session 作为初始位置写入
+            self._pending_exit_position = exit_position
 
         process_log.log(f"[Ending] 结局增量已结算：介入度{intr_d:+.2f}，破坏性{dest_d:+.2f}，"
               f"伤亡{cas_d:+.2f}，行动点数返还{refund:+d}")
@@ -197,6 +210,8 @@ class DungeonPersistence:
         return "\n".join(lines)
 
     def _create_character_from_session(self) -> CharacterSnapshot:
+        # 结局传送目的地：本局在创建角色之前就走到结局时由 _apply_ending_effects 暂存
+        exit_position = getattr(self, "_pending_exit_position", "") or ""
         char = CharacterSnapshot(
             giantess_id=f"{self.name}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}",
             name=self.name,
@@ -210,7 +225,9 @@ class DungeonPersistence:
             selected_tags=list(self.tags or []),
             intro_hidden=self.intro_hidden or "",
             intro_visible=self.intro_visible or "",
+            position=exit_position,
         )
+        self._pending_exit_position = ""
         # 初始演化行：记录副本结束时的介入度/破坏性/累计伤亡
         # （副本会话内坐标为 0~5，写入角色时统一夹取到角色的 0.5~4.5 边界）
         session_intr, session_dest = StateService.clamp_coordinates(
@@ -222,6 +239,7 @@ class DungeonPersistence:
             destruction=session_dest,
             casualties=getattr(self.dungeon_state, "total_casualties", 0.0),
             source="_create_character_from_session",
+            position=exit_position,
         )
         # 副本会话内演化的步长同步到角色存储
         char.step_intrusion = getattr(self.dungeon_state, "step_intrusion", None)

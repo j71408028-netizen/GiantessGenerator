@@ -44,7 +44,7 @@ from dungeon.window.background import DungeonBackground
 from dungeon.window.fx import WindowFx
 from dungeon.audio.chapters import find_chapter, normalize_chapters
 from dungeon.coupling import normalize_coupling_level
-from dungeon.scene import landmarks_for_chapter
+from dungeon.scene import landmarks_for_chapter, place_label
 from dungeon.window.frame import FrameScheduler
 from dungeon.window.host import HostPort
 from dungeon.window.result import (REASON_ALREADY_RUNNING, REASON_ENTRY_CANCELLED,
@@ -155,6 +155,9 @@ class DungeonWindowBase:
         buses.set_bus_levels(buses.levels_from_settings(self.dungeon_settings))
         self.ending_effects = {}
         self.ending_text = ""
+        # 结局传送目的地（``exit_address``，已解析）：本局尚未创建角色时暂存，
+        # 由 _create_character_from_session 作为初始位置写入
+        self._pending_exit_position = ""
         # 当前结局触发器信息（图标路径、触发器下标、已写入的索引记录）
         self.ending_icon_path = ""
         self._ending_trigger_index = -1
@@ -496,6 +499,14 @@ class DungeonWindowBase:
                                      self.merged_landmarks)
         self._chapter_landmark_cache = (key, pool)
         return pool
+
+    def current_place(self) -> str:
+        """当前章节的展示地点（提示词与窗口组件共用）。
+
+        ``place`` 优先，其次退回紧凑地址描述；两处都没写的章节返回空串，调用方
+        据此决定是否展示（虚构副本不写地址，界面上就不该出现任何地名）。
+        """
+        return place_label(find_chapter(self.chapters, self.current_chapter))
 
     # ---------------- 会话内容初始化 ----------------
     def _current_action_points(self):

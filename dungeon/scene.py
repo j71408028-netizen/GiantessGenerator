@@ -12,14 +12,14 @@
 本模块是纯逻辑，只依赖 ``core`` 与同层 ``dungeon.schema``，不碰 UI / services。
 """
 
-from core.address_model import relate
+from core.address_model import format_addr_compact, parse_full, relate
 from core.models import Landmark
 
 from . import schema
 
 __all__ = [
     "build_landmarks", "chapter_place", "chapter_address", "exit_address",
-    "ambient_landmarks", "landmarks_for_chapter",
+    "ambient_landmarks", "landmarks_for_chapter", "place_label", "landing_position",
 ]
 
 
@@ -74,6 +74,27 @@ def chapter_address(chapter) -> str:
 def exit_address(chapter) -> str:
     """结局的传送目的地（完整地址文本）；空串表示位置不变。"""
     return str((chapter or {}).get("exit_address") or "").strip()
+
+
+def place_label(chapter) -> str:
+    """章节的展示地点：``place`` 优先，其次退回紧凑地址描述；都没有返回空串。
+
+    窗口与提示词读同一个值，所以"作者起的名字"总压过"地址原文"——写了
+    ``place`` 的章节不会把带精度提示的地址串漏到界面上。
+    """
+    place = chapter_place(chapter)
+    if place:
+        return place
+    address = chapter_address(chapter)
+    return format_addr_compact(address) if address else ""
+
+
+def landing_position(text) -> str:
+    """结局传送目的地：能解析的完整地址原样返回；空 / 解不出返回空串（位置不变）。"""
+    text = str(text or "").strip()
+    if not text:
+        return ""
+    return text if parse_full(text) is not None else ""
 
 
 def ambient_landmarks(merged, address) -> list:
