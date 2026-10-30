@@ -194,11 +194,28 @@ class WorldManager:
     # ---------- 激活 / 卸载 ----------
 
     def load_active(self, world_id: str) -> WorldPackManifest:
-        """按已持久化的 active_world 恢复激活状态，并加载包内行为包。"""
+        """按已持久化的 active_world 恢复激活状态，并加载包内行为包与话题表。"""
         manifest = self.get_manifest(world_id)
         self.world_state.set_active(manifest)
         get_runtime().load_pack(manifest, installed_dir(self.data_dir, world_id))
+        self._apply_topic_table(manifest)
         return manifest
+
+    def _apply_topic_table(self, manifest: WorldPackManifest) -> None:
+        """把包声明的话题表安装为当前生效表；未声明或加载失败时用内置表。
+
+        延迟导入：聊天栈体量大，只在真正激活/卸载世界包时才需要它。
+        """
+        from services.chat import topic_tables
+        table = topic_tables.declared_table(manifest)
+        if not table:
+            topic_tables.restore()
+            return
+        try:
+            topic_tables.activate(table, self.data_dir, self.world_state)
+        except ValueError as exc:
+            print(f"[WorldPack] 话题表「{table}」加载失败，改用内置表: {exc}")
+            topic_tables.restore()
 
     def apply_world_settings(self, settings: Dict[str, Any]) -> None:
         """把激活包的设置叠加到内存 settings（世界块键 + 风格接管 + 表名校正）。"""
@@ -285,6 +302,8 @@ class WorldManager:
         settings.pop("active_world", None)
         self.world_state.set_active(None)
         get_runtime().reset()
+        from services.chat import topic_tables
+        topic_tables.restore()
         if settings_repo is not None:
             settings_repo.save(settings)
 
@@ -320,11 +339,17 @@ class WorldManager:
 
     @staticmethod
     def _safe_suffix(manifest: WorldPackManifest) -> str:
-        """生成用于冲突重命名的后缀：世界包名称_版本号。"""
-        name = re.sub(r'[\\/:*?"<>|\s]+', "_", manifest.name).strip("_")
-        if not name:
-            name = manifest.world_id or "world"
-        return f"{name}_{manifest.version}"
+        """冲突重命名后缀：取世界包 id 与版本，清洗成资源 id 允许的字符。
+
+        包名可以是任意语言，但资源 id 只接受小写 ASCII（``RESOURCE_ID_RE``），
+        直接拿名称拼会让解散出来的副本变成注册表不认识的文件。
+        """
+        def _slug(value: str) -> str:
+            return re.sub(r"[^a-z0-9._-]+", "_", str(value or "").lower()).strip("._-")
+
+        base = _slug(manifest.world_id) or "world"
+        version = _slug(manifest.version)
+        return f"{base}_{version}" if version else base
 
     @staticmethod
     def _target_name(dst_dir: str, name: str, ext: str,
@@ -457,6 +482,45 @@ class WorldManager:
             os.makedirs(dst_dir, exist_ok=True)
             dst = self._target_name(dst_dir, behavior, "", manifest)
             self._copy_behavior_pack(src, os.path.join(dst_dir, dst))
+        # 话题表：解开后成为自由目录里的一张表，可再被其它包带走。
+        for table in manifest.resources.get("topics", []):
+            src = os.path.join(installed, "topics",
+                               _registry.primary_relpath("topics", table))
+            if not os.path.isfile(src):
+                continue
+            dst_dir = os.path.join(packs_root, "topics")
+            os.makedirs(dst_dir, exist_ok=True)
+            dst = self._target_name(dst_dir, table, "", manifest)
+            shutil.copy2(src, os.path.join(
+                dst_dir, _registry.primary_relpath("topics", dst)))
+        # 小游戏：整目录解开到自由目录。
+        for game_id in manifest.resources.get("minigames", []):
+            src = os.path.join(installed, "minigames", game_id)
+            if not os.path.isdir(src):
+                continue
+            dst_dir = os.path.join(packs_root, "minigames")
+            os.makedirs(dst_dir, exist_ok=True)
+            dst = self._target_name(dst_dir, game_id, "", manifest)
+            shutil.rmtree(os.path.join(dst_dir, dst), ignore_errors=True)
+            shutil.copytree(
+                src, os.path.join(dst_dir, dst),
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"))
+        self._restore_envelopes(manifest, installed)
+
+    def _restore_envelopes(self, manifest: WorldPackManifest, installed: str) -> None:
+        """解散时把包内信封写回自由目录；目标已有信封时不覆盖。"""
+        for type_id, value in manifest.resources.items():
+            if isinstance(value, bool) or not value:
+                continue
+            for resource_id in value:
+                src = os.path.join(installed, type_id, f"{resource_id}.meta.json")
+                if not os.path.isfile(src):
+                    continue
+                dst = _registry.envelope_path_of(type_id, resource_id, self.data_dir)
+                if os.path.exists(dst):
+                    continue
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copy2(src, dst)
 
     # ---------- 从当前世界创建 ----------
 
@@ -492,6 +556,7 @@ class WorldManager:
             if manifest.owns("behaviors"):
                 # 程序内创建的包按当前运行时契约盖章，激活时不产版本警告
                 manifest.behavior_api = BEHAVIOR_API_VERSION
+            self._copy_envelopes(manifest, target)
             for key in ("world_setting", "seed"):
                 if key in settings and settings.get(key) is not None:
                     manifest.settings[key] = settings[key]
@@ -617,6 +682,31 @@ class WorldManager:
                 self._copy_behavior_pack(
                     src, os.path.join(target, "behaviors", name))
                 resources["behaviors"] = [name]
+        # 话题表整表替换：一份容器就是一张完整表，内置表也可以直接打包。
+        declared_topics = (selected.get("topics") or [])[:1]
+        if declared_topics:
+            from services.chat import topic_tables
+            table = declared_topics[0]
+            entries = topic_tables.load_entries(
+                table, self.data_dir, self.world_state)
+            os.makedirs(os.path.join(target, "topics"), exist_ok=True)
+            _save_json(
+                os.path.join(target, "topics",
+                             _registry.primary_relpath("topics", table)),
+                entries)
+            resources["topics"] = [table]
+        # 小游戏数据包：整目录复制（manifest.json + 入口 + 素材）。
+        collected_games = []
+        for game_id in selected.get("minigames", []):
+            src = self._resolve_minigame(game_id)
+            if src is None:
+                continue
+            shutil.copytree(
+                src, os.path.join(target, "minigames", game_id),
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"))
+            collected_games.append(game_id)
+        if collected_games:
+            resources["minigames"] = collected_games
         # 派生 worlds：从收集到的地标 / 描述风格注册地址取维度并集。
         # 全部未注册地址时保持空（未声明 → 整类型接管旧行为）。
         worlds = set()
@@ -629,6 +719,35 @@ class WorldManager:
                     worlds.add(w)
         manifest.worlds = sorted(worlds)
         manifest.resources = resources
+
+    def _copy_envelopes(self, manifest: WorldPackManifest, target: str) -> None:
+        """把每份导出资源的兄弟信封一并放进包内。
+
+        包内资源要能脱离本机的 ``catalog.json`` 被索引，信封必须随行；
+        不可读容器（挑战包）尤其如此——它的元数据只能外挂。
+        """
+        for type_id, value in manifest.resources.items():
+            if isinstance(value, bool) or not value:
+                continue
+            dest_dir = os.path.join(target, type_id)
+            for resource_id in value:
+                src = _registry.envelope_path_of(type_id, resource_id, self.data_dir)
+                if not os.path.isfile(src):
+                    continue
+                os.makedirs(dest_dir, exist_ok=True)
+                shutil.copy2(src, os.path.join(dest_dir, f"{resource_id}.meta.json"))
+
+    def _resolve_minigame(self, game_id: str) -> Optional[str]:
+        """小游戏数据包目录：自由目录优先，其次是激活包内的同名目录。"""
+        candidates = [os.path.join(self.data_dir, "packs", "minigames", game_id)]
+        if self.world_state.active:
+            pack_root = self.world_state.pack_root()
+            if pack_root:
+                candidates.append(os.path.join(pack_root, "minigames", game_id))
+        for path in candidates:
+            if os.path.isdir(path):
+                return path
+        return None
 
     @staticmethod
     def _copy_behavior_pack(src: str, dst: str) -> None:

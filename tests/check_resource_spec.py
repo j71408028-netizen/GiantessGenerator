@@ -22,6 +22,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -30,6 +31,7 @@ from core.resource_spec import (  # noqa: E402
     check_spec_consistency,
     packable_type_ids,
     spec_of,
+    type_ids,
     valid_resource_id,
     valid_type_id,
 )
@@ -38,7 +40,8 @@ from persistence.resource_settings_repo import (  # noqa: E402
     RESOURCE_SETTINGS_KEYS as LEGACY_SETTING_KEYS,
 )
 from core.resource_ref import Ref  # noqa: E402
-from persistence.resources import envelope as envelope_mod  # noqa: E402
+from core import resource_sync  # noqa: E402
+from persistence.resources import catalog_store, envelope as envelope_mod  # noqa: E402
 from persistence.resources import registry  # noqa: E402
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -89,8 +92,8 @@ check(LEGACY_SETTING_KEYS is registry.RESOURCE_SETTINGS_KEYS,
       "resource_settings_repo 复用注册表的键集")
 check(len(set(registry.RESOURCE_SETTINGS_KEYS)) == len(registry.RESOURCE_SETTINGS_KEYS),
       "RESOURCE_SETTINGS_KEYS 无重复")
-check(tuple(registry.RESOURCE_TYPE_LABELS) == packable_type_ids() + ("minigames",),
-      "显示名覆盖全部类型且与声明同序", sorted(registry.RESOURCE_TYPE_LABELS))
+check(tuple(registry.RESOURCE_TYPE_LABELS) == type_ids(),
+      "显示名覆盖全部类型且与声明同序", list(registry.RESOURCE_TYPE_LABELS))
 check(set(registry.MULTI_PICK_TYPES).isdisjoint(registry.SINGLE_PICK_TYPES)
       and set(registry.MULTI_PICK_TYPES) | set(registry.SINGLE_PICK_TYPES)
       == set(registry.PACK_RESOURCE_PATHS),
@@ -354,6 +357,93 @@ check(Ref.parse("缺少类型分隔符") is None, "无法解析的文本返回 N
 check(Ref.scoped("landmarks", "", "裸名").text == "landmarks:裸名",
       "无容器时退化为仅身份")
 check(len({_ref, Ref.parse(_ref.text)}) == 1, "Ref 可哈希去重")
+
+# ---------------- 7. 索引缓存（catalog.json） ----------------
+_tmp_cat = tempfile.mkdtemp(prefix="rescat_")
+try:
+    _landmarks = os.path.join(_tmp_cat, "packs", "landmarks")
+    os.makedirs(_landmarks)
+    with open(os.path.join(_landmarks, "chinese_mix"), "w", encoding="utf-8") as handle:
+        handle.write("[]")
+
+    _path = catalog_store.catalog_path(_tmp_cat)
+    _first = catalog_store.refresh_catalog(_tmp_cat)
+    check(os.path.isfile(_path), "首次刷新把索引落盘")
+    check(_first["rev"] == "" and _first["origin"] == "",
+          "本地索引不带远端游标", (_first["rev"], _first["origin"]))
+    _stamp = os.stat(_path).st_mtime_ns
+    time.sleep(0.02)
+    catalog_store.refresh_catalog(_tmp_cat)
+    check(os.stat(_path).st_mtime_ns == _stamp, "内容未变时不重写缓存")
+
+    os.remove(_path)
+    _rebuilt = catalog_store.load_catalog(_tmp_cat)
+    check(os.path.isfile(_path), "缓存缺失时自动重建")
+    check(catalog_store.catalog_ids(_rebuilt, "landmarks") == ["chinese_mix"],
+          "重建结果与磁盘一致", catalog_store.catalog_ids(_rebuilt, "landmarks"))
+
+    with open(os.path.join(_landmarks, "extension"), "w", encoding="utf-8") as handle:
+        handle.write("[]")
+    _after = catalog_store.refresh_catalog(_tmp_cat)
+    check(catalog_store.catalog_ids(_after, "landmarks") == ["chinese_mix", "extension"],
+          "缓存不是权威：改盘后刷新即见", catalog_store.catalog_ids(_after, "landmarks"))
+    check(set(_after["entries"]) == set(type_ids()), "索引桶覆盖全部声明类型")
+finally:
+    shutil.rmtree(_tmp_cat, ignore_errors=True)
+
+# ---------------- 8. 同步判定（无网络） ----------------
+_local_cat = {"entries": {"landmarks": [
+    {"id": "same", "content_hash": "h1"},
+    {"id": "only_local", "content_hash": "h2"},
+    {"id": "local_changed", "content_hash": "h3-local"},
+    {"id": "remote_changed", "content_hash": "h4"},
+    {"id": "both_changed", "content_hash": "h5-local"},
+    {"id": "no_base", "content_hash": "h6-local"},
+]}}
+_remote_cat = {"entries": {"landmarks": [
+    {"id": "same", "content_hash": "h1"},
+    {"id": "only_remote", "content_hash": "h7"},
+    {"id": "local_changed", "content_hash": "h3"},
+    {"id": "remote_changed", "content_hash": "h4-remote"},
+    {"id": "both_changed", "content_hash": "h5-remote"},
+    {"id": "no_base", "content_hash": "h6-remote"},
+]}}
+_base_cat = {"entries": {"landmarks": [
+    {"id": "local_changed", "content_hash": "h3"},
+    {"id": "remote_changed", "content_hash": "h4"},
+    {"id": "both_changed", "content_hash": "h5"},
+]}}
+_diff = resource_sync.diff_catalogs(_local_cat, _remote_cat, _base_cat)
+_states = _diff["landmarks"]
+check(_states["same"] == resource_sync.IN_SYNC, "同哈希判定为一致", _states["same"])
+check(_states["only_local"] == resource_sync.LOCAL_ONLY, "仅本地")
+check(_states["only_remote"] == resource_sync.REMOTE_NEW, "仅远端")
+check(_states["local_changed"] == resource_sync.LOCAL_CHANGED,
+      "本地改、远端仍基线", _states["local_changed"])
+check(_states["remote_changed"] == resource_sync.REMOTE_CHANGED,
+      "远端改、本地仍基线", _states["remote_changed"])
+check(_states["both_changed"] == resource_sync.BOTH_CHANGED,
+      "两侧都改", _states["both_changed"])
+check(_states["no_base"] == resource_sync.BOTH_CHANGED,
+      "没有基线时不猜是谁改的", _states["no_base"])
+_offline = resource_sync.diff_catalogs(_local_cat, None)
+check(set(_offline["landmarks"].values()) == {resource_sync.LOCAL_ONLY},
+      "没有远端时全部 local_only", _offline)
+check(resource_sync.summarize(_diff)["in_sync"] == 1, "状态计数")
+check("same" not in resource_sync.pending_changes(_diff)["landmarks"],
+      "待处理列表去掉已一致条目")
+check(resource_sync.entry_state(_diff, "landmarks", "same") == resource_sync.IN_SYNC
+      and resource_sync.entry_state(_diff, "landmarks", "absent")
+      == resource_sync.IN_SYNC, "查询未收录条目按一致处理")
+
+# ---------------- 9. 新增一类资源只需要声明 ----------------
+for spec in RESOURCE_TYPES:
+    _root = registry.read_dir(spec.type_id, _DATA)
+    check(os.path.basename(_root) == spec.type_id, f"{spec.type_id} 目录名即类型 id")
+    check(os.path.dirname(_root) == os.path.join(_DATA, spec.root),
+          f"{spec.type_id} 落在声明的存储根内", _root)
+check(set(registry.MULTI_PICK_TYPES) | set(registry.SINGLE_PICK_TYPES)
+      == set(type_ids()), "选择粒度覆盖全部可打包类型")
 
 print(f"PASSED ({_checked} assertions)")
 sys.exit(0)

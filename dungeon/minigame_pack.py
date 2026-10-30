@@ -15,9 +15,43 @@ import os
 from dungeon import process_log
 
 
+def pack_roots(game_id):
+    """小游戏数据包的候选目录：自由目录优先，其次是激活世界包内的同名目录。"""
+    from paths import active_world_id, data_dir
+    root = data_dir()
+    roots = [os.path.join(root, "packs", "minigames", str(game_id))]
+    world_id = active_world_id()
+    if world_id:
+        roots.append(os.path.join(root, "worlds", world_id, "minigames", str(game_id)))
+    return roots
+
+
 def pack_root(game_id):
-    from paths import data_dir
-    return os.path.join(data_dir(), "packs", "minigames", str(game_id))
+    """解析到的小游戏包目录；都不存在时返回自由目录下的位置（写路径）。"""
+    roots = pack_roots(game_id)
+    for root in roots:
+        if os.path.isdir(root):
+            return root
+    return roots[0]
+
+
+def pack_ids():
+    """两处数据包目录下的小游戏 id（自由目录优先，去重排序）。"""
+    from paths import active_world_id, data_dir
+    roots = [os.path.join(data_dir(), "packs", "minigames")]
+    world_id = active_world_id()
+    if world_id:
+        roots.append(os.path.join(data_dir(), "worlds", world_id, "minigames"))
+    found = set()
+    for root in roots:
+        if not os.path.isdir(root):
+            continue
+        for name in os.listdir(root):
+            if name.startswith(".") or name == "__pycache__":
+                continue
+            if os.path.isdir(os.path.join(root, name)):
+                found.add(name)
+    return sorted(found)
 
 
 def load_manifest(root):

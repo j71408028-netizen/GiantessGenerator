@@ -68,10 +68,10 @@ def _mini_game_problem(game_id: str) -> str:
     if not game_id or os.sep in game_id or "/" in game_id:
         return "游戏 id 非法"
     try:
-        from paths import data_dir
+        from dungeon.minigame_pack import pack_root
+        root = pack_root(game_id)
     except Exception:
         return ""  # 离线环境解析不了数据目录时不拦人，运行时自有兜底
-    root = os.path.join(data_dir(), "packs", "minigames", game_id)
     if not os.path.isdir(root):
         return f"小游戏「{game_id}」不存在（可用目录见 data/packs/minigames/）"
     manifest_path = os.path.join(root, "manifest.json")

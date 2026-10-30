@@ -1,4 +1,5 @@
 """跨平台资源与用户数据路径工具。"""
+import json
 import os
 import shutil
 import sys
@@ -82,6 +83,22 @@ def behaviors_dir() -> str:
 def worlds_dir() -> str:
     """返回世界包目录（默认为 <数据目录>/worlds）。"""
     return os.path.join(data_dir(), "worlds")
+
+
+def active_world_id() -> str:
+    """当前激活的世界包 id；未激活或读不到设置时返回空串。
+
+    只提供路径事实（不解释资源语义）：副本子进程没有注册表与持久层，
+    需要靠它定位包内的小游戏与素材。
+    """
+    path = os.path.join(data_dir(), "user", "settings.json")
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return ""
+    value = data.get("active_world") if isinstance(data, dict) else ""
+    return value if isinstance(value, str) else ""
 
 
 def _bootstrap_packaged_data() -> None:

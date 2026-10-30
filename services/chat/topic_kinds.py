@@ -16,8 +16,8 @@
 增删一个话题只需要动 ``TOPIC_KINDS`` 里的一条；``topic_lens`` 不再维护第二张
 同 id 的表，也就不会出现"坐标改了、视角没跟上"的半成品类型。
 
-面向世界包的两个入口（``topics`` 资源类型尚未接线，见
-``docs/designs/chat_topic_lens.md`` §8）：
+面向世界包的两个入口（``topics`` 资源类型经 ``services/chat/topic_tables.py``
+接线，见 ``docs/designs/chat_topic_lens.md`` §8）：
 
 - ``topic_kind_from_dict`` / ``topic_kind_to_dict``：JSON 条目 ↔ ``TopicKind``；
 - ``install_topic_kinds`` / ``reset_topic_kinds``：校验通过后整表替换或还原。

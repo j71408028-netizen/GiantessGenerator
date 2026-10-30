@@ -1,7 +1,7 @@
 """资源类型声明：资源层的单一真相源。
 
 「资源」指成组、可替换、可打包的内容：地标风格、描述风格、副本方案、静态 CSV 表、
-挑战包、行为包、小游戏。本模块只声明**有哪些类型、每种长什么样**——容器形状、
+挑战包、行为包、话题表、小游戏。本模块只声明**有哪些类型、每种长什么样**——容器形状、
 主文件命名、字段清单、id 规则、关联的资源设置键、自由存储根。这里不做任何 IO，
 也不 import persistence：路径定位与读写分别落在
 ``persistence/resources/registry.py`` 与 ``persistence/resources/envelope.py``。
@@ -184,6 +184,26 @@ _MANIFEST_FIELDS = (
     FieldSpec("params", "list", "参数声明", default=()),
 )
 
+_TOPIC_FIELDS = (
+    FieldSpec("id", "str", "类型 id", required=True),
+    FieldSpec("label", "str", "显示名", default="",
+              note="兜底视角（virtual）可以不写"),
+    FieldSpec("coord", "list", "坐标", required=True,
+              note="三分量：好感 / 紧张 / 状态"),
+    FieldSpec("radius", "number", "命中半径", default=None),
+    FieldSpec("prompt", "text", "体裁", default=""),
+    FieldSpec("focus", "str", "信息预告", default=""),
+    FieldSpec("frame", "text", "注意力框架", default=""),
+    FieldSpec("opens", "list", "开放字段", default=()),
+    FieldSpec("denies", "list", "关闭字段", default=()),
+    FieldSpec("budget", "int", "字段预算", default=None),
+    FieldSpec("disclosure", "bool", "允许私密字段", default=False),
+    FieldSpec("tags", "list", "软分类标签", default=()),
+    FieldSpec("priority", "int", "优先级", default=0),
+    FieldSpec("cooldown", "float", "冷却", default=0.0),
+    FieldSpec("virtual", "bool", "兜底视角", default=False),
+)
+
 
 def _csv_fields(*pairs, required: tuple = ()) -> Tuple[FieldSpec, ...]:
     """``(key, kind)`` 或 ``(key, kind, label)`` 列表 → 字段元组。
@@ -332,14 +352,24 @@ RESOURCE_TYPES: Tuple[ResourceTypeSpec, ...] = (
              "包名要能当 Python 标识符",
     ),
     ResourceTypeSpec(
+        type_id="topics",
+        container="json_array",
+        primary="{id}",
+        label="话题表",
+        fields=_TOPIC_FIELDS,
+        max_items=1,
+        ui_pick="single",
+        note="话题表：整表替换，一个世界包只带一张；条目形状与 "
+             "services/chat/topic_kinds 的导出格式一致，导出的表能原样导回",
+    ),
+    ResourceTypeSpec(
         type_id="minigames",
         container="json_dir",
         primary="{id}/manifest.json",
         label="小游戏",
         fields=_MANIFEST_FIELDS,
         id_required=True,
-        packable=False,
-        note="小游戏：已按 id/name 分离，打包支持待 S4",
+        note="小游戏：数据包目录，manifest.json 声明后端与参数",
     ),
 )
 

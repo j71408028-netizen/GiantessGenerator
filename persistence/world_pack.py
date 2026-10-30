@@ -14,6 +14,9 @@
     names/<table>.csv           # 姓名表
     news/<table>.csv            # 新闻表
     behaviors/<pack>/*.py       # 行为包目录（覆盖 creation/state 服务静态方法）
+    topics/<table>              # 话题表（整表替换，主文件不带后缀）
+    minigames/<id>/manifest.json# 小游戏数据包目录
+    <类型>/<id>.meta.json       # 每份资源随行的兄弟信封
 
 包内 settings 只允许“世界块”设置键：世界设定、种子、姓名表、新闻表、身材表、性格表。
 """

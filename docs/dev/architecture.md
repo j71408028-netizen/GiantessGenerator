@@ -172,7 +172,7 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 ### 2.7 资源类型清单只有一份声明
 
 「资源」指成组、可替换、可打包的内容（地标风格、描述风格、副本方案、挑战包、
-行为包、小游戏、四张静态表）。**类型清单只写在 `core/resource_spec.py`**：
+行为包、话题表、小游戏、四张静态表）。**类型清单只写在 `core/resource_spec.py`**：
 容器形状、主文件模板、字段清单、id 规则、存储根、设置键、界面显示名与选择粒度。
 
 派生出口是 `persistence/resources/registry.py`，其余模块一律从这里取值：
@@ -188,6 +188,11 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 会拦。资源 id 的全局规则是小写字母/数字/`._-`，类型可声明更宽或更严的
 `id_pattern`（行为包要能当 Python 标识符）；`WorldPackManifest.validate()`
 对**所有**类型都按各自规则校验 id，不留旧名宽松分支。
+
+界面侧只剩一张「type_id → 取条目名的函数」表（`ResourceHubPanel._resource_id_sources`），
+未登记的类型由 `registry.list_ids()` 兜底——需要业务过滤或跨目录合并的才登记
+（风格合并、排除默认副本方案、剔除内置挑战包、激活包内行为包、话题表的内置表）。
+新增一类纯文件资源时界面不用改。
 
 元数据走兄弟文件 `<id>.meta.json`（`persistence/resources/envelope.py`），
 与既有的 `<id>.addr.json` 同构：字段全可选、读取侧补默认值不写回、未知字段保留、
@@ -214,6 +219,25 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 - `quips` 的坐标写成行数组 `{"intrusion": 1, "destruction": 1, "items": [...]}`，
   正文里的 `[summary:…]` 标记改为条目自带的 `summary` 字段。`QuipRepo.load()`
   对外仍返回 `{(介入度, 破坏性): [条目]}`，格式变化不溢出到调用方。
+
+**索引是缓存**：`data/user/catalog.json`（`persistence/resources/catalog_store.py`）
+按类型分桶记录每份资源的 `id / author / namespace / version / content_hash /
+status / tags / schema`。它随时可以删掉重建，内容与磁盘一致时不重写；
+`rev` / `origin` 在本地恒为空串，接服务端后 `rev` 才作为远端游标使用。
+线上形态 = 磁盘形态，不做独立传输 DTO。
+
+「本地有没有改过」只看 `content_hash`，完全离线（`core/resource_sync.py`）：
+`compare_entry(local, remote, base_hash)` 给出 `in_sync` / `local_only` /
+`remote_new` / `local_changed` / `remote_changed` / `both_changed`，没有基线
+（`base_hash` 为空）而两侧又不同时按 `both_changed` 报——宁可多问一次，也不
+替用户裁决覆盖方向。鉴权、签名与增量协议不在本轮。
+
+**世界包内资源自带信封**：`create_from_current` 会把每份导出资源的
+`<id>.meta.json` 一并写进包内（`_copy_envelopes`），包因此不依赖本机的
+`catalog.json` 就能被索引；解散时再写回自由目录（目标已有信封则不覆盖）。
+包内小游戏按「自由目录优先、其次激活包」解析（`dungeon.minigame_pack.pack_roots`），
+副本子进程靠 `paths.active_world_id()` 读 `settings.json` 定位；话题表在激活时
+整表安装、卸载时还原内置表（`services/chat/topic_tables.py`）。
 
 ### 2.8 资源 ↔ 地址：一次解析，一处身份
 

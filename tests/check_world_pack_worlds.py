@@ -37,6 +37,7 @@ from persistence.landmark_repo import LandmarkRepo  # noqa: E402
 from persistence.quip_repo import QuipRepo  # noqa: E402
 from persistence.world_pack import (  # noqa: E402
     WorldPackManifest, WorldState, load_manifest_file, save_manifest_file,
+    validate_archive,
 )
 from services.worlds.service import (  # noqa: E402
     WorldManager, pack_worlds_warnings,
@@ -242,6 +243,82 @@ check("包内描述能被 QuipRepo 读回",
       and _reloaded_quip["small"][(1, 1)][0]["summary"] == "摘要",
       _reloaded_quip)
 shutil.move(_quip_tmp, tempfile.mkdtemp(prefix="quip_pack_retired_"))
+
+# ---------------- 8. 话题表与小游戏进世界包（S4） ----------------
+from services.chat import topic_tables  # noqa: E402
+from services.chat.topic_kinds import find_topic_kind, reset_topic_kinds  # noqa: E402
+
+os.makedirs(os.path.join(_DATA, "packs", "topics"), exist_ok=True)
+_topic_entries = topic_tables.builtin_entries()
+for _entry in _topic_entries:
+    if _entry["id"] == "daily":
+        _entry["label"] = "日常（包内）"
+with open(os.path.join(_DATA, "packs", "topics", "custom"), "w",
+          encoding="utf-8") as _f:
+    json.dump(_topic_entries, _f, ensure_ascii=False)
+
+_game_dir = os.path.join(_DATA, "packs", "minigames", "demo_game")
+os.makedirs(_game_dir, exist_ok=True)
+with open(os.path.join(_game_dir, "manifest.json"), "w", encoding="utf-8") as _f:
+    json.dump({"id": "demo_game", "name": "演示", "backend": "py",
+               "entry": "game.py"}, _f, ensure_ascii=False)
+with open(os.path.join(_game_dir, "game.py"), "w", encoding="utf-8") as _f:
+    _f.write("# demo\n")
+
+_pack4 = _mgr2.create_from_current(
+    "tpk_s4", "S4 打包", {},
+    selected_resources={"topics": ["custom"], "minigames": ["demo_game"]})
+check("话题表与小游戏都进了清单",
+      _pack4.resources.get("topics") == ["custom"]
+      and _pack4.resources.get("minigames") == ["demo_game"], _pack4.resources)
+check("包内话题表主文件不带后缀",
+      os.path.isfile(os.path.join(_DATA, "worlds", "tpk_s4", "topics", "custom")))
+check("包内小游戏是整目录随行",
+      os.path.isfile(os.path.join(_DATA, "worlds", "tpk_s4", "minigames",
+                                  "demo_game", "game.py")))
+_archive = _mgr2.export_pack("tpk_s4")
+check("含新类型的包能通过归档校验",
+      validate_archive(_archive).resources.get("minigames") == ["demo_game"])
+
+# 删掉自由目录里的小游戏，之后它只存在于包内
+shutil.rmtree(_game_dir)
+reset_topic_kinds()
+_s4_settings = {}
+_mgr2.activate("tpk_s4", _s4_settings)
+check("激活后话题表来自包内", find_topic_kind("daily").label == "日常（包内）",
+      find_topic_kind("daily").label)
+
+import paths  # noqa: E402
+from dungeon.minigame_pack import pack_root as _minigame_root  # noqa: E402
+
+_saved_data_dir, _saved_active = paths.data_dir, paths.active_world_id
+paths.data_dir = lambda: _DATA
+paths.active_world_id = lambda: "tpk_s4"
+try:
+    _in_pack = os.path.join(_DATA, "worlds", "tpk_s4", "minigames", "demo_game")
+    check("包内小游戏目录可被解析", _minigame_root("demo_game") == _in_pack,
+          _minigame_root("demo_game"))
+    from dungeon.window.minigame import list_mini_games  # noqa: E402
+    check("激活包内的小游戏能被枚举",
+          "demo_game" in [item[0] for item in list_mini_games()],
+          [item[0] for item in list_mini_games()])
+finally:
+    paths.data_dir, paths.active_world_id = _saved_data_dir, _saved_active
+
+_mgr2.deactivate(_s4_settings)
+check("卸载后话题表还原内置", find_topic_kind("daily").label == "日常",
+      find_topic_kind("daily").label)
+
+_mgr2.activate("tpk_s4", _s4_settings)
+_mgr2.dissolve("tpk_s4", _s4_settings)
+_minigame_ids = sorted(
+    name for name in os.listdir(os.path.join(_DATA, "packs", "minigames"))
+    if os.path.isdir(os.path.join(_DATA, "packs", "minigames", name)))
+check("解散后小游戏回到自由目录（原名可用时不改名）",
+      _minigame_ids == ["demo_game"], _minigame_ids)
+check("解散后话题表回到自由目录（重名则改名）",
+      os.path.isfile(os.path.join(_DATA, "packs", "topics", "custom_tpk_s4_1.0")),
+      sorted(os.listdir(os.path.join(_DATA, "packs", "topics"))))
 
 # ---------------- 清理 ----------------
 shutil.move(_DATA, tempfile.mkdtemp(prefix="worlds_retired_"))

@@ -320,11 +320,13 @@ reset_topic_kinds()          # 还原代码里的默认表
 - **位置只挂在部分视角**：`self.position` 属"处境"而非"人格"，`body` / `memory` /
   `showoff` 等视角刻意不给（聊身体和回忆时不需要知道邮编）。若实际对话里发现
   她"忘了自己在哪"，把它挂到该视角即可，不是机制缺陷。
-- **世界包还没有 `topics` 资源类型**：整表替换与 JSON 解析的入口已就位
-  （§7.1），但世界包清单（`persistence/world_pack.py`）还没声明这一类型、
-  也没接进加载流程；目前增删话题只能改 `TOPIC_KINDS`。提示词内容与节奏的
-  `chat.*` 行为包钩子已开放（见 `behaviors/hooks-chat.md`），话题表整表替换
-  仍等 `topics` 资源类型或行为运行时的清理生命周期。
+- **世界包可以整表替换话题**：`topics` 是资源类型（`core/resource_spec.py`），
+  容器是一份 JSON 数组（元素形状 = `topic_kind_to_dict`），主文件不带后缀。
+  激活时 `services/chat/topic_tables.py` 把包内那张表装成生效表，卸载/解散时
+  还原内置表；加载失败只打印并回退，不影响包内其它资源。
+  `default` 是内置表 id：没有同名文件时指向 `TOPIC_KINDS`，所以"打包当前话题表"
+  永远有东西可选，不必为了打包往用户目录写文件。内置表不进 `catalog.json`
+  ——它没有磁盘载荷，`content_hash` 无从算起；要发布就先落盘成文件。
 - **trace 只进测试与预览工具**：界面里还没有调试面板，排查线上穿帮要手动跑
   `lens_preview.py`（静态看账）或 `chat_session_preview.py`（真聊、逐轮看账）。
 

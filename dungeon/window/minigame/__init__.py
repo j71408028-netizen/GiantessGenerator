@@ -23,6 +23,7 @@ from dungeon import process_log
 from dungeon.actions import MINI_GAME_DEFAULT_ID
 from dungeon.minigame_pack import (load_manifest as _load_manifest,
                                    mini_game_params as _mini_game_params,
+                                   pack_ids as _pack_ids,
                                    pack_root as _pack_root)
 from .base import GameAPI, MiniGame, clamp_dt  # noqa: F401  （作者只 import 本包）
 
@@ -121,19 +122,17 @@ def list_mini_games():
     """枚举可用小游戏：``[(id, label, backend), ...]``（编辑器候选用）。
 
     数据包目录名即 id；解析失败的目录静默跳过（诊断由校验器负责）。
+    自由目录与激活世界包内的同名目录都算可用。
     """
-    from paths import data_dir
     found = {}
     for game_id, cls in REGISTRY.items():
         found[game_id] = (game_id, getattr(cls, "label", game_id), BACKEND_PY)
-    packs_root = os.path.join(data_dir(), "packs", "minigames")
-    if os.path.isdir(packs_root):
-        for name in sorted(os.listdir(packs_root)):
-            if name in found:
-                continue
-            resolved = resolve_mini_game(name)
-            if resolved is not None:
-                found[name] = (name, resolved.label, resolved.backend)
+    for name in _pack_ids():
+        if name in found:
+            continue
+        resolved = resolve_mini_game(name)
+        if resolved is not None:
+            found[name] = (name, resolved.label, resolved.backend)
     return sorted(found.values())
 
 

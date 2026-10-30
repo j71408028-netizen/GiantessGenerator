@@ -1,11 +1,20 @@
 """资源层：类型声明（``core.resource_spec``）的持久化实现。
 
 - :mod:`persistence.resources.registry` —— 类型清单派生、路径定位、清单与校验；
-- :mod:`persistence.resources.envelope` —— ``<id>.meta.json`` 信封读写与内容哈希。
+- :mod:`persistence.resources.envelope` —— ``<id>.meta.json`` 信封读写与内容哈希；
+- :mod:`persistence.resources.catalog_store` —— ``user/catalog.json`` 索引缓存的读写。
 
 对外一律从这里取，不要直接引用子模块（便于以后换实现）。
 """
 
+from .catalog_store import (
+    CATALOG_SCHEMA,
+    catalog_ids,
+    catalog_path,
+    load_catalog,
+    refresh_catalog,
+    save_catalog,
+)
 from .envelope import (
     ENVELOPE_DEFAULTS,
     ENVELOPE_SUFFIX,
@@ -50,6 +59,7 @@ from .registry import (
 
 __all__ = [
     "ADDR_SUFFIX",
+    "CATALOG_SCHEMA",
     "BOOL_RESOURCE_TYPES",
     "Diagnostic",
     "ENVELOPE_DEFAULTS",
@@ -66,6 +76,8 @@ __all__ = [
     "build_envelope",
     "catalog_entries",
     "catalog_entry",
+    "catalog_ids",
+    "catalog_path",
     "content_hash",
     "default_envelope",
     "empty_catalog",
@@ -74,6 +86,7 @@ __all__ = [
     "free_dir",
     "free_path",
     "list_ids",
+    "load_catalog",
     "load_envelope",
     "looks_modified",
     "missing_members",
@@ -82,7 +95,9 @@ __all__ = [
     "primary_relpath",
     "read_dir",
     "read_path",
+    "refresh_catalog",
     "resource_id_from_path",
+    "save_catalog",
     "save_envelope",
     "schema_for",
     "validate_resource",

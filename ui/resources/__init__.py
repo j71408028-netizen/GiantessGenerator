@@ -22,6 +22,9 @@ from core.address_model import world_of
 from persistence import PresetRepo, PersonalityRepo
 from persistence.landmark_repo import DEFAULT_LANDMARK_STYLE
 from persistence.name_repo import NameRepo, DEFAULT_NAME_TABLE
+from persistence.resources import registry
+from persistence.resources.catalog_store import refresh_catalog
+from persistence.resources.registry import LIST_RESOURCE_TYPES
 from persistence.world_pack import list_behavior_packs
 from dungeon.terms import is_default_scenario
 from services.challenges import ChallengeService
@@ -95,6 +98,7 @@ class ResourceHubPanel(ctk.CTkFrame):
 
         self._create_widgets()
         self._sync_all_states()
+        self._refresh_resource_catalog()
         # System 模式的实际颜色由 CustomTkinter 决定，原生 Listbox 也必须使用
         # 这个实际模式，否则首次进入本页可能短暂显示浅色。
         actual_mode = ctk.get_appearance_mode()
@@ -468,35 +472,86 @@ class ResourceHubPanel(ctk.CTkFrame):
             self._after_world_state_change()
 
     def _build_available_resources(self) -> Dict[str, list]:
-        """返回各资源类型可选打包的具体条目（供创建对话框的选择控件使用）。"""
+        """返回各资源类型可选打包的具体条目（供创建对话框的选择控件使用）。
+
+        只有需要业务过滤或跨目录合并的类型才登记取条目名的函数；其余类型
+        交给注册表的 ``list_ids``，所以新增一类资源不必改这里。
+        """
+        sources = self._resource_id_sources()
+        data_dir = self._resource_data_dir()
         resources: Dict[str, list] = {}
-        resources["landmarks"] = list(self.landmark_repo.get_styles())
-        resources["quips"] = list(self.quip_repo.get_styles())
-        resources["presets"] = list(self.preset_repo.get_tables())
-        resources["personalities"] = list(self.personality_repo.get_tables())
-        scenario_repo = getattr(self.gui_ref, "_scenario_repo", None) if self.gui_ref else None
-        if scenario_repo is not None:
-            resources["scenarios"] = [d for d in scenario_repo.list_all()
-                                      if not is_default_scenario(d)]
-        # 挑战包：列出全部自由 .chal（打包不依赖密钥，密钥由用户手动放入包内）
-        cm = ChallengeService(self.settings_repo, world_state=self.world_state)
-        resources["challenges"] = [
-            f for f in cm.get_available_packs() if not cm.is_bundled(f)]
-        resources["names"] = list(self.name_repo.get_tables())
-        news_service = getattr(getattr(self.gui_ref, "context", None), "news_service", None)
-        if news_service is not None:
-            resources["news"] = list(news_service.get_tables())
+        for type_id in LIST_RESOURCE_TYPES:
+            source = sources.get(type_id)
+            try:
+                items = list(source()) if source is not None else registry.list_ids(
+                    type_id, data_dir, self.world_state)
+            except Exception as exc:  # 单个类型出错不该拖垮整个对话框
+                print(f"[ResourceHub] 枚举 {type_id} 失败: {exc}")
+                continue
+            items = [str(item) for item in items if str(item or "")]
+            if items:
+                resources[type_id] = items
+        return resources
+
+    def _resource_id_sources(self) -> Dict[str, Callable[[], list]]:
+        """类型 id → 取可选条目名的函数（未登记的类型走注册表）。"""
+        return {
+            "landmarks": lambda: self.landmark_repo.get_styles(),
+            "quips": lambda: self.quip_repo.get_styles(),
+            "presets": lambda: self.preset_repo.get_tables() if self.preset_repo else [],
+            "personalities": lambda: (
+                self.personality_repo.get_tables() if self.personality_repo else []),
+            "names": lambda: self.name_repo.get_tables() if self.name_repo else [],
+            "topics": self._available_topics,
+            "scenarios": self._available_scenarios,
+            "challenges": self._available_challenges,
+            "behaviors": self._available_behaviors,
+        }
+
+    def _resource_data_dir(self) -> str:
         if self.world_manager is not None:
-            behaviors = list_behavior_packs(self.world_manager.data_dir)
-            if (self.world_state is not None and self.world_state.active
-                    and self.world_state.owns("behaviors")):
-                for name in self.world_state.manifest.resources.get("behaviors") or []:
-                    if name not in behaviors:
-                        behaviors.append(name)
-                behaviors.sort()
-            if behaviors:
-                resources["behaviors"] = behaviors
-        return {k: v for k, v in resources.items() if v}
+            return self.world_manager.data_dir
+        from paths import data_dir
+        return data_dir()
+
+    def _refresh_resource_catalog(self) -> None:
+        """重建 ``user/catalog.json`` 索引缓存（内容没变不会写盘）。
+
+        缓存不是权威，失败只影响在线资源的列表，不该挡住本地操作。
+        """
+        try:
+            refresh_catalog(self._resource_data_dir(), self.world_state)
+        except Exception as exc:
+            print(f"[ResourceHub] 资源索引刷新失败: {exc}")
+
+    def _available_topics(self) -> list:
+        # 话题表整表替换，内置表恒可用（无对应文件时指向代码里那张）
+        from services.chat import topic_tables
+        return topic_tables.list_tables(self._resource_data_dir(), self.world_state)
+
+    def _available_scenarios(self) -> list:
+        scenario_repo = getattr(self.gui_ref, "_scenario_repo", None) if self.gui_ref else None
+        if scenario_repo is None:
+            return []
+        return [d for d in scenario_repo.list_all() if not is_default_scenario(d)]
+
+    def _available_challenges(self) -> list:
+        # 列出全部自由 .chal（打包不依赖密钥，密钥由用户手动放入包内）
+        manager = ChallengeService(self.settings_repo, world_state=self.world_state)
+        return [f for f in manager.get_available_packs()
+                if not manager.is_bundled(f)]
+
+    def _available_behaviors(self) -> list:
+        if self.world_manager is None:
+            return []
+        behaviors = list(list_behavior_packs(self.world_manager.data_dir))
+        if (self.world_state is not None and self.world_state.active
+                and self.world_state.owns("behaviors")):
+            for name in self.world_state.manifest.resources.get("behaviors") or []:
+                if name not in behaviors:
+                    behaviors.append(name)
+            behaviors.sort()
+        return behaviors
 
     def _set_table_menus_locked(self):
         """按包锁定的资源键禁用静态表菜单（规则段的体型/种子锁在设置页）。"""
