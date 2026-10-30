@@ -37,6 +37,7 @@ from persistence import world_pack  # noqa: E402
 from persistence.resource_settings_repo import (  # noqa: E402
     RESOURCE_SETTINGS_KEYS as LEGACY_SETTING_KEYS,
 )
+from core.resource_ref import Ref  # noqa: E402
 from persistence.resources import envelope as envelope_mod  # noqa: E402
 from persistence.resources import registry  # noqa: E402
 
@@ -342,6 +343,17 @@ try:
           "索引按类型分桶")
 finally:
     shutil.rmtree(_tmp, ignore_errors=True)
+
+# ---------------- 6. 资源引用（Ref） ----------------
+_ref = Ref.scoped("landmarks", "chinese_mix", "上海中心大厦")
+check(_ref.text == "landmarks:chinese_mix/上海中心大厦", "Ref 文本形态", _ref.text)
+check((_ref.scope, _ref.name) == ("chinese_mix", "上海中心大厦"),
+      "Ref 拆出容器与容器内身份", (_ref.scope, _ref.name))
+check(Ref.parse(_ref.text) == _ref, "Ref 文本往返")
+check(Ref.parse("缺少类型分隔符") is None, "无法解析的文本返回 None")
+check(Ref.scoped("landmarks", "", "裸名").text == "landmarks:裸名",
+      "无容器时退化为仅身份")
+check(len({_ref, Ref.parse(_ref.text)}) == 1, "Ref 可哈希去重")
 
 print(f"PASSED ({_checked} assertions)")
 sys.exit(0)

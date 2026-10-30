@@ -6,81 +6,67 @@ P4a 之后本类收敛为**地址解析 + stuck_options 工具层**：选点循�
 过滤、活动区域偏好、位置演化、all_damaged 扫描）已被选取仲裁器
 （``services/exploration/arbiter.py``）吸收，口径逐行移植。
 
-依赖 ``ExplorationCatalog`` 而不是把 ``selected_styles`` / ``merged_landmarks`` /
-``_landmark_styles`` 拷进来：那些字段会被 ``update_styles()`` 整体替换，拷贝必然
-陈旧（见 ``catalog`` 模块的说明）。
+S3 之后地址解析本身也搬走了：``AddressIndex`` 一次性把每条地标解析成
+``AddressHandle``，本类只是它的门面（外加副本导出与 stuck 选项两件编排）。
+因此这里不再有「按 ``id(landmark)`` 查风格归属」和「逐条回落磁盘读
+``.addr.json``」——归属来自声明（``Ref``），注册表在重建时一次性读齐。
+
+依赖 ``ExplorationCatalog`` 而不是把 ``merged_landmarks`` / 地址索引拷进来：
+那些字段会被 ``reload_merged_data()`` 整体替换，拷贝必然陈旧。
 """
 
 from dataclasses import replace
 
-from core.address_model import (
-    compose_address_ex, world_of, resolve_full_address,
-)
+from core.address_model import world_of
+from services.exploration.address_index import AddressIndex
 
 
 class AddressPlanner:
-    """地标地址规划器。
+    """地标地址规划器（地址解析的薄门面）。
 
-    ``landmark_address`` 供 ``ReportEngine`` 在对比循环里解析地标地址（耐久
-    键、叙述定位）。
+    ``landmark_address`` / ``durability_key`` 供 ``ReportEngine`` 与
+    ``SelectionArbiter`` 在对比循环里取地址与耐久键。
     """
 
-    def __init__(self, catalog):
+    def __init__(self, catalog, index=None):
         self.catalog = catalog
-
-    def _style_reg(self, landmark, registers=None) -> str:
-        style = self.catalog._landmark_styles.get(id(landmark), "")
-        if not style:
-            return ""
-        if registers is None:
-            return self.catalog.landmark_repo.load_style_address(style) or ""
-        return registers.get(style, "") or ""
+        self.index = index if index is not None else self._index_of(catalog)
 
     @staticmethod
-    def _address_mode(landmark) -> str:
-        """把地标的 address_mode 归一为 portable / inherit / exact。"""
-        addr = (getattr(landmark, "address", "") or "").strip()
-        mode = (getattr(landmark, "address_mode", "") or "").strip().lower()
-        if mode in ("portable", "inherit", "exact", "relative"):
-            return "exact" if mode == "relative" else mode
-        if addr:
-            return "exact"
-        return "inherit" if landmark.frequency == "unique" else "portable"
+    def _index_of(catalog) -> AddressIndex:
+        """取目录自带的索引；没有就按目录现有数据临时建一个（测试/旧构造点）。"""
+        index = getattr(catalog, "address_index", None)
+        if isinstance(index, AddressIndex):
+            return index
+        index = AddressIndex(getattr(catalog, "landmark_repo", None))
+        index.rebuild(zip(getattr(catalog, "merged_refs", []) or [],
+                          getattr(catalog, "merged_landmarks", []) or []))
+        catalog.address_index = index
+        return index
 
-    def _landmark_address_ex(self, landmark, registers=None):
+    # ---------- 地址解析（全部转发给索引，本类不重复判定口径） ----------
+
+    def address_ex(self, landmark):
         """返回 ``(完整地址, 错误文本)``；错误表示地址存在但不可用。"""
-        style_reg = self._style_reg(landmark, registers)
-        mode = self._address_mode(landmark)
-        if mode == "portable":
-            return "", ""
-        if mode == "inherit":
-            if not style_reg:
-                return "", ""
-            resolved, err = compose_address_ex(style_reg, "")
-            if err:
-                return "", f"{landmark.name}: {err}"
-            return resolved, ""
-        addr_text = (getattr(landmark, "address", "") or "").strip()
-        if not addr_text:
-            return "", ""
-        resolved, err = compose_address_ex(style_reg, addr_text)
-        if err:
-            return "", f"{landmark.name}: {err}"
-        return resolved, ""
+        return self.index.address_ex(landmark)
 
-    def landmark_address(self, landmark, registers=None) -> str:
+    def landmark_address(self, landmark) -> str:
         """按 address_mode 解析地标地址；'' 表示不参与地址规则或地址无效。"""
-        return self._landmark_address_ex(landmark, registers)[0]
+        return self.index.address(landmark)
 
-    def landmark_full_address(self, landmark, registers=None) -> str:
-        """底层组合（不判定 address_mode），主要留给旧调用/诊断。"""
-        style = self.catalog._landmark_styles.get(id(landmark), "")
-        reg = ""
-        if style:
-            reg = (registers or {}).get(style, "")
-            if reg is None:
-                reg = self.catalog.landmark_repo.load_style_address(style)
-        return resolve_full_address(reg, getattr(landmark, "address", "") or "")
+    def durability_key(self, landmark) -> str:
+        """耐久表 / 地址表的键（``Ref`` 文本；无法归属时退回名称）。"""
+        return self.index.durability_key(landmark)
+
+    def ref(self, landmark):
+        """地标的声明身份；无法归属时为 None。"""
+        return self.index.ref_of(landmark)
+
+    def handle(self, landmark):
+        """地标对应的 ``AddressHandle``；未登记时为 None。"""
+        return self.index.handle_of(landmark)
+
+    # ---------- 编排 ----------
 
     def landmarks_for_export(self) -> list:
         """副本启动载荷用的地标：每条都带解析好的**完整地址**。
@@ -89,12 +75,13 @@ class AddressPlanner:
         的相对后缀解析不出来，所以地址必须在父进程组合好再进载荷（见
         ``docs/designs/dungeon_scene.md`` §6）。解析不了的地标照样导出（名字与
         尺寸不变），只是标成 ``portable``——不参与副本内的地址相配。
+
+        导出的副本本身是自足的：``address`` 已是完整地址、``address_mode`` 是
+        ``exact``，即使拿它回头再问一次 ``landmark_address()`` 也得到同一结果。
         """
-        registers = self.catalog.landmark_repo.load_style_registers(
-            self.catalog.selected_styles)
         exported = []
         for landmark in self.catalog.merged_landmarks:
-            address = self.landmark_address(landmark, registers)
+            address = self.landmark_address(landmark)
             if address:
                 exported.append(replace(landmark, address=address,
                                         address_mode="exact"))
@@ -109,18 +96,15 @@ class AddressPlanner:
         ``worlds`` 只列出“有可用落脚地址、且不同于当前位置”的维度，避免 UI
         拿到一个无法落地的世界或原地切换。
         """
-        landmark_repo = self.catalog.landmark_repo
-        registers = landmark_repo.load_style_registers(self.catalog.selected_styles)
         durability = state.landmark_durability or {}
         seen = {}
         for lm in self.catalog.merged_landmarks:
-            addr = self.landmark_address(lm, registers)
+            addr = self.landmark_address(lm)
             if not addr:
                 continue
             if lm.frequency == "unique":
-                key = f"{lm.name}@{addr}"
                 # 耐久低于 0.5 的独特地标已不适合作落脚点
-                if durability.get(key, 1.0) < 0.5:
+                if durability.get(self.durability_key(lm), 1.0) < 0.5:
                     continue
             if addr not in seen:
                 seen[addr] = lm.name

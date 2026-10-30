@@ -55,13 +55,13 @@
 → `normalize` → `validate`）；音频端到端链（说话人分档 / 三条引擎路径 / 降级 /
 播放收尾）在 `check_audio_chain.py`。加字段时别漏，见 §5.4。
 
-### 1.3 当前实测数字（2026-10-27）
+### 1.3 当前实测数字（2026-10-30）
 
 ```
-[check_import_graph] 已检查 198 个模块，798 条第一方依赖边
+[check_import_graph] 已检查 206 个模块，856 条第一方依赖边
 [check_import_graph] PASSED：层间依赖方向与 UI 框架禁令均无未登记越界
 KNOWN_EXCEPTIONS = []          # 原 11 条已全部消除
-tests/run_checks.py            # 55/55
+tests/run_checks.py            # 59/59
 ```
 
 ---
@@ -214,6 +214,36 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 - `quips` 的坐标写成行数组 `{"intrusion": 1, "destruction": 1, "items": [...]}`，
   正文里的 `[summary:…]` 标记改为条目自带的 `summary` 字段。`QuipRepo.load()`
   对外仍返回 `{(介入度, 破坏性): [条目]}`，格式变化不溢出到调用方。
+
+### 2.8 资源 ↔ 地址：一次解析，一处身份
+
+资源与地址之间交换的是**解析结果**，不是变更事件。`services/exploration/address_index.py`
+的 `AddressIndex` 是这层交换面：`rebuild()` 时把每条地标解析成一个 `AddressHandle`
+（完整地址、解析结果、维度、私有名、最小单元边长、错误原因），地址规划器 / 报告引擎 /
+选取仲裁器都读同一份 handle，不再各自组合地址。
+
+- **身份用 `Ref`（`core/resource_ref.py`），不是内存地址**。地标的 `Ref` 是
+  `("landmarks", "风格id/显示名")`，落盘形态 `landmarks:chinese_mix/上海中心大厦`。
+  `dataclasses.replace()` 出来的副本照样算得出身份，而 `id(landmark)` 会丢归属；
+  `名称@完整地址` 这类拼接键在改名或改址时断档。
+- **耐久表 / 地址表以 `Ref` 文本为键**（唯一出口 `AddressPlanner.durability_key()`），
+  所以改地址不清零耐久。读侧把键当 `Ref` 解析（`Ref.parse`），解析不了就退回原名。
+  旧档案里的 `名称@完整地址` 键由 `scripts/migrate_resource_ids.py` 第 8 步改写。
+- 同一件事只有一个口径：`AddressPlanner` 只是索引的门面，`landmark_address` /
+  `durability_key` / `ref` 全部转发；索引内部一次性读齐风格注册地址，
+  **不逐条回落磁盘**读 `.addr.json`。
+- **失效是显式的，没有事件订阅**：合并数据重建（`reload_merged_data()`，覆盖风格
+  选择变更、世界包激活切换、挑战包导入）与风格注册地址保存后
+  （`invalidate_addresses()`）各调一次 `rebuild()`。地标内容变了必然伴随
+  `merged_landmarks` 整体替换，所以不需要 dirty 标记。
+- 反向查询 `referencing(prefix)` 按「维度 + 各级地域」建倒排；空间查询
+  `nearby(position, reach_m)` 供 `all_damaged` 扫描用。两者都是拉模型，
+  没有进程内通道——副本子进程里没有仓库，地址必须在父进程解析好进载荷
+  （`landmarks_for_export()`）。
+
+`services/character/spatial.py` 与 `services/worlds/address_registry.py` 刻意不接
+索引：前者是纯文本派生视图（学的是位置历史，不是资源），后者算的是注册表申领地
+址的单元边长，都没有「资源身份」可用。
 
 ---
 

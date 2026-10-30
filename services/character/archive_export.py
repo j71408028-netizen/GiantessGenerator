@@ -20,6 +20,7 @@ from core.address_model import parse_full as _parse_addr, cell_width_m as _addr_
     format_addr_verbose as _format_addr_verbose
 from core.logic import ALL_PART_NAMES, format_size
 from core.models import CharacterSnapshot
+from core.resource_ref import Ref
 from paths import data_dir, template_dir
 from services.character.profile_text import describe_rhythm, describe_spatial
 from services.character.spatial import build_spatial_profile
@@ -267,18 +268,20 @@ def _durability_text(d) -> str:
 def _landmark_popup_info(lm_dur: dict, lm_addr: dict = None) -> dict:
     """把耐久表与地址表整理为 显示名 -> 悬浮文案 的映射。
 
-    键为"名称@完整地址"（无地址时仅名称），同名不同地址的地标各算一条；
-    同名多条时合并进同一个链接的弹窗，每条一行"位于 地址 + 耐久"。
+    键是地标的声明身份（``Ref`` 文本，``landmarks:风格/名称``），与地址无关——
+    改地址不清零耐久。同一显示名在多处出现时合并进同一个链接的弹窗，
+    每条一行"位于 地址 + 耐久"。
     """
     lm_addr = lm_addr or {}
     lines_by_name = {}
     for key in sorted(lm_dur):
+        ref = Ref.parse(key)
+        name = ref.name if ref is not None else key
         if key in lm_addr:
-            name = key.split("@", 1)[0]
             lines_by_name.setdefault(name, []).append(
                 f"位于 {lm_addr[key]}\n{_durability_text(lm_dur[key])}")
         else:
-            lines_by_name.setdefault(key, []).append(_durability_text(lm_dur[key]))
+            lines_by_name.setdefault(name, []).append(_durability_text(lm_dur[key]))
     return {name: "\n".join(lines) for name, lines in lines_by_name.items()}
 
 

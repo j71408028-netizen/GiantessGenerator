@@ -6,9 +6,10 @@
 它和 ``report_text`` 的分界：本模块产出结构化数据（对比项、quip 结果、伤亡、
 坐标、地址规划），**不做**任何面向人的排版；``report_text`` 才拼文本。
 
-``prepare()` 开头把 ``catalog`` 上的易变字段（``merged_landmarks`` / ``quips`` /
-``detail_pools`` / ``selected_styles``）取成局部变量——它们会被 ``update_styles()``
-整体替换，每次调用都重新取一次即可，绝不要在 ``__init__`` 里缓存。
+``generate()`` 开头把 ``catalog`` 上的易变字段（``merged_landmarks`` / ``quips`` /
+``detail_pools``）取成局部变量——它们会被 ``update_styles()`` 整体替换，每次调用
+都重新取一次即可，绝不要在 ``__init__`` 里缓存。地标地址与耐久键一律向
+``AddressPlanner`` 取（其背后是 ``AddressIndex`` 的单一解析结果）。
 """
 
 import copy
@@ -78,9 +79,7 @@ class ReportEngine:
         merged_landmarks = self.catalog.merged_landmarks
         quips = self.catalog.quips
         detail_pools = self.catalog.detail_pools
-        selected_styles = self.catalog.selected_styles
         state_service = self.catalog.state_service
-        landmark_repo = self.catalog.landmark_repo
 
         curr_intrusion = core_state["base_intrusion"]
         curr_destruction = core_state["base_destruction"]
@@ -169,7 +168,6 @@ class ReportEngine:
         quip_results = []
         total_casualties = 0.0
         has_quips = bool(quips)
-        landmark_registers = landmark_repo.load_style_registers(selected_styles)
 
         for idx, ruling in enumerate(chosen):
             comp = ruling.cand
@@ -192,8 +190,8 @@ class ReportEngine:
                 suffix = "高" if lm.dimension == "vertical" else (
                     "长" if lm.horizontal_type == "length" else "宽")
                 size_str = format_size(comp['size'], base_size=height)
-                lm_addr = self.addresses.landmark_address(lm, landmark_registers)
-                lm_key = f"{lm.name}@{lm_addr}" if lm_addr else lm.name
+                lm_key = self.addresses.durability_key(lm)
+                lm_addr = self.addresses.landmark_address(lm)
                 if lm_addr:
                     landmark_addresses[lm_key] = lm_addr
                 durability = landmark_durability.get(lm_key, 1.0)

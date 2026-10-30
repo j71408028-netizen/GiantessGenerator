@@ -34,10 +34,12 @@ import random  # noqa: E402
 
 from core.logic import select_quip_with_budget  # noqa: E402
 from core.models import CharacterSnapshot, EvolutionRecord, Landmark  # noqa: E402
+from core.resource_ref import Ref  # noqa: E402
 from services.character.spatial import (  # noqa: E402
     EnvPreferenceProfile, EnvironmentProfile, SpatialProfile,
     build_spatial_profile, env_priors_for_tags,
 )
+from services.exploration.address_index import AddressIndex  # noqa: E402
 from services.exploration.address_plan import AddressPlanner  # noqa: E402
 from services.exploration.arbiter import (  # noqa: E402
     SelectionArbiter, SlotRuling,
@@ -133,10 +135,11 @@ class FakeCatalog:
         self.landmark_repo = FakeLandmarkRepo(registers)
         self.quip_repo = FakeQuipRepo()
         self.quips = {}
-        self._landmark_styles = {
-            id(lm): style for lm, style in
-            ((x, getattr(x, "_style", "")) for x in landmarks) if style
-        }
+        # 夹具用 _style 属性模拟「地标属于哪个风格」，与目录里的 merged_refs 同构
+        self.merged_refs = [Ref.scoped("landmarks", getattr(x, "_style", ""), x.name)
+                            for x in self.merged_landmarks]
+        self.address_index = AddressIndex(self.landmark_repo)
+        self.address_index.rebuild(zip(self.merged_refs, self.merged_landmarks))
 
 
 def _cand(lm, ratio, size):

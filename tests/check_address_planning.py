@@ -13,6 +13,7 @@ P4a 起选点循环由选取仲裁器（services/exploration/arbiter.py）承担
 import os
 import sys
 import tempfile
+from dataclasses import replace
 from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -36,7 +37,9 @@ def check(name, ok, extra=""):
 
 from core.address_model import resolve_full_address  # noqa: E402
 from core.models import Landmark  # noqa: E402
+from core.resource_ref import Ref  # noqa: E402
 from services.character.spatial import SpatialProfile  # noqa: E402
+from services.exploration.address_index import AddressIndex  # noqa: E402
 from services.exploration.address_plan import AddressPlanner  # noqa: E402
 from services.exploration.arbiter import (  # noqa: E402
     LANE_COVER, LANE_EXACT, LANE_FREE, LANE_WEIGHTS, SelectionArbiter,
@@ -72,10 +75,11 @@ class FakeCatalog:
         self.landmark_repo = FakeLandmarkRepo(registers or {})
         self.quip_repo = FakeQuipRepo(quip_registers or {})
         self.quips = {}
-        self._landmark_styles = {
-            id(lm): style for lm, style in
-            ((x, getattr(x, "_style", "")) for x in landmarks) if style
-        }
+        # 夹具用 _style 属性模拟「地标属于哪个风格」，与目录里的 merged_refs 同构
+        self.merged_refs = [Ref.scoped("landmarks", getattr(x, "_style", ""), x.name)
+                            for x in self.merged_landmarks]
+        self.address_index = AddressIndex(self.landmark_repo)
+        self.address_index.rebuild(zip(self.merged_refs, self.merged_landmarks))
 
 
 def _arbiter(catalog):
@@ -247,7 +251,7 @@ _catalog = FakeCatalog([_damaged, _shuttle, _other_chunk],
 _plan = _arbiter(_catalog).arbitrate(
     [_cand(_damaged), _cand(_shuttle), _cand(_other_chunk)],
     "1e4_1e3_6e1@A!W-A-B-1", height=10.0,
-    durability={"NearDmg@1e4_1e3_6e1@A!W-A-B-2": 0.3}, skip_base_prob=0.1)
+    durability={"landmarks:S/NearDmg": 0.3}, skip_base_prob=0.1)
 check("私有名冲突的地标不阻断 all_damaged",
       _plan["comparisons"] and _plan["stuck"]["reason"] == "all_damaged")
 
@@ -284,6 +288,52 @@ check("仲裁结果携带覆盖报告与提拔记录",
       and isinstance(_plan.get("chosen"), list))
 check("chosen 槽位与 comparisons 对齐",
       [r.cand for r in _plan["chosen"]] == _plan["comparisons"])
+
+# ---------------- 11. 地址索引（S3）：身份、单次解析、双向查询 ----------------
+_tower = Landmark("IndexTower", 200, "vertical", "unique")      # 继承风格地址
+_tower._style = "S"
+_near = Landmark("IndexNear", 120, "vertical", "unique", address="B-1")
+_near._style = "S"
+_far = Landmark("IndexFar", 900, "vertical", "unique", address="1e5_1e3_1e2@V-Q")
+_split = Landmark("IndexSplit", 300, "vertical", "unique", address="1e5_1e3_1e2@W-Z")
+_split._style = "S"
+_idx_catalog = FakeCatalog([_tower, _near, _far, _split], {"S": "1e5_1e3_1e2@W-A"},
+                           styles=["S"])
+_idx_planner = AddressPlanner(_idx_catalog)
+_idx = _idx_catalog.address_index
+
+check("地标身份来自声明（风格 + 名称）",
+      _idx_planner.ref(_tower).text == "landmarks:S/IndexTower")
+check("耐久键与地址无关",
+      _idx_planner.durability_key(_tower) == "landmarks:S/IndexTower")
+check("改址不改身份（耐久不清零）",
+      _idx_planner.durability_key(replace(_tower, address="1e5_1e3_1e2@W-Z"))
+      == "landmarks:S/IndexTower")
+
+_exported_lm = _idx_planner.landmarks_for_export()[0]
+check("导出副本仍解析出同一完整地址",
+      _idx_planner.landmark_address(_exported_lm)
+      == _idx_planner.landmark_address(_tower),
+      _idx_planner.landmark_address(_exported_lm))
+check("导出副本的身份仍算得出来", _idx_planner.ref(_exported_lm) is not None)
+
+check("反查：地域前缀命中该区域的地标",
+      _idx.referencing("1e5_1e3_1e2@W-A")
+      == sorted([_idx_planner.ref(_tower), _idx_planner.ref(_near)]),
+      [str(r) for r in _idx.referencing("1e5_1e3_1e2@W-A")])
+check("反查：其它维度只命中自己维度的地标",
+      [str(r) for r in _idx.referencing("1e5_1e3_1e2@V-Q")]
+      == [str(_idx_planner.ref(_far))],
+      [str(r) for r in _idx.referencing("1e5_1e3_1e2@V-Q")])
+check("反查：无地址的地标不进倒排", _idx.referencing("") == [])
+check("空间候选：邻近地标可达",
+      _idx_planner.ref(_near) in _idx.nearby("1e5_1e3_1e2@W-A-B", 1e6))
+check("空间候选：超出可达半径的地标被过滤",
+      set(_idx.nearby("1e5_1e3_1e2@W-A-B", 1e3))
+      == {_idx_planner.ref(_tower), _idx_planner.ref(_near)},
+      [str(r) for r in _idx.nearby("1e5_1e3_1e2@W-A-B", 1e3)])
+check("索引重建后条目数与命中一致",
+      len(_idx) == 4 and _idx.revision >= 1)
 
 # ---------------- 结论 ----------------
 _log.flush()

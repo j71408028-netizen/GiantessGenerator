@@ -267,6 +267,8 @@ check("提示词：地址过滤后没有候选就不产生换算句",
 # ---------------- 7. 载荷里的完整地址 ----------------
 from dungeon.window.launch_payload import (deserialize_launch,  # noqa: E402
                                            serialize_launch)
+from core.resource_ref import Ref  # noqa: E402
+from services.exploration.address_index import AddressIndex  # noqa: E402
 from services.exploration.address_plan import AddressPlanner  # noqa: E402
 
 
@@ -284,10 +286,13 @@ class _FakeLandmarkRepo:
 class _FakeCatalog:
     def __init__(self, landmarks, styles, registers):
         self.merged_landmarks = landmarks
-        self._landmark_styles = {id(lm): style
-                                 for lm, style in zip(landmarks, styles)}
+        # 每条地标的风格归属按 styles 顺序给出，与目录里的 merged_refs 同构
+        self.merged_refs = [Ref.scoped("landmarks", style, lm.name)
+                            for lm, style in zip(landmarks, styles)]
         self.selected_styles = list(registers)
         self.landmark_repo = _FakeLandmarkRepo(registers)
+        self.address_index = AddressIndex(self.landmark_repo)
+        self.address_index.rebuild(zip(self.merged_refs, self.merged_landmarks))
 
 
 _relative = [

@@ -286,7 +286,7 @@ class SelectionArbiter:
             key = id(lm)
             if key in addr_cache:
                 return addr_cache[key]
-            addr, err = self.addresses._landmark_address_ex(lm, registers)
+            addr, err = self.addresses.address_ex(lm)
             if err:
                 invalid_ids.add(key)
                 errors.append({"landmark": lm.name,
@@ -297,12 +297,8 @@ class SelectionArbiter:
             return addr
 
         def cand_key(cand) -> str:
-            """耐久表键：名称@完整地址；无地址时仅名称（旧存档兼容）。"""
-            lm = cand["landmark"]
-            if lm.frequency != "unique":
-                return lm.name
-            addr = cand_addr(cand)
-            return f"{lm.name}@{addr}" if addr else lm.name
+            """耐久表键：地标的声明身份（``Ref`` 文本）；无法归属时退回名称。"""
+            return self.addresses.durability_key(cand["landmark"])
 
         def durable_ok(cand, is_engaged: bool) -> bool:
             lm = cand["landmark"]
@@ -423,21 +419,15 @@ class SelectionArbiter:
         else:
             scan_radius = 50.0 * max(0.0, skip_base_prob or 0.0) * height
             if engaged and pos_now and scan_radius > 0:
-                near = []
-                for r in slots:
-                    lm = r.cand["landmark"]
-                    if lm.frequency != "unique" or id(lm) in invalid_ids:
-                        continue
-                    if not r.addr:
-                        continue
-                    rel = relate(pos_now, r.addr)
-                    # 私有名冲突的地标不可配对，不算"附近可用"
-                    if not rel.chunk_ok or rel.interval is None:
-                        continue
-                    if rel.interval[0] < scan_radius:
-                        near.append(r)
+                # 空间候选走地址索引（私有名冲突、不可达都在索引里判过），
+                # 只保留本轮的候选槽位，口径与原逐条 relate 一致。
+                near_refs = set(self.addresses.index.nearby(pos_now, scan_radius))
+                near = [r for r in slots
+                        if near_refs
+                        and r.cand["landmark"].frequency == "unique"
+                        and self.addresses.ref(r.cand["landmark"]) in near_refs]
                 if near and all(durability.get(
-                        f"{r.cand['landmark'].name}@{r.addr}", 1.0) < 0.5
+                        self.addresses.durability_key(r.cand["landmark"]), 1.0) < 0.5
                         for r in near):
                     stuck = {"reason": "all_damaged", "position": pos_now,
                              "worlds": content_worlds}

@@ -148,8 +148,9 @@ class ExplorationContext:
         return self.catalog.merged_landmarks
 
     @property
-    def _landmark_styles(self) -> dict:
-        return self.catalog._landmark_styles
+    def address_index(self):
+        """地标地址索引（派生自合并数据，随 reload_merged_data 重建）。"""
+        return self.catalog.address_index
 
     def landmarks_for_dungeon(self) -> list:
         """副本启动载荷用：每条地标都带解析好的完整地址（见 address_plan）。"""
@@ -219,6 +220,10 @@ class ExplorationContext:
 
     def reload_merged_data(self):
         self.catalog.reload_merged_data()
+
+    def invalidate_addresses(self):
+        """风格注册地址改动后重建地址索引（地标内容没变，只有解析结果变）。"""
+        self.catalog.invalidate_addresses()
 
     def update_world_setting(self, world_setting: str):
         self.catalog.update_world_setting(world_setting)

@@ -122,6 +122,8 @@ class LandmarkCardManager(CardManager):
             initial=current, landmark_style=True)
         if dlg.result is not None:
             self.landmark_repo.save_style_address(style, dlg.result)
+            # 风格注册地址变了 → 已解析的地标地址全部作废，重建地址索引
+            self.gui.context.invalidate_addresses()
             if dlg.result:
                 ui.ctk.dialogs.showinfo(
                     "已保存",

@@ -9,6 +9,8 @@
   本对象、在调用时读这些属性，而**不能**在构造时把它们拷成自己的字段——拷了就会
   陈旧。
 - ``settings`` 是**共享引用**（外部传入的同一个 dict），对它的修改全层可见。
+- ``address_index`` 与合并数据同生共死：每次 ``_load_merged_data()`` 结束都重建
+  一次（地标集合变了，解析结果必然变），风格注册地址变更走 ``invalidate_addresses()``。
 
 **持有 vs 拥有**：``state_service`` / ``creation_service`` / ``news_service`` /
 ``name_repo`` 只是被聚在一起供上层取用，它们的生命周期与建法都没变。
@@ -17,6 +19,7 @@
 from typing import Any, Dict, List, Optional
 
 from core.logic import ALL_PART_NAMES
+from core.resource_ref import Ref
 from persistence import ScenarioRepo
 from persistence.name_repo import NameRepo, DEFAULT_NAME_TABLE
 from persistence.landmark_repo import LandmarkRepo, DEFAULT_LANDMARK_STYLE
@@ -25,6 +28,7 @@ from persistence.preset_repo import PresetRepo
 from persistence.personality_repo import PersonalityRepo
 from persistence.character_repo import CharacterRepo
 from persistence.settings_repo import SettingsRepo
+from services.exploration.address_index import LANDMARK_KIND, AddressIndex
 from services.exploration.detail_pools import build_detail_pools
 from services.creation_service import CreationService
 from services.news import DEFAULT_NEWS_TABLE, NewsService
@@ -70,7 +74,8 @@ class ExplorationCatalog:
 
         # ---------- 2. 加载合并数据 ----------
         self.merged_landmarks = []
-        self._landmark_styles = {}
+        self.merged_refs = []
+        self.address_index = AddressIndex(landmark_repo)
         self.quips = {}
         self.detail_pools = {}
         self._load_merged_data()
@@ -106,18 +111,30 @@ class ExplorationCatalog:
 
         ``__init__`` 与 ``reload_merged_data()`` 共用本方法——原先两处是逐字重复的
         代码，风格改一处忘一处就会让「设置里改风格」与「启动时读风格」产生分歧。
+
+        ``merged_refs`` 与 ``merged_landmarks`` 同序同长：前者是后者的声明身份
+        （风格 id + 地标名），地址索引据此建立，不再用 ``id(landmark)`` 当归属键。
         """
         self.merged_landmarks = []
-        self._landmark_styles = {}
-        for _style in self.selected_styles:
-            for _lm in self.landmark_repo.load(_style):
-                self.merged_landmarks.append(_lm)
-                self._landmark_styles[id(_lm)] = _style
+        self.merged_refs = []
+        for style in self.selected_styles:
+            for landmark in self.landmark_repo.load(style):
+                self.merged_landmarks.append(landmark)
+                self.merged_refs.append(
+                    Ref.scoped(LANDMARK_KIND, style, landmark.name))
         self.quips = self.quip_repo.load_merged(self.selected_quip_styles)
         self.detail_pools = build_detail_pools(self.quips)
+        self.invalidate_addresses()
 
     def reload_merged_data(self):
         self._load_merged_data()
+
+    def invalidate_addresses(self):
+        """重建地址索引（风格注册地址改动时调用；合并数据未变）。
+
+        索引是纯派生缓存，重建成本是「重新组合一遍地址」，不需要增量更新。
+        """
+        self.address_index.rebuild(zip(self.merged_refs, self.merged_landmarks))
 
     def update_world_setting(self, world_setting: str):
         self.world_setting = world_setting

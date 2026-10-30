@@ -31,7 +31,9 @@ def check(name, ok, extra=""):
 
 from core.logic import select_quip_with_budget  # noqa: E402
 from core.models import Landmark  # noqa: E402
+from core.resource_ref import Ref  # noqa: E402
 from services.character.spatial import SpatialProfile, priors_for_tags  # noqa: E402
+from services.exploration.address_index import AddressIndex  # noqa: E402
 from services.exploration.address_plan import AddressPlanner  # noqa: E402
 
 
@@ -96,10 +98,11 @@ class FakeCatalog:
         self.landmark_repo = FakeLandmarkRepo(registers)
         self.quip_repo = FakeQuipRepo(quip_registers)
         self.quips = quips
-        self._landmark_styles = {
-            id(lm): style for lm, style in
-            ((x, getattr(x, "_style", "")) for x in landmarks) if style
-        }
+        # 夹具用 _style 属性模拟「地标属于哪个风格」，与目录里的 merged_refs 同构
+        self.merged_refs = [Ref.scoped("landmarks", getattr(x, "_style", ""), x.name)
+                            for x in self.merged_landmarks]
+        self.address_index = AddressIndex(self.landmark_repo)
+        self.address_index.rebuild(zip(self.merged_refs, self.merged_landmarks))
 
 
 def _arbiter(catalog):
