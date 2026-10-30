@@ -75,7 +75,8 @@ def write_csv(path: str, landmarks) -> None:
     writer = csv.DictWriter(buffer, fieldnames=list(COLUMNS))
     writer.writeheader()
     writer.writerows(_to_row(item) for item in landmarks)
-    write_text_atomic(path, buffer.getvalue(), encoding="utf-8-sig")
+    # CSV 自带 CRLF，写文件时关掉文本模式的行尾翻译，避免出现 \r\r\n。
+    write_text_atomic(path, buffer.getvalue(), encoding="utf-8-sig", newline="")
 
 
 def _read_rows(path: str) -> list:

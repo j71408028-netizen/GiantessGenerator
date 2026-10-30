@@ -26,13 +26,17 @@ def _backup_existing(path: str) -> None:
 
 
 def write_text_atomic(path: str, text: str, *, backup: bool = True,
-                      encoding: str = "utf-8") -> None:
-    """原子写入文本文件；写入失败抛异常，由调用方决定如何提示。"""
+                      encoding: str = "utf-8", newline: str = None) -> None:
+    """原子写入文本文件；写入失败抛异常，由调用方决定如何提示。
+
+    ``newline`` 透传给 ``open``：CSV 等自带行尾的内容传 ``""``，
+    避免文本模式再把 ``\\r\\n`` 翻译成平台行尾。
+    """
     directory = os.path.dirname(path) or "."
     os.makedirs(directory, exist_ok=True)
     temp_path = path + TEMP_SUFFIX
     try:
-        with open(temp_path, "w", encoding=encoding) as f:
+        with open(temp_path, "w", encoding=encoding, newline=newline) as f:
             f.write(text)
             f.flush()
             try:

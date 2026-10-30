@@ -37,6 +37,7 @@ from core.resource_spec import (  # noqa: E402
     valid_type_id,
 )
 from persistence import world_pack  # noqa: E402
+from persistence.landmark_repo import write_csv as write_landmark_csv  # noqa: E402
 from persistence.resource_settings_repo import (  # noqa: E402
     RESOURCE_SETTINGS_KEYS as LEGACY_SETTING_KEYS,
 )
@@ -177,6 +178,13 @@ if os.path.isdir(_DATA):
 # ---------------- 4. 信封往返 ----------------
 _tmp = tempfile.mkdtemp(prefix="resource_spec_")
 try:
+    # CSV 自带 CRLF：写文件时不能再让文本模式翻译一次（Windows 上会变成 \r\r\n）
+    _csv_path = os.path.join(_tmp, "csv_newline.csv")
+    write_landmark_csv(_csv_path, [])
+    _csv_raw = open(_csv_path, "rb").read()
+    check(b"\r\r\n" not in _csv_raw and _csv_raw.count(b"\r") == _csv_raw.count(b"\n"),
+          "地标 CSV 行尾只保留一份 CRLF", _csv_raw[:80])
+
     landmarks_dir = os.path.join(_tmp, "packs", "landmarks")
     os.makedirs(landmarks_dir, exist_ok=True)
     primary = os.path.join(landmarks_dir, "chinese_mix.csv")
