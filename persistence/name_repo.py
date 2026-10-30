@@ -2,7 +2,8 @@ import csv
 import os
 from typing import List, Optional, Tuple
 
-from paths import names_dir
+from paths import data_dir
+from persistence.resources.registry import free_dir as _free_dir_of
 
 DEFAULT_NAME_TABLE = "default"
 
@@ -12,7 +13,7 @@ class NameRepo:
 
     def __init__(self, dir_path: Optional[str] = None, world_state=None):
         self._world_state = world_state
-        self._free_dir = dir_path or names_dir()
+        self._free_dir = dir_path or _free_dir_of("names", data_dir())
 
     def _read_dir(self) -> str:
         if self._world_state is not None and self._world_state.owns("names"):

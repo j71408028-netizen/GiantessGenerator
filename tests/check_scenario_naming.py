@@ -7,8 +7,8 @@
    （``dungeon_id`` / ``DungeonRepo`` / ``ScriptManager`` 等），以及裸写的
    ``"dungeons"`` 资源键字符串；白名单见 ``ALLOWED_FILES``（terms.py 的
    旧契约常量与迁移脚本）。
-2. 行为自检：``dungeon.terms`` 的兼容读、``ScenarioRepo`` 的旧目录自愈迁移
-   与读写根语义、``WorldPackManifest`` 的旧资源键归一化与旧成员路径兼容。
+2. 行为自检：``dungeon.terms`` 的兼容读、``ScenarioRepo`` 的读写根语义、
+   ``WorldPackManifest`` 的成员核对（旧的 ``dungeons`` 资源键与目录已不再兼容）。
 
 原先还夹着一节"dungeon/ 根目录必须是纯领域层"的分层扫描，已删除：它与
 ``tests/check_dungeon_layering.py`` 是同一条规则的两份实现，后者覆盖更全
@@ -113,7 +113,7 @@ check("is_default_scenario",
       is_default_scenario("_default") and not is_default_scenario("other")
       and not is_default_scenario(None))
 
-# ---------------- 3. ScenarioRepo：旧目录自愈迁移 + 读写根 ----------------
+# ---------------- 3. ScenarioRepo：读写根 ----------------
 from persistence.scenario_repo import ScenarioRepo  # noqa: E402
 
 
@@ -123,17 +123,16 @@ def _missing(manifest, members):
 
 
 tmp = tempfile.mkdtemp(prefix="scenario_naming_")
-legacy_root = os.path.join(tmp, "packs", "dungeons")
-for scenario_id, prompt in (("_default", "legacy"), ("alpha", "alpha")):
-    os.makedirs(os.path.join(legacy_root, scenario_id), exist_ok=True)
-    with open(os.path.join(legacy_root, scenario_id, "config.json"), "w",
+new_root = os.path.join(tmp, "packs", "scenarios")
+for scenario_id, prompt in (("_default", "default"), ("alpha", "alpha")):
+    os.makedirs(os.path.join(new_root, scenario_id), exist_ok=True)
+    with open(os.path.join(new_root, scenario_id, "config.json"), "w",
               encoding="utf-8") as f:
         json.dump({"initial_prompt": prompt}, f, ensure_ascii=False)
 
 repo = ScenarioRepo(data_dir=tmp)
-new_root = os.path.join(tmp, "packs", "scenarios")
-check("旧方案目录已自动迁移", os.path.isdir(new_root) and not os.path.isdir(legacy_root))
-check("迁移后可读旧配置", repo.load_config("_default")["initial_prompt"] == "legacy")
+check("写根即自由方案目录", repo.write_root == new_root, repo.write_root)
+check("可读已有配置", repo.load_config("_default")["initial_prompt"] == "default")
 check("list_all 覆盖全部方案", repo.list_all() == ["_default", "alpha"], repo.list_all())
 
 check("新建方案写入写根",
@@ -175,25 +174,29 @@ check("list_all 汇总两个根",
       all(name in repo.list_all() for name in ("_default", "alpha", "gamma", "delta")),
       repo.list_all())
 
-# ---------------- 4. 世界包清单：旧资源键归一化 ----------------
+# ---------------- 4. 世界包清单：成员核对 ----------------
 from persistence.world_pack import WorldPackManifest  # noqa: E402
 
-legacy_manifest = WorldPackManifest.from_dict({
+manifest = WorldPackManifest.from_dict({
     "world_id": "w1", "name": "测试世界",
-    "resources": {"dungeons": ["gamma"], "landmarks": ["L1"]},
+    "resources": {"scenarios": ["gamma"], "landmarks": ["L1"]},
 })
-check("旧资源键归一化为 scenarios",
-      legacy_manifest.owns("scenarios") and not legacy_manifest.owns("dungeons"))
-check("归一化后校验通过", legacy_manifest.validate() == [])
-check("归一化清单用新路径核对成员",
-      not _missing(legacy_manifest, {"world.json", "scenarios/gamma/config.json",
-                                     "landmarks/L1.json"}))
-check("旧包内 dungeons/ 成员路径同样通过核对",
-      not _missing(legacy_manifest, {"world.json", "dungeons/gamma/config.json",
-                                     "landmarks/L1.json"}))
+check("清单校验通过", manifest.validate() == [], manifest.validate())
+check("成员核对走新路径",
+      not _missing(manifest, {"world.json", "scenarios/gamma/config.json",
+                              "landmarks/L1.json"}))
 check("缺成员仍会被发现",
-      _missing(legacy_manifest, {"world.json", "landmarks/L1.json"}) ==
+      _missing(manifest, {"world.json", "landmarks/L1.json"}) ==
       ["scenarios/gamma/config.json"])
+check("旧的 dungeons/ 成员路径不再被接受",
+      _missing(manifest, {"world.json", "dungeons/gamma/config.json",
+                          "landmarks/L1.json"}) == ["scenarios/gamma/config.json"])
+legacy_manifest = WorldPackManifest.from_dict({
+    "world_id": "w1", "name": "测试世界", "resources": {"dungeons": ["gamma"]},
+})
+check("旧的 dungeons 资源键不再是合法类型",
+      any("dungeons" in e for e in legacy_manifest.validate()),
+      legacy_manifest.validate())
 
 # ---------------- 结论 ----------------
 _log.flush()

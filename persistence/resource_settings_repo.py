@@ -15,18 +15,10 @@
 import os
 
 from persistence.json_store import load_json_with_backup, write_json_atomic
+# 资源域独占的设置键（不再住 settings.json，由 SettingsRepo 在读时合并、写时分流）；
+# 键集派生自类型声明，新增一类资源不必改这里。
+from persistence.resources.registry import RESOURCE_SETTINGS_KEYS
 
-
-# 资源域独占的设置键（不再住 settings.json，由 SettingsRepo 在读时合并、写时分流）
-RESOURCE_SETTINGS_KEYS = (
-    "name_table",
-    "news_table",
-    "preset_table",
-    "personality_table",
-    "selected_styles",
-    "selected_quip_styles",
-    "active_world",
-)
 
 # 缺省值（preset_table / personality_table / active_world 无缺省：读取方各自回退）
 RESOURCE_SETTING_DEFAULTS = {

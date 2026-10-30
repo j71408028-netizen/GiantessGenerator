@@ -3,8 +3,11 @@ from dataclasses import asdict
 
 from core.models import Landmark
 from .json_store import load_json_with_backup, write_json_atomic
-from .style_addr import (addr_path as _addr_path,
-                         delete_address as _delete_addr,
+from .resources.registry import addr_path as _reg_addr_path
+from .resources.registry import free_dir as _free_dir_of
+from .resources.registry import free_path as _free_path_of
+from .resources.registry import primary_relpath as _primary_relpath
+from .style_addr import (delete_address as _delete_addr,
                          load_address as _load_addr,
                          rename_address as _rename_addr,
                          save_address as _save_addr)
@@ -13,29 +16,30 @@ from .style_universe import style_read_dir as _style_read_dir
 
 
 DEFAULT_LANDMARK_STYLE = "ChineseMix"
+_TYPE = "landmarks"
 
 
 class LandmarkRepo:
     def __init__(self, data_dir: str = "data", world_state=None):
         self._data_dir = data_dir
         self._world_state = world_state
-        self._free_dir = os.path.join(data_dir, "packs", "landmarks")
+        self._free_dir = _free_dir_of(_TYPE, data_dir)
         os.makedirs(self._free_dir, exist_ok=True)
 
     def _owns_pack(self) -> bool:
-        return self._world_state is not None and self._world_state.owns("landmarks")
+        return self._world_state is not None and self._world_state.owns(_TYPE)
 
     @property
     def default_style(self) -> str:
         if self._owns_pack():
-            styles = self._world_state.manifest.resources.get("landmarks") or []
+            styles = self._world_state.manifest.resources.get(_TYPE) or []
             if styles:
                 return styles[0]
         return DEFAULT_LANDMARK_STYLE
 
     def get_styles(self) -> list:
         # 世界包声明 worlds 时合并自由目录素材（见 style_universe 模块说明）
-        styles = _merged_styles(self._world_state, "landmarks", self._free_dir)
+        styles = _merged_styles(self._world_state, _TYPE, self._free_dir)
         if not styles and not self._owns_pack():
             self._create_defaults()
             styles = [DEFAULT_LANDMARK_STYLE]
@@ -62,11 +66,11 @@ class LandmarkRepo:
 
     # ---------- 风格注册地址（companion 文件，读写见 persistence.style_addr） ----------
     def addr_path(self, style_name: str) -> str:
-        return _addr_path(self._free_dir, style_name)
+        return _reg_addr_path(_TYPE, style_name, self._data_dir)
 
     def load_style_address(self, style_name: str) -> str:
         """读取风格注册地址文本（维度 + 风格注册的若干级）。空 = 未注册。"""
-        read_dir = _style_read_dir(self._world_state, "landmarks",
+        read_dir = _style_read_dir(self._world_state, _TYPE,
                                    self._free_dir, style_name)
         return _load_addr(read_dir, style_name)
 
@@ -109,12 +113,12 @@ class LandmarkRepo:
         _rename_addr(self._free_dir, old_name, new_name)
 
     def _filepath(self, style_name: str) -> str:
-        read_dir = _style_read_dir(self._world_state, "landmarks",
+        read_dir = _style_read_dir(self._world_state, _TYPE,
                                    self._free_dir, style_name)
-        return os.path.join(read_dir, f"{style_name}.json")
+        return os.path.join(read_dir, _primary_relpath(_TYPE, style_name))
 
     def _free_filepath(self, style_name: str) -> str:
-        return os.path.join(self._free_dir, f"{style_name}.json")
+        return _free_path_of(_TYPE, style_name, self._data_dir)
 
     def _create_defaults(self):
         default_landmarks = [

@@ -32,7 +32,7 @@ SCENARIO_CONFIG_KEY = "scenario_config"
 
 # 目录名 / 世界包资源类型键
 SCENARIO_RESOURCE_KEY = "scenarios"
-# 改名前的旧契约名：只用于读取兼容与迁移脚本，新代码不得写入
+# 改名前的资源类型键：运行时不再兼容，只剩迁移脚本需要它识别旧包
 LEGACY_SCENARIO_RESOURCE_KEY = "dungeons"
 LEGACY_SCENARIO_ID_KEY = "dungeon_id"
 LEGACY_SCENARIO_CONFIG_KEY = "dungeon_config"
@@ -61,9 +61,3 @@ def scenario_config_of(record) -> dict:
 def is_default_scenario(scenario_id) -> bool:
     """是否为内置方案（不可删除、不可重命名、不进世界包导出）。"""
     return str(scenario_id or "") == DEFAULT_SCENARIO_ID
-
-
-def legacy_resource_key(key) -> str:
-    """把改名前的资源类型键（``dungeons``）归一化为 ``scenarios``。"""
-    text = str(key or "")
-    return SCENARIO_RESOURCE_KEY if text == LEGACY_SCENARIO_RESOURCE_KEY else text

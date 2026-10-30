@@ -23,20 +23,19 @@ from dungeon.schema import (empty_scenario_config, normalize_ending_policy,
                             normalize_scene_landmarks,
                             normalize_text_component, TEXT_COMPONENT_IDS)
 from dungeon.validate import format_diagnostics, validate_scenario_config
-from dungeon.terms import (DEFAULT_SCENARIO_ID, LEGACY_SCENARIO_RESOURCE_KEY,
-                           SCENARIO_CONFIG_NAME, SCENARIO_RESOURCE_KEY,
-                           is_default_scenario)
+from dungeon.terms import (DEFAULT_SCENARIO_ID, SCENARIO_CONFIG_NAME,
+                           SCENARIO_RESOURCE_KEY, is_default_scenario)
 from .json_store import load_json_with_backup, write_json_atomic
+from .resources.registry import free_dir as _free_dir_of
+from .resources.registry import pack_dir as _pack_dir_of
 
 
 class ScenarioRepo:
     def __init__(self, data_dir: str = "data", world_state=None):
-        self._data_dir = data_dir
         self._world_state = world_state
-        self._write_root = os.path.join(data_dir, "packs", SCENARIO_RESOURCE_KEY)
+        self._write_root = _free_dir_of(SCENARIO_RESOURCE_KEY, data_dir)
         # 最近一次 save_config 的校验诊断（编辑器/启动流程各取所需）
         self.last_diagnostics = []
-        self._migrate_legacy_root()
         os.makedirs(self._write_root, exist_ok=True)
         self._ensure_default()
 
@@ -49,9 +48,7 @@ class ScenarioRepo:
     @property
     def read_root(self) -> str:
         """读取根：世界包接管方案时为世界包目录，否则与写根相同。"""
-        if self._world_state is not None and self._world_state.owns(SCENARIO_RESOURCE_KEY):
-            return self._world_state.pack_path(SCENARIO_RESOURCE_KEY)
-        return self._write_root
+        return _pack_dir_of(SCENARIO_RESOURCE_KEY, self._world_state) or self._write_root
 
     @property
     def root(self) -> str:
@@ -141,50 +138,6 @@ class ScenarioRepo:
             config = self._empty_config()
             config["triggers"] = []
             self.create(DEFAULT_SCENARIO_ID, config)
-
-    def _migrate_legacy_root(self):
-        """把改名前的 ``packs/dungeons`` 就地并入 ``packs/scenarios``（幂等）。
-
-        S1.5 之前方案目录与「一局」同名 ``dungeons``。这里只搬目录、不解析内容：
-        同名方案两边都有时保留 config.json 较新的一份，旧的留作 ``.bak``。
-        """
-        legacy_root = os.path.join(self._data_dir, "packs", LEGACY_SCENARIO_RESOURCE_KEY)
-        if not os.path.isdir(legacy_root):
-            return
-        try:
-            names = sorted(n for n in os.listdir(legacy_root)
-                           if os.path.isdir(os.path.join(legacy_root, n)))
-        except OSError as e:
-            print(f"[ScenarioRepo] 旧方案目录读取失败: {e}")
-            return
-        os.makedirs(self._write_root, exist_ok=True)
-        moved = 0
-        for name in names:
-            src = os.path.join(legacy_root, name)
-            dst = os.path.join(self._write_root, name)
-            try:
-                if not os.path.exists(dst):
-                    shutil.move(src, dst)
-                    moved += 1
-                elif _config_mtime(src) > _config_mtime(dst):
-                    _backup_config(dst)
-                    shutil.rmtree(dst, ignore_errors=True)
-                    shutil.move(src, dst)
-                    moved += 1
-                    print(f"[ScenarioRepo] 方案「{name}」旧目录较新，已用旧目录覆盖")
-                else:
-                    shutil.rmtree(src, ignore_errors=True)
-                    print(f"[ScenarioRepo] 方案「{name}」新旧目录并存，保留新目录")
-            except OSError as e:
-                print(f"[ScenarioRepo] 方案「{name}」迁移失败: {e}")
-        try:
-            if not os.listdir(legacy_root):
-                os.rmdir(legacy_root)
-        except OSError:
-            pass
-        if moved:
-            print(f"[ScenarioRepo] 旧方案目录 packs/{LEGACY_SCENARIO_RESOURCE_KEY} "
-                  f"已迁移 {moved} 个方案到 packs/{SCENARIO_RESOURCE_KEY}")
 
     def _empty_config(self) -> dict:
         """空方案模板：字段与默认值以 ``dungeon/schema.py`` 的声明为准（单一真相源）。"""
@@ -313,23 +266,3 @@ class ScenarioRepo:
         else:
             new_config["triggers"] = []
         return new_config
-
-
-# ------------------ 旧目录迁移辅助 ------------------
-
-def _config_mtime(scenario_dir: str) -> float:
-    """方案 config.json 的修改时间；缺失返回 0（用于新旧目录比对）。"""
-    try:
-        return os.path.getmtime(os.path.join(scenario_dir, SCENARIO_CONFIG_NAME))
-    except OSError:
-        return 0.0
-
-
-def _backup_config(scenario_dir: str) -> None:
-    """覆盖迁移前把现有 config.json 另存为 .bak。"""
-    path = os.path.join(scenario_dir, SCENARIO_CONFIG_NAME)
-    try:
-        if os.path.exists(path):
-            shutil.copy2(path, path + ".bak")
-    except OSError as e:
-        print(f"[ScenarioRepo] 迁移备份失败（继续）: {e}")

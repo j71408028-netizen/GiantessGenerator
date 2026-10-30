@@ -4,20 +4,15 @@ from dataclasses import asdict
 from typing import List, Optional
 
 from core.models import BodyPreset
-from paths import presets_dir
+from core.resource_spec import spec_of
+from paths import data_dir
+from persistence.resources.registry import free_dir as _free_dir_of
 from persistence.static_table import format_float_parameter, parse_float_parameter
 
 DEFAULT_PRESET_TABLE = "default"
 
-# 与 BodyPreset 字段一一对应；除 name/enabled 外均为 0~2 的比例值
-PRESET_COLUMNS = [
-    "name",
-    "height_ratio", "leg_ratio", "foot_length_ratio", "arm_span_ratio",
-    "index_finger_ratio", "palm_length_ratio", "chest_width_ratio",
-    "thigh_diameter_ratio", "forearm_diameter_ratio",
-    "index_finger_diameter_ratio", "fingerprint_width_ratio", "finger_gap_ratio",
-    "knee_height_ratio", "ankle_height_ratio", "stride_ratio",
-]
+# 列清单取自资源声明（顺序即写出的表头顺序）；除 name 外均为 0~2 的比例值
+PRESET_COLUMNS = [key for key in spec_of("presets").field_keys() if key != "weight"]
 PRESET_COLUMNS_WITH_WEIGHT = ["weight", *PRESET_COLUMNS]
 
 
@@ -27,7 +22,7 @@ class PresetRepo:
     def __init__(self, dir_path: Optional[str] = None,
                  table: str = DEFAULT_PRESET_TABLE, world_state=None):
         self._world_state = world_state
-        self._free_dir = dir_path or presets_dir()
+        self._free_dir = dir_path or _free_dir_of("presets", data_dir())
         self._table = table or DEFAULT_PRESET_TABLE
         self._cache: Optional[List[BodyPreset]] = None
 

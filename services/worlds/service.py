@@ -28,8 +28,7 @@ from persistence.world_pack import (
 )
 from persistence.style_addr import load_address as _load_style_addr
 from persistence.style_addr import save_address as _save_style_addr
-from dungeon.terms import (LEGACY_SCENARIO_RESOURCE_KEY, SCENARIO_RESOURCE_KEY,
-                           is_default_scenario)
+from dungeon.terms import SCENARIO_RESOURCE_KEY, is_default_scenario
 from core.address_model import world_of
 from core.behavior_runtime import (
     BEHAVIOR_API_VERSION, get_runtime, resolve_behavior_source,
@@ -385,15 +384,9 @@ class WorldManager:
                     os.path.join(dst_dir, f"{dst}.csv"))
                 if dst != table:
                     manifest.settings["personality_table"] = dst
-        # 枚举包目录（而非仅清单声明），覆盖激活期间在包内新建的方案；
-        # 兼容改名前的世界包（方案目录叫 dungeons）
-        scenarios_root = None
-        for name in (SCENARIO_RESOURCE_KEY, LEGACY_SCENARIO_RESOURCE_KEY):
-            candidate = os.path.join(installed, name)
-            if os.path.isdir(candidate):
-                scenarios_root = candidate
-                break
-        if scenarios_root:
+        # 枚举包目录（而非仅清单声明），覆盖激活期间在包内新建的方案
+        scenarios_root = os.path.join(installed, SCENARIO_RESOURCE_KEY)
+        if os.path.isdir(scenarios_root):
             for scenario_id in sorted(os.listdir(scenarios_root)):
                 if is_default_scenario(scenario_id):
                     continue

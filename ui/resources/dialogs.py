@@ -7,6 +7,9 @@ from typing import Dict
 
 import customtkinter as ctk
 
+from persistence.resources import (
+    MULTI_PICK_TYPES, RESOURCE_TYPE_LABELS, SINGLE_PICK_TYPES,
+)
 from ui.ctk.dialogs import BaseDialog
 from ui.ctk.widgets import StyleListBox
 from ui.ctk import fonts as ui_fonts
@@ -27,22 +30,12 @@ class WorldPackCreateDialog(BaseDialog):
 
     _WORLD_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
-    # 打包资源类型 → 显示名（按显示顺序）
-    _TYPE_LABELS = [
-        ("landmarks", "地标风格"),
-        ("quips", "描述风格"),
-        ("presets", "身材表"),
-        ("personalities", "性格表"),
-        ("scenarios", "副本方案"),
-        ("challenges", "挑战包"),
-        ("names", "姓名表"),
-        ("news", "新闻表"),
-        ("behaviors", "行为包"),
-    ]
+    # 打包资源类型 → 显示名（类型清单与显示名都来自资源声明）
+    _TYPE_LABELS = list(RESOURCE_TYPE_LABELS.items())
 
-    # 风格/副本/挑战包：StyleListBox 多选；静态表：下拉单选（第一项为空）
-    _MULTI_TYPES = ("landmarks", "quips", "scenarios", "challenges")
-    _SINGLE_TYPES = ("presets", "personalities", "names", "news", "behaviors")
+    # 多选用 StyleListBox，单选用下拉（第一项为空）
+    _MULTI_TYPES = MULTI_PICK_TYPES
+    _SINGLE_TYPES = SINGLE_PICK_TYPES
 
     def __init__(self, parent, available_resources=None):
         super().__init__(parent)
@@ -65,7 +58,7 @@ class WorldPackCreateDialog(BaseDialog):
         self._description_text = ""
         self._resource_selection = None
 
-        self._multi_types = ["landmarks", "quips", "scenarios", "challenges"]  # 多选类型顺序
+        self._multi_types = list(self._MULTI_TYPES)  # 多选类型顺序
         self._multi_index = 0  # 当前显示的类型索引
         self._multi_selections = {}  # 记录每个多选类型的已选项列表
         self._single_vars = {}  # 静态表下拉框的 StringVar 字典
@@ -180,12 +173,8 @@ class WorldPackCreateDialog(BaseDialog):
             text_color=SETTINGS_DLG_TEXT_SOFT
         ).pack(fill='x', pady=(0, 8))
 
-        single_types = [("names", "姓名"),
-                        ("news", "新闻"),
-                        ("personalities", "性格"),
-                        ("presets", "身材"),
-                        ("behaviors", "行为包")
-                        ]
+        single_types = [(rtype, RESOURCE_TYPE_LABELS[rtype])
+                        for rtype in self._SINGLE_TYPES]
 
         self._single_vars = {}
         for rtype, label in single_types:

@@ -3,19 +3,16 @@ import os
 from typing import List, Optional
 
 from core.models import Personality
-from paths import personalities_dir
+from core.resource_spec import spec_of
+from paths import data_dir
+from persistence.resources.registry import free_dir as _free_dir_of
 from persistence.static_table import format_float_parameter, parse_float_parameter
 
 DEFAULT_PERSONALITY_TABLE = "default"
 
-# 与 Personality 字段一一对应
+# 列清单取自资源声明（顺序即写出的表头顺序）
 PERSONALITY_COLUMNS = [
-    "name",
-    "init_intrusion", "step_intrusion",
-    "init_destruction", "step_destruction",
-    "sensitivity", "gravity", "skip_base_prob",
-    "description",
-]
+    key for key in spec_of("personalities").field_keys() if key != "weight"]
 PERSONALITY_COLUMNS_WITH_WEIGHT = ["weight", *PERSONALITY_COLUMNS]
 
 
@@ -25,7 +22,7 @@ class PersonalityRepo:
     def __init__(self, dir_path: Optional[str] = None,
                  table: str = DEFAULT_PERSONALITY_TABLE, world_state=None):
         self._world_state = world_state
-        self._free_dir = dir_path or personalities_dir()
+        self._free_dir = dir_path or _free_dir_of("personalities", data_dir())
         self._table = table or DEFAULT_PERSONALITY_TABLE
         self._cache: Optional[List[Personality]] = None
 

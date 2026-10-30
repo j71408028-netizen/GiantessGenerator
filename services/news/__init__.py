@@ -15,6 +15,7 @@ from typing import Dict, List, Optional
 
 from core.logic import get_size_category
 from paths import data_dir
+from persistence.resources.registry import free_dir as _free_dir_of
 
 
 NEWS_COLUMNS = (
@@ -56,7 +57,7 @@ class NewsService:
     def __init__(self, news_dir: Optional[str] = None, news_table: str = DEFAULT_NEWS_TABLE,
                  world_state=None):
         self._world_state = world_state
-        self._free_dir = news_dir or os.path.join(data_dir(), "static", "news")
+        self._free_dir = news_dir or _free_dir_of("news", data_dir())
         self._table = news_table or DEFAULT_NEWS_TABLE
         self._cache: Optional[List[Dict[str, str]]] = None
 

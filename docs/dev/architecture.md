@@ -169,6 +169,30 @@ data/static/behaviors/imperial_units/imperial_units.py:45
   三层开放模型与「学习层不开放」的边界见
   `docs/designs/behaviors/dev-guide.md`。
 
+### 2.7 资源类型清单只有一份声明
+
+「资源」指成组、可替换、可打包的内容（地标风格、描述风格、副本方案、挑战包、
+行为包、小游戏、四张静态表）。**类型清单只写在 `core/resource_spec.py`**：
+容器形状、主文件模板、字段清单、id 规则、存储根、设置键、界面显示名与选择粒度。
+
+派生出口是 `persistence/resources/registry.py`，其余模块一律从这里取值：
+
+- 包内目录（`PACK_RESOURCE_PATHS`）、可枚举类型（`LIST_RESOURCE_TYPES`）、
+  资源域设置键（`RESOURCE_SETTINGS_KEYS`）、界面显示名与多选/单选分组；
+- 路径定位：`free_dir` / `free_path` / `read_dir` / `read_path` / `addr_path`，
+  不要自己拼 `os.path.join(data_dir, "packs", ...)`；
+- 校验：`validate_resource()` 是唯一判定出口，成员核对是 `missing_members()`。
+
+新增一类资源 = 一份声明 + 一个 repo + 一处界面接入。再写第二份类型清单会让
+「登记了但没人读」和「读了但没登记」同时出现，`tests/check_resource_spec.py`
+会拦。资源 id 的全局规则是小写字母/数字/`._-`，类型可声明更宽或更严的
+`id_pattern`（行为包要能当 Python 标识符）；清单校验目前只对声明了
+`id_pattern` 的类型强校验——存量还有大写与中文 id，收口在迁移阶段。
+
+元数据走兄弟文件 `<id>.meta.json`（`persistence/resources/envelope.py`），
+与既有的 `<id>.addr.json` 同构：字段全可选、读取侧补默认值不写回、未知字段保留、
+`content_hash` 判定「本地改过没有」。
+
 ---
 
 ## 3. 历程索引（已移至 legacy/）

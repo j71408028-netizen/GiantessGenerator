@@ -26,43 +26,31 @@ import zipfile
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
-from dungeon.terms import LEGACY_SCENARIO_RESOURCE_KEY, SCENARIO_RESOURCE_KEY
 from core.address_model import valid_world_id
+from core.resource_spec import RESOURCE_TYPES, spec_of
 from .json_store import write_json_atomic
+# 类型清单全部来自注册表；这三个名字在这里保留，供旧的导入路径继续可用。
+from .resources.registry import (  # noqa: F401
+    BOOL_RESOURCE_TYPES,
+    LIST_RESOURCE_TYPES,
+    PACK_RESOURCE_PATHS,
+    missing_members,
+)
 
 WORLD_PACK_EXT = ".world.zip"
 WORLD_MANIFEST_NAME = "world.json"
 WORLD_FORMAT_VERSION = 1
 
-WORLD_SETTING_KEYS = ("world_setting", "seed", "name_table", "news_table",
-                      "preset_table", "personality_table")
-WORLD_SETTING_VALUES = {"appear", "abs_giant", "rel_giant"}
+#: 设置键 → 资源类型：能作为「当前生效表」的静态表，由声明里的 settings_keys 派生。
 TABLE_SETTING_KEYS = {
-    "name_table": "names",
-    "news_table": "news",
-    "preset_table": "presets",
-    "personality_table": "personalities",
+    spec.settings_keys[0]: spec.type_id
+    for spec in RESOURCE_TYPES
+    if spec.container == "csv" and spec.settings_keys
 }
-
-PACK_RESOURCE_PATHS = {
-    "landmarks": "landmarks",
-    "quips": "quips",
-    "presets": "presets",
-    "personalities": "personalities",
-    "scenarios": "scenarios",
-    "challenges": "challenges",
-    "names": "names",
-    "news": "news",
-    "behaviors": "behaviors",
-}
-
-LIST_RESOURCE_TYPES = ("landmarks", "quips", "scenarios", "challenges",
-                       "names", "news", "presets", "personalities",
-                       "behaviors")
-BOOL_RESOURCE_TYPES = ()
+WORLD_SETTING_KEYS = ("world_setting", "seed", *TABLE_SETTING_KEYS)
+WORLD_SETTING_VALUES = {"appear", "abs_giant", "rel_giant"}
 
 _WORLD_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-_BEHAVIOR_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def worlds_dir(data_dir: str = "data") -> str:
@@ -76,8 +64,9 @@ def behaviors_dir(data_dir: str = "data") -> str:
 
 
 def is_behavior_pack_name(name: str) -> bool:
-    """行为包目录名是否合法（字母开头，仅含字母数字下划线）。"""
-    return bool(name) and bool(_BEHAVIOR_NAME_RE.match(name))
+    """行为包目录名是否合法（按 ``behaviors`` 声明的 id 规则，即 Python 标识符）。"""
+    spec = spec_of("behaviors")
+    return bool(name) and spec is not None and spec.valid_id(name)
 
 
 def list_behavior_packs(data_dir: str = "data") -> List[str]:
@@ -152,11 +141,6 @@ class WorldPackManifest:
     def from_dict(cls, data: dict) -> "WorldPackManifest":
         if not isinstance(data, dict):
             raise ValueError("world.json 根节点必须是对象")
-        resources = dict(data.get("resources") or {})
-        # 兼容改名前的世界包：resources["dungeons"] 归一化为 "scenarios"
-        legacy = resources.pop(LEGACY_SCENARIO_RESOURCE_KEY, None)
-        if legacy is not None and not resources.get(SCENARIO_RESOURCE_KEY):
-            resources[SCENARIO_RESOURCE_KEY] = legacy
         return cls(
             format_version=data.get("format_version", WORLD_FORMAT_VERSION),
             behavior_api=data.get("behavior_api"),
@@ -169,7 +153,7 @@ class WorldPackManifest:
             created_at=data.get("created_at", ""),
             worlds=data.get("worlds", []),
             settings=dict(data.get("settings") or {}),
-            resources=resources,
+            resources=dict(data.get("resources") or {}),
         )
 
     # ---------- 校验 ----------
@@ -204,7 +188,7 @@ class WorldPackManifest:
         seed = self.settings.get("seed")
         if seed is not None and not isinstance(seed, int):
             errors.append(f"seed 必须为整数（实际: {seed!r}）")
-        for key in ("name_table", "news_table", "preset_table", "personality_table"):
+        for key in TABLE_SETTING_KEYS:
             value = self.settings.get(key)
             if value is not None and (not isinstance(value, str) or not value.strip()):
                 errors.append(f"{key} 必须为非空字符串")
@@ -222,7 +206,8 @@ class WorldPackManifest:
                 else:
                     seen_worlds.add(w)
         for rtype, value in self.resources.items():
-            if rtype not in PACK_RESOURCE_PATHS:
+            spec = spec_of(rtype)
+            if spec is None or rtype not in PACK_RESOURCE_PATHS:
                 errors.append(
                     f"resources 包含未知类型 '{rtype}'"
                     f"（允许: {', '.join(PACK_RESOURCE_PATHS)}）")
@@ -231,19 +216,23 @@ class WorldPackManifest:
                 if not isinstance(value, bool):
                     errors.append(
                         f"resources.{rtype} 必须为布尔值（实际: {value!r}）")
-            else:
-                if (not isinstance(value, list) or not value
-                        or any(not isinstance(x, str) or not x.strip() for x in value)):
-                    errors.append(
-                        f"resources.{rtype} 必须为非空字符串列表（实际: {value!r}）")
-                if rtype == "behaviors":
-                    if len(value) > 1:
-                        errors.append("resources.behaviors 只能选择一个行为包")
-                    for item in value:
-                        if not _BEHAVIOR_NAME_RE.match(item):
-                            errors.append(
-                                f"resources.behaviors 含非法行为包名 {item!r}"
-                                f"（仅允许字母开头、字母数字下划线组成）")
+                continue
+            if (not isinstance(value, list) or not value
+                    or any(not isinstance(x, str) or not x.strip() for x in value)):
+                errors.append(
+                    f"resources.{rtype} 必须为非空字符串列表（实际: {value!r}）")
+                continue
+            if spec.max_items and len(value) > spec.max_items:
+                errors.append(
+                    f"resources.{rtype} 最多 {spec.max_items} 项（实际: {len(value)} 项）")
+            # 只有声明了专属 id 规则的类型才在这里强校验：其余类型的 id 由迁移
+            # 统一改造，加载期不设门槛，避免存量的大写/中文 id 直接失效。
+            if spec.id_pattern:
+                for item in value:
+                    if not spec.valid_id(item):
+                        errors.append(
+                            f"resources.{rtype} 含非法资源 id {item!r}"
+                            f"（应为 {spec.id_pattern}）")
         return errors
 
     # ---------- 拥有关系 ----------
@@ -298,38 +287,11 @@ def save_manifest_file(path: str, manifest: WorldPackManifest) -> None:
 
 
 def _missing_members(manifest: WorldPackManifest, members: Set[str]) -> List[str]:
-    """对照清单声明的资源，返回归档中缺失的成员路径列表。"""
-    missing = []
-    for rtype, rel in PACK_RESOURCE_PATHS.items():
-        if rtype in BOOL_RESOURCE_TYPES:
-            if manifest.owns(rtype) and rel not in members:
-                missing.append(rel)
-            continue
-        for item in manifest.resources.get(rtype, []):
-            if rtype == "scenarios":
-                member = f"{rel}/{item}/config.json"
-            elif rtype == "challenges":
-                member = f"{rel}/{item}"
-            elif rtype in ("landmarks", "quips"):
-                member = f"{rel}/{item}.json"
-            elif rtype == "behaviors":
-                prefix = f"{rel}/{item}/"
-                legacy = f"{rel}/{item}.py"
-                if (legacy not in members
-                        and not any(m.startswith(prefix) and m.endswith(".py")
-                                    for m in members)):
-                    missing.append(f"{prefix}*.py")
-                continue
-            else:
-                member = f"{rel}/{item}.csv"
-            if member not in members:
-                # 兼容改名前的世界包：方案成员可能仍在 dungeons/ 目录下
-                if rtype == SCENARIO_RESOURCE_KEY:
-                    legacy_member = f"{LEGACY_SCENARIO_RESOURCE_KEY}/{item}/config.json"
-                    if legacy_member in members:
-                        continue
-                missing.append(member)
-    return missing
+    """对照清单声明的资源，返回归档中缺失的成员路径列表。
+
+    成员形状由类型声明决定，实现在 :func:`persistence.resources.missing_members`。
+    """
+    return missing_members(manifest.resources, members)
 
 
 def validate_archive(archive_path: str) -> WorldPackManifest:
