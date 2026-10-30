@@ -16,6 +16,7 @@
 退出码：0 = 通过；1 = 存在断言失败。
 """
 
+import csv
 import io
 import json
 import os
@@ -178,12 +179,12 @@ _tmp = tempfile.mkdtemp(prefix="resource_spec_")
 try:
     landmarks_dir = os.path.join(_tmp, "packs", "landmarks")
     os.makedirs(landmarks_dir, exist_ok=True)
-    primary = os.path.join(landmarks_dir, "chinese_mix")
-    payload = [{"name": "上海中心大厦", "size": 632, "dimension": "vertical",
-                "frequency": "unique", "horizontal_type": None,
-                "address": "", "address_mode": ""}]
-    with open(primary, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, ensure_ascii=False)
+    primary = os.path.join(landmarks_dir, "chinese_mix.csv")
+    _LANDMARK_HEADER = ["name", "size", "dimension", "frequency",
+                        "horizontal_type", "address", "address_mode"]
+    payload_rows = [["上海中心大厦", "632", "vertical", "unique", "", "", ""]]
+    with open(primary, "w", encoding="utf-8-sig", newline="") as handle:
+        csv.writer(handle).writerows([_LANDMARK_HEADER, *payload_rows])
 
     check(registry.resource_id_from_path("landmarks", primary) == "chinese_mix",
           "单文件容器能从路径反推 id")
@@ -220,22 +221,21 @@ try:
     check(not envelope_mod.looks_modified(landmarks_dir, "landmarks",
                                          "chinese_mix", primary),
           "未改动时哈希一致")
-    with open(primary, "w", encoding="utf-8") as handle:
-        json.dump(payload + [{"name": "新增", "size": 1}], handle, ensure_ascii=False)
+    with open(primary, "a", encoding="utf-8-sig", newline="") as handle:
+        csv.writer(handle).writerow(["新增", "1", "vertical", "unique", "", "", ""])
     check(envelope_mod.looks_modified(landmarks_dir, "landmarks",
                                       "chinese_mix", primary),
           "载荷变化后哈希不同")
 
-    # 重新缩进不算改动
+    # CSV 容器按文件字节哈希：同样的行补一个换行也算改动
     envelope_mod.save_envelope(landmarks_dir, "landmarks", "chinese_mix",
                                envelope_mod.build_envelope(
                                    landmarks_dir, "landmarks", "chinese_mix", primary))
-    with open(primary, "w", encoding="utf-8") as handle:
-        json.dump(payload + [{"name": "新增", "size": 1}], handle,
-                  ensure_ascii=False, indent=4)
-    check(not envelope_mod.looks_modified(landmarks_dir, "landmarks",
-                                          "chinese_mix", primary),
-          "仅缩进变化不算改动")
+    with open(primary, "a", encoding="utf-8-sig", newline="") as handle:
+        handle.write("\n")
+    check(envelope_mod.looks_modified(landmarks_dir, "landmarks",
+                                      "chinese_mix", primary),
+          "仅行尾换行差异也算改动（CSV 按字节哈希）")
 
     # 缺信封视为改过；不可读容器缺信封给警告
     missing_dir = os.path.join(_tmp, "packs", "challenges")
@@ -266,41 +266,41 @@ try:
            if d.code == "not_found"]
     check(bad, "合法 id 之外不因 id 规则掩盖缺失文件")
 
-    # 无后缀容器：条目名即资源名，只认文件，且要排除原子写残留
-    with open(os.path.join(landmarks_dir, "chinese_mix.tmp"), "w",
+    # 单文件容器：只认声明后缀的主文件，原子写残留、备份与子目录都不算
+    with open(os.path.join(landmarks_dir, "chinese_mix.csv.tmp"), "w",
               encoding="utf-8") as handle:
         handle.write("{}")
-    with open(os.path.join(landmarks_dir, "chinese_mix.bak"), "w",
+    with open(os.path.join(landmarks_dir, "chinese_mix.csv.bak"), "w",
               encoding="utf-8") as handle:
         handle.write("[]")
     os.makedirs(os.path.join(landmarks_dir, "notes"), exist_ok=True)
     check(sorted(registry.list_ids("landmarks", _tmp)) == ["chinese_mix"],
-          "无后缀容器只枚举主文件（临时文件、备份、子目录都不算）",
+          "单文件容器只枚举主文件（临时文件、备份、子目录都不算）",
           registry.list_ids("landmarks", _tmp))
-    check(registry.is_resource_entry("landmarks", landmarks_dir, "chinese_mix")
+    check(registry.is_resource_entry("landmarks", landmarks_dir, "chinese_mix.csv")
           and not registry.is_resource_entry("landmarks", landmarks_dir,
                                              "chinese_mix.meta.json"),
           "伴随文件与主文件可区分")
-    # 带点号的 id 不能被当成扩展名截断
-    with open(os.path.join(landmarks_dir, "v1.2"), "w", encoding="utf-8") as handle:
-        handle.write("[]")
-    check(registry.resource_id_from_entry("landmarks", "v1.2") == "v1.2",
-          "无后缀容器的 id 原样保留，不按扩展名截断")
+    # 带点号的 id 不能被后缀截断弄坏
+    with open(os.path.join(landmarks_dir, "v1.2.csv"), "w", encoding="utf-8") as handle:
+        handle.write("name,size\n")
+    check(registry.resource_id_from_entry("landmarks", "v1.2.csv") == "v1.2",
+          "点号 id 只剥声明后缀")
     check(registry.resource_id_from_path(
-              "landmarks", os.path.join(landmarks_dir, "v1.2")) == "v1.2",
+              "landmarks", os.path.join(landmarks_dir, "v1.2.csv")) == "v1.2",
           "路径反推 id 同样保留点号")
     check(registry.resource_id_from_entry("presets", "v1.2.csv") == "v1.2",
           "带后缀容器只剥声明后缀")
 
     # 打包成员核对：成员形状全部由 primary 模板派生
-    members = {"landmarks/chinese_mix", "quips/events",
+    members = {"landmarks/chinese_mix.csv", "quips/events",
                "presets/default.csv", "behaviors/imperial_units/x.py"}
     declared = {"landmarks": ["chinese_mix"], "quips": ["events"],
                 "presets": ["default"], "behaviors": ["imperial_units"]}
     check(registry.missing_members(declared, members) == [],
           "声明齐全时无缺失", registry.missing_members(declared, members))
     for type_id, resource_id, expect in (
-            ("landmarks", "absent", "landmarks/absent"),
+            ("landmarks", "absent", "landmarks/absent.csv"),
             ("scenarios", "absent", "scenarios/absent/config.json"),
             ("challenges", "absent.chal", "challenges/absent.chal"),
             ("names", "absent", "names/absent.csv"),
@@ -363,8 +363,9 @@ _tmp_cat = tempfile.mkdtemp(prefix="rescat_")
 try:
     _landmarks = os.path.join(_tmp_cat, "packs", "landmarks")
     os.makedirs(_landmarks)
-    with open(os.path.join(_landmarks, "chinese_mix"), "w", encoding="utf-8") as handle:
-        handle.write("[]")
+    with open(os.path.join(_landmarks, "chinese_mix.csv"), "w",
+              encoding="utf-8") as handle:
+        handle.write("name,size,dimension,frequency,horizontal_type,address,address_mode\n")
 
     _path = catalog_store.catalog_path(_tmp_cat)
     _first = catalog_store.refresh_catalog(_tmp_cat)
@@ -382,8 +383,8 @@ try:
     check(catalog_store.catalog_ids(_rebuilt, "landmarks") == ["chinese_mix"],
           "重建结果与磁盘一致", catalog_store.catalog_ids(_rebuilt, "landmarks"))
 
-    with open(os.path.join(_landmarks, "extension"), "w", encoding="utf-8") as handle:
-        handle.write("[]")
+    with open(os.path.join(_landmarks, "extension.csv"), "w", encoding="utf-8") as handle:
+        handle.write("name,size,dimension,frequency,horizontal_type,address,address_mode\n")
     _after = catalog_store.refresh_catalog(_tmp_cat)
     check(catalog_store.catalog_ids(_after, "landmarks") == ["chinese_mix", "extension"],
           "缓存不是权威：改盘后刷新即见", catalog_store.catalog_ids(_after, "landmarks"))

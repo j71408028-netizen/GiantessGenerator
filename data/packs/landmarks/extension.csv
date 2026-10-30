@@ -1,0 +1,7 @@
+﻿name,size,dimension,frequency,horizontal_type,address,address_mode
+卡门线（太空边缘高度）,100000,vertical,common,,,
+地球平均直径,12742000,horizontal,unique,width,,
+木星平均直径,139820000,horizontal,unique,width,,
+地月平均距离,384400000,horizontal,unique,length,,
+太阳平均直径,1392700000,horizontal,unique,width,,
+天文单位（日地平均距离）,149597870700,horizontal,unique,length,,

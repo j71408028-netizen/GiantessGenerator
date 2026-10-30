@@ -225,13 +225,13 @@ def _csv_fields(*pairs, required: tuple = ()) -> Tuple[FieldSpec, ...]:
 RESOURCE_TYPES: Tuple[ResourceTypeSpec, ...] = (
     ResourceTypeSpec(
         type_id="landmarks",
-        container="json_array",
-        primary="{id}",
+        container="csv",
+        primary="{id}.csv",
         label="地标风格",
         fields=_LANDMARK_FIELDS,
         settings_keys=("selected_styles",),
         addressable=True,
-        note="地标风格：一份文件是一个风格组，数组元素是地标条目",
+        note="地标风格：一份 CSV 是一个风格组，每行一个地标条目",
     ),
     ResourceTypeSpec(
         type_id="quips",

@@ -184,13 +184,13 @@ manifest = WorldPackManifest.from_dict({
 check("清单校验通过", manifest.validate() == [], manifest.validate())
 check("成员核对走新路径",
       not _missing(manifest, {"world.json", "scenarios/gamma/config.json",
-                              "landmarks/l1"}))
+                              "landmarks/l1.csv"}))
 check("缺成员仍会被发现",
-      _missing(manifest, {"world.json", "landmarks/l1"}) ==
+      _missing(manifest, {"world.json", "landmarks/l1.csv"}) ==
       ["scenarios/gamma/config.json"])
 check("旧的 dungeons/ 成员路径不再被接受",
       _missing(manifest, {"world.json", "dungeons/gamma/config.json",
-                          "landmarks/l1"}) == ["scenarios/gamma/config.json"])
+                          "landmarks/l1.csv"}) == ["scenarios/gamma/config.json"])
 legacy_manifest = WorldPackManifest.from_dict({
     "world_id": "w1", "name": "测试世界", "resources": {"dungeons": ["gamma"]},
 })

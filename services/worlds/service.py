@@ -10,7 +10,6 @@ import re
 import shutil
 import tempfile
 import zipfile
-from dataclasses import asdict
 from typing import Any, Dict, List, Optional
 
 from persistence.world_pack import (
@@ -29,6 +28,7 @@ from persistence.world_pack import (
 from persistence.style_addr import ADDR_SUFFIX as _ADDR_SUFFIX
 from persistence.style_addr import load_address as _load_style_addr
 from persistence.style_addr import save_address as _save_style_addr
+from persistence.landmark_repo import write_csv as _write_landmark_csv
 from persistence.resources import registry as _registry
 from dungeon.terms import SCENARIO_RESOURCE_KEY, is_default_scenario
 from core.address_model import world_of
@@ -587,9 +587,10 @@ class WorldManager:
         if styles:
             os.makedirs(os.path.join(target, "landmarks"), exist_ok=True)
             for style in styles:
-                _save_json(os.path.join(target, "landmarks",
-                                        _registry.primary_relpath("landmarks", style)),
-                           [asdict(lm) for lm in landmark_repo.load(style)])
+                _write_landmark_csv(
+                    os.path.join(target, "landmarks",
+                                 _registry.primary_relpath("landmarks", style)),
+                    landmark_repo.load(style))
                 style_addr = landmark_repo.load_style_address(style)
                 if style_addr:
                     _save_style_addr(os.path.join(target, "landmarks"),

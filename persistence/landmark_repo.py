@@ -1,8 +1,10 @@
+import csv
 import os
 from dataclasses import asdict
 
 from core.models import Landmark
-from .json_store import load_json_with_backup, write_json_atomic
+from core.resource_spec import spec_of
+from .json_store import BACKUP_SUFFIX, write_text_atomic
 from .resources.registry import addr_path as _reg_addr_path
 from .resources.registry import free_dir as _free_dir_of
 from .resources.registry import free_path as _free_path_of
@@ -17,6 +19,76 @@ from .style_universe import style_read_dir as _style_read_dir
 
 DEFAULT_LANDMARK_STYLE = "chinese_mix"
 _TYPE = "landmarks"
+
+#: CSV 列清单取自资源声明（顺序即写出的表头顺序）
+COLUMNS = tuple(spec_of(_TYPE).field_keys())
+
+
+def _format_size(value: float) -> str:
+    """尺寸写表：整数不带小数点，其余原样（读回 ``float()`` 不丢精度）。"""
+    number = float(value)
+    return str(int(number)) if number.is_integer() else str(number)
+
+
+def row_to_landmark(row: dict):
+    """CSV 行 → Landmark；名称或尺寸无效返回 None（坏行跳过）。"""
+    name = str(row.get("name") or "").strip()
+    if not name:
+        return None
+    try:
+        size = float(str(row.get("size") or "").strip())
+    except ValueError:
+        return None
+    return Landmark(
+        name=name,
+        size=size,
+        dimension=str(row.get("dimension") or "").strip() or "vertical",
+        frequency=str(row.get("frequency") or "").strip() or "unique",
+        # 空单元格与 None 同义：水平地标在模型里必有类型，空值只出现在垂直条目
+        horizontal_type=str(row.get("horizontal_type") or "").strip() or None,
+        address=str(row.get("address") or "").strip(),
+        address_mode=str(row.get("address_mode") or "").strip(),
+    )
+
+
+def _to_row(item) -> dict:
+    data = item if isinstance(item, dict) else asdict(item)
+    try:
+        size_text = _format_size(data.get("size"))
+    except (TypeError, ValueError):
+        size_text = ""
+    return {
+        "name": str(data.get("name") or ""),
+        "size": size_text,
+        "dimension": str(data.get("dimension") or "vertical"),
+        "frequency": str(data.get("frequency") or "unique"),
+        "horizontal_type": str(data.get("horizontal_type") or ""),
+        "address": str(data.get("address") or ""),
+        "address_mode": str(data.get("address_mode") or ""),
+    }
+
+
+def write_csv(path: str, landmarks) -> None:
+    """把地标列表写为 CSV（utf-8-sig，便于表格软件直接编辑），原子写并留 .bak。"""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    buffer = csv.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=list(COLUMNS))
+    writer.writeheader()
+    writer.writerows(_to_row(item) for item in landmarks)
+    write_text_atomic(path, buffer.getvalue(), encoding="utf-8-sig")
+
+
+def _read_rows(path: str) -> list:
+    """读 CSV 行；主文件缺失或损坏时回退 .bak，都不可用返回空。"""
+    for candidate in (path, path + BACKUP_SUFFIX):
+        if not os.path.exists(candidate):
+            continue
+        try:
+            with open(candidate, "r", encoding="utf-8-sig", newline="") as handle:
+                return list(csv.DictReader(handle))
+        except (OSError, csv.Error) as exc:
+            print(f"[LandmarkRepo] 读取失败: {candidate} - {exc}")
+    return []
 
 
 class LandmarkRepo:
@@ -48,11 +120,15 @@ class LandmarkRepo:
     def load(self, style_name: str = None) -> list:
         if style_name is None:
             style_name = DEFAULT_LANDMARK_STYLE
-        # 主文件损坏时回退 .bak，风格列表不至于整表不可用
-        data = load_json_with_backup(self._filepath(style_name))
-        if not isinstance(data, list):
-            return []
-        return [Landmark(**item) for item in data]
+        landmarks = []
+        for line_no, row in enumerate(_read_rows(self._filepath(style_name)),
+                                      start=2):
+            item = row_to_landmark(row)
+            if item is not None:
+                landmarks.append(item)
+            elif any(str(cell or "").strip() for cell in row.values()):
+                print(f"[LandmarkRepo] {style_name} 第 {line_no} 行被跳过: 数据无效")
+        return landmarks
 
     def load_merged(self, style_names: list) -> list:
         merged = []
@@ -61,8 +137,7 @@ class LandmarkRepo:
         return merged
 
     def save(self, style_name: str, landmarks: list):
-        write_json_atomic(self._free_filepath(style_name),
-                          [asdict(l) for l in landmarks])
+        write_csv(self._free_filepath(style_name), landmarks)
 
     # ---------- 风格注册地址（companion 文件，读写见 persistence.style_addr） ----------
     def addr_path(self, style_name: str) -> str:
@@ -85,12 +160,7 @@ class LandmarkRepo:
         if style_name in self.get_styles():
             raise ValueError(f"风格 '{style_name}' 已存在")
         if copy_from:
-            # 原样拷贝（保留未知字段），源损坏回退 .bak，仍不可用则建空风格
-            data = load_json_with_backup(self._filepath(copy_from))
-            if isinstance(data, list):
-                write_json_atomic(self._free_filepath(style_name), data)
-            else:
-                self.save(style_name, [])
+            self.save(style_name, self.load(copy_from))
             src_addr = self.load_style_address(copy_from)
             if src_addr:
                 self.save_style_address(style_name, src_addr)

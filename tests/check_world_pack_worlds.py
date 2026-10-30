@@ -6,6 +6,7 @@
 全部在系统临时目录构造数据，不触碰 data/、不联网。
 """
 
+import csv
 import json
 import os
 import shutil
@@ -88,9 +89,14 @@ def _deploy_pack(worlds):
     os.makedirs(qp_dir, exist_ok=True)
     # 包内风格：p1 注册在 TH；f_dup 与自由目录同名（遮蔽检验）
     for style, addr in (("p1", _ADDR_TH), ("f_dup", _ADDR_RW)):
-        with open(os.path.join(lm_dir, style), "w", encoding="utf-8") as f:
-            json.dump([{"name": f"包内{style}", "size": 100,
-                        "dimension": "vertical", "frequency": "common"}], f)
+        with open(os.path.join(lm_dir, f"{style}.csv"), "w", encoding="utf-8-sig",
+                  newline="") as f:
+            writer = csv.DictWriter(
+                f, fieldnames=["name", "size", "dimension", "frequency",
+                               "horizontal_type", "address", "address_mode"])
+            writer.writeheader()
+            writer.writerow({"name": f"包内{style}", "size": "100",
+                             "dimension": "vertical", "frequency": "common"})
         with open(os.path.join(lm_dir, f"{style}.addr.json"), "w", encoding="utf-8") as f:
             json.dump({"address": addr}, f)
     with open(os.path.join(qp_dir, "q1"), "w", encoding="utf-8") as f:

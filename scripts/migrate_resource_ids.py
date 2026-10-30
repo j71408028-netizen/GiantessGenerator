@@ -1,18 +1,19 @@
 """把存量资源改造成资源声明允许的形状（一次性，幂等）。
 
-八步，每步都按「已经是目标形状就跳过」判断，因此跑第二遍必须输出 0 处变更：
+九步，每步都按「已经是目标形状就跳过」判断，因此跑第二遍必须输出 0 处变更：
 
 1. 容器改名：中文/驼峰 id → 拼音全拼，伴随文件（``.addr.json`` / ``.meta.json`` /
    ``.bak``）跟着改；
 2. 改引用：``resource_settings.json`` 的选中项、世界包 ``world.json`` 的 resources；
-3. 去扩展名：无后缀容器（地标风格、描述风格）的主文件 ``<id>.json`` → ``<id>``，
+3. 去扩展名：无后缀容器（描述风格）的主文件 ``<id>.json`` → ``<id>``，
    备份随行为 ``<id>.bak``；自由目录与已部署的世界包都扫；
 4. ``news`` 表头：中文列名 → 字段键（顺序不变）；
 5. ``quips`` 坐标：``"1_1"`` → ``{"intrusion": 1, "destruction": 1, "items": [...]}``，
    正文末尾的 ``[summary:…]`` 同时拆成条目自带的 ``summary`` 字段；
-6. 补信封：为每份资源写 ``<id>.meta.json``（内容哈希一致则不重写）；
-7. 清理 ``packs/dungeons/`` 残留；
-8. 角色档案的耐久键：``名称@完整地址`` → ``Ref`` 文本（``landmarks:风格/名称``）。
+6. ``landmarks`` 主文件：无后缀 JSON 数组 → ``<id>.csv``（声明容器已改为 csv）；
+7. 补信封：为每份资源写 ``<id>.meta.json``（内容哈希一致则不重写）；
+8. 清理 ``packs/dungeons/`` 残留；
+9. 角色档案的耐久键：``名称@完整地址`` → ``Ref`` 文本（``landmarks:风格/名称``）。
 
 顺带把 ``packs/dungeons/`` 残留挪进 ``migrated/``。
 
@@ -39,6 +40,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.resource_spec import RESOURCE_TYPES, spec_of  # noqa: E402
 from dungeon.terms import LEGACY_SCENARIO_RESOURCE_KEY  # noqa: E402
 from persistence.json_store import BACKUP_SUFFIX, write_json_atomic  # noqa: E402
+from persistence.landmark_repo import write_csv  # noqa: E402
 from persistence.resources import envelope, registry  # noqa: E402
 
 #: 旧 id → 新 id。改名映射只活在本脚本里，代码侧不认旧名。
@@ -99,7 +101,7 @@ def _suffix_tails(type_id: str) -> tuple:
 
 
 def step_rename(m: Migration):
-    print("[1/8] 容器改名")
+    print("[1/9] 容器改名")
     for type_id, mapping in RENAMES.items():
         directory = registry.free_dir(type_id, m.data_dir)
         if not os.path.isdir(directory):
@@ -144,7 +146,7 @@ def _remap(values, mapping):
 
 
 def step_references(m: Migration):
-    print("[2/8] 改引用")
+    print("[2/9] 改引用")
     path = os.path.join(m.data_dir, "user", "resource_settings.json")
     data = _load_json(path)
     if isinstance(data, dict):
@@ -201,13 +203,15 @@ def _main_dirs(m: Migration, type_id: str) -> list:
 
 
 def step_strip_suffix(m: Migration):
-    print("[3/8] 主文件去扩展名")
+    print("[3/9] 主文件去扩展名")
     for spec in RESOURCE_TYPES:
         if spec.container in ("json_dir", "py_package"):
             continue
         if registry.primary_suffix(spec.type_id):
             continue  # 声明里仍带后缀（.csv / .chal），不动
         for directory in _main_dirs(m, spec.type_id):
+            if not os.path.isdir(directory):
+                continue
             names = set(os.listdir(directory))
             for name in sorted(names):
                 if name.endswith(registry.ADDR_SUFFIX) or name.endswith(
@@ -240,7 +244,7 @@ def _news_header_map() -> dict:
 
 
 def step_news_header(m: Migration):
-    print("[4/8] news 表头")
+    print("[4/9] news 表头")
     directory = registry.free_dir("news", m.data_dir)
     if not os.path.isdir(directory):
         return
@@ -311,7 +315,7 @@ def _convert_quips(data: dict, style_map: dict):
 
 
 def step_quips(m: Migration):
-    print("[5/8] quips 坐标与简介")
+    print("[5/9] quips 坐标与简介")
     style_map = RENAMES.get("quips", {})
     for resource_id in registry.list_ids("quips", m.data_dir):
         path = registry.free_path("quips", resource_id, m.data_dir)
@@ -332,11 +336,51 @@ def step_quips(m: Migration):
 
 
 # ---------------------------------------------------------------------------
-# 6. 信封
+# 6. landmarks 主文件转 CSV
+# ---------------------------------------------------------------------------
+
+def _landmark_target_name(name: str):
+    """旧主文件名 → CSV 主文件名；伴随文件等不该动的返回 None。"""
+    if name.endswith(registry.ADDR_SUFFIX) or name.endswith(envelope.ENVELOPE_SUFFIX):
+        return None
+    if name.endswith(".csv"):
+        return None
+    if name.endswith(LEGACY_MAIN_SUFFIX + BACKUP_SUFFIX):
+        return name[:-len(LEGACY_MAIN_SUFFIX)] + ".csv" + BACKUP_SUFFIX
+    if name.endswith(BACKUP_SUFFIX):
+        return name[:-len(BACKUP_SUFFIX)] + ".csv" + BACKUP_SUFFIX
+    if name.endswith(LEGACY_MAIN_SUFFIX):
+        return name[:-len(LEGACY_MAIN_SUFFIX)] + ".csv"
+    return name + ".csv"
+
+
+def step_landmarks_csv(m: Migration):
+    print("[6/9] landmarks 主文件转 CSV")
+    for directory in _main_dirs(m, "landmarks"):
+        if not os.path.isdir(directory):
+            continue
+        names = set(os.listdir(directory))
+        for name in sorted(names):
+            path = os.path.join(directory, name)
+            target_name = _landmark_target_name(name)
+            if target_name is None or target_name in names or not os.path.isfile(path):
+                continue
+            data = _load_json(path)
+            if not isinstance(data, list):
+                continue  # 非 JSON 数组的杂项文件不迁，转换后也不再被当作风格
+            m.note(f"{os.path.relpath(path, m.data_dir)} → {target_name}")
+            if m.apply:
+                write_csv(os.path.join(directory, target_name),
+                          [item for item in data if isinstance(item, dict)])
+                os.remove(path)
+
+
+# ---------------------------------------------------------------------------
+# 7. 信封
 # ---------------------------------------------------------------------------
 
 def step_envelopes(m: Migration):
-    print("[6/8] 补信封")
+    print("[7/9] 补信封")
     for spec in RESOURCE_TYPES:
         directory = registry.free_dir(spec.type_id, m.data_dir)
         if not os.path.isdir(directory):
@@ -365,7 +409,7 @@ def step_envelopes(m: Migration):
 # ---------------------------------------------------------------------------
 
 def step_cleanup(m: Migration):
-    print("[7/8] 清理残留")
+    print("[8/9] 清理残留")
     legacy = os.path.join(m.data_dir, "packs", LEGACY_SCENARIO_RESOURCE_KEY)
     if not os.path.isdir(legacy):
         return
@@ -409,7 +453,7 @@ def _durability_ref(key: str, names: dict) -> str:
 
 
 def step_durability_keys(m: Migration):
-    print("[8/8] 角色档案耐久键")
+    print("[9/9] 角色档案耐久键")
     archives = os.path.join(m.data_dir, "archives")
     if not os.path.isdir(archives):
         return
@@ -441,7 +485,8 @@ def step_durability_keys(m: Migration):
 
 
 STEPS = (step_rename, step_references, step_strip_suffix, step_news_header,
-         step_quips, step_envelopes, step_cleanup, step_durability_keys)
+         step_quips, step_landmarks_csv, step_envelopes, step_cleanup,
+         step_durability_keys)
 
 
 def run(data_dir: str, apply: bool) -> int:
