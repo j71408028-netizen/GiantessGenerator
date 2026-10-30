@@ -16,7 +16,6 @@
 ``tests/check_audio_chain.py``，本文件只留 schema 与校验器。
 """
 
-import json
 import os
 import sys
 import tempfile
@@ -580,16 +579,35 @@ from collections import Counter  # noqa: E402
 from dungeon.models import DungeonTextType  # noqa: E402
 from dungeon.rules import EvolutionRules  # noqa: E402
 
-_real_config = json.load(  # 真实方案：作者能改到的就是这两个顶层字段
-    open(os.path.join(_PROJECT_ROOT, "data", "packs", "scenarios", "default",
-                      "config.json"), encoding="utf-8"))
+# 配置链路用临时方案验证：不读 data/ 下的运行时文件（干净 checkout 里不存在）。
+_real_config = dict(clean)
+_real_config["transition_matrix"] = {
+    "background": {"background": 0.4, "branch": 0.3, "dialog": 0.2,
+                   "interaction": 0.1, "action": 0.0},
+    "branch": {"background": 0.2, "branch": 0.3, "dialog": 0.3,
+               "interaction": 0.2, "action": 0.0},
+    "dialog": {"background": 0.1, "branch": 0.2, "dialog": 0.3,
+               "interaction": 0.3, "action": 0.1},
+    "interaction": {"background": 0.1, "branch": 0.1, "dialog": 0.2,
+                    "interaction": 0.4, "action": 0.2},
+    "action": {"background": 0.2, "branch": 0.1, "dialog": 0.1,
+               "interaction": 0.2, "action": 0.4},
+}
+_real_config["section_steps"] = {
+    "background": 0.02, "branch": 0.05, "dialog": 0.1,
+    "interaction": 0.2, "action": 0.3,
+}
+_real_tmp = tempfile.mkdtemp(prefix="scenario_schema_real_")
+_real_repo = ScenarioRepo(data_dir=_real_tmp)
+_real_repo.save_config("default", _real_config)
+_real_config = _real_repo.load_config("default")
 _real_rules = EvolutionRules(
     transition_matrix=_real_config.get("transition_matrix"),
     step_overrides=_real_config.get("section_steps"))
-check("真实方案的转移矩阵进运行时",
+check("方案配置的转移矩阵进运行时",
       _real_rules.transition_matrix["background"]
       == _real_config["transition_matrix"]["background"])
-check("真实方案的分节步长进运行时",
+check("方案配置的分节步长进运行时",
       _real_rules.step_overrides["action"] == _real_config["section_steps"]["action"])
 
 _partial = EvolutionRules(transition_matrix={"background": {"action": 1.0}})
