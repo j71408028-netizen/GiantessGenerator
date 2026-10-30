@@ -62,13 +62,13 @@ from persistence.scenario_repo import ScenarioRepo  # noqa: E402
 
 repo_dir = os.path.join(tmp, "data")
 repo = ScenarioRepo(data_dir=repo_dir)
-repo.save_config("_default", {"initial_prompt": "v1"})
-repo.save_config("_default", {"initial_prompt": "v2"})
-check("repo 正常读取新内容", repo.load_config("_default")["initial_prompt"] == "v2")
-config_path = os.path.join(repo_dir, "packs", "scenarios", "_default", "config.json")
+repo.save_config("default", {"initial_prompt": "v1"})
+repo.save_config("default", {"initial_prompt": "v2"})
+check("repo 正常读取新内容", repo.load_config("default")["initial_prompt"] == "v2")
+config_path = os.path.join(repo_dir, "packs", "scenarios", "default", "config.json")
 with open(config_path, "w", encoding="utf-8") as f:
     f.write("{\u5199\u574f\u4e86")
-check("repo 自愈读取 .bak", repo.load_config("_default")["initial_prompt"] == "v1")
+check("repo 自愈读取 .bak", repo.load_config("default")["initial_prompt"] == "v1")
 
 # ---------------- 3. _finalize 三态 ----------------
 import dungeon.window.persistence as persp  # noqa: E402

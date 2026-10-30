@@ -425,6 +425,9 @@ def catalog_entry(type_id: str, resource_id: str,
     envelope = load_envelope(directory, type_id, resource_id)
     if not envelope.get("content_hash"):
         target = free_path(type_id, resource_id, data_dir)
+        if not os.path.exists(target) and spec.container in ("json_dir", "py_package"):
+            # 包型容器的主文件模板是通配，按目录算哈希
+            target = os.path.join(directory, resource_id)
         if os.path.exists(target):
             envelope["content_hash"] = content_hash(target, spec.container)
     return {

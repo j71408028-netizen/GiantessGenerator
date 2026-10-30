@@ -966,7 +966,7 @@ class StyleListBox(customtkinter.CTkFrame):
         self.listbox.selection_clear(0, tk.END)
         self._notify_change()
 
-    def set_default(self, default_name="ChineseMix"):
+    def set_default(self, default_name="chinese_mix"):
         self.listbox.selection_clear(0, tk.END)
         for i in range(self.listbox.size()):
             if self.extract_raw_name(self.listbox.get(i)) == default_name:

@@ -1,0 +1,12 @@
+{
+  "schema": "gg.news/1",
+  "id": "default",
+  "author": "",
+  "namespace": "",
+  "version": "0.0.0",
+  "content_hash": "sha256:4fac727bce88a4027282276092551979794a3863041702dd43b4968f5b816e7c",
+  "updated_at": "2026-10-30T22:41:10",
+  "source": {},
+  "status": "draft",
+  "tags": []
+}

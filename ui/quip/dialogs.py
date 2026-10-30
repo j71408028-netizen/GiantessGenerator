@@ -387,10 +387,6 @@ class QuipDialog(BaseDialog):
             return
         clean_quip = self.quip_textbox.get("1.0", "end-1c").strip()
         summary_text = self.summary_var.get().strip()
-        if summary_text:
-            full_quip = f"{clean_quip}[summary:{summary_text}]"
-        else:
-            full_quip = clean_quip
 
         # 获取步进值，若无效则使用默认值
         try:
@@ -399,7 +395,7 @@ class QuipDialog(BaseDialog):
             step = self.default_step
 
         self.result = {
-            "quip": full_quip,
+            "quip": clean_quip,
             "intrusion": self.intrusion_var.get(),
             "destruction": self.destruction_var.get(),
             "summary": summary_text,

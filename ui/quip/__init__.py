@@ -205,9 +205,13 @@ class QuipCardManager(CardManager):
             return text, summary if summary else "无简介"
 
     @classmethod
-    def embed_summary(cls, clean_text: str, summary: str) -> str:
-        clean = cls.SUMMARY_RE.sub('', clean_text).strip()
-        return f"{clean}[summary:{summary}]"
+    def split_summary(cls, item: dict) -> tuple:
+        """条目 → ``(正文, 简介)``：优先取 ``summary`` 字段，旧数据回落解标记。"""
+        text = item.get('text', '')
+        summary = (item.get('summary') or '').strip()
+        if summary:
+            return cls.SUMMARY_RE.sub('', text).strip(), summary
+        return cls.extract_summary(text)
 
     def _parse_quip_tags(self, text: str):
         pattern = r'\[([a-e]):(\d+):([^\]]+)\]'
@@ -423,10 +427,9 @@ class QuipCardManager(CardManager):
         items = []
         for (intr, dest), qlist in matrix.items():
             for q in qlist:
-                text = q.get('text', '')
                 step = q.get('step', 1.0)
                 q_style = q.get('style', style)
-                clean, summary = self.extract_summary(text)
+                clean, summary = self.split_summary(q)
                 item = {
                     'text': clean,
                     'style': q_style,
@@ -444,12 +447,12 @@ class QuipCardManager(CardManager):
         quips = self.quip_repo.load(style)
         new_matrix = {}
         for item in items:
-            full_text = self.embed_summary(item['text'], item['summary'])
             key = (item['intrusion'], item['destruction'])
             new_matrix.setdefault(key, []).append({
-                'text': full_text,
+                'text': item['text'],
                 'style': item.get('style', style),
-                'step': item.get('step', 1.0)
+                'step': item.get('step', 1.0),
+                'summary': item.get('summary', ''),
             })
         quips[size] = new_matrix
         self.quip_repo.save(style, quips)
@@ -620,12 +623,13 @@ class QuipCardManager(CardManager):
         key = (target_intr, target_dest)
         if key not in quips[target_size]:
             quips[target_size][key] = []
-        full_text = self.embed_summary(item['text'], item['summary'])
-        quips[target_size][key].append({
-            'text': full_text,
+        moved = {
+            'text': item['text'],
             'style': item.get('style', style),
-            'step': item.get('step', 1.0)
-        })
+            'step': item.get('step', 1.0),
+            'summary': item.get('summary', ''),
+        }
+        quips[target_size][key].append(moved)
 
         if not copy:
             src_key = (src_intr, src_dest)
@@ -633,7 +637,7 @@ class QuipCardManager(CardManager):
                 lst = quips[src_size][src_key]
                 to_remove = None
                 for q in lst:
-                    if q.get('text') == full_text and q.get('step') == item.get('step', 1.0):
+                    if q.get('text') == moved['text'] and q.get('step') == item.get('step', 1.0):
                         to_remove = q
                         break
                 if to_remove:
@@ -676,8 +680,6 @@ class QuipCardManager(CardManager):
             summary = dlg.result.get("summary", "").strip()
             if not summary:
                 clean_text, summary = self.extract_summary(clean_text)
-            else:
-                clean_text = self.SUMMARY_RE.sub('', clean_text).strip()
             step = dlg.result.get("step", QuipRepo.default_step(default_intr, default_dest))
             new_item = {
                 'text': clean_text,
@@ -710,8 +712,6 @@ class QuipCardManager(CardManager):
             new_summary = dlg.result.get("summary", "").strip()
             if not new_summary:
                 new_clean, new_summary = self.extract_summary(new_clean)
-            else:
-                new_clean = self.SUMMARY_RE.sub('', new_clean).strip()
             new_step = dlg.result.get("step", item.get('step', 1.0))
             item['text'] = new_clean
             item['summary'] = new_summary

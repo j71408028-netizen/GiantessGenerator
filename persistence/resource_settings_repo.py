@@ -24,8 +24,8 @@ from persistence.resources.registry import RESOURCE_SETTINGS_KEYS
 RESOURCE_SETTING_DEFAULTS = {
     "name_table": "default",
     "news_table": "default",
-    "selected_styles": ["ChineseMix"],
-    "selected_quip_styles": ["Events"],
+    "selected_styles": ["chinese_mix"],
+    "selected_quip_styles": ["events"],
 }
 
 

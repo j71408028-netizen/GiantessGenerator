@@ -110,7 +110,7 @@ check("scenario_id_of 空记录", scenario_id_of({}) == "" and scenario_id_of(No
 check("scenario_config_of 兼容旧键",
       scenario_config_of({"dungeon_config": {"x": 1}}) == {"x": 1})
 check("is_default_scenario",
-      is_default_scenario("_default") and not is_default_scenario("other")
+      is_default_scenario("default") and not is_default_scenario("other")
       and not is_default_scenario(None))
 
 # ---------------- 3. ScenarioRepo：读写根 ----------------
@@ -124,7 +124,7 @@ def _missing(manifest, members):
 
 tmp = tempfile.mkdtemp(prefix="scenario_naming_")
 new_root = os.path.join(tmp, "packs", "scenarios")
-for scenario_id, prompt in (("_default", "default"), ("alpha", "alpha")):
+for scenario_id, prompt in (("default", "default"), ("alpha", "alpha")):
     os.makedirs(os.path.join(new_root, scenario_id), exist_ok=True)
     with open(os.path.join(new_root, scenario_id, "config.json"), "w",
               encoding="utf-8") as f:
@@ -132,16 +132,16 @@ for scenario_id, prompt in (("_default", "default"), ("alpha", "alpha")):
 
 repo = ScenarioRepo(data_dir=tmp)
 check("写根即自由方案目录", repo.write_root == new_root, repo.write_root)
-check("可读已有配置", repo.load_config("_default")["initial_prompt"] == "default")
-check("list_all 覆盖全部方案", repo.list_all() == ["_default", "alpha"], repo.list_all())
+check("可读已有配置", repo.load_config("default")["initial_prompt"] == "default")
+check("list_all 覆盖全部方案", repo.list_all() == ["alpha", "default"], repo.list_all())
 
 check("新建方案写入写根",
       repo.create("beta") and os.path.isdir(os.path.join(new_root, "beta")))
-check("exists 覆盖两个根", repo.exists("beta") and repo.exists("_default"))
+check("exists 覆盖两个根", repo.exists("beta") and repo.exists("default"))
 repo.delete("beta")
 check("delete 作用于写根", not repo.exists("beta"))
 try:
-    repo.delete("_default")
+    repo.delete("default")
     check("默认方案禁止删除", False)
 except ValueError:
     check("默认方案禁止删除", True)
@@ -171,7 +171,7 @@ check("自由方案在世界包接管时仍可见", repo.exists("alpha"))
 check("新方案仍写入自由根",
       repo.create("delta") and os.path.isdir(os.path.join(repo.write_root, "delta")))
 check("list_all 汇总两个根",
-      all(name in repo.list_all() for name in ("_default", "alpha", "gamma", "delta")),
+      all(name in repo.list_all() for name in ("default", "alpha", "gamma", "delta")),
       repo.list_all())
 
 # ---------------- 4. 世界包清单：成员核对 ----------------
@@ -179,18 +179,18 @@ from persistence.world_pack import WorldPackManifest  # noqa: E402
 
 manifest = WorldPackManifest.from_dict({
     "world_id": "w1", "name": "测试世界",
-    "resources": {"scenarios": ["gamma"], "landmarks": ["L1"]},
+    "resources": {"scenarios": ["gamma"], "landmarks": ["l1"]},
 })
 check("清单校验通过", manifest.validate() == [], manifest.validate())
 check("成员核对走新路径",
       not _missing(manifest, {"world.json", "scenarios/gamma/config.json",
-                              "landmarks/L1.json"}))
+                              "landmarks/l1.json"}))
 check("缺成员仍会被发现",
-      _missing(manifest, {"world.json", "landmarks/L1.json"}) ==
+      _missing(manifest, {"world.json", "landmarks/l1.json"}) ==
       ["scenarios/gamma/config.json"])
 check("旧的 dungeons/ 成员路径不再被接受",
       _missing(manifest, {"world.json", "dungeons/gamma/config.json",
-                          "landmarks/L1.json"}) == ["scenarios/gamma/config.json"])
+                          "landmarks/l1.json"}) == ["scenarios/gamma/config.json"])
 legacy_manifest = WorldPackManifest.from_dict({
     "world_id": "w1", "name": "测试世界", "resources": {"dungeons": ["gamma"]},
 })

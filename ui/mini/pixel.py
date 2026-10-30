@@ -310,7 +310,7 @@ def surface(parent, *, fill: str = "ink", **kwargs) -> tk.Frame:
 class PixelLabel(tk.Label):
     """点阵标签：接受调色板色号，并兼容 ``text_color`` 这类旧选项名。
 
-    文字变化时重新按内容选字体：值从中文换成「ChineseMix」这类纯西文时，
+    文字变化时重新按内容选字体：值从中文换成「chinese_mix」这类纯西文时，
     跟着换成点阵西文字。
     """
 

@@ -15,7 +15,7 @@ from .style_universe import merged_styles as _merged_styles
 from .style_universe import style_read_dir as _style_read_dir
 
 
-DEFAULT_LANDMARK_STYLE = "ChineseMix"
+DEFAULT_LANDMARK_STYLE = "chinese_mix"
 _TYPE = "landmarks"
 
 

@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
 from core.address_model import valid_world_id
-from core.resource_spec import RESOURCE_TYPES, spec_of
+from core.resource_spec import RESOURCE_ID_RE, RESOURCE_TYPES, spec_of
 from .json_store import write_json_atomic
 # 类型清单全部来自注册表；这三个名字在这里保留，供旧的导入路径继续可用。
 from .resources.registry import (  # noqa: F401
@@ -225,14 +225,13 @@ class WorldPackManifest:
             if spec.max_items and len(value) > spec.max_items:
                 errors.append(
                     f"resources.{rtype} 最多 {spec.max_items} 项（实际: {len(value)} 项）")
-            # 只有声明了专属 id 规则的类型才在这里强校验：其余类型的 id 由迁移
-            # 统一改造，加载期不设门槛，避免存量的大写/中文 id 直接失效。
-            if spec.id_pattern:
-                for item in value:
-                    if not spec.valid_id(item):
-                        errors.append(
-                            f"resources.{rtype} 含非法资源 id {item!r}"
-                            f"（应为 {spec.id_pattern}）")
+            # id 规则一律来自声明：存量的大写/中文 id 已由迁移脚本改完，
+            # 加载期不再为旧包留宽松分支。
+            for item in value:
+                if not spec.valid_id(item):
+                    errors.append(
+                        f"resources.{rtype} 含非法资源 id {item!r}"
+                        f"（应为 {spec.id_pattern or RESOURCE_ID_RE.pattern}）")
         return errors
 
     # ---------- 拥有关系 ----------

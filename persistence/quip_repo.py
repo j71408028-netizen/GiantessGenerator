@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 from .json_store import load_json_with_backup, write_json_atomic
 from .resources.registry import addr_path as _reg_addr_path
@@ -14,8 +14,18 @@ from .style_addr import (delete_address as _delete_addr,
 from .style_universe import merged_styles as _merged_styles
 from .style_universe import style_read_dir as _style_read_dir
 
-DEFAULT_QUIP_STYLE = "Events"
+DEFAULT_QUIP_STYLE = "events"
 _TYPE = "quips"
+
+
+def _coord_of(row) -> Optional[Tuple[int, int]]:
+    """坐标行 → ``(介入度, 破坏性)``；形状不对返回 None。"""
+    if not isinstance(row, dict):
+        return None
+    try:
+        return int(row["intrusion"]), int(row["destruction"])
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 class QuipRepo:
@@ -62,15 +72,17 @@ class QuipRepo:
         if not isinstance(data, dict):
             return {}
         quips = {}
-        for key, value in data.items():
-            if key == "_meta":
+        for size_category, rows in data.items():
+            if size_category == "_meta" or not isinstance(rows, list):
                 continue
-            quips[key] = {}
-            for coord_key, quip_list in value.items():
-                i_str, d_str = coord_key.split('_')
-                i, d = int(i_str), int(d_str)
+            matrix = {}
+            for row in rows:
+                coord = _coord_of(row)
+                if coord is None:
+                    continue
+                i, d = coord
                 normalized_list = []
-                for item in quip_list:
+                for item in row.get("items") or []:
                     if isinstance(item, str):
                         normalized_list.append({
                             "text": item,
@@ -81,9 +93,8 @@ class QuipRepo:
                         if "step" not in item:
                             item["step"] = self.default_step(i, d)
                         normalized_list.append(item)
-                    else:
-                        continue
-                quips[key][(i, d)] = normalized_list
+                matrix[coord] = normalized_list
+            quips[size_category] = matrix
         return quips
 
     def load_merged(self, style_names: List[str]) -> Dict:
@@ -117,13 +128,19 @@ class QuipRepo:
         for category, matrix in quips_data.items():
             if category == "_meta":
                 continue
-            save_data[category] = {}
-            for coord_key, quip_list in matrix.items():
-                if isinstance(coord_key, tuple) and len(coord_key) == 2:
-                    str_key = f"{coord_key[0]}_{coord_key[1]}"
-                    save_data[category][str_key] = quip_list
-                else:
-                    save_data[category][coord_key] = quip_list
+            rows = []
+            for coord, quip_list in matrix.items():
+                pair = _coord_of(coord) if isinstance(coord, dict) else (
+                    tuple(coord) if isinstance(coord, tuple) and len(coord) == 2
+                    else None)
+                if pair is None:
+                    continue
+                rows.append({"intrusion": int(pair[0]),
+                             "destruction": int(pair[1]),
+                             "items": list(quip_list)})
+            # 坐标升序：落盘顺序稳定，diff 不会因内存顺序变化而抖动
+            rows.sort(key=lambda row: (row["intrusion"], row["destruction"]))
+            save_data[category] = rows
         save_data["_meta"] = meta
         # 原子写：save 先读旧文件保 _meta 再整体重写，直接截断写入的话
         # 崩溃时 _meta 和正文一起丢

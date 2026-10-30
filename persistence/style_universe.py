@@ -18,16 +18,20 @@ import os
 from typing import List, Optional, Set
 
 from core.address_model import world_of
+from .resources.envelope import ENVELOPE_SUFFIX
 from .style_addr import ADDR_SUFFIX, load_address
 
 
 def _list_styles(folder: str) -> List[str]:
-    """列出目录下的风格名（``<风格>.json``，排除 .addr.json 伴随文件）。"""
+    """列出目录下的风格名（``<风格>.json``，排除伴随文件与备份）。"""
     styles = []
     if os.path.isdir(folder):
         for f in os.listdir(folder):
-            if f.endswith(".json") and not f.endswith(ADDR_SUFFIX):
-                styles.append(f[:-5])
+            if not f.endswith(".json"):
+                continue
+            if f.endswith(ADDR_SUFFIX) or f.endswith(ENVELOPE_SUFFIX) or f.endswith(".bak"):
+                continue
+            styles.append(f[:-5])
     return styles
 
 

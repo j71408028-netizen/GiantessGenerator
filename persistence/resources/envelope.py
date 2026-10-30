@@ -145,7 +145,8 @@ def content_hash(path: str, container: str) -> str:
 
     - JSON 容器：按规范化 JSON 计算（重新缩进/换行不算改动）；
     - CSV / opaque：取文件字节；
-    - 目录容器：按「相对路径 + 文件哈希」排序串接，忽略 ``__pycache__``。
+    - 目录容器：按「相对路径 + 文件哈希」排序串接，忽略 ``__pycache__``；
+      传入目录本身或目录内的主文件都行，按同一份目录内容计算。
     """
     if container in ("json_array", "json_object"):
         try:
@@ -154,9 +155,11 @@ def content_hash(path: str, container: str) -> str:
         except (OSError, ValueError):
             return ""
         return "sha256:" + hashlib.sha256(canonical_json_bytes(data)).hexdigest()
-    if container == "json_dir" and os.path.isdir(path):
-        return "sha256:" + hashlib.sha256(
-            _dir_digest_bytes(path)).hexdigest()
+    if container in ("json_dir", "py_package"):
+        root = path if os.path.isdir(path) else os.path.dirname(path)
+        if os.path.isdir(root):
+            return "sha256:" + hashlib.sha256(_dir_digest_bytes(root)).hexdigest()
+        return ""
     if os.path.isfile(path):
         return "sha256:" + _file_digest(path)
     return ""

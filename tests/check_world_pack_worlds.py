@@ -85,20 +85,20 @@ def _deploy_pack(worlds):
     qp_dir = os.path.join(root, "quips")
     os.makedirs(lm_dir, exist_ok=True)
     os.makedirs(qp_dir, exist_ok=True)
-    # 包内风格：P1 注册在 TH；FDup 与自由目录同名（遮蔽检验）
-    for style, addr in (("P1", _ADDR_TH), ("FDup", _ADDR_RW)):
+    # 包内风格：p1 注册在 TH；f_dup 与自由目录同名（遮蔽检验）
+    for style, addr in (("p1", _ADDR_TH), ("f_dup", _ADDR_RW)):
         with open(os.path.join(lm_dir, f"{style}.json"), "w", encoding="utf-8") as f:
             json.dump([{"name": f"包内{style}", "size": 100,
                         "dimension": "vertical", "frequency": "common"}], f)
         with open(os.path.join(lm_dir, f"{style}.addr.json"), "w", encoding="utf-8") as f:
             json.dump({"address": addr}, f)
-    with open(os.path.join(qp_dir, "Q1.json"), "w", encoding="utf-8") as f:
+    with open(os.path.join(qp_dir, "q1.json"), "w", encoding="utf-8") as f:
         json.dump({}, f)
-    with open(os.path.join(qp_dir, "Q1.addr.json"), "w", encoding="utf-8") as f:
+    with open(os.path.join(qp_dir, "q1.addr.json"), "w", encoding="utf-8") as f:
         json.dump({"address": _ADDR_TH}, f)
     manifest = {
         "world_id": wid, "name": "命名空间测试包", "version": "1.0",
-        "resources": {"landmarks": ["P1", "FDup"], "quips": ["Q1"]},
+        "resources": {"landmarks": ["p1", "f_dup"], "quips": ["q1"]},
     }
     if worlds is not None:
         manifest["worlds"] = worlds
@@ -108,17 +108,17 @@ def _deploy_pack(worlds):
 
 
 def _deploy_free():
-    """自由目录风格：FIn 注册在 TH（会被声明 TH 的包遮蔽）、FOut 注册在 RW、
-    FPort 未注册、FDup 与包同名。"""
+    """自由目录风格：f_in 注册在 TH（会被声明 TH 的包遮蔽）、f_out 注册在 RW、
+    f_port 未注册、f_dup 与包同名。"""
     repo = LandmarkRepo(data_dir=_DATA)
-    for style, addr in (("FIn", _ADDR_TH), ("FOut", _ADDR_RW),
-                        ("FPort", ""), ("FDup", _ADDR_RW)):
+    for style, addr in (("f_in", _ADDR_TH), ("f_out", _ADDR_RW),
+                        ("f_port", ""), ("f_dup", _ADDR_RW)):
         repo.save(style, [Landmark(f"自由{style}", 50, "vertical", "common")])
         if addr:
             repo.save_style_address(style, addr)
     qrepo = QuipRepo(data_dir=_DATA)
-    qrepo.save("QFree", {})
-    qrepo.save_style_address("QFree", _ADDR_RW)
+    qrepo.save("q_free", {})
+    qrepo.save_style_address("q_free", _ADDR_RW)
     return repo, qrepo
 
 
@@ -127,17 +127,17 @@ _mgr = WorldManager(_DATA)
 
 # 3a. 未激活包：全部来自自由目录
 check("未激活时风格全集为自由目录",
-      set(_free_repo.get_styles()) == {"FIn", "FOut", "FPort", "FDup"})
+      set(_free_repo.get_styles()) == {"f_in", "f_out", "f_port", "f_dup"})
 
 # 3b. 旧式包（未声明 worlds）：整类型接管
 _wid_old = _deploy_pack(worlds=None)
 _mgr.load_active(_wid_old)
 _old_repo = LandmarkRepo(data_dir=_DATA, world_state=_mgr.world_state)
 check("未声明 worlds 的包整类型接管",
-      set(_old_repo.get_styles()) == {"P1", "FDup"})
-check("接管下包外风格不可见（读包目录为空）", _old_repo.load("FOut") == [])
+      set(_old_repo.get_styles()) == {"p1", "f_dup"})
+check("接管下包外风格不可见（读包目录为空）", _old_repo.load("f_out") == [])
 check("接管下风格注册地址读包内",
-      _old_repo.load_style_address("P1") == _ADDR_TH)
+      _old_repo.load_style_address("p1") == _ADDR_TH)
 _mgr.world_state.set_active(None)
 
 # 3c. 声明 worlds 的包：按维度合并
@@ -145,50 +145,50 @@ _wid = _deploy_pack(worlds=["TH"])
 _mgr.load_active(_wid)
 _repo = LandmarkRepo(data_dir=_DATA, world_state=_mgr.world_state)
 check("声明 worlds 时合并自由目录其它维度素材",
-      set(_repo.get_styles()) == {"P1", "FDup", "FOut", "FPort"},
+      set(_repo.get_styles()) == {"p1", "f_dup", "f_out", "f_port"},
       str(sorted(_repo.get_styles())))
-check("声明世界内的自由风格被遮蔽", "FIn" not in _repo.get_styles())
-check("同名冲突时包优先（自由 FDup 被遮蔽）",
-      [lm.name for lm in _repo.load("FDup")] == ["包内FDup"])
+check("声明世界内的自由风格被遮蔽", "f_in" not in _repo.get_styles())
+check("同名冲突时包优先（自由 f_dup 被遮蔽）",
+      [lm.name for lm in _repo.load("f_dup")] == ["包内f_dup"])
 check("合并的自由风格读自由目录",
-      [lm.name for lm in _repo.load("FOut")] == ["自由FOut"])
-check("包内风格读包目录", [lm.name for lm in _repo.load("P1")] == ["包内P1"])
+      [lm.name for lm in _repo.load("f_out")] == ["自由f_out"])
+check("包内风格读包目录", [lm.name for lm in _repo.load("p1")] == ["包内p1"])
 check("合并的自由风格注册地址读自由目录",
-      _repo.load_style_address("FOut") == _ADDR_RW)
+      _repo.load_style_address("f_out") == _ADDR_RW)
 check("未注册地址的自由风格保持可用（portable）",
-      _repo.load_style_address("FPort") == "" and "FPort" in _repo.get_styles())
+      _repo.load_style_address("f_port") == "" and "f_port" in _repo.get_styles())
 check("合并的自由风格不在包目录时读自由目录",
-      _repo._filepath("FPort").startswith(os.path.join(_DATA, "packs")))
+      _repo._filepath("f_port").startswith(os.path.join(_DATA, "packs")))
 
 _qrepo = QuipRepo(data_dir=_DATA, world_state=_mgr.world_state)
 check("描述风格同样按维度合并",
-      set(_qrepo.get_styles()) == {"Q1", "QFree"},
+      set(_qrepo.get_styles()) == {"q1", "q_free"},
       str(sorted(_qrepo.get_styles())))
 check("描述风格注册地址路由正确",
-      _qrepo.load_style_address("Q1") == _ADDR_TH
-      and _qrepo.load_style_address("QFree") == _ADDR_RW)
+      _qrepo.load_style_address("q1") == _ADDR_TH
+      and _qrepo.load_style_address("q_free") == _ADDR_RW)
 
 # ---------------- 4. 激活时的选取保留 ----------------
-_settings = {"selected_styles": ["FIn", "FOut", "FPort", "已删除"],
-             "selected_quip_styles": ["QFree"]}
+_settings = {"selected_styles": ["f_in", "f_out", "f_port", "已删除"],
+             "selected_quip_styles": ["q_free"]}
 _mgr.apply_world_settings(_settings)
 check("包风格全选且保留未遮蔽的已选自由风格",
-      _settings["selected_styles"] == ["P1", "FDup", "FOut", "FPort"],
+      _settings["selected_styles"] == ["p1", "f_dup", "f_out", "f_port"],
       str(_settings["selected_styles"]))
 check("描述风格选取同样保留",
-      _settings["selected_quip_styles"] == ["Q1", "QFree"])
+      _settings["selected_quip_styles"] == ["q1", "q_free"])
 
 # 重复应用幂等（启动恢复会再次调用）
 _mgr.apply_world_settings(_settings)
 check("选取合并幂等",
-      _settings["selected_styles"] == ["P1", "FDup", "FOut", "FPort"])
+      _settings["selected_styles"] == ["p1", "f_dup", "f_out", "f_port"])
 
 # ---------------- 5. 一致性警告（先 warning） ----------------
 _pack_root = os.path.join(_DATA, "worlds", _wid)
-# 包内 P1 在 TH、FDup 在 RW，包声明只含 TH → FDup 应告警
+# 包内 p1 在 TH、f_dup 在 RW，包声明只含 TH → f_dup 应告警
 _warns = pack_worlds_warnings(_mgr.world_state.manifest, _pack_root)
 check("注册地址在声明世界外给出警告",
-      len(_warns) == 1 and "FDup" in _warns[0] and "RW" in _warns[0],
+      len(_warns) == 1 and "f_dup" in _warns[0] and "RW" in _warns[0],
       str(_warns))
 check("未声明 worlds 的包不检查",
       pack_worlds_warnings(WorldPackManifest(world_id="t", name="t"), _pack_root) == [])
@@ -202,7 +202,7 @@ _repo2 = LandmarkRepo(data_dir=_DATA)
 _created = _mgr2.create_from_current(
     "tpk_create", "派生测试", {},
     landmark_repo=_repo2,
-    selected_resources={"landmarks": ["FIn", "FOut", "FPort"]})
+    selected_resources={"landmarks": ["f_in", "f_out", "f_port"]})
 check("create_from_current 派生 worlds 并集",
       _created.worlds == ["RW", "TH"], str(_created.worlds))
 _reloaded = load_manifest_file(os.path.join(
@@ -210,12 +210,12 @@ _reloaded = load_manifest_file(os.path.join(
 check("派生 worlds 持久化且清单可复载", _reloaded.worlds == ["RW", "TH"])
 
 # 全部未注册地址时不声明 worlds
-for style in ("FIn", "FOut"):
+for style in ("f_in", "f_out"):
     _repo2.save_style_address(style, "")
 _created2 = _mgr2.create_from_current(
     "tpk_create2", "无地址派生", {},
     landmark_repo=_repo2,
-    selected_resources={"landmarks": ["FIn", "FOut"]})
+    selected_resources={"landmarks": ["f_in", "f_out"]})
 check("全部未注册地址时 worlds 保持为空",
       _created2.worlds == [] and _created2.validate() == [])
 

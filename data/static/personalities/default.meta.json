@@ -1,0 +1,12 @@
+{
+  "schema": "gg.personalities/1",
+  "id": "default",
+  "author": "",
+  "namespace": "",
+  "version": "0.0.0",
+  "content_hash": "sha256:68c98fd7d75d0790d80aa639b9a40142436fbe0b8cdea626743a0462370ac795",
+  "updated_at": "2026-10-30T22:41:10",
+  "source": {},
+  "status": "draft",
+  "tags": []
+}

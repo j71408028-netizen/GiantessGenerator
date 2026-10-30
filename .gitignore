@@ -63,3 +63,5 @@ tempCodeRunnerFile.py
 
 # 副本方案在测试阶段暂不入库
 /data/packs/scenarios/
+# 迁移脚本的一次性回滚备份（整目录拷贝）
+/data.rollback-*/

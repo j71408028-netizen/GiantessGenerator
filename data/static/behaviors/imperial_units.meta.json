@@ -1,0 +1,12 @@
+{
+  "schema": "gg.behaviors/1",
+  "id": "imperial_units",
+  "author": "",
+  "namespace": "",
+  "version": "0.0.0",
+  "content_hash": "sha256:bebbc00a0c3a3e6b0e65e078b89fef7b132d95d5173aaba60430ee39dd287f30",
+  "updated_at": "2026-10-30T22:41:10",
+  "source": {},
+  "status": "draft",
+  "tags": []
+}

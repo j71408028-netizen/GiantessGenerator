@@ -545,27 +545,27 @@ from persistence.scenario_repo import ScenarioRepo  # noqa: E402
 
 tmp = tempfile.mkdtemp(prefix="scenario_schema_")
 repo = ScenarioRepo(data_dir=tmp)
-repo.save_config("_default", _bad_config())
+repo.save_config("default", _bad_config())
 check("save_config 记录诊断", has_errors(repo.last_diagnostics))
-repo.save_config("_default", clean)
+repo.save_config("default", clean)
 check("保存干净配置后诊断清空", not has_errors(repo.last_diagnostics))
 check("加载后再校验（迁移后配置）",
-      has_errors(validate_scenario_config(repo.load_config("_default")) or [])
+      has_errors(validate_scenario_config(repo.load_config("default")) or [])
       is False, "迁移后的干净配置仍有 error")
 
 # 旧写法迁移：components 列表里的文本家族成员提升到 text_component
 _old_style = dict(clean)
 _old_style.pop("text_component", None)
 _old_style["components"] = ["text", "attr_bar"]
-repo.save_config("_default", _old_style)
-_loaded_old = repo.load_config("_default")
+repo.save_config("default", _old_style)
+_loaded_old = repo.load_config("default")
 check("迁移：旧写法文本组件提升到 text_component",
       _loaded_old.get("text_component") == "text"
       and "text" not in (_loaded_old.get("components") or []),
       _loaded_old)
 _old_style["components"] = ["attr_bar", "text_nvl"]
-repo.save_config("_default", _old_style)
-_loaded_old = repo.load_config("_default")
+repo.save_config("default", _old_style)
+_loaded_old = repo.load_config("default")
 check("迁移：列表里的 text_nvl 同样提升",
       _loaded_old.get("text_component") == "text_nvl"
       and _loaded_old.get("components") == ["attr_bar"],
@@ -581,7 +581,7 @@ from dungeon.models import DungeonTextType  # noqa: E402
 from dungeon.rules import EvolutionRules  # noqa: E402
 
 _real_config = json.load(  # 真实方案：作者能改到的就是这两个顶层字段
-    open(os.path.join(_PROJECT_ROOT, "data", "packs", "scenarios", "_default",
+    open(os.path.join(_PROJECT_ROOT, "data", "packs", "scenarios", "default",
                       "config.json"), encoding="utf-8"))
 _real_rules = EvolutionRules(
     transition_matrix=_real_config.get("transition_matrix"),

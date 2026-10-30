@@ -186,12 +186,22 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 新增一类资源 = 一份声明 + 一个 repo + 一处界面接入。再写第二份类型清单会让
 「登记了但没人读」和「读了但没登记」同时出现，`tests/check_resource_spec.py`
 会拦。资源 id 的全局规则是小写字母/数字/`._-`，类型可声明更宽或更严的
-`id_pattern`（行为包要能当 Python 标识符）；清单校验目前只对声明了
-`id_pattern` 的类型强校验——存量还有大写与中文 id，收口在迁移阶段。
+`id_pattern`（行为包要能当 Python 标识符）；`WorldPackManifest.validate()`
+对**所有**类型都按各自规则校验 id，不留旧名宽松分支。
 
 元数据走兄弟文件 `<id>.meta.json`（`persistence/resources/envelope.py`），
 与既有的 `<id>.addr.json` 同构：字段全可选、读取侧补默认值不写回、未知字段保留、
-`content_hash` 判定「本地改过没有」。
+`content_hash` 判定「本地改过没有」。列目录时必须排除这两类伴随文件
+（`style_universe._list_styles` 已排除，新增枚举点时照做）。
+
+两个曾经破例的数据形状已在一次性迁移（`scripts/migrate_resource_ids.py`）里改掉：
+
+- `news` 的表头用字段键（`size_category` / `memorial` / `intrusion` /
+  `destruction` / `text` / `substitute_1` / `substitute_2`），不再是中文列名，
+  列清单与顺序都取自声明；
+- `quips` 的坐标写成行数组 `{"intrusion": 1, "destruction": 1, "items": [...]}`，
+  正文里的 `[summary:…]` 标记改为条目自带的 `summary` 字段。`QuipRepo.load()`
+  对外仍返回 `{(介入度, 破坏性): [条目]}`，格式变化不溢出到调用方。
 
 ---
 

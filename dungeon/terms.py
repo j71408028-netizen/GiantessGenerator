@@ -25,7 +25,7 @@
 就是方案定义，因而更名为 ``persistence.scenario_repo.ScenarioRepo``。）
 """
 
-DEFAULT_SCENARIO_ID = "_default"
+DEFAULT_SCENARIO_ID = "default"
 SCENARIO_CONFIG_NAME = "config.json"
 SCENARIO_ID_KEY = "scenario_id"
 SCENARIO_CONFIG_KEY = "scenario_config"

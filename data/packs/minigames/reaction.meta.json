@@ -1,0 +1,12 @@
+{
+  "schema": "gg.minigames/1",
+  "id": "reaction",
+  "author": "",
+  "namespace": "",
+  "version": "0.0.0",
+  "content_hash": "sha256:abdfceecf02ca13bfafbe7c35f1cbeb88b8fa22607b85c60aa41f999192610e7",
+  "updated_at": "2026-10-30T22:41:10",
+  "source": {},
+  "status": "draft",
+  "tags": []
+}

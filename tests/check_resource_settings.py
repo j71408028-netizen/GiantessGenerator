@@ -67,7 +67,7 @@ check("缺省含四个带缺省值的资源键",
       {k: _defaults[k] for k in ("name_table", "news_table",
                                  "selected_styles", "selected_quip_styles")}
       == {"name_table": "default", "news_table": "default",
-          "selected_styles": ["ChineseMix"], "selected_quip_styles": ["Events"]},
+          "selected_styles": ["chinese_mix"], "selected_quip_styles": ["events"]},
       _defaults)
 check("active_world / preset_table / personality_table 无缺省（读取方各自回退）",
       "active_world" not in _defaults
@@ -115,7 +115,7 @@ check("load 返回的 dict 仍含资源键（对外形状不变）",
       {k: _shared.get(k) for k in ("name_table", "theme_mode")})
 check("迁移补上缺省资源键",
       _migrated["news_table"] == "default"
-      and _migrated["selected_styles"] == ["ChineseMix"])
+      and _migrated["selected_styles"] == ["chinese_mix"])
 
 # 迁移幂等：settings.json 残留旧值时不覆盖现值
 _repo.save({"name_table": "newer"})

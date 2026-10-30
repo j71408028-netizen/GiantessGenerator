@@ -566,7 +566,7 @@ def _replay_fixture():
 def _scenario_repo():
     from persistence.scenario_repo import ScenarioRepo
     repo = ScenarioRepo(data_dir=_DATA_ROOT)
-    repo.save_config("_default", _scenario_config())
+    repo.save_config("default", _scenario_config())
     return repo
 
 
@@ -598,7 +598,7 @@ def _make_window(script, explore=False, parent=None, host=None,
         is_replay=False, replay_data=None,
         body_parts={}, character=None, character_repo=None, gui=None,
         mode="explore" if explore else "challenge",
-        scenario_ids=["_default"] if explore else None,
+        scenario_ids=["default"] if explore else None,
         host=host if host is not None else _HOST,
         script=script,
     )
@@ -1082,7 +1082,7 @@ def scene_entry_start():
     files = _written_files()
     replays = [f for f in files if f.startswith(os.path.join("user", "replays"))]
     check("入口进入：落盘了回放", bool(replays), files)
-    check("入口进入：结果 scenario_id 正确", result.scenario_id == "_default",
+    check("入口进入：结果 scenario_id 正确", result.scenario_id == "default",
           result.scenario_id)
     check("入口进入：结果为 session-ended", result.succeeded, result)
     check("入口进入：像素工作者已收工", win._background.worker_alive is False)

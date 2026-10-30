@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 from core.address_model import world_of
 from persistence import PresetRepo, PersonalityRepo
+from persistence.landmark_repo import DEFAULT_LANDMARK_STYLE
 from persistence.name_repo import NameRepo, DEFAULT_NAME_TABLE
 from persistence.world_pack import list_behavior_packs
 from dungeon.terms import is_default_scenario
@@ -89,7 +90,7 @@ class ResourceHubPanel(ctk.CTkFrame):
         self.news_table = self.settings.get("news_table", DEFAULT_NEWS_TABLE)
         self.preset_table = self.settings.get("preset_table", "default")
         self.personality_table = self.settings.get("personality_table", "default")
-        self.selected_styles = self.settings.get("selected_styles", ["ChineseMix"])
+        self.selected_styles = self.settings.get("selected_styles", [DEFAULT_LANDMARK_STYLE])
         self.selected_quip_styles = self.settings.get("selected_quip_styles", [])
 
         self._create_widgets()
@@ -554,7 +555,7 @@ class ResourceHubPanel(ctk.CTkFrame):
     def _after_world_state_change(self):
         """世界包状态变化后：回读本页状态 → 推给上下文 → 全局刷新。"""
         self._sync_table_vars()
-        self.selected_styles = self.settings.get("selected_styles", ["ChineseMix"])
+        self.selected_styles = self.settings.get("selected_styles", [DEFAULT_LANDMARK_STYLE])
         self.selected_quip_styles = self.settings.get("selected_quip_styles", [])
         self._sync_all_states()
         if self.gui_ref is not None:
@@ -755,7 +756,7 @@ class ResourceHubPanel(ctk.CTkFrame):
         self.selected_styles = _filter_for_world(self.selected_styles, self.landmark_repo)
         self.selected_quip_styles = _filter_for_world(self.selected_quip_styles, self.quip_repo)
         if not self.selected_styles:
-            self.selected_styles = ["ChineseMix"]
+            self.selected_styles = [DEFAULT_LANDMARK_STYLE]
         self._sync_landmark_styles(lock)
         self._sync_quip_styles(lock)
         # 同步后以实际可见的选中项为准
@@ -769,7 +770,7 @@ class ResourceHubPanel(ctk.CTkFrame):
         prev = list(self.selected_styles)
         names = self.landmark_selector.get_selected_raw_names()
         if not names:
-            names = ["ChineseMix"]
+            names = [DEFAULT_LANDMARK_STYLE]
         forced = None
         for n in names:
             if n in prev:

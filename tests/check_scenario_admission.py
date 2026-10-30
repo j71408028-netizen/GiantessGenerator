@@ -178,13 +178,13 @@ from persistence.scenario_repo import ScenarioRepo  # noqa: E402
 
 _tmp = tempfile.mkdtemp(prefix="scenario_admission_repo_")
 _repo = ScenarioRepo(data_dir=_tmp)
-_repo.save_config("_default", {
+_repo.save_config("default", {
     admission.FIELD_ADDRESS: "  ",
     admission.FIELD_MAX_DISTANCE: "-5",
     admission.FIELD_HEIGHT_MIN: "10",
     admission.FIELD_HEIGHT_MAX: 100,
 })
-_loaded = _repo.load_config("_default")
+_loaded = _repo.load_config("default")
 check("仓库迁移：地址去空白、非法距离归为不限",
       _loaded[admission.FIELD_ADDRESS] == ""
       and _loaded[admission.FIELD_MAX_DISTANCE] is None)

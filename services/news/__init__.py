@@ -14,14 +14,13 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from core.logic import get_size_category
+from core.resource_spec import spec_of
 from paths import data_dir
 from persistence.resources.registry import free_dir as _free_dir_of
 
 
-NEWS_COLUMNS = (
-    "尺寸等级", "纪念", "介入度", "破坏性", "正文",
-    "替换队列1", "替换队列2",
-)
+# 列清单来自资源声明：表头顺序即索引优先级顺序
+NEWS_COLUMNS = spec_of("news").field_keys()
 DEFAULT_NEWS_TABLE = "default"
 _REPLACEMENT_KEYS = {
     1: ("{a}", "{1}"),
@@ -98,7 +97,7 @@ class NewsService:
                 reader = csv.DictReader(f)
                 for raw in reader:
                     row = {key: (raw.get(key) or "").strip() for key in NEWS_COLUMNS}
-                    if row["正文"]:
+                    if row["text"]:
                         rows.append(row)
         except Exception as e:
             print(f"加载新闻表失败: {e}")
@@ -139,39 +138,39 @@ class NewsService:
             return None
 
     def _garbage_rows(self, rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
-        return [row for row in rows if not row["尺寸等级"]]
+        return [row for row in rows if not row["size_category"]]
 
     def _pick_different(self, pool: List[Dict[str, str]], state) -> Dict[str, str]:
         """优先选取与上一次新闻正文不同的条目，全部相同才复用，避免主干完全一致。"""
-        different = [row for row in pool if row["正文"] != state.last_news]
+        different = [row for row in pool if row["text"] != state.last_news]
         return random.choice(different) if different else random.choice(pool)
 
     def _make_article(self, row: Dict[str, str], state, indexed: bool) -> NewsArticle:
-        state.last_news = row["正文"]
+        state.last_news = row["text"]
         return NewsArticle(self._render(row, state), indexed=indexed)
 
     def _indexed_article(
             self, rows: List[Dict[str, str]], state, day: datetime.date
     ) -> Optional[NewsArticle]:
-        candidates = [row for row in rows if row["尺寸等级"]]
+        candidates = [row for row in rows if row["size_category"]]
         size = get_size_category(state.height)
         if not size:
             return None
 
         # 表头顺序即索引优先级：尺寸必须精确命中，其余字段按规则逐层收窄。
         for column in NEWS_COLUMNS:
-            if column == "尺寸等级":
+            if column == "size_category":
                 candidates = [row for row in candidates if row[column] == size]
                 if not candidates:
                     return None
-            elif column == "纪念":
+            elif column == "memorial":
                 expected = _normalize_memorial(self._memorial_for_day(state.birthday, day))
                 exact = [row for row in candidates if _normalize_memorial(row[column]) == expected]
                 if exact:
                     candidates = exact
                 # 纪念无法命中时按要求忽略该要求。
-            elif column in ("介入度", "破坏性"):
-                target = self._int_grid(getattr(state, "intrusion" if column == "介入度" else "destruction", 0))
+            elif column in ("intrusion", "destruction"):
+                target = self._int_grid(getattr(state, column, 0))
                 numeric = [(row, self._parse_int(row[column])) for row in candidates]
                 numeric = [(row, value) for row, value in numeric if value is not None]
                 if numeric:
@@ -185,9 +184,9 @@ class NewsService:
 
     @staticmethod
     def _render(row: Dict[str, str], state) -> str:
-        text = row["正文"].replace("{name}", state.name).replace("{nick}", state.nick or "")
+        text = row["text"].replace("{name}", state.name).replace("{nick}", state.nick or "")
         for index in range(1, 3):
-            values = [item.strip() for item in row[f"替换队列{index}"].split(",") if item.strip()]
+            values = [item.strip() for item in row[f"substitute_{index}"].split(",") if item.strip()]
             replacement = random.choice(values) if values else ""
             for key in _REPLACEMENT_KEYS[index]:
                 text = text.replace(key, replacement)
