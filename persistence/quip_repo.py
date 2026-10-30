@@ -115,15 +115,20 @@ class QuipRepo:
         return unified
 
     def save(self, style_name: str, quips_data: dict):
-        filepath = self._free_filepath(style_name)
-        existing_data = {}
-        if os.path.exists(filepath):
-            with open(filepath, 'r', encoding='utf-8') as f:
-                try:
-                    existing_data = json.load(f)
-                except Exception:
-                    pass
-        meta = existing_data.get("_meta", self._default_meta())
+        # 原子写：save 先读旧文件保 _meta 再整体重写，直接截断写入的话
+        # 崩溃时 _meta 和正文一起丢。meta 取**写路径**上的旧值。
+        write_json_atomic(
+            self._free_filepath(style_name),
+            self.dump_data(quips_data,
+                           self._meta_at(self._free_filepath(style_name))))
+
+    def dump_style(self, style_name: str) -> dict:
+        """当前风格的落盘形状（``_meta`` + 行数组），供世界包导出等就地序列化。"""
+        return self.dump_data(self.load(style_name), self.load_meta(style_name))
+
+    @staticmethod
+    def dump_data(quips_data: dict, meta: dict) -> dict:
+        """``{(尺寸档, (介入度, 破坏性)): [条目]}`` → 落盘用的行数组。"""
         save_data = {}
         for category, matrix in quips_data.items():
             if category == "_meta":
@@ -142,9 +147,7 @@ class QuipRepo:
             rows.sort(key=lambda row: (row["intrusion"], row["destruction"]))
             save_data[category] = rows
         save_data["_meta"] = meta
-        # 原子写：save 先读旧文件保 _meta 再整体重写，直接截断写入的话
-        # 崩溃时 _meta 和正文一起丢
-        write_json_atomic(filepath, save_data)
+        return save_data
 
     def create_style(self, style_name: str, copy_from: str = None):
         if style_name in self.get_styles():
@@ -191,7 +194,10 @@ class QuipRepo:
         return {s: self.load_style_address(s) for s in (style_names or [])}
 
     def load_meta(self, style_name: str) -> dict:
-        data = load_json_with_backup(self._filepath(style_name))
+        return self._meta_at(self._filepath(style_name))
+
+    def _meta_at(self, path: str) -> dict:
+        data = load_json_with_backup(path)
         if not isinstance(data, dict):
             return self._default_meta()
         return data.get("_meta", self._default_meta())

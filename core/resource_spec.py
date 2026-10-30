@@ -11,10 +11,14 @@
 ``RESOURCE_SETTINGS_KEYS`` / 资源中心的可打包清单）都从这里派生，
 新增一类资源 = 一份声明 + 一个 repo + 一处界面接入。
 
-两条命名规则对本文件声明的**全部**类型生效：
+三条命名规则对本文件声明的**全部**类型生效：
 
 - 类型 id：``^[a-z][a-z0-9_]*$``，复数形式，同时充当自由目录名与世界包内目录名；
-- 资源 id：``^[a-z0-9][a-z0-9._-]{0,63}$``，来自容器名，不从显示名推断。
+- 资源 id：``^[a-z0-9][a-z0-9._-]{0,63}$``，来自容器名，不从显示名推断；
+- 主文件后缀：只有容器本身需要被外部程序认领时才带后缀（``.csv`` 要给表格软件、
+  ``.chal`` 是整包、``.py`` 是 Python 包）。单个 JSON 文件的主文件**不带后缀**——
+  路径本身就是资源的地址，同目录的 ``.addr.json`` / ``.meta.json`` 一眼可辨，
+  按名与按类型两种浏览方式才能得到不同视图；编辑器里关联语言见 docs/dev/architecture.md。
 
 显示名（``name`` / ``label`` 字段）可以是任意语言，只用于界面与提示词。
 """
@@ -83,8 +87,8 @@ class FieldSpec:
 class ResourceTypeSpec:
     """一类资源的完整声明。
 
-    - ``primary``：主文件相对路径模板，必须含 ``{id}``，如 ``{id}.json`` /
-      ``{id}/config.json`` / ``{id}.csv``；
+    - ``primary``：主文件相对路径模板，必须含 ``{id}``，如 ``{id}``（无后缀的
+      JSON 容器）/ ``{id}/config.json`` / ``{id}.csv``；
     - ``root``：自由目录所在的存储根（``packs`` = 用户可写素材，``static`` = 静态表）；
     - ``id_required``：载荷内必须自带 ``id``（目录型容器才有地方放）；
       其余类型的 id 取自容器名，信封里的 ``id`` 只做冗余校验；
@@ -202,7 +206,7 @@ RESOURCE_TYPES: Tuple[ResourceTypeSpec, ...] = (
     ResourceTypeSpec(
         type_id="landmarks",
         container="json_array",
-        primary="{id}.json",
+        primary="{id}",
         label="地标风格",
         fields=_LANDMARK_FIELDS,
         settings_keys=("selected_styles",),
@@ -212,7 +216,7 @@ RESOURCE_TYPES: Tuple[ResourceTypeSpec, ...] = (
     ResourceTypeSpec(
         type_id="quips",
         container="json_object",
-        primary="{id}.json",
+        primary="{id}",
         label="描述风格",
         fields=(
             FieldSpec("_meta", "dict", "风格元数据", note="自定义类型与细分"),

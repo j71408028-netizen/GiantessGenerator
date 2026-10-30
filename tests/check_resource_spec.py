@@ -174,7 +174,7 @@ _tmp = tempfile.mkdtemp(prefix="resource_spec_")
 try:
     landmarks_dir = os.path.join(_tmp, "packs", "landmarks")
     os.makedirs(landmarks_dir, exist_ok=True)
-    primary = os.path.join(landmarks_dir, "chinese_mix.json")
+    primary = os.path.join(landmarks_dir, "chinese_mix")
     payload = [{"name": "上海中心大厦", "size": 632, "dimension": "vertical",
                 "frequency": "unique", "horizontal_type": None,
                 "address": "", "address_mode": ""}]
@@ -248,7 +248,7 @@ try:
     check(registry.validate_resource("nope", chal)[0].code == "unknown_type",
           "未知类型给出诊断")
     check(registry.validate_resource(
-              "landmarks", os.path.join(landmarks_dir, "nope.json"))[0].code
+              "landmarks", os.path.join(landmarks_dir, "nope"))[0].code
           == "not_found", "缺失主文件给出诊断")
 
     # id 规则：存量中文 id 明确不合规（改名交给迁移）
@@ -258,19 +258,45 @@ try:
           and not valid_resource_id("../etc") and not valid_resource_id(""),
           "非法 id 被拒绝")
     bad = [d for d in registry.validate_resource(
-               "landmarks", os.path.join(landmarks_dir, "ChineseMix.json"))
+               "landmarks", os.path.join(landmarks_dir, "ChineseMix"))
            if d.code == "not_found"]
     check(bad, "合法 id 之外不因 id 规则掩盖缺失文件")
 
+    # 无后缀容器：条目名即资源名，只认文件，且要排除原子写残留
+    with open(os.path.join(landmarks_dir, "chinese_mix.tmp"), "w",
+              encoding="utf-8") as handle:
+        handle.write("{}")
+    with open(os.path.join(landmarks_dir, "chinese_mix.bak"), "w",
+              encoding="utf-8") as handle:
+        handle.write("[]")
+    os.makedirs(os.path.join(landmarks_dir, "notes"), exist_ok=True)
+    check(sorted(registry.list_ids("landmarks", _tmp)) == ["chinese_mix"],
+          "无后缀容器只枚举主文件（临时文件、备份、子目录都不算）",
+          registry.list_ids("landmarks", _tmp))
+    check(registry.is_resource_entry("landmarks", landmarks_dir, "chinese_mix")
+          and not registry.is_resource_entry("landmarks", landmarks_dir,
+                                             "chinese_mix.meta.json"),
+          "伴随文件与主文件可区分")
+    # 带点号的 id 不能被当成扩展名截断
+    with open(os.path.join(landmarks_dir, "v1.2"), "w", encoding="utf-8") as handle:
+        handle.write("[]")
+    check(registry.resource_id_from_entry("landmarks", "v1.2") == "v1.2",
+          "无后缀容器的 id 原样保留，不按扩展名截断")
+    check(registry.resource_id_from_path(
+              "landmarks", os.path.join(landmarks_dir, "v1.2")) == "v1.2",
+          "路径反推 id 同样保留点号")
+    check(registry.resource_id_from_entry("presets", "v1.2.csv") == "v1.2",
+          "带后缀容器只剥声明后缀")
+
     # 打包成员核对：成员形状全部由 primary 模板派生
-    members = {"landmarks/chinese_mix.json", "quips/events.json",
+    members = {"landmarks/chinese_mix", "quips/events",
                "presets/default.csv", "behaviors/imperial_units/x.py"}
     declared = {"landmarks": ["chinese_mix"], "quips": ["events"],
                 "presets": ["default"], "behaviors": ["imperial_units"]}
     check(registry.missing_members(declared, members) == [],
           "声明齐全时无缺失", registry.missing_members(declared, members))
     for type_id, resource_id, expect in (
-            ("landmarks", "absent", "landmarks/absent.json"),
+            ("landmarks", "absent", "landmarks/absent"),
             ("scenarios", "absent", "scenarios/absent/config.json"),
             ("challenges", "absent.chal", "challenges/absent.chal"),
             ("names", "absent", "names/absent.csv"),

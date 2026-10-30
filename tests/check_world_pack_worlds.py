@@ -87,12 +87,12 @@ def _deploy_pack(worlds):
     os.makedirs(qp_dir, exist_ok=True)
     # 包内风格：p1 注册在 TH；f_dup 与自由目录同名（遮蔽检验）
     for style, addr in (("p1", _ADDR_TH), ("f_dup", _ADDR_RW)):
-        with open(os.path.join(lm_dir, f"{style}.json"), "w", encoding="utf-8") as f:
+        with open(os.path.join(lm_dir, style), "w", encoding="utf-8") as f:
             json.dump([{"name": f"包内{style}", "size": 100,
                         "dimension": "vertical", "frequency": "common"}], f)
         with open(os.path.join(lm_dir, f"{style}.addr.json"), "w", encoding="utf-8") as f:
             json.dump({"address": addr}, f)
-    with open(os.path.join(qp_dir, "q1.json"), "w", encoding="utf-8") as f:
+    with open(os.path.join(qp_dir, "q1"), "w", encoding="utf-8") as f:
         json.dump({}, f)
     with open(os.path.join(qp_dir, "q1.addr.json"), "w", encoding="utf-8") as f:
         json.dump({"address": _ADDR_TH}, f)
@@ -218,6 +218,30 @@ _created2 = _mgr2.create_from_current(
     selected_resources={"landmarks": ["f_in", "f_out"]})
 check("全部未注册地址时 worlds 保持为空",
       _created2.worlds == [] and _created2.validate() == [])
+
+# ---------------- 7. 导出的描述文件能被读回 ----------------
+_qrepo = QuipRepo(data_dir=_DATA)
+_qrepo.save("q_rt", {"small": {(1, 1): [{"text": "包内正文", "style": "q_rt",
+                                          "step": 0.1, "summary": "摘要"}]}})
+_mgr2.create_from_current(
+    "tpk_quip", "描述往返", {},
+    landmark_repo=_repo2, quip_repo=_qrepo,
+    selected_resources={"quips": ["q_rt"]})
+_pack_quip = os.path.join(_DATA, "worlds", "tpk_quip", "quips", "q_rt")
+check("包内描述主文件不带后缀", os.path.isfile(_pack_quip), _pack_quip)
+with open(_pack_quip, encoding="utf-8") as _f:
+    _back = json.load(_f)
+check("包内描述是落盘形状（行数组 + _meta）",
+      isinstance(_back.get("small"), list) and "_meta" in _back, sorted(_back))
+_quip_tmp = tempfile.mkdtemp(prefix="quip_pack_")
+os.makedirs(os.path.join(_quip_tmp, "packs", "quips"))
+shutil.copy2(_pack_quip, os.path.join(_quip_tmp, "packs", "quips", "q_rt"))
+_reloaded_quip = QuipRepo(data_dir=_quip_tmp).load("q_rt")
+check("包内描述能被 QuipRepo 读回",
+      _reloaded_quip["small"][(1, 1)][0]["text"] == "包内正文"
+      and _reloaded_quip["small"][(1, 1)][0]["summary"] == "摘要",
+      _reloaded_quip)
+shutil.move(_quip_tmp, tempfile.mkdtemp(prefix="quip_pack_retired_"))
 
 # ---------------- 清理 ----------------
 shutil.move(_DATA, tempfile.mkdtemp(prefix="worlds_retired_"))

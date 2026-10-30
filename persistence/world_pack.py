@@ -3,9 +3,9 @@
 世界包为 zip 归档，扩展名固定为 ``.world.zip``，内部布局：
 
     world.json                  # 清单（唯一必需文件）
-    landmarks/<style>.json      # 地标风格
+    landmarks/<style>           # 地标风格（主文件不带后缀，路径即地址）
     landmarks/<style>.addr.json # （可选）地标风格注册地址（维度 + 风格注册的若干级）
-    quips/<style>.json          # 描述风格
+    quips/<style>               # 描述风格
     quips/<style>.addr.json     # （可选）描述风格注册地址
     presets/<table>.csv         # 身材表
     personalities/<table>.csv   # 性格表

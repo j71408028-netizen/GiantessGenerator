@@ -191,8 +191,20 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 
 元数据走兄弟文件 `<id>.meta.json`（`persistence/resources/envelope.py`），
 与既有的 `<id>.addr.json` 同构：字段全可选、读取侧补默认值不写回、未知字段保留、
-`content_hash` 判定「本地改过没有」。列目录时必须排除这两类伴随文件
-（`style_universe._list_styles` 已排除，新增枚举点时照做）。
+`content_hash` 判定「本地改过没有」。列目录一律走 `registry.is_resource_entry()`
+（伴随文件、`.bak`、原子写的 `.tmp` 都由它排除），不要自己写 `endswith(".json")`。
+
+**单文件 JSON 容器的主文件不带扩展名**：`landmarks/chinese_mix`、`quips/events`，
+路径本身就是资源地址。理由是三份文件挤在同一层的目录里时，`x.json` +
+`x.addr.json` + `x.meta.json` 让「按名浏览」和「按类型浏览」看不出区别；去掉主文件
+后缀后，只有内容和它的伴随文件，两类视图才各有意义。需要外部程序认领的容器仍带
+后缀：`.csv`（表格软件）、`.chal`（整包）、`.py`（Python 包），目录型容器的主文件
+在目录内（`<id>/config.json`、`<id>/manifest.json`），不在此列。
+
+代价是编辑器不再按后缀识别语言：.vscode 未提交关联配置，用 VS Code 直接看这些
+文件时需手动 `Change Language Mode → JSON`（或用 `files.associations` 关联
+`data/packs/landmarks/*`）。跨过这一层，`<id>` 与 `<id>.addr.json` 谁是需要编辑的
+内容一眼可辨。
 
 两个曾经破例的数据形状已在一次性迁移（`scripts/migrate_resource_ids.py`）里改掉：
 

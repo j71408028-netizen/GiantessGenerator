@@ -1,14 +1,16 @@
 """把存量资源改造成资源声明允许的形状（一次性，幂等）。
 
-六步，每步都按「已经是目标形状就跳过」判断，因此跑第二遍必须输出 0 处变更：
+七步，每步都按「已经是目标形状就跳过」判断，因此跑第二遍必须输出 0 处变更：
 
 1. 容器改名：中文/驼峰 id → 拼音全拼，伴随文件（``.addr.json`` / ``.meta.json`` /
    ``.bak``）跟着改；
 2. 改引用：``resource_settings.json`` 的选中项、世界包 ``world.json`` 的 resources；
-3. ``news`` 表头：中文列名 → 字段键（顺序不变）；
-4. ``quips`` 坐标：``"1_1"`` → ``{"intrusion": 1, "destruction": 1, "items": [...]}``；
-5. ``quips`` 简介：正文末尾的 ``[summary:…]`` 拆成条目自带的 ``summary`` 字段；
-6. 补信封：为每份资源写 ``<id>.meta.json``（内容哈希一致则不重写）。
+3. 去扩展名：无后缀容器（地标风格、描述风格）的主文件 ``<id>.json`` → ``<id>``，
+   备份随行为 ``<id>.bak``；自由目录与已部署的世界包都扫；
+4. ``news`` 表头：中文列名 → 字段键（顺序不变）；
+5. ``quips`` 坐标：``"1_1"`` → ``{"intrusion": 1, "destruction": 1, "items": [...]}``；
+6. ``quips`` 简介：正文末尾的 ``[summary:…]`` 拆成条目自带的 ``summary`` 字段；
+7. 补信封：为每份资源写 ``<id>.meta.json``（内容哈希一致则不重写）。
 
 顺带把 ``packs/dungeons/`` 残留挪进 ``migrated/``。
 
@@ -34,7 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.resource_spec import RESOURCE_TYPES, spec_of  # noqa: E402
 from dungeon.terms import LEGACY_SCENARIO_RESOURCE_KEY  # noqa: E402
-from persistence.json_store import write_json_atomic  # noqa: E402
+from persistence.json_store import BACKUP_SUFFIX, write_json_atomic  # noqa: E402
 from persistence.resources import envelope, registry  # noqa: E402
 
 #: 旧 id → 新 id。改名映射只活在本脚本里，代码侧不认旧名。
@@ -45,6 +47,9 @@ RENAMES = {
 }
 
 _SUMMARY_RE = re.compile(r"\s*\[summary:(.*?)\]\s*$")
+
+#: 去扩展名前，单文件 JSON 容器的主文件后缀。只在本脚本里认。
+LEGACY_MAIN_SUFFIX = ".json"
 
 
 # ---------------------------------------------------------------------------
@@ -80,16 +85,19 @@ class Migration:
 # ---------------------------------------------------------------------------
 
 def _suffix_tails(type_id: str) -> tuple:
-    """一个资源名后面可能跟的尾巴（主文件扩展名、备份、伴随文件）。"""
-    spec = spec_of(type_id)
-    if spec.container in ("json_dir", "py_package"):
+    """一个资源名后面可能跟的尾巴（主文件扩展名、备份、伴随文件）。
+
+    改名发生在去扩展名之前，所以这里用的是**迁移前**的后缀：无后缀容器此时
+    还带着 ``.json``。
+    """
+    if spec_of(type_id).container in ("json_dir", "py_package"):
         return ("",)
-    ext = os.path.splitext(spec.primary)[1]
+    ext = registry.primary_suffix(type_id) or LEGACY_MAIN_SUFFIX
     return ("", ext, ext + ".bak")
 
 
 def step_rename(m: Migration):
-    print("[1/6] 容器改名")
+    print("[1/7] 容器改名")
     for type_id, mapping in RENAMES.items():
         directory = registry.free_dir(type_id, m.data_dir)
         if not os.path.isdir(directory):
@@ -134,7 +142,7 @@ def _remap(values, mapping):
 
 
 def step_references(m: Migration):
-    print("[2/6] 改引用")
+    print("[2/7] 改引用")
     path = os.path.join(m.data_dir, "user", "resource_settings.json")
     data = _load_json(path)
     if isinstance(data, dict):
@@ -175,7 +183,52 @@ def step_references(m: Migration):
 
 
 # ---------------------------------------------------------------------------
-# 3. news 表头
+# 3. 去扩展名
+# ---------------------------------------------------------------------------
+
+def _main_dirs(m: Migration, type_id: str) -> list:
+    """该类型主文件可能出现的地方：自由目录 + 已部署世界包里的同名目录。"""
+    dirs = [registry.free_dir(type_id, m.data_dir)]
+    worlds = os.path.join(m.data_dir, "worlds")
+    if os.path.isdir(worlds):
+        for world_id in sorted(os.listdir(worlds)):
+            candidate = os.path.join(worlds, world_id, type_id)
+            if os.path.isdir(candidate):
+                dirs.append(candidate)
+    return dirs
+
+
+def step_strip_suffix(m: Migration):
+    print("[3/7] 主文件去扩展名")
+    for spec in RESOURCE_TYPES:
+        if spec.container in ("json_dir", "py_package"):
+            continue
+        if registry.primary_suffix(spec.type_id):
+            continue  # 声明里仍带后缀（.csv / .chal），不动
+        for directory in _main_dirs(m, spec.type_id):
+            names = set(os.listdir(directory))
+            for name in sorted(names):
+                if name.endswith(registry.ADDR_SUFFIX) or name.endswith(
+                        envelope.ENVELOPE_SUFFIX):
+                    continue
+                if name.endswith(LEGACY_MAIN_SUFFIX + BACKUP_SUFFIX):
+                    # 主文件的备份跟着改，否则升级后第一次保存找不到旧档可回退
+                    target = name[:-len(LEGACY_MAIN_SUFFIX + BACKUP_SUFFIX)] + BACKUP_SUFFIX
+                elif name.endswith(LEGACY_MAIN_SUFFIX):
+                    target = name[:-len(LEGACY_MAIN_SUFFIX)]
+                else:
+                    continue
+                if target in names or not target:
+                    continue
+                rel = os.path.relpath(os.path.join(directory, name), m.data_dir)
+                m.note(f"{rel} → {target}")
+                if m.apply:
+                    os.rename(os.path.join(directory, name),
+                              os.path.join(directory, target))
+
+
+# ---------------------------------------------------------------------------
+# 4. news 表头
 # ---------------------------------------------------------------------------
 
 def _news_header_map() -> dict:
@@ -185,7 +238,7 @@ def _news_header_map() -> dict:
 
 
 def step_news_header(m: Migration):
-    print("[3/6] news 表头")
+    print("[4/7] news 表头")
     directory = registry.free_dir("news", m.data_dir)
     if not os.path.isdir(directory):
         return
@@ -256,17 +309,10 @@ def _convert_quips(data: dict, style_map: dict):
 
 
 def step_quips(m: Migration):
-    print("[4/6] quips 坐标与简介")
-    directory = registry.free_dir("quips", m.data_dir)
-    if not os.path.isdir(directory):
-        return
+    print("[5/7] quips 坐标与简介")
     style_map = RENAMES.get("quips", {})
-    for name in sorted(os.listdir(directory)):
-        if name.endswith(registry.ADDR_SUFFIX) or name.endswith(envelope.ENVELOPE_SUFFIX):
-            continue
-        if not (name.endswith(".json") or name.endswith(".json.bak")):
-            continue
-        path = os.path.join(directory, name)
+    for resource_id in registry.list_ids("quips", m.data_dir):
+        path = registry.free_path("quips", resource_id, m.data_dir)
         data = _load_json(path)
         if not isinstance(data, dict):
             continue
@@ -278,7 +324,7 @@ def step_quips(m: Migration):
                                              ("summary", "简介"),
                                              ("style", "风格"))
                           if counts[key])
-        m.note(f"quips/{name}: {detail}")
+        m.note(f"quips/{resource_id}: {detail}")
         if m.apply:
             write_json_atomic(path, converted, backup=False)
 
@@ -288,7 +334,7 @@ def step_quips(m: Migration):
 # ---------------------------------------------------------------------------
 
 def step_envelopes(m: Migration):
-    print("[5/6] 补信封")
+    print("[6/7] 补信封")
     for spec in RESOURCE_TYPES:
         directory = registry.free_dir(spec.type_id, m.data_dir)
         if not os.path.isdir(directory):
@@ -317,7 +363,7 @@ def step_envelopes(m: Migration):
 # ---------------------------------------------------------------------------
 
 def step_cleanup(m: Migration):
-    print("[6/6] 清理残留")
+    print("[7/7] 清理残留")
     legacy = os.path.join(m.data_dir, "packs", LEGACY_SCENARIO_RESOURCE_KEY)
     if not os.path.isdir(legacy):
         return
@@ -329,8 +375,8 @@ def step_cleanup(m: Migration):
         shutil.move(legacy, target)
 
 
-STEPS = (step_rename, step_references, step_news_header, step_quips,
-         step_envelopes, step_cleanup)
+STEPS = (step_rename, step_references, step_strip_suffix, step_news_header,
+         step_quips, step_envelopes, step_cleanup)
 
 
 def run(data_dir: str, apply: bool) -> int:

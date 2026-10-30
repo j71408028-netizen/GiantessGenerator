@@ -26,8 +26,10 @@ from persistence.world_pack import (
     validate_archive,
     worlds_dir,
 )
+from persistence.style_addr import ADDR_SUFFIX as _ADDR_SUFFIX
 from persistence.style_addr import load_address as _load_style_addr
 from persistence.style_addr import save_address as _save_style_addr
+from persistence.resources import registry as _registry
 from dungeon.terms import SCENARIO_RESOURCE_KEY, is_default_scenario
 from core.address_model import world_of
 from core.behavior_runtime import (
@@ -241,14 +243,15 @@ class WorldManager:
         declared = self.world_state.declared_worlds()
         if not declared or not selected:
             return []
-        free_dir = os.path.join(self.data_dir, "packs", rtype)
         kept = []
         for style in selected:
             if not isinstance(style, str) or not style or style in pack_styles:
                 continue
-            if not os.path.isfile(os.path.join(free_dir, f"{style}.json")):
+            if not os.path.isfile(
+                    _registry.free_path(rtype, style, self.data_dir)):
                 continue
-            reg_world = world_of(_load_style_addr(free_dir, style))
+            reg_world = world_of(_load_style_addr(
+                _registry.free_dir(rtype, self.data_dir), style))
             if reg_world and reg_world in declared:
                 continue
             kept.append(style)
@@ -344,26 +347,25 @@ class WorldManager:
                         challenge_mgr=None) -> None:
         packs_root = os.path.join(self.data_dir, "packs")
         static_root = os.path.join(self.data_dir, "static")
-        for style in manifest.resources.get("landmarks", []):
-            dst_dir = os.path.join(packs_root, "landmarks")
+        # 风格类素材：主文件形状取自声明，注册地址随行改名
+        for rtype in ("landmarks", "quips"):
+            styles = manifest.resources.get(rtype, [])
+            if not styles:
+                continue
+            dst_dir = os.path.join(packs_root, rtype)
             os.makedirs(dst_dir, exist_ok=True)
-            dst = self._target_name(dst_dir, style, ".json", manifest)
-            shutil.copy2(
-                os.path.join(installed, "landmarks", f"{style}.json"),
-                os.path.join(dst_dir, f"{dst}.json"))
-            src_addr = os.path.join(installed, "landmarks", f"{style}.addr.json")
-            if os.path.isfile(src_addr):
-                shutil.copy2(src_addr, os.path.join(dst_dir, f"{dst}.addr.json"))
-        for style in manifest.resources.get("quips", []):
-            dst_dir = os.path.join(packs_root, "quips")
-            os.makedirs(dst_dir, exist_ok=True)
-            dst = self._target_name(dst_dir, style, ".json", manifest)
-            shutil.copy2(
-                os.path.join(installed, "quips", f"{style}.json"),
-                os.path.join(dst_dir, f"{dst}.json"))
-            src_addr = os.path.join(installed, "quips", f"{style}.addr.json")
-            if os.path.isfile(src_addr):
-                shutil.copy2(src_addr, os.path.join(dst_dir, f"{dst}.addr.json"))
+            suffix = _registry.primary_suffix(rtype)
+            inner_dir = os.path.dirname(
+                _registry.primary_relpath(rtype, "x")).replace("/", os.sep)
+            for style in styles:
+                dst = self._target_name(dst_dir, style, suffix, manifest)
+                shutil.copy2(
+                    os.path.join(installed, rtype, inner_dir, style + suffix),
+                    os.path.join(dst_dir, dst + suffix))
+                src_addr = os.path.join(installed, rtype, style + _ADDR_SUFFIX)
+                if os.path.isfile(src_addr):
+                    shutil.copy2(src_addr,
+                                 os.path.join(dst_dir, dst + _ADDR_SUFFIX))
         if manifest.owns("presets"):
             for table in manifest.resources.get("presets", []):
                 dst_dir = os.path.join(static_root, "presets")
@@ -520,7 +522,8 @@ class WorldManager:
         if styles:
             os.makedirs(os.path.join(target, "landmarks"), exist_ok=True)
             for style in styles:
-                _save_json(os.path.join(target, "landmarks", f"{style}.json"),
+                _save_json(os.path.join(target, "landmarks",
+                                        _registry.primary_relpath("landmarks", style)),
                            [asdict(lm) for lm in landmark_repo.load(style)])
                 style_addr = landmark_repo.load_style_address(style)
                 if style_addr:
@@ -532,13 +535,9 @@ class WorldManager:
         if styles:
             os.makedirs(os.path.join(target, "quips"), exist_ok=True)
             for style in styles:
-                serializable = {}
-                for size_cat, matrix in quip_repo.load(style).items():
-                    serializable[size_cat] = {}
-                    for (i, d), quip_list in matrix.items():
-                        serializable[size_cat][f"{i}_{d}"] = quip_list
-                _save_json(os.path.join(target, "quips", f"{style}.json"),
-                           serializable)
+                _save_json(os.path.join(target, "quips",
+                                        _registry.primary_relpath("quips", style)),
+                           quip_repo.dump_style(style))
                 style_addr = quip_repo.load_style_address(style)
                 if style_addr:
                     _save_style_addr(os.path.join(target, "quips"),

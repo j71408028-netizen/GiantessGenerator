@@ -36,6 +36,7 @@ from .envelope import (
     load_envelope,
     schema_for,
 )
+from ..json_store import BACKUP_SUFFIX, TEMP_SUFFIX
 
 DEFAULT_DATA_DIR = "data"
 
@@ -102,15 +103,21 @@ def read_dir(type_id: str, data_dir: str = DEFAULT_DATA_DIR, world_state=None) -
 def primary_relpath(type_id: str, resource_id: str) -> str:
     """主文件相对路径（按声明的 ``primary`` 模板展开）。
 
-    调用方传来的 id 可能已带容器扩展名（挑战包列表返回的就是 ``x.chal``），
-    这里统一剥掉，避免拼出 ``x.chal.chal``。
+    调用方传来的 id 可能已带容器后缀（挑战包列表返回的就是 ``x.chal``），
+    这里统一剥掉，避免拼出 ``x.chal.chal``；无后缀容器原样拼。
     """
-    spec = _spec(type_id)
-    if spec.container not in ("json_dir", "py_package"):
-        _, _, ext = spec.primary.rsplit("/", 1)[-1].partition("{id}")
-        if ext and resource_id.endswith(ext):
-            resource_id = resource_id[:-len(ext)]
-    return spec.primary.replace("{id}", resource_id)
+    suffix = primary_suffix(type_id)
+    if suffix and resource_id.endswith(suffix):
+        resource_id = resource_id[:-len(suffix)]
+    return _spec(type_id).primary.replace("{id}", resource_id)
+
+
+def primary_suffix(type_id: str) -> str:
+    """主文件模板里 ``{id}`` 之后的后缀（无后缀容器返回空串）。"""
+    tail = _spec(type_id).primary.rsplit("/", 1)[-1]
+    if "{id}" not in tail:
+        return ""  # 目录型容器：后缀在目录内那个文件名上，不归本函数管
+    return tail.split("{id}", 1)[1]
 
 
 def free_path(type_id: str, resource_id: str, data_dir: str = DEFAULT_DATA_DIR) -> str:
@@ -156,31 +163,43 @@ def resource_id_from_path(type_id: str, path: str) -> str:
     for suffix in (ADDR_SUFFIX, ENVELOPE_SUFFIX):
         if base.endswith(suffix):
             return base[:-len(suffix)]
-    return os.path.splitext(base)[0]
+    return resource_id_from_entry(type_id, base)
 
 
 # ---------------------------------------------------------------------------
 # 枚举
 # ---------------------------------------------------------------------------
 
-def _is_container_name(type_id: str, name: str) -> bool:
-    """目录项是否是该类型的一份资源（排除伴随文件、备份与缓存）。"""
+def is_resource_entry(type_id: str, directory: str, name: str) -> bool:
+    """目录项是否是该类型的一份资源（排除伴随文件、备份与原子写残留）。
+
+    无后缀容器的条目名即资源名，因此必须真的存在且是文件——同目录里放一份
+    笔记或一张截图，不该被当成风格。
+    """
     spec = _spec(type_id)
     if name.endswith(ADDR_SUFFIX) or name.endswith(ENVELOPE_SUFFIX):
         return False
-    if name.endswith(".bak") or name == "__pycache__" or name.startswith("."):
+    if name.endswith(BACKUP_SUFFIX) or name.endswith(TEMP_SUFFIX):
+        return False
+    if name.startswith(".") or name == "__pycache__":
         return False
     if spec.container in ("json_dir", "py_package"):
         return True  # 目录项即资源
+    suffix = primary_suffix(type_id)
+    if not suffix:
+        return os.path.isfile(os.path.join(directory, name))
     # 单文件容器：后缀取自 primary 模板，新增类型不必改这里
-    return name.lower().endswith(os.path.splitext(spec.primary)[1].lower())
+    return name.lower().endswith(suffix.lower())
 
 
-def _id_from_entry(type_id: str, name: str) -> str:
-    """目录项名 → 资源 id（目录型保留目录名，其余去掉扩展名）。"""
+def resource_id_from_entry(type_id: str, name: str) -> str:
+    """目录项名 → 资源 id（目录型与无后缀容器保留原名，其余去掉声明后缀）。"""
     if _spec(type_id).container in ("json_dir", "py_package"):
         return name
-    return os.path.splitext(name)[0]
+    suffix = primary_suffix(type_id)
+    if suffix and name.lower().endswith(suffix.lower()):
+        return name[:-len(suffix)]
+    return name
 
 
 def list_ids(type_id: str, data_dir: str = DEFAULT_DATA_DIR,
@@ -201,8 +220,8 @@ def list_ids(type_id: str, data_dir: str = DEFAULT_DATA_DIR,
         except OSError:
             continue
         for name in entries:
-            if _is_container_name(type_id, name):
-                found.add(_id_from_entry(type_id, name))
+            if is_resource_entry(type_id, root, name):
+                found.add(resource_id_from_entry(type_id, name))
     return sorted(found)
 
 

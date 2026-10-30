@@ -18,20 +18,17 @@ import os
 from typing import List, Optional, Set
 
 from core.address_model import world_of
-from .resources.envelope import ENVELOPE_SUFFIX
-from .style_addr import ADDR_SUFFIX, load_address
+from .resources import registry
+from .style_addr import load_address
 
 
-def _list_styles(folder: str) -> List[str]:
-    """列出目录下的风格名（``<风格>.json``，排除伴随文件与备份）。"""
+def _list_styles(rtype: str, folder: str) -> List[str]:
+    """列出目录下的风格名（主文件形状由资源声明决定，伴随文件与备份排除）。"""
     styles = []
     if os.path.isdir(folder):
-        for f in os.listdir(folder):
-            if not f.endswith(".json"):
-                continue
-            if f.endswith(ADDR_SUFFIX) or f.endswith(ENVELOPE_SUFFIX) or f.endswith(".bak"):
-                continue
-            styles.append(f[:-5])
+        for name in os.listdir(folder):
+            if registry.is_resource_entry(rtype, folder, name):
+                styles.append(registry.resource_id_from_entry(rtype, name))
     return styles
 
 
@@ -53,14 +50,14 @@ def merged_styles(world_state, rtype: str, free_dir: str) -> List[str]:
     """该类型的风格全集（排序）。未激活 = 自由目录；未声明 worlds = 仅包内。"""
     pack = _pack_dir(world_state, rtype)
     if pack is None:
-        return sorted(_list_styles(free_dir))
-    pack_styles = _list_styles(pack)
+        return sorted(_list_styles(rtype, free_dir))
+    pack_styles = _list_styles(rtype, pack)
     if not namespace_merge(world_state, rtype):
         return sorted(pack_styles)
     declared: Set[str] = world_state.declared_worlds()
     pack_set = set(pack_styles)
     merged = list(pack_styles)
-    for style in _list_styles(free_dir):
+    for style in _list_styles(rtype, free_dir):
         if style in pack_set:
             continue
         reg_world = world_of(load_address(free_dir, style))
@@ -79,7 +76,8 @@ def style_read_dir(world_state, rtype: str, free_dir: str, style_name: str) -> s
     """
     pack = _pack_dir(world_state, rtype)
     if pack is not None:
-        if os.path.isfile(os.path.join(pack, f"{style_name}.json")):
+        primary = registry.primary_relpath(rtype, style_name).replace("/", os.sep)
+        if os.path.isfile(os.path.join(pack, primary)):
             return pack
         if not namespace_merge(world_state, rtype):
             return pack
