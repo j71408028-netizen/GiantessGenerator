@@ -153,7 +153,7 @@ def resource_id_from_path(type_id: str, path: str) -> str:
     """从主文件路径反推资源 id（目录型容器取目录名）。"""
     spec = _spec(type_id)
     norm = os.path.normpath(path)
-    if spec.container in ("json_dir", "py_package"):
+    if spec.container in ("json_dir", "py_package", "csv_dir"):
         if not os.path.isdir(norm):
             depth = primary_relpath(type_id, "__id__").count("/")
             for _ in range(depth):
@@ -183,7 +183,7 @@ def is_resource_entry(type_id: str, directory: str, name: str) -> bool:
         return False
     if name.startswith(".") or name == "__pycache__":
         return False
-    if spec.container in ("json_dir", "py_package"):
+    if spec.container in ("json_dir", "py_package", "csv_dir"):
         return True  # 目录项即资源
     suffix = primary_suffix(type_id)
     if not suffix:
@@ -194,7 +194,7 @@ def is_resource_entry(type_id: str, directory: str, name: str) -> bool:
 
 def resource_id_from_entry(type_id: str, name: str) -> str:
     """目录项名 → 资源 id（目录型与无后缀容器保留原名，其余去掉声明后缀）。"""
-    if _spec(type_id).container in ("json_dir", "py_package"):
+    if _spec(type_id).container in ("json_dir", "py_package", "csv_dir"):
         return name
     suffix = primary_suffix(type_id)
     if suffix and name.lower().endswith(suffix.lower()):
@@ -326,6 +326,8 @@ def validate_resource(type_id: str, path: str) -> List[Diagnostic]:
         diagnostics.extend(_validate_json(spec, path))
     elif spec.container == "csv":
         diagnostics.extend(_validate_csv(spec, path))
+    elif spec.container == "csv_dir":
+        diagnostics.extend(_validate_csv_dir(spec, path))
     elif spec.container == "json_dir":
         diagnostics.extend(_validate_dir_manifest(spec, path))
     elif spec.container == "py_package":
@@ -398,6 +400,36 @@ def _validate_csv(spec, path: str) -> List[Diagnostic]:
     return diagnostics
 
 
+def _validate_csv_dir(spec, path: str) -> List[Diagnostic]:
+    """目录型 CSV：校验目录内的主 CSV，并尽量校验可选配置 JSON。"""
+    directory = path if os.path.isdir(path) else os.path.dirname(path)
+    tail = primary_relpath(spec.type_id, "__id__").split("/", 1)
+    primary = os.path.join(directory, tail[1].replace("/", os.sep)) if len(tail) > 1 else path
+    if not os.path.isfile(primary):
+        return [_error("not_found", f"目录内缺少主文件: {primary}")]
+    diagnostics = _validate_csv(spec, primary)
+    if spec.config:
+        resource_id = resource_id_from_path(spec.type_id, path)
+        config_tail = spec.config.replace("{id}", resource_id).split("/", 1)
+        config_path = (os.path.join(directory, config_tail[1].replace("/", os.sep))
+                       if len(config_tail) > 1 else os.path.join(directory, spec.config))
+        if os.path.isfile(config_path):
+            try:
+                with open(config_path, "r", encoding="utf-8-sig") as handle:
+                    config = json.load(handle)
+            except (OSError, ValueError) as exc:
+                diagnostics.append(_error(
+                    "bad_config", f"配置 JSON 无法解析: {config_path} - {exc}"))
+            else:
+                if not isinstance(config, dict):
+                    diagnostics.append(_error(
+                        "bad_config", "配置 JSON 根节点应为对象"))
+                elif "schema" in config and not isinstance(config["schema"], str):
+                    diagnostics.append(_warning(
+                        "bad_config", "配置 JSON 的 schema 应为字符串"))
+    return diagnostics
+
+
 def _validate_dir_manifest(spec, path: str) -> List[Diagnostic]:
     """目录型容器：主文件在目录内，按 JSON 规则校验主文件。"""
     primary = path
@@ -444,8 +476,9 @@ def catalog_entry(type_id: str, resource_id: str,
     envelope = load_envelope(directory, type_id, resource_id)
     if not envelope.get("content_hash"):
         target = free_path(type_id, resource_id, data_dir)
-        if not os.path.exists(target) and spec.container in ("json_dir", "py_package"):
-            # 包型容器的主文件模板是通配，按目录算哈希
+        if not os.path.exists(target) and spec.container in (
+                "json_dir", "py_package", "csv_dir"):
+            # 目录型容器（含目录内 CSV）按整个目录算哈希
             target = os.path.join(directory, resource_id)
         if os.path.exists(target):
             envelope["content_hash"] = content_hash(target, spec.container)

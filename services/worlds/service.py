@@ -372,22 +372,42 @@ class WorldManager:
                         challenge_mgr=None) -> None:
         packs_root = os.path.join(self.data_dir, "packs")
         static_root = os.path.join(self.data_dir, "static")
-        # 风格类素材：主文件形状取自声明，注册地址随行改名
-        for rtype in ("landmarks", "quips"):
-            styles = manifest.resources.get(rtype, [])
-            if not styles:
-                continue
-            dst_dir = os.path.join(packs_root, rtype)
+        renamed = {}
+        # 地标风格：单个 CSV 主文件，注册地址随行改名。
+        styles = manifest.resources.get("landmarks", [])
+        if styles:
+            dst_dir = os.path.join(packs_root, "landmarks")
             os.makedirs(dst_dir, exist_ok=True)
-            suffix = _registry.primary_suffix(rtype)
-            inner_dir = os.path.dirname(
-                _registry.primary_relpath(rtype, "x")).replace("/", os.sep)
+            suffix = _registry.primary_suffix("landmarks")
             for style in styles:
                 dst = self._target_name(dst_dir, style, suffix, manifest)
                 shutil.copy2(
-                    os.path.join(installed, rtype, inner_dir, style + suffix),
+                    os.path.join(installed, "landmarks", style + suffix),
                     os.path.join(dst_dir, dst + suffix))
-                src_addr = os.path.join(installed, rtype, style + _ADDR_SUFFIX)
+                renamed[("landmarks", style)] = dst
+                src_addr = os.path.join(installed, "landmarks", style + _ADDR_SUFFIX)
+                if os.path.isfile(src_addr):
+                    shutil.copy2(src_addr,
+                                 os.path.join(dst_dir, dst + _ADDR_SUFFIX))
+        # 描述风格：整个目录（quips.csv + config.json + 未知文件）随行。
+        styles = manifest.resources.get("quips", [])
+        if styles:
+            dst_dir = os.path.join(packs_root, "quips")
+            os.makedirs(dst_dir, exist_ok=True)
+            for style in styles:
+                src_dir = os.path.join(installed, "quips", style)
+                if not os.path.isdir(src_dir):
+                    raise ValueError(
+                        f"世界包内描述风格 {style!r} 不是目录布局；"
+                        "旧包请先导出为新版布局")
+                dst = self._target_name(dst_dir, style, "", manifest)
+                dst_path = os.path.join(dst_dir, dst)
+                shutil.rmtree(dst_path, ignore_errors=True)
+                shutil.copytree(
+                    src_dir, dst_path,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"))
+                renamed[("quips", style)] = dst
+                src_addr = os.path.join(installed, "quips", style + _ADDR_SUFFIX)
                 if os.path.isfile(src_addr):
                     shutil.copy2(src_addr,
                                  os.path.join(dst_dir, dst + _ADDR_SUFFIX))
@@ -399,6 +419,7 @@ class WorldManager:
                 shutil.copy2(
                     os.path.join(installed, "presets", f"{table}.csv"),
                     os.path.join(dst_dir, f"{dst}.csv"))
+                renamed[("presets", table)] = dst
                 if dst != table:
                     manifest.settings["preset_table"] = dst
         if manifest.owns("personalities"):
@@ -409,6 +430,7 @@ class WorldManager:
                 shutil.copy2(
                     os.path.join(installed, "personalities", f"{table}.csv"),
                     os.path.join(dst_dir, f"{dst}.csv"))
+                renamed[("personalities", table)] = dst
                 if dst != table:
                     manifest.settings["personality_table"] = dst
         # 枚举包目录（而非仅清单声明），覆盖激活期间在包内新建的方案
@@ -425,6 +447,7 @@ class WorldManager:
                 dst = self._target_name(dst_dir, scenario_id, "", manifest)
                 shutil.rmtree(os.path.join(dst_dir, dst), ignore_errors=True)
                 shutil.copytree(src, os.path.join(dst_dir, dst))
+                renamed[("scenarios", scenario_id)] = dst
         # 附带挑战包：复制到自由挑战目录并注册包内秘钥
         challenges_root = os.path.join(installed, "challenges")
         if os.path.isdir(challenges_root):
@@ -447,6 +470,7 @@ class WorldManager:
                 shutil.copy2(
                     os.path.join(challenges_root, cf),
                     os.path.join(dst_dir, f"{dst}.chal"))
+                renamed[("challenges", cf)] = f"{dst}.chal"
                 if challenge_mgr is not None:
                     key = pack_keys.get(os.path.splitext(cf)[0])
                     if key:
@@ -461,6 +485,7 @@ class WorldManager:
             shutil.copy2(
                 os.path.join(installed, "names", f"{table}.csv"),
                 os.path.join(dst_dir, f"{dst}.csv"))
+            renamed[("names", table)] = dst
             if dst != table:
                 manifest.settings["name_table"] = dst
         for table in manifest.resources.get("news", []):
@@ -470,6 +495,7 @@ class WorldManager:
             shutil.copy2(
                 os.path.join(installed, "news", f"{table}.csv"),
                 os.path.join(dst_dir, f"{dst}.csv"))
+            renamed[("news", table)] = dst
             if dst != table:
                 manifest.settings["news_table"] = dst
         # 行为包是静态资源目录，目录名冲突时整体改名。
@@ -482,6 +508,7 @@ class WorldManager:
             os.makedirs(dst_dir, exist_ok=True)
             dst = self._target_name(dst_dir, behavior, "", manifest)
             self._copy_behavior_pack(src, os.path.join(dst_dir, dst))
+            renamed[("behaviors", behavior)] = dst
         # 话题表：解开后成为自由目录里的一张表，可再被其它包带走。
         for table in manifest.resources.get("topics", []):
             src = os.path.join(installed, "topics",
@@ -493,6 +520,7 @@ class WorldManager:
             dst = self._target_name(dst_dir, table, "", manifest)
             shutil.copy2(src, os.path.join(
                 dst_dir, _registry.primary_relpath("topics", dst)))
+            renamed[("topics", table)] = dst
         # 小游戏：整目录解开到自由目录。
         for game_id in manifest.resources.get("minigames", []):
             src = os.path.join(installed, "minigames", game_id)
@@ -505,10 +533,17 @@ class WorldManager:
             shutil.copytree(
                 src, os.path.join(dst_dir, dst),
                 ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"))
-        self._restore_envelopes(manifest, installed)
+            renamed[("minigames", game_id)] = dst
+        self._restore_envelopes(manifest, installed, renamed)
 
-    def _restore_envelopes(self, manifest: WorldPackManifest, installed: str) -> None:
-        """解散时把包内信封写回自由目录；目标已有信封时不覆盖。"""
+    def _restore_envelopes(self, manifest: WorldPackManifest, installed: str,
+                           renamed: Optional[Dict[tuple, str]] = None) -> None:
+        """解散时把包内信封写回自由目录；目标已有信封时不覆盖。
+
+        ``renamed`` 记录解散时的冲突改名 ``{(类型, 源 id): 目标 id}``，
+        信封必须写到目标 id 的兄弟位置，不能沿用包内源 id。
+        """
+        renamed = renamed or {}
         for type_id, value in manifest.resources.items():
             if isinstance(value, bool) or not value:
                 continue
@@ -516,7 +551,8 @@ class WorldManager:
                 src = os.path.join(installed, type_id, f"{resource_id}.meta.json")
                 if not os.path.isfile(src):
                     continue
-                dst = _registry.envelope_path_of(type_id, resource_id, self.data_dir)
+                target_id = renamed.get((type_id, resource_id), resource_id)
+                dst = _registry.envelope_path_of(type_id, target_id, self.data_dir)
                 if os.path.exists(dst):
                     continue
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
@@ -601,9 +637,7 @@ class WorldManager:
         if styles:
             os.makedirs(os.path.join(target, "quips"), exist_ok=True)
             for style in styles:
-                _save_json(os.path.join(target, "quips",
-                                        _registry.primary_relpath("quips", style)),
-                           quip_repo.dump_style(style))
+                quip_repo.copy_style_to(style, os.path.join(target, "quips", style))
                 style_addr = quip_repo.load_style_address(style)
                 if style_addr:
                     _save_style_addr(os.path.join(target, "quips"),

@@ -3,9 +3,10 @@
 世界包为 zip 归档，扩展名固定为 ``.world.zip``，内部布局：
 
     world.json                  # 清单（唯一必需文件）
-    landmarks/<style>           # 地标风格（主文件不带后缀，路径即地址）
+    landmarks/<style>.csv       # 地标风格（表格软件可直接编辑）
     landmarks/<style>.addr.json # （可选）地标风格注册地址（维度 + 风格注册的若干级）
-    quips/<style>               # 描述风格
+    quips/<style>/quips.csv     # 描述风格正文（每行一个条目）
+    quips/<style>/config.json   # （可选）描述风格配置（自定义类型等）
     quips/<style>.addr.json     # （可选）描述风格注册地址
     presets/<table>.csv         # 身材表
     personalities/<table>.csv   # 性格表
@@ -19,6 +20,7 @@
     <类型>/<id>.meta.json       # 每份资源随行的兄弟信封
 
 包内 settings 只允许“世界块”设置键：世界设定、种子、姓名表、新闻表、身材表、性格表。
+旧版 ``quips/<style>`` 单文件布局不再接受，导入时会按缺少 ``quips.csv`` 成员报错。
 """
 
 import datetime

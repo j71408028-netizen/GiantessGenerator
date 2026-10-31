@@ -48,7 +48,7 @@
 |---|---|---|---|
 | `archive_preview.py` | 角色档案导出 | 打开预览 | 改 `services/character/archive_export.py` 后起个小服务，F5 即用最新代码重渲染角色档案 |
 | `minigame_preview.py` | 小游戏舞台 | 打开预览 | 不进副本，直接在独立 imgui 窗口跑一个小游戏；帧时钟 / 输入层 / 纹理上传与副本同一套 |
-| `quip_report.py` | quip 语料 | 简略报告 | 检查 `data/packs/quips/` 的类型 meta、标记格式，以及类型替换的**组合级语法风险**并双向溯源。**一次只查一个风格的一个尺寸档** |
+| `quip_report.py` | quip 语料 | 简略报告 | 检查 `data/packs/quips/<风格>/` 的 `quips.csv`、`config.json` 类型 meta、标记格式，以及类型替换的**组合级语法风险**并双向溯源。**一次只查一个风格的一个尺寸档** |
 | `behavior_hooks_report.py` | 行为包钩子 | 简略报告 | 把 `runtime.catalog()` 按 scope 分组打到 stdout（细度 / 层级 / 签名 / 常量默认值），可 `--scope` 过滤、`--json` 机器可读 |
 | `lens_preview.py` | 聊天话题视角 | 简略报告 | 改完 `services/chat/topic_kinds.py`（类型定义）或 `topic_lens.py`（字段目录）后，对真实存档逐类型打印"此刻给 AI 的信息"，附取用/挡掉账本；`--kind X --full` 可看整份系统提示词，`--out` 另存到 `_out/lens_preview/` |
 | `chat_session_preview.py` | 聊天会话 | 打开预览（控制台） | 在控制台里跟角色**实际聊天**，每轮打印视角账本（取用/挡掉/预算）、话题变化、属性与原始 JSON；`/topic` 锁定类型、`/attitude` 验证隐藏介绍门槛、`/reroll` 同前提重掷。默认在 `_out/` 沙盒里聊，**不写 `data/`** |

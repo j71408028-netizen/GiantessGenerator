@@ -199,7 +199,7 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 `content_hash` 判定「本地改过没有」。列目录一律走 `registry.is_resource_entry()`
 （伴随文件、`.bak`、原子写的 `.tmp` 都由它排除），不要自己写 `endswith(".json")`。
 
-**单文件 JSON 容器的主文件不带扩展名**：`quips/events`，路径本身就是资源地址。
+**单文件 JSON 容器的主文件不带扩展名**：`topics/<id>`，路径本身就是资源地址。
 理由是三份文件挤在同一层的目录里时，`x.json` +
 `x.addr.json` + `x.meta.json` 让「按名浏览」和「按类型浏览」看不出区别；去掉主文件
 后缀后，只有内容和它的伴随文件，两类视图才各有意义。需要外部程序认领的容器仍带
@@ -207,9 +207,16 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 `.chal`（整包）、`.py`（Python 包），目录型容器的主文件
 在目录内（`<id>/config.json`、`<id>/manifest.json`），不在此列。
 
+描述风格是目录型 CSV 容器：`quips/<id>/quips.csv` 每行一个条目，
+`quips/<id>/config.json` 存 `custom_types` 与后续匹配配置；注册地址与信封仍是
+目录的兄弟文件（`<id>.addr.json` / `<id>.meta.json`）。目录即资源边界，未知文件
+原样保留并随世界包整目录复制；`config.json` 的未知键也保留。旧版单文件布局
+（`quips/<id>`）不再读取，导入或激活旧世界包会得到明确的成员缺失错误，需先用
+一次性迁移转换。
+
 代价是编辑器不再按后缀识别语言：.vscode 未提交关联配置，用 VS Code 直接看这些
 文件时需手动 `Change Language Mode → JSON`（或用 `files.associations` 关联
-`data/packs/quips/*`）。跨过这一层，`<id>` 与 `<id>.addr.json` 谁是需要编辑的
+`data/packs/topics/*`）。跨过这一层，`<id>` 与 `<id>.addr.json` 谁是需要编辑的
 内容一眼可辨。
 
 三个曾经破例的数据形状已在一次性迁移（`scripts/migrate_resource_ids.py`）里改掉：
@@ -217,9 +224,10 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 - `news` 的表头用字段键（`size_category` / `memorial` / `intrusion` /
   `destruction` / `text` / `substitute_1` / `substitute_2`），不再是中文列名，
   列清单与顺序都取自声明；
-- `quips` 的坐标写成行数组 `{"intrusion": 1, "destruction": 1, "items": [...]}`，
-  正文里的 `[summary:…]` 标记改为条目自带的 `summary` 字段。`QuipRepo.load()`
-  对外仍返回 `{(介入度, 破坏性): [条目]}`，格式变化不溢出到调用方；
+- `quips` 的单文件 JSON 改为 `<id>/quips.csv` 长表（列清单与顺序取自声明），
+  `_meta` 移入同目录的 `config.json`，正文里的 `[summary:…]` 标记改为 CSV 的
+  `summary` 列。`QuipRepo.load()` 对外仍返回 `{(介入度, 破坏性): [条目]}`，
+  格式变化不溢出到调用方；
 - `landmarks` 的主文件由无后缀 JSON 数组改为 `<id>.csv`（声明容器为 csv），
   每行一个地标条目，列清单与顺序都取自声明，表格软件可直接编辑。
 

@@ -5,11 +5,11 @@
 1. 容器改名：中文/驼峰 id → 拼音全拼，伴随文件（``.addr.json`` / ``.meta.json`` /
    ``.bak``）跟着改；
 2. 改引用：``resource_settings.json`` 的选中项、世界包 ``world.json`` 的 resources；
-3. 去扩展名：无后缀容器（描述风格）的主文件 ``<id>.json`` → ``<id>``，
+3. 去扩展名：旧描述风格主文件 ``<id>.json`` → ``<id>``（第 5 步再转目录），
    备份随行为 ``<id>.bak``；自由目录与已部署的世界包都扫；
 4. ``news`` 表头：中文列名 → 字段键（顺序不变）；
-5. ``quips`` 坐标：``"1_1"`` → ``{"intrusion": 1, "destruction": 1, "items": [...]}``，
-   正文末尾的 ``[summary:…]`` 同时拆成条目自带的 ``summary`` 字段；
+5. ``quips`` 主文件：单文件 JSON → ``<id>/quips.csv`` + ``config.json``，
+   坐标行展开为 CSV 长表，正文末尾的 ``[summary:…]`` 拆成 ``summary`` 列；
 6. ``landmarks`` 主文件：无后缀 JSON 数组 → ``<id>.csv``（声明容器已改为 csv）；
 7. 补信封：为每份资源写 ``<id>.meta.json``（内容哈希一致则不重写）；
 8. 清理 ``packs/dungeons/`` 残留；
@@ -41,6 +41,7 @@ from core.resource_spec import RESOURCE_TYPES, spec_of  # noqa: E402
 from dungeon.terms import LEGACY_SCENARIO_RESOURCE_KEY  # noqa: E402
 from persistence.json_store import BACKUP_SUFFIX, write_json_atomic  # noqa: E402
 from persistence.landmark_repo import write_csv  # noqa: E402
+from persistence.quip_repo import QUIPS_CSV, write_style_dir  # noqa: E402
 from persistence.resources import envelope, registry  # noqa: E402
 
 #: 旧 id → 新 id。改名映射只活在本脚本里，代码侧不认旧名。
@@ -314,25 +315,77 @@ def _convert_quips(data: dict, style_map: dict):
     return result, counts
 
 
+def _legacy_quips_matrix(data: dict, style_map: dict, style_name: str):
+    """旧 JSON → ``(矩阵, meta)``；同时把坐标、风格与 summary 规整好。"""
+    converted, _counts = _convert_quips(data, style_map)
+    matrix = {}
+    for category, rows in converted.items():
+        if category == "_meta" or not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            try:
+                intrusion = int(row.get("intrusion"))
+                destruction = int(row.get("destruction"))
+            except (TypeError, ValueError):
+                continue
+            items = []
+            for item in row.get("items") or []:
+                if isinstance(item, str):
+                    items.append({"text": item, "style": style_name})
+                elif isinstance(item, dict):
+                    items.append(item)
+            matrix.setdefault(category, {}).setdefault(
+                (intrusion, destruction), []).extend(items)
+    meta = converted.get("_meta")
+    return matrix, meta if isinstance(meta, dict) else {}
+
+
 def step_quips(m: Migration):
-    print("[5/9] quips 坐标与简介")
+    print("[5/9] quips 主文件转目录 CSV")
     style_map = RENAMES.get("quips", {})
-    for resource_id in registry.list_ids("quips", m.data_dir):
-        path = registry.free_path("quips", resource_id, m.data_dir)
-        data = _load_json(path)
-        if not isinstance(data, dict):
+    for directory in _main_dirs(m, "quips"):
+        if not os.path.isdir(directory):
             continue
-        converted, counts = _convert_quips(data, style_map)
-        if not any(counts.values()):
-            continue
-        detail = "、".join(f"{label} {counts[key]}"
-                          for key, label in (("coords", "坐标"),
-                                             ("summary", "简介"),
-                                             ("style", "风格"))
-                          if counts[key])
-        m.note(f"quips/{resource_id}: {detail}")
-        if m.apply:
-            write_json_atomic(path, converted, backup=False)
+        names = set(os.listdir(directory))
+        for name in sorted(names):
+            if name.endswith(registry.ADDR_SUFFIX) or name.endswith(
+                    envelope.ENVELOPE_SUFFIX):
+                continue
+            if name.endswith(BACKUP_SUFFIX) or name.endswith(".tmp"):
+                continue
+            path = os.path.join(directory, name)
+            if not os.path.isfile(path):
+                continue
+            style_name = name[:-len(LEGACY_MAIN_SUFFIX)] if name.endswith(
+                LEGACY_MAIN_SUFFIX) else name
+            target_dir = os.path.join(directory, style_name)
+            if os.path.isdir(target_dir):
+                continue
+            data = _load_json(path)
+            if not isinstance(data, dict):
+                continue
+            matrix, meta = _legacy_quips_matrix(data, style_map, style_name)
+            m.note(f"{os.path.relpath(path, m.data_dir)} → "
+                   f"{style_name}/quips.csv + config.json")
+            if m.apply:
+                # 无后缀旧文件与目标目录同名，先写暂存目录再替换。
+                staging = target_dir + ".migrating"
+                shutil.rmtree(staging, ignore_errors=True)
+                write_style_dir(staging, matrix, meta, style_name)
+                if os.path.isfile(target_dir):
+                    os.remove(target_dir)
+                os.replace(staging, target_dir)
+                if os.path.isfile(path):
+                    os.remove(path)
+                for backup in (path + BACKUP_SUFFIX,
+                               path + LEGACY_MAIN_SUFFIX + BACKUP_SUFFIX):
+                    if os.path.isfile(backup):
+                        target_backup = os.path.join(
+                            target_dir, QUIPS_CSV + BACKUP_SUFFIX)
+                        if not os.path.exists(target_backup):
+                            os.replace(backup, target_backup)
 
 
 # ---------------------------------------------------------------------------
@@ -432,11 +485,16 @@ def _landmark_name_index(m: Migration) -> dict:
     """``显示名 → {风格 id}``：把旧耐久键里的名字折射回声明身份。"""
     index = {}
     for style in registry.list_ids("landmarks", m.data_dir):
-        data = _load_json(registry.free_path("landmarks", style, m.data_dir))
-        for item in data if isinstance(data, list) else []:
-            name = (item or {}).get("name") if isinstance(item, dict) else None
-            if name:
-                index.setdefault(name, set()).add(style)
+        path = registry.free_path("landmarks", style, m.data_dir)
+        try:
+            with open(path, "r", encoding="utf-8-sig", newline="") as handle:
+                rows = csv.DictReader(handle)
+                for row in rows:
+                    name = (row.get("name") or "").strip()
+                    if name:
+                        index.setdefault(name, set()).add(style)
+        except OSError:
+            continue
     return index
 
 

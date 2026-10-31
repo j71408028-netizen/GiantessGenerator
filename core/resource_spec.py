@@ -48,6 +48,7 @@ CONTAINERS = (
     "json_object",   # 单个 JSON 文件的根是对象，一个文件即一份资源
     "json_dir",      # 一个目录即一份资源，主文件在目录内
     "csv",           # 一个 CSV 文件即一份资源（表头即字段）
+    "csv_dir",       # 一个目录即一份资源，主文件是目录内的 CSV，可带配置 JSON
     "py_package",    # 一个目录即一份 Python 包
     "opaque",        # 不可解释的整包（加密归档等），只有文件名可外读
 )
@@ -89,6 +90,7 @@ class ResourceTypeSpec:
 
     - ``primary``：主文件相对路径模板，必须含 ``{id}``，如 ``{id}``（无后缀的
       JSON 容器）/ ``{id}/config.json`` / ``{id}.csv``；
+    - ``config``：目录型容器内的可选配置 JSON 路径模板，如 ``{id}/config.json``；
     - ``root``：自由目录所在的存储根（``packs`` = 用户可写素材，``static`` = 静态表）；
     - ``id_required``：载荷内必须自带 ``id``（目录型容器才有地方放）；
       其余类型的 id 取自容器名，信封里的 ``id`` 只做冗余校验；
@@ -104,6 +106,7 @@ class ResourceTypeSpec:
     type_id: str
     container: str
     primary: str
+    config: str = ""
     label: str = ""
     root: str = "packs"
     fields: Tuple[FieldSpec, ...] = ()
@@ -217,6 +220,18 @@ def _csv_fields(*pairs, required: tuple = ()) -> Tuple[FieldSpec, ...]:
     )
 
 
+_QUIP_FIELDS = _csv_fields(
+    ("size_category", "str", "尺寸等级"),
+    ("intrusion", "int", "介入度"),
+    ("destruction", "int", "破坏性"),
+    ("text", "text", "正文"),
+    ("style", "str", "风格"),
+    ("step", "number", "步进"),
+    ("summary", "str", "摘要"),
+    required=("size_category", "intrusion", "destruction", "text"),
+)
+
+
 # ---------------------------------------------------------------------------
 # 类型清单
 # ---------------------------------------------------------------------------
@@ -235,17 +250,15 @@ RESOURCE_TYPES: Tuple[ResourceTypeSpec, ...] = (
     ),
     ResourceTypeSpec(
         type_id="quips",
-        container="json_object",
-        primary="{id}",
+        container="csv_dir",
+        primary="{id}/quips.csv",
+        config="{id}/config.json",
         label="描述风格",
-        fields=(
-            FieldSpec("_meta", "dict", "风格元数据", note="自定义类型与细分"),
-            FieldSpec("size_category", "dict", "尺寸等级的坐标矩阵",
-                      note="键为 size_category，值为 {介入度_破坏性: [条目]}"),
-        ),
+        fields=_QUIP_FIELDS,
         settings_keys=("selected_quip_styles",),
         addressable=True,
-        note="描述风格：载荷直接是矩阵，没有地方放 id，id 取容器名",
+        note="描述风格：目录即一份资源，quips.csv 每行一个条目，"
+             "config.json 存自定义类型与后续匹配配置",
     ),
     ResourceTypeSpec(
         type_id="presets",
@@ -432,8 +445,13 @@ def check_spec_consistency() -> list:
             problems.append(f"{spec.type_id}: 未知存储根 {spec.root!r}")
         if "{id}" not in spec.primary:
             problems.append(f"{spec.type_id}: primary 缺少 {{id}} 占位")
-        if spec.container not in ("json_dir", "py_package") and "/" in spec.primary:
+        if spec.container not in ("json_dir", "py_package", "csv_dir") and "/" in spec.primary:
             problems.append(f"{spec.type_id}: 单文件容器的 primary 不应含子目录")
+        if spec.config:
+            if "{id}" not in spec.config:
+                problems.append(f"{spec.type_id}: config 缺少 {{id}} 占位")
+            if spec.container not in ("json_dir", "csv_dir"):
+                problems.append(f"{spec.type_id}: 只有目录型容器能声明 config")
         keys = spec.field_keys()
         if len(set(keys)) != len(keys):
             problems.append(f"{spec.type_id}: 字段 key 重复")

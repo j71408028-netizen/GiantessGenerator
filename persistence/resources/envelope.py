@@ -155,7 +155,7 @@ def content_hash(path: str, container: str) -> str:
         except (OSError, ValueError):
             return ""
         return "sha256:" + hashlib.sha256(canonical_json_bytes(data)).hexdigest()
-    if container in ("json_dir", "py_package"):
+    if container in ("json_dir", "py_package", "csv_dir"):
         root = path if os.path.isdir(path) else os.path.dirname(path)
         if os.path.isdir(root):
             return "sha256:" + hashlib.sha256(_dir_digest_bytes(root)).hexdigest()

@@ -51,6 +51,7 @@
 """
 
 import argparse
+import csv
 import json
 import math
 import os
@@ -314,7 +315,57 @@ def format_extra(extra):
 
 
 def load_style_file(path):
-    """读风格 JSON，返回 (data, error)。坏 JSON 时 error 带行号信息。"""
+    """读 ``<风格>/quips.csv``（或旧版单文件 JSON），返回 (data, error)。
+
+    返回形状沿用分析器使用的 ``{尺寸档: {"介入度_破坏性": [条目]}}``，配置
+    ``config.json`` 放进 ``_meta``。CSV 的坏行跳过；配置解析失败直接报错。
+    """
+    style_dir = path if os.path.isdir(path) else os.path.dirname(path)
+    csv_path = os.path.join(style_dir, "quips.csv")
+    if os.path.isfile(csv_path):
+        try:
+            with open(csv_path, "r", encoding="utf-8-sig", newline="") as f:
+                rows = list(csv.DictReader(f))
+        except OSError as e:
+            return None, f"CSV 读取失败：{e}"
+        style_name = os.path.basename(style_dir)
+        data = {}
+        for row in rows:
+            try:
+                size = str(row.get("size_category") or "").strip()
+                intrusion = int(str(row.get("intrusion") or "").strip())
+                destruction = int(str(row.get("destruction") or "").strip())
+            except (TypeError, ValueError):
+                continue
+            text = row.get("text")
+            if not size or text is None:
+                continue
+            item = {
+                "text": text,
+                "style": str(row.get("style") or "").strip() or style_name,
+            }
+            try:
+                item["step"] = float(str(row.get("step") or "").strip())
+            except (TypeError, ValueError):
+                item["step"] = 0.0
+            summary = str(row.get("summary") or "").strip()
+            if summary:
+                item["summary"] = summary
+            data.setdefault(size, {}).setdefault(
+                f"{intrusion}_{destruction}", []).append(item)
+        config_path = os.path.join(style_dir, "config.json")
+        if os.path.isfile(config_path):
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    data["_meta"] = json.load(f)
+            except json.JSONDecodeError as e:
+                return None, (f"config.json 解析失败（行 {e.lineno} 列 "
+                              f"{e.colno}）：{e.msg}")
+            except OSError as e:
+                return None, f"config.json 读取失败：{e}"
+        return data, None
+
+    # 旧版单文件仍可读，便于迁移前检查；应用本身已不再接受这种布局。
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f), None
@@ -490,7 +541,7 @@ def scan_style(style_name, data, findings, size_filter=None):
 
     if not isinstance(data, dict):
         findings.append(Finding(
-            "error", "structure", "风格 JSON 顶层不是对象", make_loc(f"{style_name}.json")))
+            "error", "structure", "风格 JSON 顶层不是对象", make_loc(f"{style_name}/quips.csv")))
         return pools, numset, used_letters, origins, occurrences
 
     for key, matrix in data.items():
@@ -502,11 +553,11 @@ def scan_style(style_name, data, findings, size_filter=None):
             findings.append(Finding(
                 "warn", "structure",
                 f"未知体型档 '{key}'（合法为 {','.join(SIZE_CATS)}），运行时会整档忽略",
-                make_loc(f"{style_name}.json")))
+                make_loc(f"{style_name}/quips.csv")))
         if not isinstance(matrix, dict):
             findings.append(Finding(
                 "error", "structure", f"体型档 '{key}' 不是坐标到条目列表的映射",
-                make_loc(f"{style_name}.json", key)))
+                make_loc(f"{style_name}/quips.csv", key)))
             continue
         for coord_key, quip_list in matrix.items():
             coord = None
@@ -514,7 +565,7 @@ def scan_style(style_name, data, findings, size_filter=None):
                 findings.append(Finding(
                     "error", "coord",
                     f"坐标键 {coord_key!r} 缺少 '_'：QuipRepo.load 会在 split('_') 处"
-                    f"直接抛异常，导致整个风格加载失败", make_loc(f"{style_name}.json", key)))
+                    f"直接抛异常，导致整个风格加载失败", make_loc(f"{style_name}/quips.csv", key)))
             else:
                 try:
                     i, d = (int(p) for p in coord_key.split("_"))
@@ -526,11 +577,11 @@ def scan_style(style_name, data, findings, size_filter=None):
                         "error", "coord",
                         f"坐标键 '{coord_key}' 不是 1-4 范围的 整数_整数："
                         f"QuipRepo.load 会在 int() 处抛异常，导致整个风格加载失败",
-                        make_loc(f"{style_name}.json", key)))
+                        make_loc(f"{style_name}/quips.csv", key)))
             if not isinstance(quip_list, list):
                 findings.append(Finding(
                     "error", "structure", f"坐标 '{coord_key}' 下的条目不是列表",
-                    make_loc(f"{style_name}.json", key, coord_key)))
+                    make_loc(f"{style_name}/quips.csv", key, coord_key)))
                 continue
             for idx, item in enumerate(quip_list):
                 if isinstance(item, str):
@@ -542,28 +593,28 @@ def scan_style(style_name, data, findings, size_filter=None):
                         findings.append(Finding(
                             "error", "structure",
                             f"条目缺少 text 字段或 text 不是字符串",
-                            make_loc(f"{style_name}.json", key, coord_key, idx)))
+                            make_loc(f"{style_name}/quips.csv", key, coord_key, idx)))
                         continue
                     if item_style != style_name:
                         findings.append(Finding(
                             "warn", "style_field",
                             f"条目 style 字段为 {item_style!r}，与所属文件 '{style_name}' 不符："
                             f"选句后 replace_quip_tags 会按该字段取内容池，会串风格/取空池",
-                            make_loc(f"{style_name}.json", key, coord_key, idx)))
+                            make_loc(f"{style_name}/quips.csv", key, coord_key, idx)))
                         if not item_style:
                             findings.append(Finding(
                                 "error", "style_field",
                                 f"条目缺少 style 字段：select_quip_with_budget 返回空风格名，"
                                 f"replace_quip_tags 取不到内容池，所有标记原样漏进报告",
-                                make_loc(f"{style_name}.json", key, coord_key, idx)))
+                                make_loc(f"{style_name}/quips.csv", key, coord_key, idx)))
                 else:
                     findings.append(Finding(
                         "warn", "structure",
                         f"条目类型为 {type(item).__name__}，运行时会被静默丢弃",
-                        make_loc(f"{style_name}.json", key, coord_key, idx)))
+                        make_loc(f"{style_name}/quips.csv", key, coord_key, idx)))
                     continue
                 pool_key_style = item_style if item_style else style_name
-                tags = scan_text(text, f"{style_name}.json", key, coord_key, idx, findings)
+                tags = scan_text(text, f"{style_name}/quips.csv", key, coord_key, idx, findings)
                 for letter, num, span, content, prev_ch, next_ch in tags:
                     used_letters[letter] += 1
                     if content.strip().upper() == "MARK":
@@ -571,10 +622,10 @@ def scan_style(style_name, data, findings, size_filter=None):
                     pk = (key, pool_key_style, letter, num)
                     pools[pk].add(content)
                     origins.setdefault(pk, {}).setdefault(
-                        content, make_loc(f"{style_name}.json", key, coord_key, idx,
+                        content, make_loc(f"{style_name}/quips.csv", key, coord_key, idx,
                                           span[0], content[:24]))
                     occurrences.append({
-                        "file": f"{style_name}.json", "style": style_name,
+                        "file": f"{style_name}/quips.csv", "style": style_name,
                         "size_cat": key, "coord": coord_key, "entry_idx": idx,
                         "letter": letter, "num": num,
                         "offset": span[0], "end": span[1],
@@ -618,7 +669,7 @@ def check_replacement(style_name, pools, numset, types_info, findings):
                 "info", "confusion_noop",
                 f"类型 {letter} 已允许混淆，但格 ({i},{d}) 周边距离≤2.0 内只有编号 "
                 f"{sorted(reachable)}：混淆在该格是空转（改选编号只会命中自己）",
-                make_loc(f"{style_name}.json", size, f"{i}_{d}")))
+                make_loc(f"{style_name}/quips.csv", size, f"{i}_{d}")))
     return confusing, used_nums, declared
 
 
@@ -636,7 +687,7 @@ def check_usage(style_name, used_letters, used_nums, types_info, declared, findi
                 f"{scope}内文本使用了自定义类型 {letter}（{used_letters[letter]} 处），"
                 f"但 _meta.custom_types 未声明：编辑器无名称/细分可显示，"
                 f"allow_confusion_map 也不会包含它（永不混淆）",
-                make_loc(f"{style_name}.json")))
+                make_loc(f"{style_name}/quips.csv")))
         src = "内置" if letter in BUILTIN_SUBTYPES else "自定义"
         name = (BUILTIN_SUBTYPES.get(letter) and ",".join(BUILTIN_SUBTYPES[letter])) or (
             types_info.get(letter) and types_info[letter]["name"]) or "?"
@@ -645,7 +696,7 @@ def check_usage(style_name, used_letters, used_nums, types_info, declared, findi
                 findings.append(Finding(
                     "info", "usage",
                     f"自定义类型 {letter}({types_info[letter]['name']}) 在{scope}内从未使用",
-                    make_loc(f"{style_name}.json")))
+                    make_loc(f"{style_name}/quips.csv")))
             continue
         limit = declared.get(letter)
         if limit:
@@ -655,7 +706,7 @@ def check_usage(style_name, used_letters, used_nums, types_info, declared, findi
                         "warn", "tag_range",
                         f"{src}类型 {letter}({name}) 出现编号 {num}，超出声明的 {limit} 个细分："
                         f"编辑器无法显示该细分，混淆后编辑器归类为未知",
-                        make_loc(f"{style_name}.json")))
+                        make_loc(f"{style_name}/quips.csv")))
         # 声明了细分但整档无人用（对自定义类型才有意义；内置类型仅提示缺口）
         if letter in CUSTOM_LETTERS and types_info.get(letter):
             missing = [str(n + 1) for n in range(limit or 0)
@@ -665,7 +716,7 @@ def check_usage(style_name, used_letters, used_nums, types_info, declared, findi
                     "info", "usage",
                     f"类型 {letter}({types_info[letter]['name']}) 的细分 "
                     f"{','.join(missing)} 在{scope}内没有任何标记使用",
-                    make_loc(f"{style_name}.json")))
+                    make_loc(f"{style_name}/quips.csv")))
 
 
 def _classify_combo(occ, feat, req, next_occ, prev_occ, pool_head_classes, pool_tail_classes):
@@ -878,7 +929,7 @@ def check_grammar(style_name, occurrences, pools, origins, findings):
         if not hers or len(hers) == len(contents):
             continue
         sample_loc = (origins.get(pk, {}).get(hers[0]) or
-                      make_loc(f"{style_name}.json", pk[0]))
+                      make_loc(f"{style_name}/quips.csv", pk[0]))
         findings.append(Finding(
             "info", "pool_pronoun",
             f"池 ({pk[2]},{pk[3]}) @ {pk[0]} 的 {len(contents)} 条候选里，"
@@ -899,7 +950,7 @@ def analyze_style(style_name, data, findings, with_grammar=True, size_filter=Non
     main 与 --selftest 共用这一条路径，避免自检与真实运行两套口径。
     """
     meta = data.get("_meta") if isinstance(data, dict) else None
-    types_info = check_meta(f"{style_name}.json", meta, findings)
+    types_info = check_meta(f"{style_name}/quips.csv", meta, findings)
     pools, numset, used_letters, origins, occurrences = scan_style(
         style_name, data, findings, size_filter=size_filter)
     confusing, used_nums, declared = check_replacement(
@@ -1037,7 +1088,7 @@ def print_group_menu(data_dir, styles):
     print("[quip-check] 一次只检查一个风格的一个尺寸分组。可选分组：")
     any_group = False
     for style in styles:
-        path = os.path.join(data_dir, f"{style}.json")
+        path = os.path.join(data_dir, style)
         data, err = load_style_file(path)
         if err:
             print(f"  ◆ {style}：读不了（{err}）")
@@ -1080,11 +1131,11 @@ def main():
     parser = argparse.ArgumentParser(
         description="quip 类型 meta 读取 + 类型替换静态检查 + 疑似语法问题溯源")
     parser.add_argument("styles", nargs="*",
-                        help="要检查的风格名（不带 .json）；尺寸档也可写成第二个位置参数")
+                        help="要检查的风格目录名；尺寸档也可写成第二个位置参数")
     parser.add_argument("-s", "--size", choices=SIZE_CATS, default=None,
                         help=f"只检查该尺寸档：{'/'.join(SIZE_CATS)}")
     parser.add_argument("--data-dir", default=None,
-                        help="描述目录（含 *.json），缺省为 <仓库根>/data/packs/quips")
+                        help="描述目录（含 <风格>/quips.csv），缺省为 <仓库根>/data/packs/quips")
     parser.add_argument("--json", action="store_true", help="以 JSON 输出结果")
     parser.add_argument("--all", action="store_true",
                         help="展开 info 级问题（缺省清单只列 error/warn，摘要仍报 info 数）")
@@ -1107,17 +1158,20 @@ def main():
         print(f"[quip-check] 描述目录不存在：{data_dir}")
         return 2
 
-    all_styles = sorted(f[:-5] for f in os.listdir(data_dir)
-                        if f.endswith(".json") and not f.endswith(".addr.json"))
+    all_styles = sorted(
+        f for f in os.listdir(data_dir)
+        if os.path.isdir(os.path.join(data_dir, f))
+        and not f.startswith(".") and f != "__pycache__")
     styles = list(args.styles)
     size = args.size
     # 尺寸档写成第二个位置参数也认：`… PixelGame small` 与 `… PixelGame -s small` 等价
     if size is None and len(styles) >= 2 and styles[-1] in SIZE_CATS:
         size = styles.pop()
 
-    missing = [s for s in styles if not os.path.exists(os.path.join(data_dir, f"{s}.json"))]
+    missing = [s for s in styles
+               if not os.path.isfile(os.path.join(data_dir, s, "quips.csv"))]
     for s in missing:
-        print(f"[quip-check] 找不到风格文件：{os.path.join(data_dir, s + '.json')}")
+        print(f"[quip-check] 找不到风格文件：{os.path.join(data_dir, s, 'quips.csv')}")
     styles = [s for s in styles if s not in missing]
 
     if len(styles) > 1:
@@ -1145,7 +1199,7 @@ def main():
     grammar_stats = Counter()
     grammar_skipped = args.no_grammar
 
-    path = os.path.join(data_dir, f"{style}.json")
+    path = os.path.join(data_dir, style)
     data, err = load_style_file(path)
     if err:
         print(f"[quip-check] 风格 {style}：{err}")

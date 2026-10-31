@@ -99,8 +99,16 @@ def _deploy_pack(worlds):
                              "dimension": "vertical", "frequency": "common"})
         with open(os.path.join(lm_dir, f"{style}.addr.json"), "w", encoding="utf-8") as f:
             json.dump({"address": addr}, f)
-    with open(os.path.join(qp_dir, "q1"), "w", encoding="utf-8") as f:
-        json.dump({}, f)
+    q1_dir = os.path.join(qp_dir, "q1")
+    os.makedirs(q1_dir, exist_ok=True)
+    with open(os.path.join(q1_dir, "quips.csv"), "w", encoding="utf-8-sig",
+              newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["size_category", "intrusion", "destruction",
+                         "text", "style", "step", "summary"])
+        writer.writerow(["small", "1", "1", "包内描述", "q1", "0.1", ""])
+    with open(os.path.join(q1_dir, "config.json"), "w", encoding="utf-8") as f:
+        json.dump({"schema": "gg.quips.config/1", "custom_types": {}}, f)
     with open(os.path.join(qp_dir, "q1.addr.json"), "w", encoding="utf-8") as f:
         json.dump({"address": _ADDR_TH}, f)
     manifest = {
@@ -230,19 +238,26 @@ check("全部未注册地址时 worlds 保持为空",
 _qrepo = QuipRepo(data_dir=_DATA)
 _qrepo.save("q_rt", {"small": {(1, 1): [{"text": "包内正文", "style": "q_rt",
                                           "step": 0.1, "summary": "摘要"}]}})
+with open(os.path.join(_qrepo.style_dir("q_rt"), "notes.txt"), "w",
+          encoding="utf-8") as _f:
+    _f.write("随目录保留\n")
 _mgr2.create_from_current(
     "tpk_quip", "描述往返", {},
     landmark_repo=_repo2, quip_repo=_qrepo,
     selected_resources={"quips": ["q_rt"]})
-_pack_quip = os.path.join(_DATA, "worlds", "tpk_quip", "quips", "q_rt")
-check("包内描述主文件不带后缀", os.path.isfile(_pack_quip), _pack_quip)
-with open(_pack_quip, encoding="utf-8") as _f:
-    _back = json.load(_f)
-check("包内描述是落盘形状（行数组 + _meta）",
-      isinstance(_back.get("small"), list) and "_meta" in _back, sorted(_back))
+_pack_quip_dir = os.path.join(_DATA, "worlds", "tpk_quip", "quips", "q_rt")
+_pack_quip = os.path.join(_pack_quip_dir, "quips.csv")
+check("包内描述主文件在风格目录内", os.path.isfile(_pack_quip), _pack_quip)
+with open(_pack_quip, encoding="utf-8-sig", newline="") as _f:
+    _back = list(csv.DictReader(_f))
+check("包内描述是 CSV 行表",
+      _back and _back[0].get("text") == "包内正文"
+      and _back[0].get("summary") == "摘要", _back)
+check("包内描述目录保留未知文件",
+      os.path.isfile(os.path.join(_pack_quip_dir, "notes.txt")))
 _quip_tmp = tempfile.mkdtemp(prefix="quip_pack_")
 os.makedirs(os.path.join(_quip_tmp, "packs", "quips"))
-shutil.copy2(_pack_quip, os.path.join(_quip_tmp, "packs", "quips", "q_rt"))
+shutil.copytree(_pack_quip_dir, os.path.join(_quip_tmp, "packs", "quips", "q_rt"))
 _reloaded_quip = QuipRepo(data_dir=_quip_tmp).load("q_rt")
 check("包内描述能被 QuipRepo 读回",
       _reloaded_quip["small"][(1, 1)][0]["text"] == "包内正文"
@@ -325,6 +340,26 @@ check("解散后小游戏回到自由目录（原名可用时不改名）",
 check("解散后话题表回到自由目录（重名则改名）",
       os.path.isfile(os.path.join(_DATA, "packs", "topics", "custom_tpk_s4_1.0")),
       sorted(os.listdir(os.path.join(_DATA, "packs", "topics"))))
+
+# 描述风格解散遇到同名目录：正文目录与信封都要落到改名后的 id。
+_qconf = QuipRepo(data_dir=_DATA)
+_qconf.save("q_dup", {"small": {(1, 1): [{"text": "自由同名", "style": "q_dup"}]}})
+with open(os.path.join(_DATA, "packs", "quips", "q_dup.meta.json"),
+          "w", encoding="utf-8") as f:
+    json.dump({"id": "q_dup"}, f)
+_mgr2.create_from_current(
+    "tpk_qconf", "描述冲突", {}, quip_repo=_qconf,
+    selected_resources={"quips": ["q_dup"]})
+_mgr2.dissolve("tpk_qconf", {})
+_qtargets = sorted(
+    name for name in os.listdir(os.path.join(_DATA, "packs", "quips"))
+    if name.startswith("q_dup_") and os.path.isdir(
+        os.path.join(_DATA, "packs", "quips", name)))
+check("描述风格冲突改名后信封跟随目标 id",
+      len(_qtargets) == 1
+      and os.path.isfile(os.path.join(_DATA, "packs", "quips",
+                                      _qtargets[0] + ".meta.json")),
+      _qtargets)
 
 # ---------------- 清理 ----------------
 shutil.move(_DATA, tempfile.mkdtemp(prefix="worlds_retired_"))

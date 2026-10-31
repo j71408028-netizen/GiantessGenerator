@@ -1,0 +1,35 @@
+{
+  "schema": "gg.quips.config/1",
+  "custom_types": {
+    "c": {
+      "name": "对象",
+      "subtypes": [
+        "小型",
+        "中型",
+        "大型",
+        "人类"
+      ],
+      "allow_confusion": false
+    },
+    "d": {
+      "name": "身体形容",
+      "subtypes": [
+        "普通",
+        "宏观",
+        "侵略性",
+        "气味与温度"
+      ],
+      "allow_confusion": true
+    },
+    "e": {
+      "name": "后果",
+      "subtypes": [
+        "灾害_名词",
+        "灾害_动词短语",
+        "留存",
+        "印象"
+      ],
+      "allow_confusion": false
+    }
+  }
+}

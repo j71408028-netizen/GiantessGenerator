@@ -185,6 +185,32 @@ try:
     check(b"\r\r\n" not in _csv_raw and _csv_raw.count(b"\r") == _csv_raw.count(b"\n"),
           "地标 CSV 行尾只保留一份 CRLF", _csv_raw[:80])
 
+    # 目录型 CSV：目录名是 id，主文件在目录内，配置 JSON 可选
+    quips_dir = os.path.join(_tmp, "packs", "quips")
+    quip_style_dir = os.path.join(quips_dir, "events")
+    os.makedirs(quip_style_dir, exist_ok=True)
+    quip_csv = os.path.join(quip_style_dir, "quips.csv")
+    with open(quip_csv, "w", encoding="utf-8-sig", newline="") as handle:
+        csv.writer(handle).writerow(["size_category", "intrusion", "destruction",
+                                     "text", "style", "step", "summary"])
+    quip_config = os.path.join(quip_style_dir, "config.json")
+    with open(quip_config, "w", encoding="utf-8") as handle:
+        json.dump({"schema": "gg.quips.config/1", "custom_types": {}}, handle)
+    check(registry.resource_id_from_path("quips", quip_csv) == "events"
+          and registry.resource_id_from_path("quips", quip_style_dir) == "events",
+          "csv_dir 能从主文件或目录反推 id")
+    check(registry.is_resource_entry("quips", quips_dir, "events")
+          and not registry.is_resource_entry("quips", quips_dir, "events.meta.json"),
+          "csv_dir 目录是资源，兄弟信封不是")
+    quip_diags = registry.validate_resource("quips", quip_csv)
+    check(not [d for d in quip_diags if d.is_error()],
+          "csv_dir 主文件与配置通过校验", quip_diags)
+    quip_hash = envelope_mod.content_hash(quip_style_dir, "csv_dir")
+    with open(os.path.join(quip_style_dir, "notes.txt"), "w", encoding="utf-8") as handle:
+        handle.write("unknown")
+    check(quip_hash and envelope_mod.content_hash(quip_style_dir, "csv_dir") != quip_hash,
+          "csv_dir 内容哈希覆盖目录内未知文件")
+
     landmarks_dir = os.path.join(_tmp, "packs", "landmarks")
     os.makedirs(landmarks_dir, exist_ok=True)
     primary = os.path.join(landmarks_dir, "chinese_mix.csv")
@@ -301,7 +327,7 @@ try:
           "带后缀容器只剥声明后缀")
 
     # 打包成员核对：成员形状全部由 primary 模板派生
-    members = {"landmarks/chinese_mix.csv", "quips/events",
+    members = {"landmarks/chinese_mix.csv", "quips/events/quips.csv",
                "presets/default.csv", "behaviors/imperial_units/x.py"}
     declared = {"landmarks": ["chinese_mix"], "quips": ["events"],
                 "presets": ["default"], "behaviors": ["imperial_units"]}
@@ -309,6 +335,7 @@ try:
           "声明齐全时无缺失", registry.missing_members(declared, members))
     for type_id, resource_id, expect in (
             ("landmarks", "absent", "landmarks/absent.csv"),
+            ("quips", "absent", "quips/absent/quips.csv"),
             ("scenarios", "absent", "scenarios/absent/config.json"),
             ("challenges", "absent.chal", "challenges/absent.chal"),
             ("names", "absent", "names/absent.csv"),
