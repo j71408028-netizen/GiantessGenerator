@@ -36,9 +36,20 @@ from ui.scenario.text_editor_dlg import ScriptTextDialog
 
 NO_FILTER_LABEL = "（不使用滤镜）"
 OVERFLOW_LEAVE_LABEL = "（离开章节）"
-LANDMARK_WHOLE_LABEL = "整份清单（默认）"
-LANDMARK_NONE_LABEL = "本章不用清单"
-LANDMARK_PICK_LABEL = "指定地标"
+# 章节独特地标的「方向」三选一（与 dungeon.schema 的维度/横向类型一一对应）：
+# 高 = 竖向；长 / 宽 = 横向，分别对应横向类型 length / width
+SCENE_DIRECTION_LABELS = ("高", "长", "宽")
+SCENE_DIRECTION_KEYS = {"高": ("vertical", None),
+                        "长": ("horizontal", "length"),
+                        "宽": ("horizontal", "width")}
+
+
+def _scene_direction_label(dimension: str, htype: str) -> str:
+    """存盘取值 → 方向标签；未知取值按竖向处理。"""
+    for label, (dim, h) in SCENE_DIRECTION_KEYS.items():
+        if dim == dimension and (dim != "horizontal" or h == htype):
+            return label
+    return "高"
 
 
 class ChapterEditDialog(BaseDialog):
@@ -286,16 +297,16 @@ class ChapterEditDialog(BaseDialog):
         # 编辑已有章节时全部收起；新建时除固定文本外默认展开
         default_open = self.is_new
 
-        # 地点与取景：这一章发生在哪儿（展示名、取景地址、本章地标、结局出口）
-        block = self._add_section(area, "地点与取景", expanded=default_open,
-                                  status=self._place_status)
-        self._build_place_section(block.body)
-        self._refresh_section_status(block)
-
         # 固定文本：不进 AI 生成，默认收起（多数章节用不到）
         block = self._add_section(area, "固定文本", expanded=False,
                                   status=self._fixed_text_status)
         self._build_script_section(block.body)
+        self._refresh_section_status(block)
+
+        # 地点与取景：这一章发生在哪儿（展示名、取景地址、本章地标、结局出口）
+        block = self._add_section(area, "地点与取景", expanded=default_open,
+                                  status=self._place_status)
+        self._build_place_section(block.body)
         self._refresh_section_status(block)
 
         # 特定背景
@@ -433,21 +444,24 @@ class ChapterEditDialog(BaseDialog):
 
     # ---------- 地点与取景 ----------
     def _build_place_section(self, parent):
-        """地点 / 取景地址 / 本章地标 / 结局出口：副本里"这是哪儿"全由作者写死。
+        """地点 / 取景地址 / 本章独特地标 / 常见地标私有名 / 结局出口。
 
-        字段语义见 ``docs/designs/dungeon_scene.md`` §3：地点只影响展示与提示词，
-        取景地址用来筛"这一带"的全局地标，地标白名单决定本章从方案清单里取哪几个，
-        出口地址只在结束章节生效（结局后写回主世界位置）。
+        字段语义见 ``docs/designs/dungeon_scene.md`` §3：地点与取景地址只影响
+        展示与提示词；独特地标逐行内联配置，在场时提示词给出她的身高与该地标
+        的对比（靠左占满卡片宽度，行内设置项较多）；常见地标按私有名过滤
+        （空 = 不使用；* = 不指定世界，收地址没点名私有名的常见地标）；出口
+        地址只在结束章节生效（结局后写回主世界位置）。
         """
         frame = self._form_grid(ctk.CTkFrame(parent, fg_color="transparent"))
         frame.pack(fill='x')
 
-        control = self._form_row(frame, 0, "地点", fill=True)
+        control = self._form_row(frame, 0, "地点名称", fill=True)
         self.place_var = tk.StringVar(value=str(self.chapter.get("place") or ""))
         self._entry_field(control, self.place_var,
                           placeholder="如：黑塔脚下的集市").pack(
             side='left', fill='x', expand=True)
-        ctk.CTkLabel(control, text="留空则不显示", font=self.UI_FONT_SMALL,
+        ctk.CTkLabel(control, text="留空则用取景地址代替",
+                     font=self.UI_FONT_SMALL,
                      text_color=CHAPTER_HINT).pack(side='left', padx=(8, 0))
 
         control = self._form_row(frame, 1, "取景地址", fill=True)
@@ -466,33 +480,37 @@ class ChapterEditDialog(BaseDialog):
         self.address_hint.grid(row=2, column=0, columnspan=2, sticky='w',
                                padx=10, pady=(0, 8))
 
-        control = self._form_row(frame, 3, "本章地标", fill=True)
-        self.landmark_mode_var = tk.StringVar(value=self._landmark_mode())
-        self._option_field(control, [LANDMARK_WHOLE_LABEL, LANDMARK_NONE_LABEL,
-                                     LANDMARK_PICK_LABEL],
-                           variable=self.landmark_mode_var, width=150,
-                           command=self._sync_landmark_rows).pack(side='left')
-
-        # 白名单勾选：方案清单里的名字 + 本章已引用但清单里没有的名字（不丢作者数据）
+        # 独特地标行编辑：像敏感效果一样逐行添加（名称 / 尺寸 / 方向）
+        # 靠左对齐（不缩进到控件列），行内控件多，需要整张卡片的宽度
         self.landmark_box = ctk.CTkFrame(frame, fg_color="transparent")
-        self._landmark_vars = {}
-        names = self._scene_landmark_names()
-        if names:
-            selected = set(self.chapter.get("landmarks") or [])
-            for index, name in enumerate(names):
-                var = tk.BooleanVar(value=name in selected)
-                var.trace_add("write", lambda *_a: self._refresh_all_section_status())
-                self._landmark_vars[name] = var
-                self._checkbox_field(self.landmark_box, name, var, width=180).grid(
-                    row=index // 2, column=index % 2, sticky='w',
-                    padx=(0, 10), pady=2)
-        else:
-            ctk.CTkLabel(self.landmark_box, anchor='w', justify='left',
-                         wraplength=420, font=self.UI_FONT_SMALL,
-                         text_color=CHAPTER_HINT,
-                         text="方案还没有场景地标：清单为空时本章没有可勾的条目，"
-                              "要么选「本章不用清单」，要么先在方案配置里写 "
-                              "scene_landmarks。").pack(anchor='w')
+        self._landmark_rows = []
+        head = ctk.CTkFrame(self.landmark_box, fg_color="transparent")
+        head.pack(fill='x')
+        ctk.CTkLabel(head, justify='left', anchor='w',
+                     text="在场独特地标",
+                     font=self.UI_FONT,
+                     text_color=CHAPTER_HINT).pack(side='left', fill='x',
+                                                   expand=True)
+        self._small_button(head, "添加地标", self._add_landmark_row,
+                           width=84).pack(side='right', padx=(8, 0))
+        # 空容器不占位：默认 CTkFrame 高度为 200，空着会撑出一大块空白
+        self.landmark_container = ctk.CTkFrame(
+            self.landmark_box, fg_color="transparent", height=0)
+        self.landmark_container.pack(fill='x', pady=(4, 0))
+        for item in self.chapter.get("scene_landmarks") or []:
+            if isinstance(item, dict):
+                self._add_landmark_row(item)
+        self.landmark_box.grid(row=3, column=0, columnspan=2, sticky='w',
+                               padx=(10, 10), pady=(0, 8))
+
+        control = self._form_row(frame, 4, "常见地标私有名", fill=True)
+        self.common_private_var = tk.StringVar(
+            value=str(self.chapter.get("common_private_name") or ""))
+        self._entry_field(control, self.common_private_var).pack(
+            side='left', fill='x', expand=True)
+        ctk.CTkLabel(control, text="空 = 不使用常见地标；* = 不指定世界",
+                     font=self.UI_FONT_SMALL,
+                     text_color=CHAPTER_HINT).pack(side='left', padx=(8, 0))
 
         # 出口地址：只在结束章节出现（结局后角色落到的主世界地址）
         self.exit_label = ctk.CTkLabel(
@@ -517,61 +535,69 @@ class ChapterEditDialog(BaseDialog):
         self.exit_hint.grid(row=6, column=0, columnspan=2, sticky='w',
                             padx=10, pady=(0, 8))
 
-        for var in (self.place_var, self.address_var, self.landmark_mode_var,
+        for var in (self.place_var, self.address_var, self.common_private_var,
                     self.exit_address_var):
             var.trace_add("write", lambda *_a: self._refresh_all_section_status())
         self.address_var.trace_add("write", lambda *_a: self._refresh_address_hint())
         self.exit_address_var.trace_add("write", lambda *_a: self._refresh_exit_hint())
         self._refresh_address_hint()
         self._refresh_exit_hint()
-        self._sync_landmark_rows()
         self._sync_exit_row()
 
-    def _scene_landmark_names(self) -> list:
-        """可选的地标名：方案 ``scene_landmarks`` + 本章已引用但清单里没有的名字。
+    def _add_landmark_row(self, item: dict = None):
+        """加一行本章独特地标（形式同敏感效果行：名称 / 尺寸 / 方向 + 移除）。
 
-        后一半是为了"编辑一轮不丢作者数据"：清单里删掉某条之后，引用了它的章节
-        仍能看见并取消勾选，而不是保存时被静默抹掉。
+        方向一个下拉三选一：高 = 竖向；长 / 宽 = 横向（横向类型 length / width）。
         """
-        names = []
-        if self._scenario_repo is not None and self.scenario_id:
+        item = item or {}
+        row = ctk.CTkFrame(self.landmark_container, fg_color="transparent")
+        row.pack(fill='x', pady=3)
+        name_var = tk.StringVar(value=str(item.get("name") or ""))
+        name_var.trace_add("write", lambda *_a: self._refresh_all_section_status())
+
+        self._entry_field(row, name_var, width=120,
+                          placeholder="名称").pack(side='left')
+        self._label_field(row, "尺寸").pack(side='left', padx=(12, 2))
+        size_var = tk.StringVar(value=str(item.get("size", "") or ""))
+        self._entry_field(row, size_var, width=72).pack(side='left')
+        self._label_field(row, "方向").pack(side='left', padx=(12, 2))
+        dimension = str(item.get("dimension") or "vertical")
+        htype = str(item.get("horizontal_type") or "length")
+        direction_var = tk.StringVar(
+            value=_scene_direction_label(dimension, htype))
+        self._option_field(row, SCENE_DIRECTION_LABELS, variable=direction_var,
+                           width=64).pack(side='left')
+        entry = {"frame": row, "name_var": name_var, "size_var": size_var,
+                 "direction_var": direction_var}
+        self._small_button(row, "移除", lambda: self._remove_landmark_row(entry),
+                           width=52, danger=True).pack(side='left', padx=(12, 0))
+        self._landmark_rows.append(entry)
+        self._refresh_all_section_status()
+
+    def _remove_landmark_row(self, entry):
+        entry["frame"].destroy()
+        if entry in self._landmark_rows:
+            self._landmark_rows.remove(entry)
+        self._refresh_all_section_status()
+
+    def _scene_landmarks_from_ui(self):
+        """行编辑 → 章节独特地标条目；写坏的条目由存盘校验当场拦截。"""
+        rows = []
+        for row in self._landmark_rows:
+            name = row["name_var"].get().strip()
+            if not name:
+                continue
+            dimension, htype = SCENE_DIRECTION_KEYS.get(
+                row["direction_var"].get(), ("vertical", None))
+            entry = {"name": name, "dimension": dimension}
             try:
-                config = self._scenario_repo.load_config(self.scenario_id) or {}
-                for item in config.get("scene_landmarks") or []:
-                    if isinstance(item, dict):
-                        name = str(item.get("name") or "").strip()
-                        if name and name not in names:
-                            names.append(name)
-            except Exception:
-                pass
-        for name in (self.chapter.get("landmarks") or []):
-            if isinstance(name, str) and name and name not in names:
-                names.append(name)
-        return names
-
-    def _landmark_mode(self) -> str:
-        """三态取用方式：``None`` = 整份清单，``[]`` = 本章不用，列表 = 指定。"""
-        current = self.chapter.get("landmarks")
-        if not isinstance(current, list):
-            return LANDMARK_WHOLE_LABEL
-        return LANDMARK_PICK_LABEL if current else LANDMARK_NONE_LABEL
-
-    def _landmarks_from_ui(self):
-        mode = self.landmark_mode_var.get()
-        if mode == LANDMARK_WHOLE_LABEL:
-            return None
-        if mode == LANDMARK_NONE_LABEL:
-            return []
-        return [name for name, var in self._landmark_vars.items() if var.get()]
-
-    def _sync_landmark_rows(self, *_a):
-        """只有「指定地标」才摊开勾选行，其余两态各占一行下拉。"""
-        if self.landmark_mode_var.get() == LANDMARK_PICK_LABEL:
-            self.landmark_box.grid(row=4, column=0, columnspan=2, sticky='w',
-                                   padx=(self.FORM_LABEL_WIDTH + 22, 10),
-                                   pady=(0, 8))
-        else:
-            self.landmark_box.grid_remove()
+                entry["size"] = float(row["size_var"].get())
+            except ValueError:
+                entry["size"] = row["size_var"].get().strip()
+            if dimension == "horizontal":
+                entry["horizontal_type"] = htype or "length"
+            rows.append(entry)
+        return rows
 
     def _sync_exit_row(self):
         """出口地址只在结束章节有意义：跟着章节角色一起显隐。"""
@@ -595,9 +621,8 @@ class ChapterEditDialog(BaseDialog):
             return
         text = self.address_var.get().strip()
         if not text:
-            label.configure(
-                text="留空 = 不限定范围：候选池只用方案清单（没有清单就是全局全量）。",
-                text_color=CHAPTER_HINT)
+            label.configure(text="留空 = 只用地点名展示。",
+                            text_color=CHAPTER_HINT)
             return
         problem = validate_address_text(text)
         if problem:
@@ -613,7 +638,7 @@ class ChapterEditDialog(BaseDialog):
             return
         text = self.exit_address_var.get().strip()
         if not text:
-            label.configure(text="留空 = 结局后位置不变（绝大多数结局的默认行为）。",
+            label.configure(text="留空 = 结局后位置不变。",
                             text_color=CHAPTER_HINT)
             return
         problem = validate_address_text(text)
@@ -625,26 +650,27 @@ class ChapterEditDialog(BaseDialog):
                             text_color=CHAPTER_ACCENT)
 
     def _place_status(self) -> str:
-        """折叠状态行摘要：地点、地址、地标取用方式三样都没配就不显示。"""
+        """折叠状态行摘要：地点、地址、私有名、独特地标四样都没配就不显示。"""
         place_var = getattr(self, "place_var", None)
         if place_var is None:
             return ""
         place_text = place_var.get().strip()
         address = self.address_var.get().strip()
-        landmarks = self._landmarks_from_ui()
-        if not place_text and not address and landmarks is None:
+        private_name = self.common_private_var.get().strip()
+        landmark_names = [row["name_var"].get().strip()
+                          for row in self._landmark_rows]
+        landmark_names = [name for name in landmark_names if name]
+        if not place_text and not address and not private_name and not landmark_names:
             return ""
         parts = []
         if place_text:
             parts.append(place_text)
         if address:
             parts.append(address)
-        if landmarks is None:
-            parts.append("整份清单")
-        elif not landmarks:
-            parts.append("不用清单")
-        else:
-            parts.append(f"{len(landmarks)} 个地标")
+        if private_name:
+            parts.append(f"常见@{private_name}")
+        if landmark_names:
+            parts.append(f"{len(landmark_names)} 个独特地标")
         return "地点与取景：" + " · ".join(parts)
 
     def _pick_address(self, var):
@@ -1197,7 +1223,37 @@ class ChapterEditDialog(BaseDialog):
             if problem:
                 ui.ctk.dialogs.showerror("错误", f"取景地址无法解析：{problem}")
                 return
-        landmarks = self._landmarks_from_ui()
+        # 独特地标：写坏的条目当场拦截，别留到启动前校验才报
+        scene_landmarks = []
+        seen_landmark_names = set()
+        for index, row in enumerate(self._landmark_rows, start=1):
+            landmark_name = row["name_var"].get().strip()
+            if not landmark_name:
+                ui.ctk.dialogs.showerror("错误", f"第 {index} 条独特地标缺少名称")
+                return
+            if landmark_name in seen_landmark_names:
+                ui.ctk.dialogs.showerror("错误",
+                                         f"独特地标「{landmark_name}」在本章重复")
+                return
+            seen_landmark_names.add(landmark_name)
+            try:
+                landmark_size = float(row["size_var"].get())
+            except ValueError:
+                ui.ctk.dialogs.showerror(
+                    "错误", f"第 {index} 条独特地标的尺寸必须是数字")
+                return
+            if landmark_size <= 0:
+                ui.ctk.dialogs.showerror(
+                    "错误", f"第 {index} 条独特地标的尺寸必须大于 0")
+                return
+            dimension, htype = SCENE_DIRECTION_KEYS.get(
+                row["direction_var"].get(), ("vertical", None))
+            entry = {"name": landmark_name, "size": landmark_size,
+                     "dimension": dimension}
+            if dimension == "horizontal":
+                entry["horizontal_type"] = htype or "length"
+            scene_landmarks.append(entry)
+        common_private_name = self.common_private_var.get().strip()
         exit_address = ""
         if is_ending:
             exit_address = self.exit_address_var.get().strip()
@@ -1233,7 +1289,8 @@ class ChapterEditDialog(BaseDialog):
             "note": self.note_var.get().strip(),
             "place": place,
             "address": address,
-            "landmarks": landmarks,
+            "scene_landmarks": scene_landmarks,
+            "common_private_name": common_private_name,
         }
         if is_ending:
             delta_fields = {"介入度增量": "intrusion_delta",
