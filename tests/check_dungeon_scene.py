@@ -13,7 +13,9 @@
    私有名随地址进载荷），子进程按私有名过滤才可能成立；
 6. 展示：``place`` / 紧凑地址 / 空三种形态，以及提示词的「当前地点」行；
 7. 结局传送：写回 ``position``、坏地址不动位置、未建角色时暂存；
-8. 独特地标的「同时在场」触发：同段 / 相邻两段 / 缺她 / 隔两段 / 防重复。
+8. 独特地标的「同时在场」触发：同段 / 相邻两段 / 缺她 / 隔两段 / 防重复；
+9. 文本校准块：坐标数值行、谓词与上界、尺度行复用本章换算句、
+   ``direction`` 顺挫澄清句。
 
 坐标带出预算属于后续阶段，不在本文件断言。
 """
@@ -367,7 +369,7 @@ def _prompt_session(chapters, current):
         prompted_presence_landmark="",
         option_choice=None, story_summary=None, replay_data=[], _detail_queries=None,
         pending_insertions=[], selected_quip_styles=[],
-        settings={"blocked_words": []},
+        settings={"blocked_words": []}, height=480.0,
         merged_landmarks=[], _chapter_landmark_cache=None,
         body_parts={}, dungeon_state=DungeonState(intrusion=2.0, destruction=2.0),
     )
@@ -394,6 +396,64 @@ _bare_prompt = DungeonPromptBuilder(
     _prompt_session([{"name": "城里"}], "城里")).build_user_prompt(_text_type)
 check("提示词：虚构章节不出现地点行", "当前地点" not in _bare_prompt,
       _bare_prompt[-300:])
+
+# ---------------- 7b. 文本校准块 ----------------
+from core.scale_reference import (destruction_calibration_line,  # noqa: E402
+                                  destruction_level_title,
+                                  intrusion_calibration_line,
+                                  intrusion_level_title,
+                                  intrusion_level_text)
+
+check("校准：谓词行给上下界，4 级没有上界",
+      "尚未到" in intrusion_calibration_line(3.2)
+      and "尚未到" not in intrusion_calibration_line(4.2)
+      and "尚未到" in destruction_calibration_line(1.8)
+      and "尚未到" not in destruction_calibration_line(4.0))
+check("校准：分级原文一字未改",
+      intrusion_level_text(3.0).startswith("主动的城市互动："),
+      intrusion_level_text(3.0))
+check("校准：短标题取自分级定义的冒号前名称",
+      intrusion_level_title(3.2) == "主动的城市互动"
+      and destruction_level_title(1.8) == "可能破坏")
+
+_calib_prompt = DungeonPromptBuilder(
+    _prompt_session([{"name": "城里"}], "城里")).build_user_prompt(_text_type)
+check("校准：用户提示词给出坐标数值行",
+      "当前坐标：介入度 2.0（2 级：无意的日常动作）"
+      "/ 破坏性 2.0（2 级：可能破坏）" in _calib_prompt,
+      _calib_prompt[:800])
+check("校准：谓词与上界随坐标出现",
+      "介入度 2：" in _calib_prompt and "破坏性 2：" in _calib_prompt
+      and "尚未到" in _calib_prompt)
+check("校准：尺度行给出密度与后果上限规则",
+      "本段只发生一件与此级别相称的事" in _calib_prompt
+      and "不超过她脚掌覆盖的范围" in _calib_prompt)
+check("校准：无换算句时尺度行只写身高",
+      "尺度：她的身高 480.0 米；" in _calib_prompt, _calib_prompt[:800])
+_calib_session = _prompt_session(_chapters, "城里")
+_calib_session.body_parts = {"身高": 480.0}
+_calib_city_prompt = DungeonPromptBuilder(_calib_session).build_user_prompt(_text_type)
+check("校准：尺度行复用本章换算句",
+      "尺度：她的身高 480.0 米，约等于黑塔" in _calib_city_prompt,
+      _calib_city_prompt[:800])
+check("校准：坐标行紧跟地点行之后",
+      _place_prompt.index("当前坐标") > _place_prompt.index("当前地点"))
+
+_sys_session = types.SimpleNamespace(
+    coupling_level=None, protagonist_title="", name="测试", nick="",
+    evolution_attrs=[], personality=types.SimpleNamespace(description=""),
+    initial_prompt="", section_prompts={},
+    body_parts={}, merged_landmarks=[], _chapter_landmark_cache=None,
+    settings={"blocked_words": []},
+)
+_sys_session.chapter_landmarks = types.MethodType(
+    DungeonWindowBase.chapter_landmarks, _sys_session)
+_system_prompt = DungeonPromptBuilder(_sys_session).build_system_prompt()
+check("校准：系统提示词澄清 direction 只表顺挫",
+      "顺利（+1）还是受挫（-1）" in _system_prompt
+      and "不表示事情更激烈还是更收敛" in _system_prompt
+      and "内容的深浅以“当前坐标”一行为准" in _system_prompt,
+      _system_prompt[:600])
 
 # ---------------- 8. 结局传送 ----------------
 check("传送：合法地址原样返回", scene.landing_position(_CELL) == _CELL)
@@ -506,26 +566,30 @@ def _prompt_of(session):
     return DungeonPromptBuilder(session).build_user_prompt(_text_type)
 
 
+def _tower_compares(session):
+    """提示词里黑塔对比句的出现次数：尺度行恒占 1 次，在场对比再加 1 次。"""
+    return _prompt_of(session).count("约等于黑塔")
+
+
 _same = _presence_session([{"text": "测试抬起头，望见了黑塔的塔尖。"}])
 check("在场：同段出现她与独特地标 → 对比进提示词",
-      "约等于黑塔" in _prompt_of(_same), _prompt_of(_same)[-400:])
+      _tower_compares(_same) == 2, _prompt_of(_same)[-400:])
 _adjacent = _presence_session([{"text": "黑塔矗立在街区尽头。"},
                                {"text": "测试沿着街道走近，她抬头仰望。"}])
 check("在场：分处相邻两段同样触发",
-      "约等于黑塔" in _prompt_of(_adjacent), _prompt_of(_adjacent)[-400:])
+      _tower_compares(_adjacent) == 2, _prompt_of(_adjacent)[-400:])
 _only_landmark = _presence_session([{"text": "黑塔矗立在街区尽头。"},
                                     {"text": "黑塔的影子铺满广场。"}])
 check("在场：段落里没有她就不触发",
-      "约等于黑塔" not in _prompt_of(_only_landmark),
+      _tower_compares(_only_landmark) == 1,
       _prompt_of(_only_landmark)[-400:])
 _too_far = _presence_session([{"text": "黑塔。"}, {"text": "人群散去。"},
                               {"text": "测试继续往前走。"}])
 check("在场：地标只在两段之前出现不触发",
-      "约等于黑塔" not in _prompt_of(_too_far), _prompt_of(_too_far)[-400:])
+      _tower_compares(_too_far) == 1, _prompt_of(_too_far)[-400:])
 _repeat = _presence_session([{"text": "测试望见了黑塔。"}])
-check("在场：首次触发给出对比", "约等于黑塔" in _prompt_of(_repeat))
-check("在场：上一轮刚提示过同一地标时不重复",
-      "约等于黑塔" not in _prompt_of(_repeat))
+check("在场：首次触发给出对比", _tower_compares(_repeat) == 2)
+check("在场：上一轮刚提示过同一地标时不重复", _tower_compares(_repeat) == 1)
 _common_only = _presence_session(
     [{"text": "测试从高楼旁走过。"}],
     chapters=[{"name": "城里", "common_private_name": "HD"}],

@@ -62,6 +62,69 @@ DESTRUCTION_LEVELS = {
 }
 
 
+# 副本文本校准块用的谓词层：只保留各级的客观状态，剥离描写口径与视角
+# （口径归耦合等级、视角归耦合等级，副本提示词两者都不该带）。
+INTRUSION_PREDICATES = {
+    1: "她仅仅作为庞大存在，被在意的是影响而非她本身",
+    2: "她的行走、跳跃、转身、撩发、坐下、躺下等普通日常动作被观察",
+    3: "她的动作明确指向场景中的人造物，或使人因她的身体改变行为",
+    4: "她已经暴露贪婪或情色的一面，以身体占据、封锁或玩弄周遭环境，建筑与人群彻底沦为玩物",
+}
+
+# 校准块的上界：本级尚未到达的更高一级核心内容；4 级没有下一级，不写
+INTRUSION_NOT_YET = {
+    1: "做出行走、坐下等普通日常动作",
+    2: "她的动作明确指向场景中的人造物",
+    3: "以身体占据、玩弄为目的",
+}
+
+DESTRUCTION_PREDICATES = {
+    1: "她小心地对待身边一切，但客观上可能造成无人员伤亡的环境改变或感官上的压迫",
+    2: "她可能造成局部结构受损或人员伤亡，但无明确破坏意图",
+    3: "她带有明确目的地让建筑结构受损或变形，且波及范围大面积扩大",
+    4: "她以身体接触和摧毁为唯一目的，短时间便使建筑结构化为废墟或齑粉",
+}
+
+DESTRUCTION_NOT_YET = {
+    1: "对可能的结构受损或人员伤亡持无所谓态度",
+    2: "有目的地让结构失效",
+    3: "以摧毁为唯一目的",
+}
+
+
+def _level_title(levels: dict, value: float) -> str:
+    """分级文本冒号前的名称部分（如「主动的城市互动」「可能破坏」）。"""
+    return levels[max(1, min(4, int(round(value))))].split("：", 1)[0]
+
+
+def intrusion_level_title(value: float) -> str:
+    """介入度坐标对应级别的短标题。"""
+    return _level_title(INTRUSION_LEVELS, value)
+
+
+def destruction_level_title(value: float) -> str:
+    """破坏性坐标对应级别的短标题。"""
+    return _level_title(DESTRUCTION_LEVELS, value)
+
+
+def intrusion_calibration_line(value: float) -> str:
+    """介入度校准行：本级谓词 + 尚未到的更高一级核心（4 级只写本级）。"""
+    n = max(1, min(4, int(round(value))))
+    line = f"介入度 {n}：{INTRUSION_PREDICATES[n]}"
+    if n in INTRUSION_NOT_YET:
+        line += f"；尚未到{INTRUSION_NOT_YET[n]}"
+    return line + "。"
+
+
+def destruction_calibration_line(value: float) -> str:
+    """破坏性校准行：本级谓词 + 尚未到的更高一级核心（4 级只写本级）。"""
+    n = max(1, min(4, int(round(value))))
+    line = f"破坏性 {n}：{DESTRUCTION_PREDICATES[n]}"
+    if n in DESTRUCTION_NOT_YET:
+        line += f"；尚未到{DESTRUCTION_NOT_YET[n]}"
+    return line + "。"
+
+
 def intrusion_level_text(value: float) -> str:
     """把介入度坐标（0.5~4.5）解释为 1~4 级的分级说明文本。"""
     return INTRUSION_LEVELS[max(1, min(4, int(round(value))))]

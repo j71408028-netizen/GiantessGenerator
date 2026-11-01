@@ -4,6 +4,10 @@ import re
 
 from core.logic import ALL_PART_NAMES, format_size, get_comparisons, replace_quip_tags, \
     should_skip_by_part_tags, contains_blocked_word
+from core.scale_reference import (destruction_calibration_line,
+                                  destruction_level_title,
+                                  intrusion_calibration_line,
+                                  intrusion_level_title)
 from dungeon.audio.chapters import find_chapter, is_terminating_chapter
 from .coupling import (COMMON_OUTPUT_RULE, DEFAULT_COUPLING_LEVEL, coupling_prompts,
                        normalize_coupling_level, section_instruction)
@@ -86,6 +90,8 @@ class DungeonPromptBuilder:
             f"{pack['brief']}\n"
             f"{COMMON_OUTPUT_RULE}\n"
             "direction 取值范围：-1（消极/挫败），0（中性），1（积极/满足）。\n"
+            'direction 表示这一段对她是顺利（+1）还是受挫（-1），'
+            "不表示事情更激烈还是更收敛；内容的深浅以“当前坐标”一行为准。\n"
             f"{parse}\n你必须严格按照以下 JSON 格式输出，不要包含任何额外注释或文字：\n"
             "{\n    \"text\": \"叙述内容\",\n    \"direction\": 1,\n"
             f"    {output}}}\n如果某个自定义属性未提及或不适用，其值默认为 0。\n"
@@ -177,7 +183,7 @@ class DungeonPromptBuilder:
                                 "仅供叙事参考）：\n" + "\n".join(f"- {h}" for h in hits) + "\n")
             session._detail_queries = []
         pack = coupling_prompts(level)
-        result = (f"{history}{chapter_line}{detail_block}"
+        result = (f"{history}{chapter_line}{self._calibration_block()}{detail_block}"
                   f"{pack['narrate'].format(instruction=instruction)}\n"
                   f"请严格按系统提示的 JSON 格式输出，不要添加额外解释。{reference}")
         # Solea/Bulla 的对话分支：要求 AI 用 @说话人@ 行内标记区分说话人与台词，
@@ -215,6 +221,33 @@ class DungeonPromptBuilder:
                 result += "\n\n" + pack["option_notice"].format(
                     index=option_choice.get('index', 0), prompt=choice_prompt)
         return result
+
+    def _calibration_block(self) -> str:
+        """本段写作校准块：坐标数值行 + 两级谓词 + 尺度上限，无坐标时为空串。
+
+        进 user prompt 而不是 system：system 只在开局构建一次，坐标会停在
+        开局值。内容的深浅只由坐标决定，与 direction 的符号无关。
+        尺度行复用本章换算句（场景同源、随体型变化、视角中立），没有换算句
+        时只写身高，绝不引入其他场景词。
+        """
+        state = getattr(self.context, "dungeon_state", None)
+        if state is None:
+            return ""
+        intrusion = float(state.intrusion)
+        destruction = float(state.destruction)
+        height_match = self._get_height_match()
+        scale = (height_match.rstrip("。") if height_match
+                 else f"她的身高 {format_size(getattr(self.context, 'height', 0.0))}")
+        lines = [
+            f"当前坐标：介入度 {intrusion:.1f}"
+            f"（{round(intrusion)} 级：{intrusion_level_title(intrusion)}）"
+            f"/ 破坏性 {destruction:.1f}"
+            f"（{round(destruction)} 级：{destruction_level_title(destruction)}）",
+            intrusion_calibration_line(intrusion),
+            destruction_calibration_line(destruction),
+            f"尺度：{scale}；本段只发生一件与此级别相称的事，而非毁灭或颠覆整个场景。",
+        ]
+        return "\n".join(lines) + "\n"
 
     def _landmark_pool(self) -> list:
         """本章的尺寸换算候选池（章节地址过滤后的全局池）。
