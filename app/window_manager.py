@@ -218,6 +218,8 @@ class MainWindowManager:
             return
         self.pages[page_key].lift()
         self.nav_bar.set_active(page_key)
+        if page_key == "resources" and hasattr(self, 'resource_hub'):
+            self.resource_hub.on_page_shown()
 
     # ==================== 生成器标签页 ====================
     def create_generator_tab(self, parent):

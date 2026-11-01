@@ -1,11 +1,16 @@
-"""资源中心标签页：联网资源（预留）+ 静态表选择、风格素材选择与世界包管理。
+"""资源中心标签页：顶部导航「在线资源 / 社区 / 本地资源」。
 
-页面主区为**联网资源**预留（在线下载静态表/风格素材/世界包，未来接入）；
-本地资源经顶部切换条按需进入，改动**即时生效**：每次选择立即写回
+在线资源与社区为联网能力预留占位；本地资源是本页功能区：世界包、风格组、
+副本方案、静态表、挑战包以分区卡片呈现，各分区**启用项排在未启用项之前**
+（世界包=激活包、风格组=已选风格、静态表=当前选中表、副本方案/挑战包=随
+世界包附带的资源）。改动**即时生效**：每次选择立即写回
 ``resource_settings.json``（经 :meth:`SettingsRepo.save_resource_keys`，只动
-资源域键）并同步生成上下文；世界包的启用/停用/删除同样即时执行（与挂件模式
-调查系统的行为一致）。设置页只保留"当前生成规则与偏好"。
+资源域键）并同步生成上下文；世界包的启用/停用/删除同样即时执行。
+
+功能边界：风格条目编辑在「文本管理」、副本方案编辑在「副本编辑」、挑战包
+创建与启动在「挑战模式」，本页只做状态总览与深跳，不重复实现。
 """
+import os
 import tkinter as tk
 from typing import Dict, Callable, Optional, TYPE_CHECKING
 
@@ -30,12 +35,11 @@ from dungeon.terms import is_default_scenario
 from services.challenges import ChallengeService
 from services.news import DEFAULT_NEWS_TABLE, NewsService
 from ui.resources.dialogs import WorldPackCreateDialog
-from ui.ctk.widgets import CollapsibleBlock, StyleListBox, OptionButton
+from ui.ctk.widgets import StyleListBox, OptionButton
 from ui.ctk import fonts as ui_fonts
 from ui.ctk.theme import (
     SETTINGS_PANEL_BG, SETTINGS_HOVER, SETTINGS_INPUT_HOVER,
     SETTINGS_INPUT_BG, SETTINGS_INPUT_BORDER,
-    SETTINGS_SWITCH_TRACK, SETTINGS_SWITCH_PROGRESS, SETTINGS_SWITCH_KNOB,
     SETTINGS_TEXT_SOFT,
     SETTINGS_LABEL, SETTINGS_OK, SETTINGS_ERR,
 )
@@ -44,12 +48,11 @@ _FONT = ui_fonts.ui_font(13)
 
 
 class ResourceHubPanel(ctk.CTkFrame):
-    # 顶部切换条：键 → 显示名（在线资源为主区默认页，其余为本地分区）
+    # 顶部导航：在线资源 / 社区 为联网能力预留，本地资源承载全部本地管理
     _VIEWS = (
         ("online", "在线资源"),
-        ("tables", "静态表"),
-        ("styles", "风格素材"),
-        ("pack", "世界包"),
+        ("community", "社区"),
+        ("local", "本地资源"),
     )
 
     def __init__(
@@ -98,6 +101,7 @@ class ResourceHubPanel(ctk.CTkFrame):
 
         self._create_widgets()
         self._sync_all_states()
+        self._refresh_local_sections()
         self._refresh_resource_catalog()
         # System 模式的实际颜色由 CustomTkinter 决定，原生 Listbox 也必须使用
         # 这个实际模式，否则首次进入本页可能短暂显示浅色。
@@ -107,7 +111,6 @@ class ResourceHubPanel(ctk.CTkFrame):
 
     # ───────────────────── UI 构建 ─────────────────────
     def _create_widgets(self):
-        # 顶部切换条：在线资源是本页主区（为联网下载预留），本地资源按需进入
         self._view_bar = ctk.CTkFrame(self, fg_color="transparent")
         self._view_bar.pack(fill='x', padx=10, pady=(4, 2))
         self._view_buttons = {}
@@ -124,39 +127,22 @@ class ResourceHubPanel(ctk.CTkFrame):
         self._view_area = ctk.CTkFrame(self, fg_color="transparent")
         self._view_area.pack(fill='both', expand=True)
 
-        # 在线资源（默认主区，占位等待接入）
         self.online_view = ctk.CTkFrame(self._view_area, fg_color="transparent")
         self._build_online_view()
 
-        # 本地资源：每个分区一个独立滚动视图，内嵌原样式的折叠卡片
-        self.tables_view = ctk.CTkScrollableFrame(self._view_area, fg_color="transparent")
-        self.styles_view = ctk.CTkScrollableFrame(self._view_area, fg_color="transparent")
-        self.pack_view = ctk.CTkScrollableFrame(self._view_area, fg_color="transparent")
+        self.community_view = ctk.CTkFrame(self._view_area, fg_color="transparent")
+        self._build_community_view()
 
-        self.tables_block = CollapsibleBlock(self.tables_view, "静态表",
-                                             body_padx=(6, 12), body_pady=(6, 12))
-        self.styles_block = CollapsibleBlock(self.styles_view, "风格素材",
-                                             body_padx=(6, 12), body_pady=(6, 12))
-        self.pack_block = CollapsibleBlock(self.pack_view, "世界包",
-                                           body_padx=(6, 12), body_pady=(6, 12))
-
-        for block in (self.tables_block, self.styles_block, self.pack_block):
-            block.body.configure(fg_color="transparent")
-            block.header.pack(fill='x', padx=8, pady=(8, 0))
-            if block._expanded:
-                block.body.pack(fill='x', padx=block._body_padx,
-                                pady=block._body_pady, after=block.header)
-
-        self._build_tables_block()
-        self._build_styles_block()
-        self._build_pack_block()
+        self.local_view = ctk.CTkScrollableFrame(self._view_area,
+                                                 fg_color="transparent")
+        self._build_local_view()
 
         self._show_view("online")
 
     def _show_view(self, key):
-        """切换主区视图并同步切换条高亮。"""
-        views = {"online": self.online_view, "tables": self.tables_view,
-                 "styles": self.styles_view, "pack": self.pack_view}
+        """切换主区视图并同步导航高亮。"""
+        views = {"online": self.online_view, "community": self.community_view,
+                 "local": self.local_view}
         for k, view in views.items():
             if k == key:
                 view.pack(fill='both', expand=True)
@@ -168,64 +154,324 @@ class ResourceHubPanel(ctk.CTkFrame):
                 fg_color=SETTINGS_INPUT_BG if selected else "transparent",
                 text_color=SETTINGS_LABEL if selected else SETTINGS_TEXT_SOFT)
 
-    def _build_online_view(self):
-        """联网资源占位页：布局与导航均已就位，等下载能力接入后填充主区。"""
-        self.online_view.columnconfigure(0, weight=1)
-        self.online_view.rowconfigure(0, weight=1)
-        card = ctk.CTkFrame(self.online_view, fg_color=SETTINGS_PANEL_BG,
-                            corner_radius=6)
+    def _build_placeholder(self, view, icon, title, text):
+        view.columnconfigure(0, weight=1)
+        view.rowconfigure(0, weight=1)
+        card = ctk.CTkFrame(view, fg_color=SETTINGS_PANEL_BG, corner_radius=6)
         card.grid(row=0, column=0, sticky='nsew', padx=10, pady=(6, 8))
 
         inner = ctk.CTkFrame(card, fg_color="transparent")
         inner.place(relx=0.5, rely=0.45, anchor='center')
-        ctk.CTkLabel(inner, text="🌐", font=ui_fonts.ui_font(44)).pack()
-        ctk.CTkLabel(inner, text="联网资源",
+        ctk.CTkLabel(inner, text=icon, font=ui_fonts.ui_font(44)).pack()
+        ctk.CTkLabel(inner, text=title,
                      font=ui_fonts.ui_font(16, "bold"),
                      text_color=SETTINGS_LABEL).pack(pady=(8, 4))
-        ctk.CTkLabel(
-            inner,
-            text="在线下载静态表、风格素材与世界包的能力将在这里提供。\n"
-                 "当前版本请通过上方切换使用本地资源。",
-            font=ui_fonts.ui_font(12), text_color=SETTINGS_TEXT_SOFT,
-            justify="center").pack()
+        ctk.CTkLabel(inner, text=text,
+                     font=ui_fonts.ui_font(12), text_color=SETTINGS_TEXT_SOFT,
+                     justify="center").pack()
 
-    # ───────────────── 通用控件辅助 ─────────────────
-    @staticmethod
-    def _setup_body_grid(body, name):
-        """块体内统一两列：0=标签列，1=控件列，跨行对齐。"""
-        body.columnconfigure(0, weight=2, uniform=name + "_cols")
-        body.columnconfigure(1, weight=3, uniform=name + "_cols")
+    def _build_online_view(self):
+        """联网资源占位页：布局与导航均已就位，等下载能力接入后填充主区。"""
+        self._build_placeholder(
+            self.online_view, "🌐", "联网资源",
+            "在线下载静态表、风格素材、副本方案与世界包的能力将在这里提供。\n"
+            "当前版本请通过「本地资源」使用与管理资源。")
 
-    def _section_label(self, parent, row, text):
+    def _build_community_view(self):
+        """社区占位页：分享/订阅能力预留。"""
+        self._build_placeholder(
+            self.community_view, "🤝", "社区",
+            "社区资源分享、订阅与交流能力将在这里提供，敬请期待。")
+
+    # ───────────────── 本地资源视图 ─────────────────
+    def _build_local_view(self):
+        """本地资源：分区卡片依次排列，行级刷新由各 _refresh_* 负责。"""
+        self._build_world_section()
+        self._build_styles_section()
+        self._build_scenarios_section()
+        self._build_tables_section()
+        self._build_challenges_section()
+
+    def _add_section(self, title, note=None, action=None):
+        """创建一个分区卡片：标题行（含说明与可选右上角动作键）+ 内容区。"""
+        card = ctk.CTkFrame(self.local_view, fg_color=SETTINGS_PANEL_BG,
+                            corner_radius=8)
+        card.pack(fill='x', padx=10, pady=(8, 0))
+        header = ctk.CTkFrame(card, fg_color="transparent")
+        header.pack(fill='x', padx=12, pady=(10, 2))
+        ctk.CTkLabel(header, text=title, font=ui_fonts.ui_font(13, "bold"),
+                     text_color=SETTINGS_LABEL, anchor='w').pack(side='left')
+        if note:
+            ctk.CTkLabel(header, text=note, font=ui_fonts.ui_font(11),
+                         text_color=SETTINGS_TEXT_SOFT).pack(
+                side='left', padx=(10, 0))
+        action_btn = None
+        if action:
+            text, command = action
+            action_btn = ctk.CTkButton(
+                header, text=text, width=90, height=26, command=command,
+                fg_color="transparent", text_color=SETTINGS_TEXT_SOFT,
+                hover_color=SETTINGS_HOVER, border_width=1,
+                border_color=SETTINGS_INPUT_BORDER, corner_radius=8,
+                font=ui_fonts.ui_font(12))
+            action_btn.pack(side='right')
+        body = ctk.CTkFrame(card, fg_color="transparent")
+        body.pack(fill='x', padx=12, pady=(2, 10))
+        return body, action_btn
+
+    def _rows_container(self, parent):
+        """分区内容里的行容器：整体重建行时只需清空它。"""
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
+        frame.pack(fill='x')
+        return frame
+
+    def _clear(self, frame):
+        for w in frame.winfo_children():
+            w.destroy()
+
+    def _note_row(self, parent, text):
+        ctk.CTkLabel(parent, text=text, anchor='w', justify='left',
+                     font=ui_fonts.ui_font(12),
+                     text_color=SETTINGS_TEXT_SOFT).pack(
+            fill='x', padx=8, pady=(2, 4))
+
+    def _item_row(self, parent, title, subtitle=None, badge=None,
+                  badge_color=SETTINGS_OK, buttons=()):
+        """资源行：左侧标题(+徽标+说明)，右侧一排小按钮。"""
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill='x', padx=8, pady=(0, 6))
+        left = ctk.CTkFrame(row, fg_color="transparent")
+        left.pack(side='left', fill='x', expand=True)
+        title_row = ctk.CTkFrame(left, fg_color="transparent")
+        title_row.pack(anchor='w')
+        ctk.CTkLabel(title_row, text=title, font=_FONT,
+                     text_color=SETTINGS_LABEL, anchor='w').pack(side='left')
+        if badge:
+            ctk.CTkLabel(title_row, text=badge, font=ui_fonts.ui_font(11),
+                         text_color=badge_color, fg_color=SETTINGS_INPUT_BG,
+                         corner_radius=6).pack(side='left', padx=(8, 0),
+                                               ipadx=6, ipady=1)
+        if subtitle:
+            ctk.CTkLabel(left, text=subtitle, anchor='w', justify='left',
+                         font=ui_fonts.ui_font(11),
+                         text_color=SETTINGS_TEXT_SOFT).pack(
+                anchor='w', fill='x')
+        for spec in buttons:
+            text, command, color = spec
+            btn = ctk.CTkButton(
+                row, text=text, width=56, height=26, command=command,
+                fg_color="transparent", text_color=color,
+                hover_color=SETTINGS_HOVER, border_width=1,
+                border_color=SETTINGS_INPUT_BORDER, corner_radius=8,
+                font=ui_fonts.ui_font(12))
+            btn.pack(side='right', padx=(6, 0))
+        return row
+
+    # ───────────────── 分区：世界包 ─────────────────
+    def _build_world_section(self):
+        self._world_rows_frame, self._world_new_btn = self._add_section(
+            "世界包", note="启用中的世界包会接管其打包的资源",
+            action=("＋ 新建", self._create_world_pack))
+        # 行内容统一由 __init__ 末尾的 _refresh_local_sections 首次填充
+        # （此刻静态表菜单尚未创建，行刷新里的锁键逻辑还不能跑）。
+
+    def _refresh_world_rows(self):
+        """重建世界包行：激活包在最前（启用项优先），其余按名称排列。"""
+        frame = self._world_rows_frame
+        self._clear(frame)
+        available = self.world_manager is not None
+        self._world_new_btn.configure(state="normal" if available else "disabled")
+        if not available:
+            self._note_row(frame, "世界包功能不可用")
+            self._set_table_menus_locked()
+            return
+
+        packs = [p for p in self.world_manager.list_packs() if not p.get("error")]
+        active = self.world_state is not None and self.world_state.active
+        active_id = self.world_state.world_id if active else None
+        packs.sort(key=lambda p: (p["world_id"] != active_id, p["name"]))
+
+        if not packs:
+            self._note_row(frame, "暂无世界包，点击右上角「＋ 新建」创建")
+        for p in packs:
+            name = p["name"]
+            if active and p["world_id"] == active_id:
+                self._item_row(
+                    frame, name, badge="启用中",
+                    buttons=(
+                        ("停用", self._deactivate_world_pack, SETTINGS_TEXT_SOFT),
+                        ("删除", self._dissolve_world_pack, SETTINGS_ERR),
+                    ))
+            else:
+                self._item_row(
+                    frame, name,
+                    buttons=(("启用", lambda n=name: self._activate_world_pack(n),
+                              SETTINGS_OK),))
+        self._set_table_menus_locked()
+
+    def _activate_world_pack(self, pack_name):
+        """启用（或切换到）指定世界包；已在启用中则忽略。"""
+        target = next((p for p in self.world_manager.list_packs()
+                       if p["name"] == pack_name and not p.get("error")), None)
+        if target is None:
+            ui.ctk.dialogs.showwarning("提示", "没有可加载的世界包，请先创建")
+            return
+        try:
+            if self.world_state is not None and self.world_state.active:
+                if self.world_state.world_id == target["world_id"]:
+                    return
+                self.world_manager.deactivate(self.settings, self.settings_repo)
+            self.world_manager.activate(
+                target["world_id"], self.settings, self.settings_repo)
+        except ValueError as e:
+            ui.ctk.dialogs.showerror("错误", str(e))
+            return
+        self._after_world_state_change()
+
+    def _deactivate_world_pack(self):
+        """停用当前世界包（即时生效）。"""
+        if self.world_state is None or not self.world_state.active:
+            return
+        self.world_manager.deactivate(self.settings, self.settings_repo)
+        self._after_world_state_change()
+
+    # ───────────────── 分区：风格组 ─────────────────
+    def _build_styles_section(self):
+        can_nav = self.gui_ref is not None and hasattr(self.gui_ref, "show_page")
+        action = ("编辑条目", lambda: self.gui_ref.show_page("text_mgmt")) \
+            if can_nav else None
+        body, _ = self._add_section(
+            "风格组", note="启用中的风格组决定生成时使用的素材",
+            action=action)
+        body.columnconfigure(0, weight=1, uniform="hub_style")
+        body.columnconfigure(1, weight=1, uniform="hub_style")
+
+        self.landmark_selector = StyleListBox(body, "地标风格组", height=2,
+                                              on_change=self._on_landmark_selection_changed)
+        self.landmark_selector.grid(row=0, column=0, sticky='nsew', padx=(8, 5), pady=6)
+        self.landmark_selector.add_button("默认", self.landmark_selector.set_default, padx=0)
+        self.landmark_selector.add_button("全选", self.landmark_selector.select_all, padx=10)
+
+        self.quip_selector = StyleListBox(body, "描述风格组", height=2,
+                                          on_change=self._on_quip_selection_changed)
+        self.quip_selector.grid(row=0, column=1, sticky='nsew', padx=(5, 8), pady=6)
+        self.quip_selector.add_button("清空", self.quip_selector.clear_selection, padx=0)
+        self.quip_selector.add_button("全选", self.quip_selector.select_all, padx=10)
+
         ctk.CTkLabel(
-            parent, text=text,
-            font=ui_fonts.ui_font(13, "bold"),
+            body, text="编辑风格条目请前往「文本管理」页", anchor='w',
+            font=ui_fonts.ui_font(12),
             text_color=SETTINGS_TEXT_SOFT
-        ).grid(row=row, column=0, columnspan=2, sticky='w',
-               padx=10, pady=6)
+        ).grid(row=1, column=0, columnspan=2, sticky='w', padx=8, pady=(0, 6))
 
-    def _make_row(self, parent, row, text):
-        """创建一行：标签在左，控件容器在右，两列对齐。"""
+    # ───────────────── 分区：副本方案 ─────────────────
+    def _build_scenarios_section(self):
+        self._scenario_rows_frame, _ = self._add_section(
+            "副本方案", note="方案在「副本编辑」页创建与编辑")
+        self._refresh_scenario_rows()
+
+    def _refresh_scenario_rows(self):
+        """重建副本方案行：随世界包附带的（启用）方案排在最前。"""
+        frame = self._scenario_rows_frame
+        self._clear(frame)
+        scenarios = self._available_scenarios()
+        bundled = set()
+        if self.world_state is not None and self.world_state.active:
+            bundled = set(self.world_state.manifest.resources.get("scenarios") or [])
+        ordered = ([s for s in scenarios if s in bundled]
+                   + [s for s in scenarios if s not in bundled])
+        if not ordered:
+            self._note_row(frame, "暂无副本方案，可在「副本编辑」页创建")
+            return
+        editor_locked = (self.world_state is not None
+                         and self.world_state.active
+                         and self.world_state.owns("scenarios"))
+        for scenario_id in ordered:
+            if editor_locked:
+                buttons = (("随包锁定", None, SETTINGS_TEXT_SOFT),)
+            else:
+                buttons = (("编辑",
+                            lambda sid=scenario_id: self._goto_scenario_editor(sid),
+                            SETTINGS_TEXT_SOFT),)
+            self._item_row(
+                frame, scenario_id,
+                badge="随包启用" if scenario_id in bundled else None,
+                buttons=buttons)
+
+    # ───────────────── 分区：静态表 ─────────────────
+    @staticmethod
+    def _pinned_front(values, current):
+        """把当前选中项排到最前（静态表的"启用项优先"）。"""
+        rest = [v for v in values if v != current]
+        return [current] + rest if current else rest
+
+    def _build_tables_section(self):
+        body, _ = self._add_section(
+            "静态表", note="每类表生效中的即为启用项，切换即时生效")
+        body.columnconfigure(0, weight=2, uniform="hub_tables")
+        body.columnconfigure(1, weight=3, uniform="hub_tables")
+        row = 0
+
+        _, ctrl = self._make_table_row(body, row, "姓名表")
+        row += 1
+        self.name_table_var = tk.StringVar(value=self.name_table)
+        name_tables = self._pinned_front(self.name_repo.get_tables(), self.name_table)
+        self.name_table_menu = self._make_option_button(
+            ctrl, name_tables,
+            self._on_name_table_changed, self.name_table_var
+        )
+
+        _, ctrl = self._make_table_row(body, row, "新闻表")
+        row += 1
+        self.news_table_var = tk.StringVar(value=self.news_table)
+        news_service = NewsService(news_table=self.news_table,
+                                   world_state=self.world_state)
+        news_tables = self._pinned_front(news_service.get_tables(), self.news_table)
+        if not news_tables:
+            news_tables = [DEFAULT_NEWS_TABLE]
+        self.news_table_menu = self._make_option_button(
+            ctrl, news_tables,
+            self._on_news_table_changed, self.news_table_var
+        )
+
+        _, ctrl = self._make_table_row(body, row, "身材表")
+        row += 1
+        self.preset_table_var = tk.StringVar(value=self.preset_table)
+        preset_tables = self._pinned_front(self.preset_repo.get_tables(),
+                                           self.preset_table)
+        if not preset_tables:
+            preset_tables = ["default"]
+        self.preset_table_menu = self._make_option_button(
+            ctrl, preset_tables,
+            self._on_preset_table_changed, self.preset_table_var
+        )
+
+        _, ctrl = self._make_table_row(body, row, "性格表")
+        row += 1
+        self.personality_table_var = tk.StringVar(value=self.personality_table)
+        personality_tables = self._pinned_front(
+            self.personality_repo.get_tables(), self.personality_table)
+        if not personality_tables:
+            personality_tables = ["default"]
+        self.personality_table_menu = self._make_option_button(
+            ctrl, personality_tables,
+            self._on_personality_table_changed, self.personality_table_var
+        )
+
+    def _make_table_row(self, parent, row, text):
+        """静态表分区的一行：标签在左，下拉控件在右。"""
         label = ctk.CTkLabel(
             parent, text=text, anchor='w',
             font=_FONT, text_color=SETTINGS_LABEL
         )
-        label.grid(row=row, column=0, sticky='w', padx=(18, 12), pady=(0, 8))
+        label.grid(row=row, column=0, sticky='w', padx=(10, 12), pady=(0, 8))
         control = ctk.CTkFrame(parent, fg_color="transparent")
-        control.grid(row=row, column=1, sticky='e', padx=(0, 18), pady=(0, 8))
+        control.grid(row=row, column=1, sticky='e', padx=(0, 10), pady=(0, 8))
         return label, control
 
-    @staticmethod
-    def _pack_control(control, expand=True):
-        if expand:
-            control.pack(fill='both', expand=True)
-        else:
-            control.pack(side='left')
-        return control
-
-    def _make_option_button(self, parent, values, command, variable=None, expand=True):
+    def _make_option_button(self, parent, values, command, variable=None):
         """行内选项控件统一用 widgets.OptionButton：按钮 + 顶部锚定下拉列表。"""
-        return self._pack_control(OptionButton(
+        btn = OptionButton(
             parent, values=values, command=command, variable=variable,
             width=120, height=28, corner_radius=7, font=_FONT,
             fg_color=SETTINGS_INPUT_BG, border_color=SETTINGS_INPUT_BORDER,
@@ -234,143 +480,69 @@ class ResourceHubPanel(ctk.CTkFrame):
             popup_fg_color=SETTINGS_INPUT_BG,
             popup_hover_color=SETTINGS_INPUT_HOVER,
             popup_text_color=SETTINGS_LABEL,
-        ), expand)
-
-    # ───────────────── 各区块构建 ─────────────────
-    def _build_tables_block(self):
-        body = self.tables_block.body
-        self._setup_body_grid(body, "tables")
-        row = 0
-
-        _, ctrl = self._make_row(body, row, "姓名表")
-        row += 1
-        self.name_table_var = tk.StringVar(value=self.name_table)
-        name_tables = self.name_repo.get_tables()
-        if self.name_table not in name_tables:
-            name_tables.insert(0, self.name_table)
-        self.name_table_menu = self._make_option_button(
-            ctrl, name_tables,
-            self._on_name_table_changed, self.name_table_var
         )
+        btn.pack(fill='both', expand=True)
+        return btn
 
-        _, ctrl = self._make_row(body, row, "新闻表")
-        row += 1
-        self.news_table_var = tk.StringVar(value=self.news_table)
-        news_service = NewsService(news_table=self.news_table,
-                                   world_state=self.world_state)
-        news_tables = news_service.get_tables()
-        if self.news_table not in news_tables:
-            news_tables.insert(0, self.news_table)
-        if not news_tables:
-            news_tables = [DEFAULT_NEWS_TABLE]
-        self.news_table_menu = self._make_option_button(
-            ctrl, news_tables,
-            self._on_news_table_changed, self.news_table_var
-        )
+    # ───────────────── 分区：挑战包 ─────────────────
+    def _build_challenges_section(self):
+        can_nav = self.gui_ref is not None and hasattr(self.gui_ref, "show_page")
+        action = ("前往挑战模式", lambda: self.gui_ref.show_page("challenge")) \
+            if can_nav else None
+        self._challenge_rows_frame, _ = self._add_section(
+            "挑战包", note="挑战包的创建与启动在「挑战模式」页",
+            action=action)
+        self._refresh_challenge_rows()
 
-        _, ctrl = self._make_row(body, row, "身材表")
-        row += 1
-        self.preset_table_var = tk.StringVar(value=self.preset_table)
-        preset_tables = self.preset_repo.get_tables()
-        if self.preset_table not in preset_tables:
-            preset_tables.insert(0, self.preset_table)
-        if not preset_tables:
-            preset_tables = ["default"]
-        self.preset_table_menu = self._make_option_button(
-            ctrl, preset_tables,
-            self._on_preset_table_changed, self.preset_table_var
-        )
+    def _refresh_challenge_rows(self):
+        """重建挑战包行：随世界包附带的（启用）包排在最前。"""
+        frame = self._challenge_rows_frame
+        self._clear(frame)
+        try:
+            metas = ChallengeService(
+                self.settings_repo, world_state=self.world_state
+            ).get_all_metas()
+        except Exception as exc:
+            self._note_row(frame, f"挑战包读取失败: {exc}")
+            return
+        if not metas:
+            self._note_row(frame, "暂无挑战包，可在「挑战模式」页创建")
+            return
+        for meta in metas:
+            filename = meta.get("filename", "")
+            title = meta.get("pack_base") or (
+                os.path.splitext(filename)[0] if filename else "未命名")
+            intro = (meta.get("intro", "") or "").strip()
+            if len(intro) > 40:
+                intro = intro[:40] + "…"
+            char_name = meta.get("character_name", "")
+            subtitle = f"角色：{char_name}" + (f" · {intro}" if intro else "")
+            self._item_row(
+                frame, title, subtitle=subtitle,
+                badge="随包启用" if meta.get("bundled") else None)
 
-        _, ctrl = self._make_row(body, row, "性格表")
-        row += 1
-        self.personality_table_var = tk.StringVar(value=self.personality_table)
-        personality_tables = self.personality_repo.get_tables()
-        if self.personality_table not in personality_tables:
-            personality_tables.insert(0, self.personality_table)
-        if not personality_tables:
-            personality_tables = ["default"]
-        self.personality_table_menu = self._make_option_button(
-            ctrl, personality_tables,
-            self._on_personality_table_changed, self.personality_table_var
-        )
+    # ───────────────── 本地分区统一刷新 ─────────────────
+    def _refresh_local_sections(self):
+        """重建会因外部操作而变化的行：世界包 / 副本方案 / 挑战包。"""
+        self._refresh_world_rows()
+        self._refresh_scenario_rows()
+        self._refresh_challenge_rows()
 
-    def _build_styles_block(self):
-        body = self.styles_block.body
-        self._setup_body_grid(body, "styles")
-        body.columnconfigure(0, weight=1, uniform="hub_style")
-        body.columnconfigure(1, weight=1, uniform="hub_style")
+    def on_page_shown(self):
+        """切回本页时刷新：拾取挑战模式 / 副本编辑页的外部增删。"""
+        self._refresh_scenario_rows()
+        self._refresh_challenge_rows()
 
-        self.landmark_selector = StyleListBox(body, "地标风格组", height=2,
-                                              on_change=self._on_landmark_selection_changed)
-        self.landmark_selector.grid(row=0, column=0, sticky='nsew', padx=(10, 5), pady=6)
-        self.landmark_selector.add_button("默认", self.landmark_selector.set_default, padx=0)
-        self.landmark_selector.add_button("全选", self.landmark_selector.select_all, padx=10)
+    def _goto_page(self, page_key):
+        if self.gui_ref is not None and hasattr(self.gui_ref, "show_page"):
+            self.gui_ref.show_page(page_key)
 
-        self.quip_selector = StyleListBox(body, "描述风格组", height=2,
-                                          on_change=self._on_quip_selection_changed)
-        self.quip_selector.grid(row=0, column=1, sticky='nsew', padx=(5, 10), pady=6)
-        self.quip_selector.add_button("清空", self.quip_selector.clear_selection, padx=0)
-        self.quip_selector.add_button("全选", self.quip_selector.select_all, padx=10)
-
-        ctk.CTkLabel(
-            body, text="编辑风格条目请前往「文本管理」页", anchor='w',
-            font=ui_fonts.ui_font(12),
-            text_color=SETTINGS_TEXT_SOFT
-        ).grid(row=1, column=0, columnspan=2, sticky='w', padx=10, pady=(0, 6))
-
-    def _build_pack_block(self):
-        body = self.pack_block.body
-        self._setup_body_grid(body, "pack")
-        row = 0
-
-        # 第1行：世界包
-        self.world_pack_label, ctrl = self._make_row(body, row, "世界包")
-        row += 1
-
-        self.world_pack_idle_frame = ctk.CTkFrame(ctrl, fg_color="transparent")
-        self.world_pack_idle_frame.pack(side='left')
-        self.world_pack_var = tk.StringVar(value="")
-        self.world_pack_menu = self._make_option_button(
-            self.world_pack_idle_frame, [],
-            self._on_world_pack_changed, self.world_pack_var, expand=False
-        )
-        self.world_pack_new_btn = ctk.CTkButton(
-            self.world_pack_idle_frame, text="新建", width=60, height=28,
-            command=self._create_world_pack, fg_color="transparent",
-            text_color=SETTINGS_TEXT_SOFT, hover_color=SETTINGS_HOVER,
-            border_width=1, border_color=SETTINGS_INPUT_BORDER,
-            corner_radius=8, font=ui_fonts.ui_font(12)
-        )
-        self.world_pack_new_btn.pack(side='left', padx=(8, 0))
-
-        self.world_pack_active_frame = ctk.CTkFrame(ctrl, fg_color="transparent")
-        self.world_pack_active_label = ctk.CTkLabel(
-            self.world_pack_active_frame, text="", anchor='w',
-            font=_FONT, text_color=SETTINGS_OK)
-        self.world_pack_active_label.pack(side='left')
-        self.world_pack_dissolve_btn = ctk.CTkButton(
-            self.world_pack_active_frame, text="删除", width=60, height=28,
-            command=self._dissolve_world_pack, fg_color="transparent",
-            text_color=SETTINGS_ERR, hover_color=SETTINGS_HOVER,
-            border_width=1, border_color=SETTINGS_INPUT_BORDER,
-            corner_radius=8, font=ui_fonts.ui_font(12)
-        )
-        self.world_pack_dissolve_btn.pack(side='left', padx=(12, 0))
-        self.world_pack_active_frame.pack_forget()
-
-        # 第2行：启用开关（切换即生效，无需保存）
-        _, ctrl = self._make_row(body, row, "启用")
-        row += 1
-        self.world_pack_enable_var = tk.BooleanVar(value=False)
-        self.world_pack_switch = ctk.CTkSwitch(
-            ctrl, text="", variable=self.world_pack_enable_var,
-            width=44, height=22, command=self._on_world_pack_switch,
-            progress_color=SETTINGS_SWITCH_PROGRESS, fg_color=SETTINGS_SWITCH_TRACK,
-            button_color=SETTINGS_SWITCH_KNOB, button_hover_color=SETTINGS_SWITCH_KNOB
-        )
-        self.world_pack_switch.pack(side='left')
-
-        self._refresh_world_pack_ui()
+    def _goto_scenario_editor(self, scenario_id):
+        """深跳到副本编辑页并载入指定方案（世界包锁定时行按钮不可用）。"""
+        self._goto_page("dungeon")
+        editor = getattr(self.gui_ref, "scenario_editor", None) if self.gui_ref else None
+        if editor is not None and scenario_id:
+            editor._load_scenario(scenario_id)
 
     # ───────────────── 资源键即时落盘 ─────────────────
     def _persist_resource_keys(self):
@@ -385,92 +557,7 @@ class ResourceHubPanel(ctk.CTkFrame):
         })
         self.settings_repo.save_resource_keys(self.settings)
 
-    # ───────────────── 世界包操作 ─────────────────
-    def _refresh_world_pack_ui(self):
-        """刷新世界包块：未启用时显示 optionmenu+新建键，已启用时显示启用标签+删除键。"""
-        if self.world_manager is None:
-            self.world_pack_label.configure(
-                text="世界包（不可用）", text_color=SETTINGS_TEXT_SOFT)
-            self.world_pack_menu.configure(state="disabled")
-            self.world_pack_new_btn.configure(state="disabled")
-            self.world_pack_dissolve_btn.configure(state="disabled")
-            self.world_pack_switch.configure(state="disabled")
-            self._show_pack_row(False)
-            self.world_pack_var.set("")
-            self._set_table_menus_locked()
-            return
-
-        self.world_pack_menu.configure(state="normal")
-        self.world_pack_new_btn.configure(state="normal")
-        self.world_pack_dissolve_btn.configure(state="normal")
-        self.world_pack_switch.configure(state="normal")
-
-        names = []
-        for p in self.world_manager.list_packs():
-            if not p.get("error"):
-                names.append(p["name"])
-        current = self.world_pack_var.get()
-        self.world_pack_menu.configure(values=names)
-        if current not in names:
-            self.world_pack_var.set(names[0] if names else "")
-
-        active = self.world_state is not None and self.world_state.active
-        if active:
-            self.world_pack_label.configure(text="世界包", text_color=SETTINGS_LABEL)
-            self.world_pack_active_label.configure(
-                text=f"已启用：{self.world_state.pack_name}")
-            self._show_pack_row(True)
-            self.world_pack_var.set(self.world_state.pack_name)
-            self.world_pack_enable_var.set(True)
-        else:
-            self.world_pack_label.configure(text="世界包", text_color=SETTINGS_LABEL)
-            self.world_pack_active_label.configure(text="已启用：")
-            self._show_pack_row(False)
-            self.world_pack_enable_var.set(False)
-        self._set_table_menus_locked()
-
-    def _show_pack_row(self, active):
-        """在“optionmenu+新建键”与“启用标签+删除键”两种布局间切换。"""
-        if active:
-            self.world_pack_idle_frame.pack_forget()
-            self.world_pack_active_frame.pack(side='left')
-        else:
-            self.world_pack_active_frame.pack_forget()
-            self.world_pack_idle_frame.pack(side='left')
-
-    def _on_world_pack_changed(self, choice):
-        """仅记录 optionmenu 选择，启用/停用由“启用”开关即时触发。"""
-        pass
-
-    def _on_world_pack_switch(self):
-        """启用开关即时生效：开=激活所选包，关=卸载当前包（与挂件模式调查系统一致）。"""
-        if self.world_manager is None:
-            self.world_pack_enable_var.set(False)
-            return
-        if self.world_pack_enable_var.get():
-            target = None
-            for p in self.world_manager.list_packs():
-                if p["name"] == self.world_pack_var.get() and not p.get("error"):
-                    target = p
-                    break
-            if target is None:
-                self.world_pack_enable_var.set(False)
-                ui.ctk.dialogs.showwarning("提示", "没有可加载的世界包，请先创建")
-                return
-            try:
-                self.world_manager.activate(
-                    target["world_id"], self.settings, self.settings_repo)
-            except ValueError as e:
-                self.world_pack_enable_var.set(False)
-                ui.ctk.dialogs.showerror("错误", str(e))
-                return
-            self._after_world_state_change()
-        else:
-            if self.world_state is None or not self.world_state.active:
-                return
-            self.world_manager.deactivate(self.settings, self.settings_repo)
-            self._after_world_state_change()
-
+    # ───────────────── 世界包资源枚举（创建对话框用） ─────────────────
     def _build_available_resources(self) -> Dict[str, list]:
         """返回各资源类型可选打包的具体条目（供创建对话框的选择控件使用）。
 
@@ -567,44 +654,37 @@ class ResourceHubPanel(ctk.CTkFrame):
 
     def _sync_table_vars(self):
         """激活/卸载/解散后，按 self.settings 回读静态表选择。"""
-        name_tables = self.name_repo.get_tables()
-        name_table = self.settings.get("name_table", DEFAULT_NAME_TABLE)
-        if name_table not in name_tables:
-            name_tables.insert(0, name_table)
-        self.name_table = name_table
-        self.name_table_var.set(name_table)
+        name_tables = self._pinned_front(self.name_repo.get_tables(),
+                                         self.settings.get("name_table", DEFAULT_NAME_TABLE))
+        self.name_table = name_tables[0]
+        self.name_table_var.set(self.name_table)
         self.name_table_menu.configure(values=name_tables)
 
         news_table = self.settings.get("news_table", DEFAULT_NEWS_TABLE)
         news_service = NewsService(news_table=news_table,
                                    world_state=self.world_state)
-        news_tables = news_service.get_tables()
-        if news_table not in news_tables:
-            news_tables.insert(0, news_table)
+        news_tables = self._pinned_front(news_service.get_tables(), news_table)
         if not news_tables:
             news_tables = [DEFAULT_NEWS_TABLE]
-        self.news_table = news_table
-        self.news_table_var.set(news_table)
+        self.news_table = news_tables[0]
+        self.news_table_var.set(self.news_table)
         self.news_table_menu.configure(values=news_tables)
 
         preset_table = self.settings.get("preset_table", "default")
-        preset_tables = self.preset_repo.get_tables()
-        if preset_table not in preset_tables:
-            preset_tables.insert(0, preset_table)
+        preset_tables = self._pinned_front(self.preset_repo.get_tables(), preset_table)
         if not preset_tables:
             preset_tables = ["default"]
-        self.preset_table = preset_table
-        self.preset_table_var.set(preset_table)
+        self.preset_table = preset_tables[0]
+        self.preset_table_var.set(self.preset_table)
         self.preset_table_menu.configure(values=preset_tables)
 
         personality_table = self.settings.get("personality_table", "default")
-        personality_tables = self.personality_repo.get_tables()
-        if personality_table not in personality_tables:
-            personality_tables.insert(0, personality_table)
+        personality_tables = self._pinned_front(
+            self.personality_repo.get_tables(), personality_table)
         if not personality_tables:
             personality_tables = ["default"]
-        self.personality_table = personality_table
-        self.personality_table_var.set(personality_table)
+        self.personality_table = personality_tables[0]
+        self.personality_table_var.set(self.personality_table)
         self.personality_table_menu.configure(values=personality_tables)
 
     def _after_world_state_change(self):
@@ -624,12 +704,12 @@ class ResourceHubPanel(ctk.CTkFrame):
                     getattr(self.gui_ref, method)(arg)
             if hasattr(self.gui_ref, "refresh_world_ui"):
                 self.gui_ref.refresh_world_ui()
-        self._refresh_world_pack_ui()
+        self._refresh_local_sections()
 
     def on_world_state_changed(self):
         """世界包状态变化后的本页刷新（由 gui_ref.refresh_world_ui 调度）。"""
         self._sync_table_vars()
-        self._refresh_world_pack_ui()
+        self._refresh_local_sections()
 
     def _create_world_pack(self):
         if self.world_manager is None:
@@ -677,7 +757,7 @@ class ResourceHubPanel(ctk.CTkFrame):
     def _on_pack_created(self, manifest):
         ui.ctk.dialogs.showinfo(
             "成功", f"世界包「{manifest.name}」已创建\nworld_id: {manifest.world_id}")
-        self._refresh_world_pack_ui()
+        self._refresh_world_rows()
 
     def _dissolve_world_pack(self):
         if self.world_manager is None:
@@ -749,23 +829,26 @@ class ResourceHubPanel(ctk.CTkFrame):
 
     def _sync_landmark_styles(self, filter_world=None):
         styles = self.landmark_repo.get_styles()
-        display_items = []
-        kept = []
+        selected = set(self.selected_styles)
+        entries = []
         for style in styles:
             reg_world = world_of(self.landmark_repo.load_style_address(style))
             if filter_world and reg_world and reg_world != filter_world:
                 continue  # 同一维度自动筛选：隐藏其它维度的地标风格
             landmarks = self.landmark_repo.load(style)
-            display_items.append(f"{style} ({len(landmarks)})")
-            kept.append(style)
-        selected_indices = [i for i, s in enumerate(kept) if s in self.selected_styles]
+            entries.append((f"{style} ({len(landmarks)})", style,
+                            style in selected))
+        # 启用（已选）风格排在最前，其余保持原顺序
+        entries.sort(key=lambda e: not e[2])
+        display_items = [e[0] for e in entries]
+        selected_indices = [i for i, e in enumerate(entries) if e[2]]
         self.landmark_selector.sync_items(display_items, selected_indices)
 
     def _sync_quip_styles(self, filter_world=None):
         styles = self.quip_repo.get_styles()
         size_order = ["small", "medium", "large", "huge", "colossal"]
-        display_items = []
-        kept = []
+        selected = set(self.selected_quip_styles)
+        entries = []
         for style in styles:
             reg_world = world_of(self.quip_repo.load_style_address(style))
             if filter_world and reg_world and reg_world != filter_world:
@@ -776,9 +859,12 @@ class ResourceHubPanel(ctk.CTkFrame):
                 matrix = quips.get(size, {})
                 total = sum(len(qlist) for qlist in matrix.values())
                 counts.append(str(total))
-            display_items.append(f"{style} ({', '.join(counts)})")
-            kept.append(style)
-        selected_indices = [i for i, s in enumerate(kept) if s in self.selected_quip_styles]
+            entries.append((f"{style} ({', '.join(counts)})", style,
+                            style in selected))
+        # 启用（已选）风格排在最前，其余保持原顺序
+        entries.sort(key=lambda e: not e[2])
+        display_items = [e[0] for e in entries]
+        selected_indices = [i for i, e in enumerate(entries) if e[2]]
         self.quip_selector.sync_items(display_items, selected_indices)
 
     def _lock_world_from_selection(self) -> Optional[str]:
@@ -859,16 +945,20 @@ class ResourceHubPanel(ctk.CTkFrame):
         self.quip_selector.apply_theme(actual_mode)
 
     def scroll_to_style_section(self):
-        """外部深跳：切到风格素材视图并滚动到地标风格组。"""
-        self._show_view("styles")
+        """外部深跳：切到本地资源视图并滚动到风格组分区。"""
+        self._show_view("local")
         self.update_idletasks()
-        canvas = getattr(self.styles_view, '_parent_canvas', None)
-        frame = getattr(self.styles_view, '_parent_frame', None)
+        canvas = getattr(self.local_view, '_parent_canvas', None)
+        frame = getattr(self.local_view, '_parent_frame', None)
         if canvas is None or frame is None:
             return
-        total_height = frame.winfo_reqheight()
-        if total_height <= 0:
-            return
-        y = self.landmark_selector.border.winfo_y()
-        fraction = max(0.0, min(1.0, (y - 10) / total_height))
-        canvas.yview_moveto(fraction)
+        try:
+            total_height = frame.winfo_reqheight()
+            if total_height <= 0:
+                return
+            y = (self.landmark_selector.winfo_rooty()
+                 - self.local_view.winfo_rooty())
+            fraction = max(0.0, min(1.0, y / total_height))
+            canvas.yview_moveto(fraction)
+        except Exception:
+            pass
