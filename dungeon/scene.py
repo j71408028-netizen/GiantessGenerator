@@ -1,30 +1,31 @@
-"""副本内的地点与参照物：章节地址的声明与候选池组装。
+"""副本内的地点与参照物：章节地点声明与候选池组装。
 
 副本里没有移动与寻路，章节发生在哪儿由作者写死，所以地址只承担声明职责：
-展示地点、筛出「这一带」的全局地标做尺寸换算、结局传送（写回位置）。
+展示地点、结局传送（写回位置）。尺寸换算的候选池（见
+``docs/designs/dungeon_scene.md`` §4）两类地标两条路：
 
-候选池规则（见 ``docs/designs/dungeon_scene.md`` §4）：
-
-- 章节没写地址、也没取清单 → ``merged_landmarks`` 全量（改动前的行为）；
-- 写了地址 → 只保留 ``relate(章节地址, 地标地址).pairable()`` 的全局地标；
-- 取了清单 → 清单优先，写了地址时与地址相配的全局地标取并集（同名以清单为准）。
+- 独特地标由章节内联配置（``scene_landmarks``，编辑器像敏感效果一样逐行添加）；
+  「同时在场」的对比触发见 ``dungeon/prompts.py``；
+- 常见地标走私有名过滤：章节 ``common_private_name`` 非空时，全局池里完整地址
+  带同一私有名的常见地标进池；留空 = 不使用常见地标。
 
 本模块是纯逻辑，只依赖 ``core`` 与同层 ``dungeon.schema``，不碰 UI / services。
 """
 
-from core.address_model import format_addr_compact, parse_full, relate
+from core.address_model import format_addr_compact, parse_full
 from core.models import Landmark
 
 from . import schema
 
 __all__ = [
-    "build_landmarks", "chapter_place", "chapter_address", "exit_address",
-    "ambient_landmarks", "landmarks_for_chapter", "place_label", "landing_position",
+    "chapter_place", "chapter_address", "chapter_scene_landmarks",
+    "common_private_name", "exit_address", "ambient_landmarks",
+    "landmarks_for_chapter", "place_label", "landing_position",
 ]
 
 
-def _coerce_landmark(item: dict):
-    """把清单里的一条归一成 ``Landmark``；写坏（校验器会报 error）时返回 None。"""
+def _coerce_unique_landmark(item: dict):
+    """把一条独特地标归一成 ``Landmark``；写坏（校验器会报 error）时返回 None。"""
     name = item.get("name") or ""
     if not name:
         return None
@@ -34,9 +35,6 @@ def _coerce_landmark(item: dict):
     dimension = item.get("dimension") or schema.DEFAULT_SCENE_LANDMARK_DIMENSION
     if dimension not in schema.SCENE_LANDMARK_DIMENSIONS:
         return None
-    frequency = item.get("frequency") or schema.DEFAULT_SCENE_LANDMARK_FREQUENCY
-    if frequency not in schema.SCENE_LANDMARK_FREQUENCIES:
-        frequency = schema.DEFAULT_SCENE_LANDMARK_FREQUENCY
     horizontal_type = None
     if dimension == "horizontal":
         horizontal_type = (item.get("horizontal_type")
@@ -44,16 +42,16 @@ def _coerce_landmark(item: dict):
         if horizontal_type not in schema.SCENE_LANDMARK_HORIZONTAL_TYPES:
             horizontal_type = schema.DEFAULT_SCENE_LANDMARK_HORIZONTAL_TYPE
     return Landmark(name=name, size=float(size), dimension=dimension,
-                    frequency=frequency, horizontal_type=horizontal_type)
+                    frequency="unique", horizontal_type=horizontal_type)
 
 
-def build_landmarks(config) -> list:
-    """方案自带的场景地标清单 → ``Landmark`` 列表（重名取第一条）。"""
-    raw = config.get("scene_landmarks") if isinstance(config, dict) else None
+def chapter_scene_landmarks(chapter) -> list:
+    """章节自带的独特地标（``scene_landmarks``）→ ``Landmark`` 列表（重名取第一条）。"""
+    raw = (chapter or {}).get("scene_landmarks")
     landmarks = []
     seen = set()
     for item in schema.normalize_scene_landmarks(raw):
-        landmark = _coerce_landmark(item)
+        landmark = _coerce_unique_landmark(item)
         if landmark is None or landmark.name in seen:
             continue
         seen.add(landmark.name)
@@ -69,6 +67,11 @@ def chapter_place(chapter) -> str:
 def chapter_address(chapter) -> str:
     """章节的取景地址（完整地址文本）；空串表示没写。"""
     return str((chapter or {}).get("address") or "").strip()
+
+
+def common_private_name(chapter) -> str:
+    """常见地标的过滤私有名；空串 = 不使用常见地标。"""
+    return str((chapter or {}).get("common_private_name") or "").strip()
 
 
 def exit_address(chapter) -> str:
@@ -97,63 +100,47 @@ def landing_position(text) -> str:
     return text if parse_full(text) is not None else ""
 
 
-def ambient_landmarks(merged, address) -> list:
-    """从全局地标里筛出与 ``address`` 相配的那一批。
+def ambient_landmarks(merged, private_name) -> list:
+    """私有名与章节声明一致的常见地标。
 
-    判据只有地址自身的空间关系（同址 / 包含 / 被包含，且私有名互相满足），
-    不做米数阈值；没写地址或地址解析不了时不返回任何候选。
+    数据通道是私有名，不是地址相配：地标完整地址的约束段（``@名字!``）与
+    章节声明的 ``common_private_name`` 相同才进池。没写私有名时不返回任何
+    候选——空就是"不使用常见地标"。独特地标不参与这一路（它们由章节内联
+    配置）；显式 ``portable`` 的地标不参与。
     """
-    address = (address or "").strip()
-    if not address:
+    private_name = (private_name or "").strip()
+    if not private_name:
         return []
     matched = []
     for landmark in merged or []:
+        if str(getattr(landmark, "frequency", "") or "") != "common":
+            continue
         landmark_address = str(getattr(landmark, "address", "") or "").strip()
         if not landmark_address:
             continue
-        # portable 明确声明不参与地址规则，写了地址也不例外
         if str(getattr(landmark, "address_mode", "") or "").strip().lower() == "portable":
             continue
-        if relate(address, landmark_address).pairable():
+        addr = parse_full(landmark_address)
+        if addr is not None and addr.chunk == private_name:
             matched.append(landmark)
     return matched
 
 
-def _chapter_selection(scene: list, chapter) -> list:
-    """按章节 ``landmarks`` 白名单取清单条目；``None`` = 整份清单，``[]`` = 不用。"""
-    names = (chapter or {}).get("landmarks")
-    if names is None:
-        return list(scene)
-    picked = []
-    by_name = {landmark.name: landmark for landmark in scene}
-    for name in names or []:
-        landmark = by_name.get(str(name).strip())
-        if landmark is not None and landmark not in picked:
-            picked.append(landmark)
-    return picked
+def landmarks_for_chapter(chapter, merged) -> list:
+    """本章的尺寸换算候选池：章节独特地标 ∪ 私有名过滤的常见地标。
 
+    - 章节没配独特地标、也没填私有名 → 空池（不产生换算句，也不回落全量）；
+    - 只配独特地标 → 只有内联清单；
+    - 只填私有名 → 只有私有名一致的常见地标；
+    - 两者都配 → 并集，同名以章节独特地标为准。
 
-def landmarks_for_chapter(config, chapter, merged) -> list:
-    """本章的尺寸换算候选池：清单 ∪ 与章节地址相配的全局地标。
-
-    四种组合（见 ``docs/designs/dungeon_scene.md`` §4）：
-
-    - 无地址、无清单 → ``merged`` 全量（改动前的行为）；
-    - 无地址、有清单 → 只有清单；
-    - 有地址、无清单 → 只有地址相配的全局地标；
-    - 有地址、有清单 → 并集，同名以清单为准。
-
-    章节 ``landmarks`` 为 ``None`` 时取整份清单，为 ``[]`` 时本章不用清单——
-    后者**不是**"回落到全量"，限定范围才是作者的意图。
+    旧版地址相配与方案级清单已退役：章节 ``landmarks`` 白名单与方案级
+    ``scene_landmarks`` 被忽略（校验器报 warning）。
     """
-    scene = build_landmarks(config)
-    address = chapter_address(chapter)
-    if not scene and not address:
-        return list(merged or [])
-    selected = _chapter_selection(scene, chapter) if scene else []
-    if not address:
-        return selected
-    names = {landmark.name for landmark in selected}
-    selected.extend(landmark for landmark in ambient_landmarks(merged, address)
-                    if landmark.name not in names)
-    return selected
+    uniques = chapter_scene_landmarks(chapter)
+    private_name = common_private_name(chapter)
+    if not private_name:
+        return uniques
+    names = {landmark.name for landmark in uniques}
+    return uniques + [landmark for landmark in ambient_landmarks(merged, private_name)
+                      if landmark.name not in names]

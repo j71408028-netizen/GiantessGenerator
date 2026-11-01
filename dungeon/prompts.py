@@ -122,6 +122,11 @@ class DungeonPromptBuilder:
                     context_parts.append("人们注意到了她的身体尺寸：" + match)
                 else:
                     context_parts.append("她注意到了自己的身体尺寸：" + match)
+        # 独特地标的另一条触发途径：她与被点名的地标"同时在场"时给出对比
+        # （判定是内部的，见 _copresent_unique_line；措辞不出现"同时在场"）
+        presence = self._copresent_unique_line()
+        if presence:
+            context_parts.append(presence)
         quip = self._get_nearest_quip_no_consume()
         if quip:
             context_parts.append(f"她的态度类似：{quip}")
@@ -222,6 +227,64 @@ class DungeonPromptBuilder:
         if callable(getter):
             return getter()
         return getattr(self.context, "merged_landmarks", None) or []
+
+    def _copresent_unique_line(self) -> str:
+        """她与独特地标"同时在场"时的身高对比行；不满足判据返回空串。
+
+        判据是内部原则，不是提示词措辞：最近一或两个显示段落内，她的名字
+        （或"她"）与独特地标的名字同段出现，或分处相邻两段。独特地标只经
+        章节 ``landmarks`` 白名单进池（见 ``dungeon.scene``），被点名即视为
+        本章可能在场；正文提到才触发对比。比例超出 ``get_comparisons`` 的
+        可比范围、或上一轮刚提示过同一地标时不重复。
+
+        身体部位提及（``_detect_prompted_parts``）是独特地标对比的另一条
+        触发途径，与此并行。
+        """
+        session = self.context
+        blocked = self._blocked_words()
+        uniques = [lm for lm in self._landmark_pool()
+                   if str(getattr(lm, "frequency", "") or "") == "unique"
+                   and not contains_blocked_word(lm.name, blocked)]
+        if not uniques:
+            return ""
+        paragraphs = [str(item.get("text") or "")
+                      for item in (getattr(session, "story_history", None) or [])
+                      if str(item.get("text") or "").strip()][-2:]
+        if not paragraphs:
+            return ""
+        names = [n.strip() for n in (getattr(session, "name", "") or "",
+                                     getattr(session, "nick", "") or "")
+                 if (n or "").strip()]
+        her_re = re.compile("|".join([re.escape(n) for n in names] + [r"她(?!们)"]))
+        present = None
+        for landmark in uniques:
+            lm_re = re.compile(re.escape(landmark.name))
+            hers = [bool(her_re.search(text)) for text in paragraphs]
+            theirs = [bool(lm_re.search(text)) for text in paragraphs]
+            same = any(h and t for h, t in zip(hers, theirs))
+            adjacent = (len(paragraphs) == 2
+                        and ((hers[0] and theirs[1]) or (theirs[0] and hers[1])))
+            if same or adjacent:
+                present = landmark
+                break
+        if present is None or present.name == getattr(
+                session, "prompted_presence_landmark", ""):
+            return ""
+        if not session.body_parts or "身高" not in session.body_parts:
+            return ""
+        comparisons = get_comparisons(
+            [present], {"身高": session.body_parts["身高"]},
+            order="match", limit=1, selected_tags=[], skip_base_prob=0.0,
+            blocked_words=blocked)
+        if not comparisons:
+            return ""
+        comp = comparisons[0]
+        landmark = comp["landmark"]
+        suffix = ("高" if landmark.dimension == "vertical"
+                  else ("长" if landmark.horizontal_type == "length" else "宽"))
+        session.prompted_presence_landmark = landmark.name
+        return (f"她的身高 {format_size(session.height)}，"
+                f"约等于{landmark.name}{suffix}度的{comp['ratio']:.2f}倍。")
 
     def _get_height_match(self):
         session = self.context

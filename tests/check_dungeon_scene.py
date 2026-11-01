@@ -1,18 +1,19 @@
-"""副本内地点与参照物自检：章节地址 → 地标候选池。
+"""副本内地点与参照物自检：章节独特地标与常见地标私有名过滤。
 
 用法：``python tests/check_dungeon_scene.py``
 输出：控制台一行 ASCII 结论 + UTF-8 报告文件路径。
 
-覆盖 P1「按章节地址构建地标候选池」这一段：
+覆盖「按章节构建地标候选池」这一段：
 
-1. 旧方案回归（无地址、无清单）与四种组合的池子；
-2. 地址过滤的粒度（二级 / 三级 / 兄弟格 / 跨二级 / 跨维度 / 私有名 / portable）；
-3. ``landmarks`` 白名单的三种写法（缺省 / 空列表 / 名字子集）；
-4. 坏地址只留清单、**不**回落全量，且校验器报 error；
-5. 会话访问器与提示词读同一个池子，按章节缓存、切章失效；
-6. 父进程把地标解析成完整地址再过载荷，副本内的地址相配才可能成立；
-7. 展示：``place`` / 紧凑地址 / 空三种形态，以及提示词的「当前地点」行；
-8. 结局传送：写回 ``position``、坏地址不动位置、未建角色时暂存。
+1. 候选池四种组合（独特地标内联 / 私有名过滤常见地标 / 并集 / 空池不回落）；
+2. 私有名过滤的判据（chunk 一致 / 无私有名 / 独特地标不经私有名进池 / portable）；
+3. 坏条目跳过（校验 error），旧字段退役 warning；
+4. 会话访问器与提示词读同一个池子，按章节缓存、切章失效；
+5. 父进程把地标解析成完整地址再过载荷（含常见地标按风格注册地址升级，
+   私有名随地址进载荷），子进程按私有名过滤才可能成立；
+6. 展示：``place`` / 紧凑地址 / 空三种形态，以及提示词的「当前地点」行；
+7. 结局传送：写回 ``position``、坏地址不动位置、未建角色时暂存；
+8. 独特地标的「同时在场」触发：同段 / 相邻两段 / 缺她 / 隔两段 / 防重复。
 
 坐标带出预算属于后续阶段，不在本文件断言。
 """
@@ -47,176 +48,165 @@ from dungeon import scene  # noqa: E402
 from dungeon.scenario_graph import build_graph  # noqa: E402
 from dungeon.validate import format_diagnostics, validate_scenario_config  # noqa: E402
 
-# 地址文本按 core.address_model 的规范格式：<规模>@<维度>-<一级>-<二级>-<三级>
-_STYLE_REG = "2e6_3e5_5e4@RW-CN1"
-_CITY = "2e6_3e5_5e4@RW-CN1-HD"          # 二级地域
-_CELL = "2e6_3e5_5e4@RW-CN1-HD-9"        # 三级地域（_CITY 之内）
-_SIBLING = "2e6_3e5_5e4@RW-CN1-HD-8"     # 兄弟格
-_OTHER_CITY = "2e6_3e5_5e4@RW-CN1-XY"    # 同维度、不同二级
-_OTHER_WORLD = "2e6_3e5_5e4@XW-CN1-HD"   # 不同维度
+# 地址文本按 core.address_model 的规范格式：<规模>@<私有名>!<维度>-<一级>-<二级>-<三级>
+_CHUNK_HD = "1e3_1e2_1e1@HD!RW-CN1-HD"
+_CELL = "1e3_1e2_1e1@RW-CN1-HD-9"         # 无私有名的完整地址
+_OTHER_CHUNK = "1e3_1e2_1e1@XY!RW-CN1-HD-3"
+_STYLE_REG = "1e3_1e2_1e1@HD!RW-CN1"      # 带私有名的风格注册地址
+_CITY = "1e3_1e2_1e1@HD!RW-CN1-HD"
 
 
-def _lm(name, size, address="", address_mode="", dimension="vertical"):
+def _lm(name, size, address="", address_mode="", dimension="vertical",
+        frequency="unique"):
     return Landmark(name=name, size=size, dimension=dimension,
-                    frequency="unique", address=address,
+                    frequency=frequency, address=address,
                     address_mode=address_mode)
+
+
+def _cm(name, size, address="", address_mode="", dimension="vertical"):
+    """常见地标：私有名过滤只收这一类。"""
+    return _lm(name, size, address, address_mode, dimension, frequency="common")
 
 
 def _names(pool):
     return [landmark.name for landmark in pool]
 
 
-# ---------------- 1. 四种组合 ----------------
+# ---------------- 1. 候选池的四种组合 ----------------
 _merged = [
-    _lm("黑塔", 468, _CELL),
-    _lm("断门", 120, _SIBLING),
-    _lm("跨城桥", 900, _OTHER_CITY),
-    _lm("别界塔", 700, _OTHER_WORLD),
-    _lm("无主塔", 300),                       # 没地址：不参与相配
-    _lm("便携塔", 50, _CELL, address_mode="portable"),
+    _cm("高楼", 60, _CHUNK_HD),
+    _cm("路灯", 8, _OTHER_CHUNK),
+    _cm("裸楼", 20, _CELL),                    # 地址没带私有名（chunk 为空）
+    _cm("无主楼", 30),                         # 没地址
+    _cm("便携楼", 50, _CHUNK_HD, address_mode="portable"),
+    _lm("黑塔", 468, _CHUNK_HD),               # 独特：私有名通道也进不来
 ]
-_config = {"scene_landmarks": [
+_chapter_landmarks = [
+    {"name": "黑塔", "size": 500},
     {"name": "护城河", "size": 40, "dimension": "horizontal",
      "horizontal_type": "length"},
-    {"name": "黑塔", "size": 500},           # 与全局池同名：清单优先
-]}
+]
 
-check("无地址、无清单：候选池 = merged_landmarks 全量",
-      _names(scene.landmarks_for_chapter({}, {}, _merged)) == _names(_merged))
-check("无地址、有清单：只有清单",
-      _names(scene.landmarks_for_chapter(_config, {}, _merged)) == ["护城河", "黑塔"])
-check("有地址、无清单：只有地址相配的全局地标",
-      _names(scene.landmarks_for_chapter({}, {"address": _CITY}, _merged))
-      == ["黑塔", "断门"])
-check("有地址、有清单：并集，同名以清单为准",
-      _names(scene.landmarks_for_chapter(_config, {"address": _CITY}, _merged))
-      == ["护城河", "黑塔", "断门"])
-check("清单优先：同名地标的尺寸取清单里的",
-      [lm.size for lm in scene.landmarks_for_chapter(
-          _config, {"address": _CITY}, _merged) if lm.name == "黑塔"] == [500.0])
-
-# ---------------- 2. 地址过滤的粒度 ----------------
-def _pool_at(address):
-    return _names(scene.ambient_landmarks(_merged, address))
-
-
-check("二级地址含其下三级地标", "黑塔" in _pool_at(_CITY))
-check("三级地址不含兄弟格", "黑塔" in _pool_at(_CELL) and "断门" not in _pool_at(_CELL))
-check("同维度、不同二级地域不进池", "跨城桥" not in _pool_at(_CITY))
-check("跨维度不进池", "别界塔" not in _pool_at(_CITY))
-check("没地址的地标不参与相配", "无主塔" not in _pool_at(_CITY))
-check("portable 地标不参与相配", "便携塔" not in _pool_at(_CELL))
-check("维度级地址覆盖整个世界（无私有名时）",
-      "跨城桥" in _pool_at(_STYLE_REG))
-
-# 私有名必须互相满足：只写 @*! 不算
-_private_any = "1e3_1e2_1e1@*!RW-CN1-HD"
-_chunked = "1e3_1e2_1e1@HD!RW-CN1-HD"
-check("章节地址声明了私有名时与无私有名的地标不配对（约束是双向的）",
-      scene.ambient_landmarks(_merged, _chunked) == [])
-_same_chunk_lm = [_lm("私名塔", 400, "1e3_1e2_1e1@HD!RW-CN1-HD")]
-check("章节地址只写 @*! 时不能满足地标声明的私有名",
-      scene.ambient_landmarks(_same_chunk_lm, _private_any) == [])
-check("双方私有名一致时配对",
-      _names(scene.ambient_landmarks(_same_chunk_lm, _chunked)) == ["私名塔"])
-
-# ---------------- 3. 白名单 ----------------
-check("landmarks 缺省 = 整份清单",
-      _names(scene.landmarks_for_chapter(_config, {"address": _CITY}, []))
-      == ["护城河", "黑塔"])
-check("landmarks = [] = 本章不用清单（有地址时只剩全局池）",
+check("空配置：候选池为空，不回落全量",
+      scene.landmarks_for_chapter({}, _merged) == [])
+check("只配独特地标：只有内联清单",
+      _names(scene.landmarks_for_chapter({"scene_landmarks": _chapter_landmarks},
+                                         _merged)) == ["黑塔", "护城河"])
+check("只填私有名：只有私有名一致的常见地标",
+      _names(scene.landmarks_for_chapter({"common_private_name": "HD"}, _merged))
+      == ["高楼"])
+check("两者都配：并集，同名以独特地标为准",
       _names(scene.landmarks_for_chapter(
-          _config, {"address": _CITY, "landmarks": []}, _merged))
-      == ["黑塔", "断门"])
-check("landmarks = [] 且无地址：池子为空，不回落到全量",
-      scene.landmarks_for_chapter(_config, {"landmarks": []}, _merged) == [])
-check("landmarks 名字子集只取被点名的",
-      _names(scene.landmarks_for_chapter(
-          _config, {"landmarks": ["护城河"]}, _merged)) == ["护城河"])
-check("白名单里的陌生名字被忽略（校验器负责报错）",
-      _names(scene.landmarks_for_chapter(
-          _config, {"landmarks": ["不存在"]}, [])) == [])
+          {"scene_landmarks": [{"name": "高楼", "size": 999}],
+           "common_private_name": "HD"}, _merged)) == ["高楼"])
 
-# ---------------- 4. 坏地址 ----------------
-_bad_address = {"address": "乱写", "landmarks": None}
-check("坏地址：只留清单，不回落全量",
-      _names(scene.landmarks_for_chapter(_config, _bad_address, _merged))
-      == ["护城河", "黑塔"])
-check("坏地址 + 无清单：池子为空（宁可没有参照物也不放大范围）",
-      scene.landmarks_for_chapter({}, _bad_address, _merged) == [])
+# ---------------- 2. 私有名过滤的判据 ----------------
+def _pool_at(private_name):
+    return _names(scene.ambient_landmarks(_merged, private_name))
 
+
+check("私有名一致才进池", _pool_at("HD") == ["高楼"])
+check("其它私有名对应各自的常见地标", _pool_at("XY") == ["路灯"])
+check("没填私有名 = 不使用常见地标", _pool_at("") == [] and _pool_at(None) == [])
+check("没有这个私有名就是空池", _pool_at("没有") == [])
+check("地址没带私有名的地标不进池", "裸楼" not in _pool_at("HD"))
+check("没地址的常见地标不进池", "无主楼" not in _pool_at("HD"))
+check("portable 常见地标不进池", "便携楼" not in _pool_at("HD"))
+check("独特地标不经私有名通道进池", "黑塔" not in _pool_at("HD"))
+
+# 章节独特地标：坏条目跳过、重名取第一条、横向类型回落默认
+_mixed = scene.chapter_scene_landmarks({"scene_landmarks": [
+    {"name": "黑塔", "size": 468},
+    {"name": "黑塔", "size": 10, "dimension": "斜向"},     # 写坏 + 重名：跳过
+    {"name": "坏\n名字", "size": 1},                        # 写坏：跳过
+    {"name": "护城河", "size": 40, "dimension": "horizontal",
+     "horizontal_type": "深度"},                            # 类型非法：回落 length
+    "不是对象",
+]})
+check("独特地标：重名与非法维度跳过，其余照常（换行名留给校验器拦截）",
+      _names(_mixed) == ["黑塔", "坏\n名字", "护城河"], _names(_mixed))
+check("独特地标：横向类型非法回落 length",
+      _mixed[2].horizontal_type == "length", _mixed[2])
+
+# ---------------- 3. 校验诊断 ----------------
 _bad_config = {
-    "scene_landmarks": [
-        {"name": "黑塔", "size": 0},
-        {"name": "黑塔", "size": 10, "dimension": "斜向"},
-        {"name": "坏\n名字", "size": 1},
-        {"name": "护城河", "size": 40, "dimension": "horizontal",
-         "frequency": "rare", "horizontal_type": "深度"},
-    ],
-    "entry_address": _CITY,
+    "scene_landmarks": [{"name": "方案级旧清单", "size": 1}],
     "chapters": [
         {"name": "一", "start": True, "address": "乱写",
-         "landmarks": ["黑塔", "不存在"]},
-        {"name": "二", "ending": True, "address": _OTHER_WORLD},
+         "landmarks": ["旧白名单"],
+         "scene_landmarks": [
+             {"name": "黑塔", "size": 0},
+             {"name": "黑塔", "size": 10, "dimension": "斜向"},
+             {"name": "坏\n名字", "size": 1},
+             {"name": "石塔", "size": 30},
+         ],
+         "common_private_name": "非法!名"},
+        {"name": "二", "ending": True,
+         "scene_landmarks": [{"name": f"塔{i}", "size": 10} for i in range(6)]
+         + [{"name": "长桥", "size": 50, "dimension": "horizontal",
+             "horizontal_type": "深度"}]},
     ],
 }
-_bad_diags = validate_scenario_config(_bad_config)
+_diags = validate_scenario_config(_bad_config)
 
 
 def _has(level, path, message_part=""):
-    return any(d.level == level and d.path == path
-               and message_part in d.message for d in _bad_diags)
+    return any(d.level == level and d.path == path and message_part in d.message
+               for d in _diags)
 
 
-check("诊断：尺寸非正 error", _has("error", "scene_landmarks[0].size"),
-      format_diagnostics(_bad_diags))
-check("诊断：维度非法 error", _has("error", "scene_landmarks[1].dimension"),
-      format_diagnostics(_bad_diags))
-check("诊断：清单内重名 error", _has("error", "scene_landmarks[1].name", "重名"))
-check("诊断：名字含换行 error", _has("error", "scene_landmarks[2].name", "换行"))
-check("诊断：频率非法 warning",
-      _has("warning", "scene_landmarks[3].frequency"), format_diagnostics(_bad_diags))
+check("诊断：尺寸非正 error", _has("error", "chapters[0].scene_landmarks[0].size"),
+      format_diagnostics(_diags))
+check("诊断：维度非法 error", _has("error", "chapters[0].scene_landmarks[1].dimension"))
+check("诊断：本章重名 error",
+      _has("error", "chapters[0].scene_landmarks[1].name", "重名"))
+check("诊断：名字含换行 error", _has("error", "chapters[0].scene_landmarks[2].name", "换行"))
 check("诊断：横向类型非法 warning",
-      _has("warning", "scene_landmarks[3].horizontal_type"))
+      _has("warning", "chapters[1].scene_landmarks[6].horizontal_type"))
+check("诊断：只有一种维度 warning",
+      _has("warning", "chapters[0].scene_landmarks", "只有竖向"))
+check("诊断：私有名非法 warning",
+      _has("warning", "chapters[0].common_private_name", "非法字符"))
+check("诊断：独特地标超过 5 条 warning",
+      _has("warning", "chapters[1].scene_landmarks", "超过 5 条"))
+check("诊断：章节 landmarks 白名单已退役 warning",
+      _has("warning", "chapters[0].landmarks", "退役"))
+check("诊断：方案级 scene_landmarks 已退役 warning",
+      _has("warning", "scene_landmarks", "退役"))
 check("诊断：章节地址无法解析 error", _has("error", "chapters[0].address"))
-check("诊断：白名单引用不存在的地标 error", _has("error", "chapters[0].landmarks"))
-check("诊断：取景地址与入口不在同一维度 warning",
-      _has("warning", "chapters[1].address", "维度"))
 
-_clean_scene_config = {
-    "scene_landmarks": [
-        {"name": "黑塔", "size": 468},
-        {"name": "护城河", "size": 40, "dimension": "horizontal"},
-    ],
-    "entry_address": _CITY,
+_clean_config = {
     "chapters": [
         {"name": "一", "start": True, "place": "黑塔脚下",
-         "address": _CITY, "landmarks": ["黑塔"]},
-        {"name": "二", "ending": True, "address": _CELL,
-         "exit_address": _CELL},
+         "scene_landmarks": _chapter_landmarks,
+         "common_private_name": "HD"},
+        {"name": "二", "ending": True, "address": _CITY,
+         "exit_address": _CITY},
     ],
 }
-_clean_diags = validate_scenario_config(_clean_scene_config)
+_clean_diags = validate_scenario_config(_clean_config)
 _scene_diags = [
     d for d in _clean_diags
     if d.path == "scene_landmarks" or d.path.startswith("scene_landmarks[")
-    or d.path.endswith((".address", ".exit_address", ".landmarks"))
+    or d.path.endswith((".address", ".exit_address", ".landmarks",
+                        ".scene_landmarks", ".common_private_name"))
+    or ".scene_landmarks" in d.path
 ]
-check("干净的地址与地标配置不报 error/warning",
+check("干净的地标与私有名配置不报 error/warning",
       not [d for d in _scene_diags if d.level in ("error", "warning")],
       format_diagnostics(_scene_diags))
 
-# ---------------- 5. 影响不到推进 ----------------
-_graph_plain = build_graph({"chapters": _clean_scene_config["chapters"]})
-_graph_scene = build_graph(_clean_scene_config)
-check("改地址 / 改清单不改变关系图的节点集合",
+# ---------------- 4. 影响不到推进 ----------------
+_graph_plain = build_graph({"chapters": _clean_config["chapters"]})
+_graph_scene = build_graph(_clean_config)
+check("改地标 / 改私有名不改变关系图的节点集合",
       set(_graph_plain.nodes) == set(_graph_scene.nodes),
       (set(_graph_plain.nodes) ^ set(_graph_scene.nodes)))
-check("改地址 / 改清单不改变关系图的边",
+check("改地标 / 改私有名不改变关系图的边",
       {(e.src, e.dst, e.kind) for e in _graph_plain.edges}
       == {(e.src, e.dst, e.kind) for e in _graph_scene.edges})
 
-# ---------------- 6. 会话访问器与提示词 ----------------
+# ---------------- 5. 会话访问器与提示词 ----------------
 from dungeon.prompts import DungeonPromptBuilder  # noqa: E402
 from dungeon.window.base import DungeonWindowBase  # noqa: E402
 
@@ -224,7 +214,7 @@ from dungeon.window.base import DungeonWindowBase  # noqa: E402
 def _session(chapters, current):
     session = types.SimpleNamespace(
         chapters=chapters, current_chapter=current,
-        scenario_config={}, merged_landmarks=_merged,
+        merged_landmarks=_merged,
         _chapter_landmark_cache=None,
         body_parts={"身高": 480.0}, height=480.0,
         settings={"blocked_words": []},
@@ -235,21 +225,21 @@ def _session(chapters, current):
 
 
 _chapters = [
-    {"name": "城里", "address": _CITY},
-    {"name": "别处", "address": _OTHER_CITY},
-    {"name": "无地址"},
+    {"name": "城里", "scene_landmarks": _chapter_landmarks},
+    {"name": "别处", "common_private_name": "HD"},
+    {"name": "空的"},
 ]
 _session_mixed = _session(_chapters, "城里")
-check("访问器：当前章节有地址时只给相配的地标",
-      _names(_session_mixed.chapter_landmarks()) == ["黑塔", "断门"],
+check("访问器：只配独特地标的章节拿到内联清单",
+      _names(_session_mixed.chapter_landmarks()) == ["黑塔", "护城河"],
       _names(_session_mixed.chapter_landmarks()))
 _session_mixed.current_chapter = "别处"
 check("访问器：切章后池子随之更换",
-      _names(_session_mixed.chapter_landmarks()) == ["跨城桥"],
+      _names(_session_mixed.chapter_landmarks()) == ["高楼"],
       _names(_session_mixed.chapter_landmarks()))
-_session_mixed.current_chapter = "无地址"
-check("访问器：无地址章节回到全量",
-      _names(_session_mixed.chapter_landmarks()) == _names(_merged))
+_session_mixed.current_chapter = "空的"
+check("访问器：空配置章节池子为空",
+      _session_mixed.chapter_landmarks() == [])
 check("访问器：按章节缓存同一份池子",
       _session_mixed.chapter_landmarks()
       is _session_mixed.chapter_landmarks())
@@ -258,13 +248,12 @@ session_city = _session(_chapters, "城里")
 _text = DungeonPromptBuilder(session_city)._get_height_match()
 check("提示词：换算句取自本章的池子", "黑塔" in _text, _text)
 check("提示词：池子外的地标不会出现在换算句里",
-      "跨城桥" not in _text and "别界塔" not in _text, _text)
-_empty_pool_session = _session([{"name": "空", "address": _OTHER_CITY}], "空")
-_empty_pool_session.merged_landmarks = [_lm("只在此城", 400, _CELL)]
-check("提示词：地址过滤后没有候选就不产生换算句",
+      "高楼" not in _text and "路灯" not in _text, _text)
+_empty_pool_session = _session([{"name": "空", "common_private_name": "没有"}], "空")
+check("提示词：私有名匹配不到就不产生换算句",
       DungeonPromptBuilder(_empty_pool_session)._get_height_match() == "")
 
-# ---------------- 7. 载荷里的完整地址 ----------------
+# ---------------- 6. 载荷里的完整地址 ----------------
 from dungeon.window.launch_payload import (deserialize_launch,  # noqa: E402
                                            serialize_launch)
 from core.resource_ref import Ref  # noqa: E402
@@ -296,26 +285,30 @@ class _FakeCatalog:
 
 
 _relative = [
-    _lm("黑塔", 468, "-HD-9"),                      # 相对后缀，父进程解析
+    _lm("黑塔", 468, "-HD-9"),                      # 独特：相对后缀，父进程解析
+    _cm("均值楼", 60),                              # 常见、无显式地址：按风格注册地址参与
     _lm("便携塔", 50, _CELL, address_mode="portable"),
     _lm("谜之塔", 300, "-ZZ-1"),                    # 风格未注册，解析不出
 ]
-_catalog = _FakeCatalog(_relative, ["有注册", "有注册", "无注册"],
-                       {"有注册": _STYLE_REG})
+_catalog = _FakeCatalog(_relative, ["有注册", "有注册", "有注册", "无注册"],
+                        {"有注册": _STYLE_REG})
 _exported = AddressPlanner(_catalog).landmarks_for_export()
 check("导出：相对后缀被组合成完整地址",
-      _exported[0].address.startswith("2e6_3e5_5e4@")
+      _exported[0].address.startswith("1e3_1e2_1e1@")
       and _exported[0].address_mode == "exact", _exported[0])
 check("导出：原始地标不被改写（父进程的池子仍是相对后缀）",
       _relative[0].address == "-HD-9", _relative[0])
-check("导出：portable 地标不参与地址相配",
-      _exported[1].address == "" and _exported[1].address_mode == "portable")
-check("导出：解析失败的地标照样进载荷，只是不参与相配",
-      _exported[2].name == "谜之塔" and _exported[2].address == ""
-      and _exported[2].size == 300.0)
-check("导出后的地标能被章节地址筛出来",
-      _names(scene.ambient_landmarks(_exported, _CITY)) == ["黑塔"],
-      _names(scene.ambient_landmarks(_exported, _CITY)))
+check("导出：缺省 portable 的常见地标按风格注册地址参与（私有名随地址进载荷）",
+      _exported[1].address.startswith("1e3_1e2_1e1@HD!")
+      and _exported[1].address_mode == "exact", _exported[1])
+check("导出：portable 地标不参与私有名过滤",
+      _exported[2].address == "" and _exported[2].address_mode == "portable")
+check("导出：解析失败的地标照样进载荷，只是不参与过滤",
+      _exported[3].name == "谜之塔" and _exported[3].address == ""
+      and _exported[3].size == 300.0)
+check("导出后的地标能按私有名筛出来",
+      _names(scene.ambient_landmarks(_exported, "HD")) == ["均值楼"],
+      _names(scene.ambient_landmarks(_exported, "HD")))
 
 _payload = serialize_launch({"merged_landmarks": _exported})
 try:
@@ -329,11 +322,11 @@ check("载荷：还原成 Landmark 且地址保留",
       all(isinstance(lm, Landmark) for lm in _restored["merged_landmarks"])
       and _restored["merged_landmarks"] == _exported,
       _restored["merged_landmarks"])
-check("载荷：还原后的地址仍能配对",
-      _names(scene.ambient_landmarks(_restored["merged_landmarks"], _CITY))
-      == ["黑塔"])
+check("载荷：还原后的地址仍能按私有名过滤",
+      _names(scene.ambient_landmarks(_restored["merged_landmarks"], "HD"))
+      == ["均值楼"])
 
-# ---------------- 8. 展示：当前地点 ----------------
+# ---------------- 7. 展示：当前地点 ----------------
 from core.models import CharacterSnapshot  # noqa: E402
 from dungeon.models import DungeonState, DungeonTextType  # noqa: E402
 from dungeon.window.engine import DungeonStoryEngine  # noqa: E402
@@ -371,9 +364,10 @@ def _prompt_session(chapters, current):
         chapters=chapters, current_chapter=current,
         name="测试", nick="", coupling_level=None, protagonist_title="",
         prompted_parts=set(), keyword_match_given=set(), last_ai_text="",
+        prompted_presence_landmark="",
         option_choice=None, story_summary=None, replay_data=[], _detail_queries=None,
         pending_insertions=[], selected_quip_styles=[],
-        settings={"blocked_words": []}, scenario_config={},
+        settings={"blocked_words": []},
         merged_landmarks=[], _chapter_landmark_cache=None,
         body_parts={}, dungeon_state=DungeonState(intrusion=2.0, destruction=2.0),
     )
@@ -401,7 +395,7 @@ _bare_prompt = DungeonPromptBuilder(
 check("提示词：虚构章节不出现地点行", "当前地点" not in _bare_prompt,
       _bare_prompt[-300:])
 
-# ---------------- 9. 结局传送 ----------------
+# ---------------- 8. 结局传送 ----------------
 check("传送：合法地址原样返回", scene.landing_position(_CELL) == _CELL)
 check("传送：空 / 坏地址一律不动位置",
       scene.landing_position("") == "" and scene.landing_position("乱写") == ""
@@ -481,6 +475,67 @@ DungeonStoryEngine._terminate_from_ending_chapter(
     _no_exit, {"name": "终章", "ending": True})
 check("传送：没写 exit_address 的结束章节结算字段为空",
       _no_exit.pending_ending["action_data"]["exit_address"] == "")
+
+# ---------------- 9. 同时在场触发（独特地标对比的第二条途径） ----------------
+_TOWER_CHAPTER = {"name": "城里",
+                  "scene_landmarks": [{"name": "黑塔", "size": 468}]}
+
+
+def _presence_session(history, chapters=None, merged=None):
+    session = types.SimpleNamespace(
+        chapters=chapters if chapters is not None else [_TOWER_CHAPTER],
+        current_chapter="城里",
+        name="测试", nick="", coupling_level=None, protagonist_title="",
+        prompted_parts=set(), keyword_match_given=set(), last_ai_text="",
+        prompted_presence_landmark="",
+        option_choice=None, story_summary=None, replay_data=[], _detail_queries=None,
+        pending_insertions=[], selected_quip_styles=[],
+        settings={"blocked_words": []},
+        merged_landmarks=merged if merged is not None else [],
+        _chapter_landmark_cache=None,
+        body_parts={"身高": 480.0}, height=480.0,
+        dungeon_state=DungeonState(intrusion=2.0, destruction=2.0),
+        story_history=history,
+    )
+    session.chapter_landmarks = types.MethodType(
+        DungeonWindowBase.chapter_landmarks, session)
+    return session
+
+
+def _prompt_of(session):
+    return DungeonPromptBuilder(session).build_user_prompt(_text_type)
+
+
+_same = _presence_session([{"text": "测试抬起头，望见了黑塔的塔尖。"}])
+check("在场：同段出现她与独特地标 → 对比进提示词",
+      "约等于黑塔" in _prompt_of(_same), _prompt_of(_same)[-400:])
+_adjacent = _presence_session([{"text": "黑塔矗立在街区尽头。"},
+                               {"text": "测试沿着街道走近，她抬头仰望。"}])
+check("在场：分处相邻两段同样触发",
+      "约等于黑塔" in _prompt_of(_adjacent), _prompt_of(_adjacent)[-400:])
+_only_landmark = _presence_session([{"text": "黑塔矗立在街区尽头。"},
+                                    {"text": "黑塔的影子铺满广场。"}])
+check("在场：段落里没有她就不触发",
+      "约等于黑塔" not in _prompt_of(_only_landmark),
+      _prompt_of(_only_landmark)[-400:])
+_too_far = _presence_session([{"text": "黑塔。"}, {"text": "人群散去。"},
+                              {"text": "测试继续往前走。"}])
+check("在场：地标只在两段之前出现不触发",
+      "约等于黑塔" not in _prompt_of(_too_far), _prompt_of(_too_far)[-400:])
+_repeat = _presence_session([{"text": "测试望见了黑塔。"}])
+check("在场：首次触发给出对比", "约等于黑塔" in _prompt_of(_repeat))
+check("在场：上一轮刚提示过同一地标时不重复",
+      "约等于黑塔" not in _prompt_of(_repeat))
+_common_only = _presence_session(
+    [{"text": "测试从高楼旁走过。"}],
+    chapters=[{"name": "城里", "common_private_name": "HD"}],
+    merged=[_cm("高楼", 60, _CHUNK_HD)])
+check("在场：常见地标的名字出现在正文不触发在场对比",
+      "约等于高楼" not in _prompt_of(_common_only))
+_no_height = _presence_session([{"text": "测试望见了黑塔。"}])
+_no_height.body_parts = {}
+check("在场：没有身高数据时不产生对比行",
+      "约等于黑塔" not in _prompt_of(_no_height))
 
 # ---------------- 结论 ----------------
 _log.flush()

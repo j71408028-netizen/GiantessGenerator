@@ -167,7 +167,6 @@ _SCENARIO_FIELDS = (
     FieldSpec("entry_address_max_distance_m", "number", "进入准入最远距离", default=None),
     FieldSpec("entry_height_min_m", "number", "进入准本身高下限", default=None),
     FieldSpec("entry_height_max_m", "number", "进入准本身高上限", default=None),
-    FieldSpec("scene_landmarks", "list", "场景地标", default=()),
     FieldSpec("ending_policy", "str", "结局策略"),
     FieldSpec("section_prompts", "dict", "分段提示词", default=()),
     FieldSpec("section_steps", "dict", "分段步进", default=()),

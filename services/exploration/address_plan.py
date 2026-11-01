@@ -17,7 +17,7 @@ S3 之后地址解析本身也搬走了：``AddressIndex`` 一次性把每条地
 
 from dataclasses import replace
 
-from core.address_model import world_of
+from core.address_model import compose_address_ex, world_of
 from services.exploration.address_index import AddressIndex
 
 
@@ -76,12 +76,21 @@ class AddressPlanner:
         ``docs/designs/dungeon_scene.md`` §6）。解析不了的地标照样导出（名字与
         尺寸不变），只是标成 ``portable``——不参与副本内的地址相配。
 
+        常见地标默认不参与地址规则（``address_index.address_mode_of`` 的缺省
+        portable），副本导出改为按所属风格的注册地址参与：常见地标挂在世界下，
+        章节取景在那个世界，世界里的常见参照物就可用（见 §4 的候选池规则）。
+        显式声明过 ``address_mode`` / ``address`` 的按原样解析，缺省 portable
+        的独特地标不受影响。
+
         导出的副本本身是自足的：``address`` 已是完整地址、``address_mode`` 是
         ``exact``，即使拿它回头再问一次 ``landmark_address()`` 也得到同一结果。
         """
         exported = []
+        registers = {}
         for landmark in self.catalog.merged_landmarks:
             address = self.landmark_address(landmark)
+            if not address and self._is_default_common(landmark):
+                address = self._common_style_address(landmark, registers)
             if address:
                 exported.append(replace(landmark, address=address,
                                         address_mode="exact"))
@@ -89,6 +98,30 @@ class AddressPlanner:
                 exported.append(replace(landmark, address="",
                                         address_mode="portable"))
         return exported
+
+    @staticmethod
+    def _is_default_common(landmark) -> bool:
+        """未显式声明地址参与的常见地标（缺省 portable 的那批）。"""
+        if str(getattr(landmark, "frequency", "") or "") != "common":
+            return False
+        if (getattr(landmark, "address_mode", "") or "").strip():
+            return False
+        return not (getattr(landmark, "address", "") or "").strip()
+
+    def _common_style_address(self, landmark, registers: dict) -> str:
+        """常见地标按所属风格的注册地址解析；解不出返回空（照旧 portable）。"""
+        style = self.index.style_of(landmark)
+        if not style:
+            return ""
+        if style not in registers:
+            repo = getattr(self.catalog, "landmark_repo", None)
+            loaded = (repo.load_style_registers([style]) or {}) if repo else {}
+            registers.update(loaded)
+        style_reg = (registers.get(style) or "").strip()
+        if not style_reg:
+            return ""
+        address, _err = compose_address_ex(style_reg, "")
+        return address or ""
 
     def stuck_options(self, state, stuck: dict) -> dict:
         """无路可走时可供角色选择的目标：当前/其它维度内的地标地址，以及可切换的维度。

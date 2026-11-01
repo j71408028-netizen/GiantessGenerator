@@ -40,15 +40,13 @@ DEFAULT_TEXT_COMPONENT = "text"
 ENDING_POLICIES = ("required", "open")
 DEFAULT_ENDING_POLICY = "required"
 
-# ---------------- 场景地标（方案自带清单） ----------------
-# 章节的候选池 = 清单 ∪ 地址相配的全局地标（组装规则见 dungeon/scene.py）。
-# 清单只喂尺寸换算句，不参与章节推进。
+# ---------------- 场景地标（章节自带） ----------------
+# 章节的候选池 = 本章独特地标 ∪ 私有名过滤的常见地标（组装规则见 dungeon/scene.py）。
+# 只喂尺寸换算句，不参与章节推进。
 SCENE_LANDMARK_DIMENSIONS = ("vertical", "horizontal")
 SCENE_LANDMARK_HORIZONTAL_TYPES = ("length", "width")
-SCENE_LANDMARK_FREQUENCIES = ("unique", "common")
 DEFAULT_SCENE_LANDMARK_DIMENSION = "vertical"
 DEFAULT_SCENE_LANDMARK_HORIZONTAL_TYPE = "length"
-DEFAULT_SCENE_LANDMARK_FREQUENCY = "unique"
 
 
 def normalize_ending_policy(value, default: str = DEFAULT_ENDING_POLICY) -> str:
@@ -58,10 +56,11 @@ def normalize_ending_policy(value, default: str = DEFAULT_ENDING_POLICY) -> str:
 
 
 def normalize_scene_landmarks(raw) -> list:
-    """归一化方案自带的场景地标清单：补默认字段，跳过非对象项。
+    """归一化章节自带的独特地标清单：补默认字段，跳过非对象项。
 
-    数值与枚举的合法性留给 ``dungeon/validate.py`` 诊断——这里保留作者的
-    原始取值，不把写错的一条悄悄丢掉（否则编辑器读一轮就丢数据）。
+    条目全是独特地标（frequency 固定 unique，不入字段）。数值与枚举的合法性
+    留给 ``dungeon/validate.py`` 诊断——这里保留作者的原始取值，不把写错的
+    一条悄悄丢掉（否则编辑器读一轮就丢数据）。
     """
     if not isinstance(raw, list):
         return []
@@ -73,8 +72,6 @@ def normalize_scene_landmarks(raw) -> list:
         item["name"] = str(item.get("name") or "").strip()
         item["dimension"] = str(
             item.get("dimension") or DEFAULT_SCENE_LANDMARK_DIMENSION).strip().lower()
-        item["frequency"] = str(
-            item.get("frequency") or DEFAULT_SCENE_LANDMARK_FREQUENCY).strip().lower()
         if item["dimension"] == "horizontal":
             item["horizontal_type"] = str(
                 item.get("horizontal_type")
@@ -121,9 +118,6 @@ SCENARIO_FIELDS = (
               note="留空表示不设下限"),
     FieldSpec("entry_height_max_m", "float", "身高上限（米）", None,
               note="留空表示不设上限"),
-    FieldSpec("scene_landmarks", "list", "场景地标清单", [],
-              note="方案自带的地标，供章节取用做尺寸换算；章节写了地址时，"
-                   "地址相配的全局地标会并进来"),
     FieldSpec("ending_policy", "enum", "结局策略", DEFAULT_ENDING_POLICY,
               choices=ENDING_POLICIES,
               note="required=方案应有结局（没有则校验提示）；"
@@ -157,8 +151,10 @@ VOICE_FIELDS = (
                    "语音档位 + 语音总线锚点；旧版 0-100 的 volume 会自动折算"),
 )
 
-# 迁移前遗留、``_migrate`` 会移除的顶层键（读到即提示作者清理）
-DEPRECATED_SCENARIO_KEYS = ("custom_attrs", "custom_attrs_def", "view_mode")
+# 迁移前遗留、``_migrate`` 会移除的顶层键（读到即提示作者清理）。
+# scene_landmarks：方案级清单已退役，独特地标改在章节里内联配置
+DEPRECATED_SCENARIO_KEYS = ("custom_attrs", "custom_attrs_def", "view_mode",
+                            "scene_landmarks")
 
 # ---------------- 章节字段 ----------------
 # 与 chapters.normalize_chapter 的产出保持一致（守卫脚本校验）
@@ -172,9 +168,13 @@ CHAPTER_FIELDS = (
     FieldSpec("place", "str", "地点", "",
               note="展示名；提示词与窗口都用它，留空不显示"),
     FieldSpec("address", "str", "取景地址", "",
-              note="完整地址；用来筛「这一带」的全局地标，不参与结算"),
-    FieldSpec("landmarks", "list", "本章地标", None,
-              note="本章从方案清单里取哪几个；留空 = 全清单，[] = 本章不用清单"),
+              note="完整地址；进提示词的地点行与展示用，不参与结算"),
+    FieldSpec("scene_landmarks", "list", "本章独特地标", [],
+              note="本章在场的独特地标（名称 / 尺寸 / 维度），在场时提示词给出"
+                   "她的身高与该地标的对比；建议不超过 5 条"),
+    FieldSpec("common_private_name", "str", "常见地标私有名", "",
+              note="填私有名后，注册在该私有名世界下的常见参照物进本章候选池；"
+                   "留空 = 不使用常见地标"),
     FieldSpec("exit_address", "str", "出口地址", "",
               note="结局后角色落到的主世界地址；留空 = 位置不变"),
     FieldSpec("max_paragraphs", "int", "最大段落数", 99),
@@ -301,7 +301,6 @@ def empty_scenario_config() -> dict:
         "entry_address_max_distance_m": None,
         "entry_height_min_m": None,
         "entry_height_max_m": None,
-        "scene_landmarks": [],
         "ending_policy": DEFAULT_ENDING_POLICY,
         "section_prompts": {key: "" for key in TEXT_TYPE_KEYS},
         "evolution_attrs": [

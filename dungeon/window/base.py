@@ -486,17 +486,15 @@ class DungeonWindowBase:
     def chapter_landmarks(self) -> list:
         """本章的尺寸换算候选池（提示词与窗口共用）。
 
-        章节没写地址也没取清单时返回 ``merged_landmarks`` 全量——旧方案因此与
-        改动前逐字一致；写了地址就只留地址相配的全局地标，取清单则以清单为准
-        （组装规则见 ``dungeon/scene.py``）。按章节名缓存，切章失效。
+        章节独特地标 ∪ 私有名过滤的常见地标（组装规则见 ``dungeon/scene.py``）；
+        什么都没配就是空池——不产生换算句，也不回落全量。按章节名缓存，切章失效。
         """
         key = self.current_chapter or ""
         cached = self._chapter_landmark_cache
         if cached is not None and cached[0] == key:
             return cached[1]
         chapter = find_chapter(self.chapters, self.current_chapter)
-        pool = landmarks_for_chapter(self.scenario_config, chapter,
-                                     self.merged_landmarks)
+        pool = landmarks_for_chapter(chapter, self.merged_landmarks)
         self._chapter_landmark_cache = (key, pool)
         return pool
 
@@ -684,6 +682,9 @@ class DungeonWindowBase:
         self.noticed_parts = set()
         self.prompted_parts = set()
         self.keyword_match_given = set()
+        # 上一轮"同时在场"已提示过的独特地标（避免在场期间逐轮重复，见
+        # dungeon/prompts.py::_copresent_unique_line）
+        self.prompted_presence_landmark = ""
         self.quips_working = dict(self.merged_quips) if self.merged_quips else {}
         self.used_quips = set()
 

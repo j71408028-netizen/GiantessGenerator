@@ -46,8 +46,9 @@
 | `ending` | bool | `false` | 结束章节，见 §3.2 |
 | `note` | str | `""` | 备注；提示词里会带一行「当前章节：X（备注）」 |
 | `place` | str | `""` | 地点展示名：提示词与窗口使用，留空不显示 |
-| `address` | str | `""` | 取景地址（完整地址）：用来筛「这一带」的全局地标，不参与结算 |
-| `landmarks` | list | `null` | 本章从方案清单里取哪几个；`null` = 全清单，`[]` = 本章不用清单 |
+| `address` | str | `""` | 取景地址（完整地址）：地点行与展示用，不参与结算 |
+| `scene_landmarks` | list | `[]` | 本章在场的独特地标（名称 / 尺寸 / 维度），建议 ≤5 |
+| `common_private_name` | str | `""` | 常见地标过滤私有名；空 = 不使用常见地标 |
 | `exit_address` | str | `""` | 结局后角色落到的主世界地址；空 = 位置不变 |
 | `max_paragraphs` | int | `99` | 节内最大段落数（`chapters.DEFAULT_MAX_PARAGRAPHS`） |
 | `overflow_target` | str | `""` | 超限跳转目标；空串 = 离开章节（无章节） |
@@ -633,15 +634,17 @@ Solea / Bulla 耦合等级的对话分支会给每句台词标 `@说话人@`（�
 
 ---
 
-## 12. 场景地标清单（方案级）
+## 12. 场景地标（章节级）
 
-`scene_landmarks` 是方案自带的地标清单：字段形状、取用规则（清单 ∪ 地址相配的
-全局地标）与校验口径见 [副本内地点与参照物](../designs/dungeon_scene.md)。
+独特地标内联在章节 `scene_landmarks` 里，常见地标按章节 `common_private_name`
+过滤私有名：字段形状、候选池规则与校验口径见
+[副本内地点与参照物](../designs/dungeon_scene.md)。
 
-- 初值 `[]`（没有自带清单）；章节 `landmarks` 为 `null` 时用整份清单，
-  `[]` 表示本章不用清单；
-- 条目默认 `dimension=vertical` / `frequency=unique`，`horizontal` 时
-  `horizontal_type` 默认 `length`；
+- 两者都缺省为空：什么都没配的章节没有候选池，不产生换算句，也不回落全量；
+- 地标条目默认 `dimension=vertical`，`horizontal` 时 `horizontal_type` 默认
+  `length`；条目全部按独特地标（unique）换算；
+- 方案级 `scene_landmarks` 与章节级 `landmarks` 白名单已退役，读到即忽略
+  （校验器报 warning 提示迁移）；
 - 清单只喂尺寸换算句，不参与章节推进与结局判定。
 
 ---

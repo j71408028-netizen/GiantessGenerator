@@ -16,6 +16,7 @@
 
 import json
 import os
+import re
 from dataclasses import dataclass
 
 from dungeon import schema
@@ -756,72 +757,90 @@ def _validate_chapters(chapters_raw, effective, chapter_names, terminating,
 #: 地标名直接进提示词，过长或带换行会污染这一行的结构
 _MAX_SCENE_NAME_LEN = 40
 
+#: 私有名允许的字符（与 ``core.address_model`` 的约束段规则一致；``*`` = 不指定）
+_PRIVATE_NAME_RE = re.compile(r"^(\*|[A-Za-z0-9_]{0,64})$")
+
 
 def _validate_scene(config: dict, chapters, add) -> None:
-    """场景地标清单与章节地点字段（见 ``docs/designs/dungeon_scene.md`` §9）。
+    """章节独特地标与常见地标私有名（见 ``docs/designs/dungeon_scene.md`` §9）。
 
-    运行时对写坏的一条是「跳过 / 回落默认 / 按没写地址处理」，全部不吭声；
-    作者要能从诊断里知道哪一条没生效。地址解析失败报 error：它会让整章的
-    候选池退回「只有清单」，与作者本意（限定范围）正好相反。
+    运行时对写坏的一条是「跳过 / 回落默认 / 当没填处理」，全部不吭声；作者要能
+    从诊断里知道哪一条没生效。方案级 ``scene_landmarks`` 与章节级 ``landmarks``
+    白名单已退役，读到即提示迁移。
     """
-    raw = config.get("scene_landmarks")
-    if raw is not None and not isinstance(raw, list):
-        add("warning", "scene_landmarks", "场景地标清单必须是数组，已按空清单处理")
-        raw = []
-    raw = raw or []
-    scene_names = set()
-    dimensions = set()
-    for index, item in enumerate(raw):
-        path = f"scene_landmarks[{index}]"
-        if not isinstance(item, dict):
-            add("error", path, "地标条目必须是对象")
-            continue
-        name = str(item.get("name") or "").strip()
-        if not name:
-            add("error", path + ".name", "地标缺少名称")
-        elif "\n" in name or "\r" in name:
-            add("error", path + ".name", "地标名称含换行（会直接进提示词）")
-        elif len(name) > _MAX_SCENE_NAME_LEN:
-            add("error", path + ".name",
-                f"地标名称超过 {_MAX_SCENE_NAME_LEN} 字（会直接进提示词）")
-        elif name in scene_names:
-            add("error", path + ".name", f"地标「{name}」在清单里重名（只取第一条）")
-        scene_names.add(name)
-
-        size = item.get("size")
-        if not _is_number(size) or size <= 0:
-            add("error", path + ".size", "尺寸必须是大于 0 的数字（米）")
-        dimension = str(item.get("dimension")
-                        or schema.DEFAULT_SCENE_LANDMARK_DIMENSION).strip().lower()
-        if dimension not in schema.SCENE_LANDMARK_DIMENSIONS:
-            add("error", path + ".dimension",
-                f"维度「{dimension}」无效"
-                f"（允许：{', '.join(schema.SCENE_LANDMARK_DIMENSIONS)}）")
-        else:
-            dimensions.add(dimension)
-        frequency = str(item.get("frequency") or "").strip().lower()
-        if frequency and frequency not in schema.SCENE_LANDMARK_FREQUENCIES:
-            add("warning", path + ".frequency",
-                f"出现频率「{frequency}」无效"
-                f"（允许：{', '.join(schema.SCENE_LANDMARK_FREQUENCIES)}），"
-                f"按 {schema.DEFAULT_SCENE_LANDMARK_FREQUENCY} 处理")
-        horizontal_type = str(item.get("horizontal_type") or "").strip().lower()
-        if (dimension == "horizontal" and horizontal_type
-                and horizontal_type not in schema.SCENE_LANDMARK_HORIZONTAL_TYPES):
-            add("warning", path + ".horizontal_type",
-                f"横向类型「{horizontal_type}」无效"
-                f"（允许：{', '.join(schema.SCENE_LANDMARK_HORIZONTAL_TYPES)}），"
-                f"按 {schema.DEFAULT_SCENE_LANDMARK_HORIZONTAL_TYPE} 处理")
-
-    if len(raw) >= 2 and len(dimensions) == 1:
-        only = "竖向" if "vertical" in dimensions else "横向"
+    if config.get("scene_landmarks") is not None:
         add("warning", "scene_landmarks",
-            f"清单里只有{only}地标：另一种体位的尺寸换算句会没有参照物")
+            "方案级场景地标清单已退役：独特地标改在章节里配置（scene_landmarks），"
+            "常见参照物用章节的 common_private_name 过滤")
 
     entry = str(config.get(FIELD_ADDRESS) or "").strip()
     entry_ok = bool(entry) and not validate_address_text(entry)
     for index, chapter in enumerate(chapters or []):
         path = f"chapters[{index}]"
+        if chapter.get("landmarks") is not None:
+            add("warning", f"{path}.landmarks",
+                "章节 landmarks 白名单已退役：独特地标改用 scene_landmarks 内联"
+                "配置，常见参照物用 common_private_name 过滤")
+
+        raw = chapter.get("scene_landmarks")
+        if raw is not None and not isinstance(raw, list):
+            add("warning", f"{path}.scene_landmarks",
+                "本章独特地标必须是数组，已按空清单处理")
+            raw = []
+        raw = raw or []
+        scene_names = set()
+        dimensions = set()
+        for entry_index, item in enumerate(raw):
+            item_path = f"{path}.scene_landmarks[{entry_index}]"
+            if not isinstance(item, dict):
+                add("error", item_path, "地标条目必须是对象")
+                continue
+            name = str(item.get("name") or "").strip()
+            if not name:
+                add("error", item_path + ".name", "地标缺少名称")
+            elif "\n" in name or "\r" in name:
+                add("error", item_path + ".name", "地标名称含换行（会直接进提示词）")
+            elif len(name) > _MAX_SCENE_NAME_LEN:
+                add("error", item_path + ".name",
+                    f"地标名称超过 {_MAX_SCENE_NAME_LEN} 字（会直接进提示词）")
+            elif name in scene_names:
+                add("error", item_path + ".name",
+                    f"地标「{name}」在本章重名（只取第一条）")
+            scene_names.add(name)
+
+            size = item.get("size")
+            if not _is_number(size) or size <= 0:
+                add("error", item_path + ".size", "尺寸必须是大于 0 的数字（米）")
+            dimension = str(item.get("dimension")
+                            or schema.DEFAULT_SCENE_LANDMARK_DIMENSION).strip().lower()
+            if dimension not in schema.SCENE_LANDMARK_DIMENSIONS:
+                add("error", item_path + ".dimension",
+                    f"维度「{dimension}」无效"
+                    f"（允许：{', '.join(schema.SCENE_LANDMARK_DIMENSIONS)}）")
+            else:
+                dimensions.add(dimension)
+            horizontal_type = str(item.get("horizontal_type") or "").strip().lower()
+            if (dimension == "horizontal" and horizontal_type
+                    and horizontal_type not in schema.SCENE_LANDMARK_HORIZONTAL_TYPES):
+                add("warning", item_path + ".horizontal_type",
+                    f"横向类型「{horizontal_type}」无效"
+                    f"（允许：{', '.join(schema.SCENE_LANDMARK_HORIZONTAL_TYPES)}），"
+                    f"按 {schema.DEFAULT_SCENE_LANDMARK_HORIZONTAL_TYPE} 处理")
+        if len(raw) > 5:
+            add("warning", f"{path}.scene_landmarks",
+                "本章独特地标超过 5 条：一章节在场的独特地标理应很少，"
+                "考虑拆到相邻章节")
+        if len(raw) >= 2 and len(dimensions) == 1:
+            only = "竖向" if "vertical" in dimensions else "横向"
+            add("warning", f"{path}.scene_landmarks",
+                f"本章只有{only}地标：另一种体位的尺寸换算句会没有参照物")
+
+        private_name = str(chapter.get("common_private_name") or "").strip()
+        if private_name and not _PRIVATE_NAME_RE.fullmatch(private_name):
+            add("warning", f"{path}.common_private_name",
+                f"私有名「{private_name}」含非法字符或过长"
+                "（允许字母 / 数字 / 下划线，≤64 字），常见地标将匹配不到")
+
         for key in ("address", "exit_address"):
             text = str(chapter.get(key) or "").strip()
             if not text:
@@ -840,10 +859,6 @@ def _validate_scene(config: dict, chapters, add) -> None:
             elif relation.kind == REL_DIVERGENT and relation.diverge_level == 0:
                 add("warning", f"{path}.address",
                     "取景地址与入口地址不在同一一级地域：确认是有意为之")
-        for name in chapter.get("landmarks") or []:
-            if name not in scene_names:
-                add("error", f"{path}.landmarks",
-                    f"本章引用了清单里不存在的地标「{name}」")
 
 
 def _validate_triggers(triggers, chapter_names, terminating, trigger_names,
