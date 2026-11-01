@@ -2,44 +2,30 @@ import csv
 import os
 from typing import List, Optional, Tuple
 
-from paths import data_dir
-from persistence.resources.registry import free_dir as _free_dir_of
-
-DEFAULT_NAME_TABLE = "default"
+from persistence.material_tables import (
+    DEFAULT_MATERIAL_TABLE,
+    list_groups,
+    member_path,
+)
 
 
 class NameRepo:
-    """静态姓名表仓库：管理 <数据目录>/static/names/ 下的 CSV 表。"""
+    """姓名表读取器：定位当前取材表组内的 ``names.csv``。"""
 
-    def __init__(self, dir_path: Optional[str] = None, world_state=None):
+    def __init__(self, world_state=None):
         self._world_state = world_state
-        self._free_dir = dir_path or _free_dir_of("names", data_dir())
 
-    def _read_dir(self) -> str:
-        if self._world_state is not None and self._world_state.owns("names"):
-            return self._world_state.pack_path("names")
-        return self._free_dir
+    def get_groups(self) -> List[str]:
+        """返回可用取材表组名（按名称排序）。"""
+        return list_groups(world_state=self._world_state)
 
-    def get_tables(self) -> List[str]:
-        """返回可用姓名表名（文件名不含 .csv 后缀），按名称排序。"""
-        read_dir = self._read_dir()
-        if not os.path.isdir(read_dir):
-            return []
-        return sorted(
-            os.path.splitext(f)[0]
-            for f in os.listdir(read_dir)
-            if f.lower().endswith(".csv")
-        )
+    def resolve(self, group: Optional[str] = None) -> str:
+        """返回指定组内姓名表的完整路径（缺席时已回落到内置组）。"""
+        return member_path(group, "names", world_state=self._world_state)
 
-    def resolve(self, table_name: str) -> str:
-        name = table_name or DEFAULT_NAME_TABLE
-        if not name.lower().endswith(".csv"):
-            name += ".csv"
-        return os.path.join(self._read_dir(), name)
-
-    def load(self, table_name: str = DEFAULT_NAME_TABLE) -> Tuple[List[str], List[float], List[str], List[str]]:
+    def load(self, group: Optional[str] = None) -> Tuple[List[str], List[float], List[str], List[str]]:
         """加载姓名表，返回 (surnames, weights, names, nicks)。"""
-        csv_path = self.resolve(table_name)
+        csv_path = self.resolve(group)
         surnames: List[str] = []
         weights: List[float] = []
         names: List[str] = []
@@ -65,5 +51,5 @@ class NameRepo:
                     if nick:
                         nicks.append(nick)
         except Exception as e:
-            print(f"加载姓名表 {table_name} 失败: {e}")
+            print(f"加载姓名表 {group or DEFAULT_MATERIAL_TABLE} 失败: {e}")
         return surnames, weights, names, nicks

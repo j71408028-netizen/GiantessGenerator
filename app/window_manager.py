@@ -301,10 +301,7 @@ class MainWindowManager:
             self._quip_repo,
             self.settings,
             on_styles_changed=self._on_styles_changed,
-            on_name_table_changed=self.on_name_table_changed,
-            on_news_table_changed=self.on_news_table_changed,
-            on_preset_table_changed=self.on_preset_table_changed,
-            on_personality_table_changed=self.on_personality_table_changed,
+            on_material_table_changed=self.on_material_table_changed,
             gui_ref=self,
             world_manager=self.world_manager,
             name_repo=self.context.name_repo,
@@ -367,18 +364,9 @@ class MainWindowManager:
         if hasattr(self, 'generator_panel'):
             self.generator_panel.update_world_setting(world_setting)
 
-    def on_name_table_changed(self, table_name):
-        self.context.update_name_table(table_name)
-
-    def on_news_table_changed(self, table_name):
-        self.context.update_news_table(table_name)
-
-    def on_preset_table_changed(self, table_name):
-        self.context.update_preset_table(table_name)
-        self.refresh_personality_and_preset_combos()
-
-    def on_personality_table_changed(self, table_name):
-        self.context.update_personality_table(table_name)
+    def on_material_table_changed(self, group):
+        """取材表整组切换：四张表一起换，再刷新依赖它们的选择器。"""
+        self.context.update_material_table(group)
         self.refresh_personality_and_preset_combos()
 
     def refresh_world_ui(self):

@@ -5,67 +5,60 @@ from typing import List, Optional
 
 from core.models import BodyPreset
 from core.resource_spec import spec_of
-from paths import data_dir
-from persistence.resources.registry import free_dir as _free_dir_of
+from persistence.material_tables import (
+    DEFAULT_MATERIAL_TABLE,
+    group_dir,
+    list_groups,
+    member_path,
+)
 from persistence.static_table import format_float_parameter, parse_float_parameter
 
-DEFAULT_PRESET_TABLE = "default"
+MATERIAL_TYPE = "materials"
+MEMBER_KEY = "presets"
 
 # 列清单取自资源声明（顺序即写出的表头顺序）；除 name 外均为 0~2 的比例值
-PRESET_COLUMNS = [key for key in spec_of("presets").field_keys() if key != "weight"]
+PRESET_COLUMNS = [key for key in spec_of(MATERIAL_TYPE).member(MEMBER_KEY).field_keys()
+                  if key != "weight"]
 PRESET_COLUMNS_WITH_WEIGHT = ["weight", *PRESET_COLUMNS]
 
 
 class PresetRepo:
-    """静态身材表仓库：管理 <数据目录>/static/presets/ 下的 CSV 表，无内部管理器。"""
+    """身材表读取器：管理取材表组内的 ``presets.csv``，无内部管理器。"""
 
-    def __init__(self, dir_path: Optional[str] = None,
-                 table: str = DEFAULT_PRESET_TABLE, world_state=None):
+    def __init__(self, group: Optional[str] = None, world_state=None):
         self._world_state = world_state
-        self._free_dir = dir_path or _free_dir_of("presets", data_dir())
-        self._table = table or DEFAULT_PRESET_TABLE
+        self._group = group or DEFAULT_MATERIAL_TABLE
         self._cache: Optional[List[BodyPreset]] = None
 
     def _read_dir(self) -> str:
-        if self._world_state is not None and self._world_state.owns("presets"):
-            return self._world_state.pack_path("presets")
-        return self._free_dir
+        return group_dir(self._group, world_state=self._world_state)
 
-    def get_tables(self) -> List[str]:
-        """返回可用身材表名（文件名不含 .csv 后缀）。"""
-        read_dir = self._read_dir()
-        if not os.path.isdir(read_dir):
-            return []
-        return sorted(
-            os.path.splitext(filename)[0]
-            for filename in os.listdir(read_dir)
-            if filename.lower().endswith(".csv")
-        )
+    def get_groups(self) -> List[str]:
+        """返回可用取材表组名。"""
+        return list_groups(world_state=self._world_state)
 
-    def resolve(self, table_name: str) -> str:
-        """返回指定身材表 CSV 的完整路径。"""
-        name = table_name or DEFAULT_PRESET_TABLE
-        if not name.lower().endswith(".csv"):
-            name += ".csv"
-        return os.path.join(self._read_dir(), name)
+    def resolve(self, group: Optional[str] = None) -> str:
+        """返回指定组内身材表的完整路径（缺席时已回落到内置组）。"""
+        return member_path(group or self._group, MEMBER_KEY,
+                           world_state=self._world_state)
 
-    def set_table(self, table_name: str):
-        self._table = table_name or DEFAULT_PRESET_TABLE
+    def set_group(self, group: Optional[str]):
+        self._group = group or DEFAULT_MATERIAL_TABLE
         self._cache = None
 
-    def load(self, table: Optional[str] = None) -> List[BodyPreset]:
+    def load(self, group: Optional[str] = None) -> List[BodyPreset]:
         """加载身材表，返回 BodyPreset 列表；坏行跳过并打印警告。
 
-        table 为 None 时使用当前激活表（含缓存），显式传入表名时直读不缓存。
+        group 为 None 时使用当前激活组（含缓存），显式传入组名时直读不缓存。
         """
-        if table is None:
+        if group is None:
             if self._cache is not None:
                 return self._cache
-            table = self._table
+            group = self._group
             cache = True
         else:
             cache = False
-        path = self.resolve(table)
+        path = self.resolve(group)
         items: List[BodyPreset] = []
         if not os.path.isfile(path):
             self._cache = items if cache else self._cache
@@ -78,9 +71,9 @@ class PresetRepo:
                     if item is not None:
                         items.append(item)
                     else:
-                        print(f"身材表 {table} 第 {line_no} 行被跳过: 数据无效")
+                        print(f"身材表 {group} 第 {line_no} 行被跳过: 数据无效")
         except Exception as e:
-            print(f"加载身材表 {table} 失败: {e}")
+            print(f"加载身材表 {group} 失败: {e}")
         if cache:
             self._cache = items
         return items

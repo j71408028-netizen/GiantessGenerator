@@ -205,18 +205,15 @@ class WorldPackCreateDialog(BaseDialog):
     _TYPE_LABELS = [
         ("landmarks", "地标风格"),
         ("quips", "描述风格"),
-        ("presets", "身材表"),
-        ("personalities", "性格表"),
+        ("materials", "取材表"),
         ("scenarios", "副本方案"),
         ("challenges", "挑战包"),
-        ("names", "姓名表"),
-        ("news", "新闻表"),
         ("behaviors", "行为包"),
     ]
 
-    # 风格/副本/挑战包：StyleListBox 多选；静态表：下拉单选（第一项为空）
+    # 风格/副本/挑战包：StyleListBox 多选；取材表/行为包：下拉单选（第一项为空）
     _MULTI_TYPES = ("landmarks", "quips", "scenarios", "challenges")
-    _SINGLE_TYPES = ("presets", "personalities", "names", "news", "behaviors")
+    _SINGLE_TYPES = ("materials", "behaviors")
 
     def __init__(self, parent, available_resources=None):
         super().__init__(parent)
@@ -242,7 +239,7 @@ class WorldPackCreateDialog(BaseDialog):
         self._multi_types = ["landmarks", "quips", "scenarios", "challenges"]  # 多选类型顺序
         self._multi_index = 0  # 当前显示的类型索引
         self._multi_selections = {}  # 记录每个多选类型的已选项列表
-        self._single_vars = {}  # 静态表下拉框的 StringVar 字典
+        self._single_vars = {}  # 取材表下拉框的 StringVar 字典
         self._current_listbox = None  # 当前显示的 StyleListBox 实例
 
         body = ctk.CTkFrame(self, fg_color="transparent")
@@ -338,28 +335,24 @@ class WorldPackCreateDialog(BaseDialog):
 
     # ---------- 资源打包页 ----------
     def _build_resources_page(self, parent):
-        """资源打包页：左栏静态表下拉框，右栏可切换的多选列表（带全选/清空），底部提示跨两栏。"""
+        """资源打包页：左栏取材表下拉框，右栏可切换的多选列表（带全选/清空），底部提示跨两栏。"""
         # 主容器：左右两栏
         main_row = ctk.CTkFrame(parent, fg_color="transparent")
         main_row.pack(fill='both', expand=True, pady=4)
 
-        # ---- 左栏：静态表配置 ----
+        # ---- 左栏：取材表配置 ----
         left_frame = ctk.CTkFrame(main_row, fg_color="transparent", width=180)
         left_frame.pack(side='left', fill='y', padx=(0, 10))
         left_frame.pack_propagate(False)  # 固定宽度
 
         ctk.CTkLabel(
-            left_frame, text="配置静态表", anchor='w',
+            left_frame, text="配置取材表", anchor='w',
             font=ui_fonts.ui_font(12, "bold"),
             text_color=SETTINGS_DLG_TEXT_SOFT
         ).pack(fill='x', pady=(0, 8))
 
-        single_types = [("names", "姓名"),
-                        ("news", "新闻"),
-                        ("personalities", "性格"),
-                        ("presets", "身材"),
-                        ("behaviors", "行为包")
-                        ]
+        single_types = [(rtype, dict(self._TYPE_LABELS).get(rtype, rtype))
+                        for rtype in self._SINGLE_TYPES]
 
         self._single_vars = {}
         for rtype, label in single_types:
@@ -496,7 +489,7 @@ class WorldPackCreateDialog(BaseDialog):
             label = dict(self._TYPE_LABELS).get(rtype, rtype)
             self._current_listbox.set_title(f"{label}（{count}/{total}）")
 
-        # 收集所有选中资源包（多选类型），不包含静态表
+        # 收集所有选中资源包（多选类型），不包含取材表
         parts = []
         for rtype in self._multi_types:
             label = dict(self._TYPE_LABELS).get(rtype, rtype)
@@ -522,7 +515,7 @@ class WorldPackCreateDialog(BaseDialog):
     def _save_resources_state(self):
         """保存当前所有资源选择（供返回基础页时保留）。"""
         state = {}
-        # 静态表
+        # 取材表
         for rtype, var in self._single_vars.items():
             val = var.get().strip()
             if val and val != "<不配置>":

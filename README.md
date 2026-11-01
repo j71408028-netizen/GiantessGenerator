@@ -149,7 +149,7 @@ Linux 侧的兼容细节、限制与实测记录见 [docs/users/platforms/linux.
 
 - **角色（character）**：创建后的角色拥有长期档案—— HTML 历史档案、离线恢复（程序没开的时间里角色仍在按性格与作息曲线演化）、今日新闻。演化模型的完整设计见 [docs/designs/character_evolution.md](docs/designs/character_evolution.md)。
 - **聊天（chat）**：与角色持续对话。AI 按 JSON 协议回复（可一次多条消息、可沉默）；AI 可自主开启 / 切换话题，并把少量白名单属性写回角色档案。协议细节见 [docs/dev/chat_delivery.md](docs/dev/chat_delivery.md)。
-- **世界包（worlds）**：一键激活后，包内资源按类型**接管**各数据源（地标、描述、副本方案、静态表……），你的自由数据不受影响；停用即恢复。世界包还可携带**行为包**在激活期间改变核心算法（[机制说明](docs/designs/behaviors/README.md)；开发见「包开发」）。
+- **世界包（worlds）**：一键激活后，包内资源按类型**接管**各数据源（地标、描述、副本方案、取材表……），你的自由数据不受影响；停用即恢复。世界包还可携带**行为包**在激活期间改变核心算法（[机制说明](docs/designs/behaviors/README.md)；开发见「包开发」）。
 
 ### 数据与存档
 
@@ -157,9 +157,9 @@ Linux 侧的兼容细节、限制与实测记录见 [docs/users/platforms/linux.
 data/
 ├── archives/       # 角色档案与历史报告（txt 格式），按角色名归档
 ├── packs/          # 资源包（地标、描述、副本、挑战包）；随程序发布，也可自行创建
-├── static/         # 静态表（姓名、新闻、性格预设、身材预设、临时存储的行为包）；提供辅助或装饰作用，无程序内编辑器
+├── static/         # 取材表（materials/<组名>/ 下放姓名、身材、性格、新闻四张 .csv，可只放其中几张）与临时存储的行为包
 ├── user/           # 用户数据（设置、API秘钥、挑战秘钥、报告与回放、截图、地址注册表）
-└── worlds/         # 世界包（<world_id>/）；激活世界包时创建，可携带若干资源包和静态表并一键激活
+└── worlds/         # 世界包（<world_id>/）；激活世界包时创建，可携带若干资源包和取材表并一键激活
 ```
 
 全部数据保存在本机；设置有备份 / 还原能力，程序自检也会先备份再还原。打包版的数据目录**不在安装位置**：Windows 为 `%LOCALAPPDATA%\GiantessGenerator\data`，macOS 为 `~/Library/Application Support/GiantessGenerator/data`，Linux 为 `$XDG_DATA_HOME/GiantessGenerator/data`（默认 `~/.local/share/GiantessGenerator/data`）。
@@ -171,8 +171,8 @@ data/
 | 你想制作          | 说明                                                     | 开发指引                                       |
 |---------------|--------------------------------------------------------|--------------------------------------------|
 | 地标、描述、副本方案    | 可供探索的资源                                                | 程序内编辑器（文本管理 / 副本编辑）即可                      |
-| 姓名、新闻、性格或身材预设 | 一次性抽取单条的资源，.csv格式                                      | 无程序内编辑器；推荐使用Excel                          |
-| 世界包           | 把资源包 + 静态表打成一个可一键激活的 `<world_id>.world.zip`，激活期间接管各数据源 | [世界包行为包开发指南](docs/designs/behaviors/dev-guide.md) |
+| 取材表           | 一个目录含姓名、身材、性格、新闻四张 .csv，缺的成员自动回落到内置 default 组 | 无程序内编辑器；推荐使用 Excel                        |
+| 世界包           | 把资源包 + 取材表打成一个可一键激活的 `<world_id>.world.zip`，激活期间接管各数据源 | [世界包行为包开发指南](docs/designs/behaviors/dev-guide.md) |
 | 行为包           | 世界包可选携带的 Python 代码包，激活期间覆盖核心算法                         | [世界包行为包开发指南](docs/designs/behaviors/dev-guide.md) |
 | 副本小游戏         | `mini_game` 触发器的运行时与作者 API                             | [小游戏框架](docs/designs/minigame.md)          |
 | 挑战包           | 把角色与资源打包成秘钥保护的加密 `.chal`，玩家在挑战模式中达成副本结局                | 程序内「挑战模式」打包                                |

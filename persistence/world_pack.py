@@ -46,11 +46,12 @@ WORLD_PACK_EXT = ".world.zip"
 WORLD_MANIFEST_NAME = "world.json"
 WORLD_FORMAT_VERSION = 1
 
-#: 设置键 → 资源类型：能作为「当前生效表」的静态表，由声明里的 settings_keys 派生。
+#: 设置键 → 资源类型：能作为「当前生效表」的取材表，由声明里的 settings_keys 派生。
+#: 取材表是整组替换的类型，一个键对应一整组 CSV。
 TABLE_SETTING_KEYS = {
     spec.settings_keys[0]: spec.type_id
     for spec in RESOURCE_TYPES
-    if spec.container == "csv" and spec.settings_keys
+    if spec.container in ("csv", "csv_dir", "csv_bundle") and spec.settings_keys
 }
 WORLD_SETTING_KEYS = ("world_setting", "seed", *TABLE_SETTING_KEYS)
 WORLD_SETTING_VALUES = {"appear", "abs_giant", "rel_giant"}
@@ -288,7 +289,7 @@ class WorldPackManifest:
         """返回包锁定的设置键。
 
         世界设定 / 种子：出现在 settings 中即锁定。
-        静态表（姓名 / 新闻 / 身材 / 性格）：仅当包实际配置了对应资源类型时锁定。
+        取材表：仅当包实际配置了该资源类型时锁定。
         """
         keys = set()
         for key in WORLD_SETTING_KEYS:
@@ -361,7 +362,7 @@ class WorldState:
     """世界包激活状态：决定各 repo 从包目录还是自由目录读取资源。
 
     - owns(rtype)：包是否拥有该资源类型（决定管理器禁用与路径接管）
-    - locked_keys()：包锁定的设置键（世界设定/种子以 settings 为准；静态表以 owns 为准）
+    - locked_keys()：包锁定的设置键（世界设定/种子以 settings 为准；取材表以 owns 为准）
     - effective_settings()：仅叠加锁定键
     - pack_path()/resolve()：包内资源的读取路径
     """

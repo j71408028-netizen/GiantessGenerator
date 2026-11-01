@@ -85,8 +85,8 @@ from core.models import CharacterSnapshot, Personality       # noqa: E402
 from core.behavior_runtime import (                           # noqa: E402
     _load_module, _python_files, get_runtime, resolve_behavior_source)
 from paths import behaviors_dir, data_dir, worlds_dir         # noqa: E402
-from persistence.personality_repo import (                   # noqa: E402
-    DEFAULT_PERSONALITY_TABLE, PersonalityRepo)
+from persistence.material_tables import DEFAULT_MATERIAL_TABLE  # noqa: E402
+from persistence.personality_repo import PersonalityRepo      # noqa: E402
 from persistence.world_pack import (                          # noqa: E402
     WORLD_MANIFEST_NAME, WorldPackManifest, installed_dir,
     is_behavior_pack_name, load_manifest_file)
@@ -186,16 +186,16 @@ def build_corner_presets() -> list:
 
 
 def build_table_presets(table: str) -> list:
-    """从默认性格表（data/static/personalities/<table>.csv）逐条构造预设。
+    """从取材表组（data/static/materials/<table>/personalities.csv）逐条构造预设。
 
     读不到表时返回空列表——由调用方决定是报错还是跳过（--group table 显式要求时
-    会在 select_presets 里报错并列出可用表名）。
+    会在 select_presets 里报错并列出可用组名）。
     """
-    repo = PersonalityRepo(table=table)
+    repo = PersonalityRepo(group=table)
     presets = []
-    for item in repo.load(table):
+    for item in repo.load():
         preset = dict(key=item.name, name=item.name, source=SOURCE_TABLE,
-                      note=f"{table}.csv", description=item.description)
+                      note=f"{table}/personalities.csv", description=item.description)
         preset.update({k: getattr(item, k) for k in PERSONALITY_FIELDS})
         presets.append(preset)
     return presets
@@ -213,7 +213,7 @@ def _dedupe_keys(presets: list) -> list:
 
 
 def available_personality_tables() -> list:
-    return PersonalityRepo(table=DEFAULT_PERSONALITY_TABLE).get_tables()
+    return PersonalityRepo(group=DEFAULT_MATERIAL_TABLE).get_groups()
 
 
 def select_presets(group: str, table: str, only: str) -> list:
@@ -224,9 +224,9 @@ def select_presets(group: str, table: str, only: str) -> list:
     if group in ("table", "all"):
         table_presets = build_table_presets(table)
         if not table_presets:
-            message = (f"性格表 '{table}' 读不到或为空"
-                       f"（目录 {os.path.dirname(PersonalityRepo(table=table).resolve(table))}），"
-                       f"可用表：{available_personality_tables() or '（无）'}")
+            message = (f"取材表组 '{table}' 读不到或为空"
+                       f"（目录 {os.path.dirname(PersonalityRepo(group=table).resolve())}），"
+                       f"可用组：{available_personality_tables() or '（无）'}")
             if group == "table":
                 raise SystemExit(message)
             print(f"⚠️  {message}\n    本次只跑角点。")
@@ -967,8 +967,8 @@ def main():
     parser.add_argument("--group", type=str, default="all",
                         choices=("all", "corners", "table"),
                         help="预设来源：角点 / 默认性格表 / 两者（默认）")
-    parser.add_argument("--table", type=str, default=DEFAULT_PERSONALITY_TABLE,
-                        help="性格表名（data/static/personalities/<名>.csv）")
+    parser.add_argument("--table", type=str, default=DEFAULT_MATERIAL_TABLE,
+                        help="取材表组名（data/static/materials/<名>/personalities.csv）")
     parser.add_argument("--profile", type=str, default="both",
                         choices=list(AP_PROFILES) + ["both"],
                         help="行动点消耗习惯（both=两种都跑并分目录输出）")

@@ -1,6 +1,6 @@
 """资源类型声明：资源层的单一真相源。
 
-「资源」指成组、可替换、可打包的内容：地标风格、描述风格、副本方案、静态 CSV 表、
+「资源」指成组、可替换、可打包的内容：地标风格、描述风格、副本方案、取材表、
 挑战包、行为包、话题表、小游戏。本模块只声明**有哪些类型、每种长什么样**——容器形状、
 主文件命名、字段清单、id 规则、关联的资源设置键、自由存储根。这里不做任何 IO，
 也不 import persistence：路径定位与读写分别落在
@@ -49,6 +49,7 @@ CONTAINERS = (
     "json_dir",      # 一个目录即一份资源，主文件在目录内
     "csv",           # 一个 CSV 文件即一份资源（表头即字段）
     "csv_dir",       # 一个目录即一份资源，主文件是目录内的 CSV，可带配置 JSON
+    "csv_bundle",    # 一个目录即一份资源，内含若干命名 CSV 成员（取材表）
     "py_package",    # 一个目录即一份 Python 包
     "opaque",        # 不可解释的整包（加密归档等），只有文件名可外读
 )
@@ -85,13 +86,44 @@ class FieldSpec:
 
 
 @dataclass(frozen=True)
+class MemberSpec:
+    """多成员容器（``csv_bundle``）内的一个成员文件。
+
+    ``key`` 同时是成员键与文件名主干：``names`` → ``names.csv``。``required``
+    只表示「组内必须有这份文件」；标记为非必填的成员允许缺席，读取侧回落到
+    内置缺省组里的同名成员——这样新增一种成员不必迁移存量组，用户只覆盖其中
+    一两张表时也不必复制整套。
+    """
+
+    key: str
+    label: str = ""
+    suffix: str = ".csv"
+    fields: Tuple[FieldSpec, ...] = ()
+    required: bool = False
+    note: str = ""
+
+    def file_name(self) -> str:
+        return f"{self.key}{self.suffix}"
+
+    def relpath(self, resource_id: str) -> str:
+        """成员相对资源目录的路径（正斜杠）。"""
+        return f"{resource_id}/{self.file_name()}"
+
+    def field_keys(self) -> Tuple[str, ...]:
+        return tuple(f.key for f in self.fields)
+
+    def required_keys(self) -> Tuple[str, ...]:
+        return tuple(f.key for f in self.fields if f.required)
+
+
+@dataclass(frozen=True)
 class ResourceTypeSpec:
     """一类资源的完整声明。
 
     - ``primary``：主文件相对路径模板，必须含 ``{id}``，如 ``{id}``（无后缀的
       JSON 容器）/ ``{id}/config.json`` / ``{id}.csv``；
     - ``config``：目录型容器内的可选配置 JSON 路径模板，如 ``{id}/config.json``；
-    - ``root``：自由目录所在的存储根（``packs`` = 用户可写素材，``static`` = 静态表）；
+    - ``root``：自由目录所在的存储根（``packs`` = 用户可写素材，``static`` = 内置随包素材）；
     - ``id_required``：载荷内必须自带 ``id``（目录型容器才有地方放）；
       其余类型的 id 取自容器名，信封里的 ``id`` 只做冗余校验；
     - ``settings_keys``：指向本类型的资源设置键（选择态）；
@@ -104,7 +136,9 @@ class ResourceTypeSpec:
     - ``trait_values``：本类型的特色（``traits``）词表，声明在信封 ``traits``
       字段里的合法取值；空 = 该类型暂未启用特色，界面对其隐藏该筛选项。
       词表外的值不清洗、原样保留；
-    - ``trait_pick``：特色在界面上的选择粒度，见 ``PICK_MODES``。
+    - ``trait_pick``：特色在界面上的选择粒度，见 ``PICK_MODES``；
+    - ``members``：``csv_bundle`` 容器的成员清单（第一项即主文件）。其余容器
+      为空，字段写在 ``fields`` 上。
     """
 
     type_id: str
@@ -123,6 +157,7 @@ class ResourceTypeSpec:
     ui_pick: str = "multi"
     trait_values: Tuple[str, ...] = ()
     trait_pick: str = "single"
+    members: Tuple[MemberSpec, ...] = ()
     note: str = ""
 
     def id_regex(self):
@@ -143,6 +178,13 @@ class ResourceTypeSpec:
 
     def required_keys(self) -> Tuple[str, ...]:
         return tuple(f.key for f in self.fields if f.required)
+
+    def member(self, key: str):
+        """按成员键取声明；无此成员返回 None。"""
+        for m in self.members:
+            if m.key == key:
+                return m
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +279,65 @@ _QUIP_FIELDS = _csv_fields(
 )
 
 
+# 取材表的四个成员。姓名 / 身材 / 性格三张表产出角色状态，新闻表的索引列正是
+# 这些状态变量（尺寸等级来自身高，介入度与破坏性来自性格演化），所以它们共用
+# 一套坐标系，只能整组替换。
+
+_NAME_FIELDS = _csv_fields(
+    ("surname", "str", "姓"), ("ppm", "number", "权重"),
+    ("name", "str", "名"), ("nick", "str", "昵称"),
+)
+
+_PRESET_FIELDS = _csv_fields(
+    ("weight", "number", "权重"),
+    ("name", "str", "名称"),
+    ("height_ratio", "number"), ("leg_ratio", "number"),
+    ("foot_length_ratio", "number"), ("arm_span_ratio", "number"),
+    ("index_finger_ratio", "number"), ("palm_length_ratio", "number"),
+    ("chest_width_ratio", "number"), ("thigh_diameter_ratio", "number"),
+    ("forearm_diameter_ratio", "number"),
+    ("index_finger_diameter_ratio", "number"),
+    ("fingerprint_width_ratio", "number"), ("finger_gap_ratio", "number"),
+    ("knee_height_ratio", "number"), ("ankle_height_ratio", "number"),
+    ("stride_ratio", "number"),
+    required=("name",),
+)
+
+_PERSONALITY_FIELDS = _csv_fields(
+    ("weight", "number", "权重"),
+    ("name", "str", "名称"),
+    ("init_intrusion", "number"), ("step_intrusion", "number"),
+    ("init_destruction", "number"), ("step_destruction", "number"),
+    ("sensitivity", "number"), ("gravity", "number"),
+    ("skip_base_prob", "number"), ("description", "text"),
+    required=("name",),
+)
+
+_NEWS_FIELDS = _csv_fields(
+    ("size_category", "str", "尺寸等级"),
+    ("memorial", "str", "纪念"),
+    ("intrusion", "int", "介入度"),
+    ("destruction", "int", "破坏性"),
+    ("text", "text", "正文"),
+    ("substitute_1", "str", "替换队列1"),
+    ("substitute_2", "str", "替换队列2"),
+    required=("text",),
+)
+
+#: 取材表的成员清单（顺序即界面展示顺序，第一项是主文件模板指向的成员）。
+#: 四项都不强制存在：组内至少有一份 CSV 即成立，缺的成员读取时回落到内置组。
+MATERIAL_MEMBERS: Tuple[MemberSpec, ...] = (
+    MemberSpec("names", "姓名表", fields=_NAME_FIELDS,
+               note="surname 与 name 为空的行会被跳过"),
+    MemberSpec("presets", "身材表", fields=_PRESET_FIELDS,
+               note="列即字段，weight 不进字段顺序"),
+    MemberSpec("personalities", "性格表", fields=_PERSONALITY_FIELDS,
+               note="init/step 决定角色进入时的介入度与破坏性"),
+    MemberSpec("news", "新闻表", fields=_NEWS_FIELDS,
+               note="表头即索引优先级顺序"),
+)
+
+
 # ---------------------------------------------------------------------------
 # 特色词表
 # ---------------------------------------------------------------------------
@@ -289,47 +390,18 @@ RESOURCE_TYPES: Tuple[ResourceTypeSpec, ...] = (
              "config.json 存自定义类型与后续匹配配置",
     ),
     ResourceTypeSpec(
-        type_id="presets",
-        container="csv",
-        primary="{id}.csv",
-        label="身材表",
+        type_id="materials",
+        container="csv_bundle",
+        primary="{id}/names.csv",
+        label="取材表",
         root="static",
-        fields=_csv_fields(
-            ("weight", "number", "权重"),
-            ("name", "str", "名称"),
-            ("height_ratio", "number"), ("leg_ratio", "number"),
-            ("foot_length_ratio", "number"), ("arm_span_ratio", "number"),
-            ("index_finger_ratio", "number"), ("palm_length_ratio", "number"),
-            ("chest_width_ratio", "number"), ("thigh_diameter_ratio", "number"),
-            ("forearm_diameter_ratio", "number"),
-            ("index_finger_diameter_ratio", "number"),
-            ("fingerprint_width_ratio", "number"), ("finger_gap_ratio", "number"),
-            ("knee_height_ratio", "number"), ("ankle_height_ratio", "number"),
-            ("stride_ratio", "number"),
-            required=("name",),
-        ),
-        settings_keys=("preset_table",),
+        members=MATERIAL_MEMBERS,
+        settings_keys=("material_table",),
+        max_items=1,
         ui_pick="single",
-        note="身材表：列即字段，``weight`` 不进字段顺序",
-    ),
-    ResourceTypeSpec(
-        type_id="personalities",
-        container="csv",
-        primary="{id}.csv",
-        label="性格表",
-        root="static",
-        fields=_csv_fields(
-            ("weight", "number", "权重"),
-            ("name", "str", "名称"),
-            ("init_intrusion", "number"), ("step_intrusion", "number"),
-            ("init_destruction", "number"), ("step_destruction", "number"),
-            ("sensitivity", "number"), ("gravity", "number"),
-            ("skip_base_prob", "number"), ("description", "text"),
-            required=("name",),
-        ),
-        settings_keys=("personality_table",),
-        ui_pick="single",
-        note="性格表",
+        trait_values=("realistic", "fantasy", "anime", "scifi"),
+        note="取材表：目录即一份资源，内含姓名 / 身材 / 性格 / 新闻四个 CSV 成员，"
+             "整组替换；缺席的成员回落到内置组",
     ),
     ResourceTypeSpec(
         type_id="scenarios",
@@ -347,40 +419,6 @@ RESOURCE_TYPES: Tuple[ResourceTypeSpec, ...] = (
         primary="{id}.chal",
         label="挑战包",
         note="挑战包：整包加密、文件名是唯一外读信息，纳入索引时必须外加兄弟信封",
-    ),
-    ResourceTypeSpec(
-        type_id="names",
-        container="csv",
-        primary="{id}.csv",
-        label="姓名表",
-        root="static",
-        fields=_csv_fields(
-            ("surname", "str", "姓"), ("ppm", "number", "权重"),
-            ("name", "str", "名"), ("nick", "str", "昵称"),
-        ),
-        settings_keys=("name_table",),
-        ui_pick="single",
-        note="姓名表",
-    ),
-    ResourceTypeSpec(
-        type_id="news",
-        container="csv",
-        primary="{id}.csv",
-        label="新闻表",
-        root="static",
-        fields=_csv_fields(
-            ("size_category", "str", "尺寸等级"),
-            ("memorial", "str", "纪念"),
-            ("intrusion", "int", "介入度"),
-            ("destruction", "int", "破坏性"),
-            ("text", "text", "正文"),
-            ("substitute_1", "str", "替换队列1"),
-            ("substitute_2", "str", "替换队列2"),
-            required=("text",),
-        ),
-        settings_keys=("news_table",),
-        ui_pick="single",
-        note="新闻表：表头即索引优先级顺序",
     ),
     ResourceTypeSpec(
         type_id="behaviors",
@@ -465,6 +503,39 @@ def trait_values_of(type_id: str) -> Tuple[str, ...]:
     return spec.trait_values if spec is not None else ()
 
 
+def _check_members(spec) -> list:
+    """``csv_bundle`` 的成员声明自洽：键唯一且合法、主文件即第一个成员。
+
+    不要求成员必须出现在组里：缺席的成员由读取侧回落到内置组，组本身只要
+    含至少一份 CSV 即成立（由校验层的 ``empty_bundle`` 兜底）。
+    """
+    problems = []
+    if not spec.members:
+        return [f"{spec.type_id}: csv_bundle 至少要声明一个成员"]
+    seen = set()
+    for member in spec.members:
+        if not re.match(r"^[a-z][a-z0-9_]*$", member.key):
+            problems.append(f"{spec.type_id}: 成员键不合规 {member.key!r}")
+        if member.key in seen:
+            problems.append(f"{spec.type_id}: 成员键重复 {member.key}")
+        seen.add(member.key)
+        if not member.suffix.startswith("."):
+            problems.append(f"{spec.type_id}.{member.key}: 成员后缀应以点开头")
+        keys = member.field_keys()
+        if len(set(keys)) != len(keys):
+            problems.append(f"{spec.type_id}.{member.key}: 字段 key 重复")
+        for f in member.fields:
+            if f.kind not in FIELD_KINDS:
+                problems.append(
+                    f"{spec.type_id}.{member.key}.{f.key}: 未知字段种类 {f.kind!r}")
+    expected = spec.members[0].relpath("{id}")
+    if spec.primary != expected:
+        problems.append(
+            f"{spec.type_id}: primary 应指向第一个成员 {expected!r}"
+            f"（实际 {spec.primary!r}）")
+    return problems
+
+
 def check_spec_consistency() -> list:
     """声明自身的结构自洽检查（守卫与开发者工具共用），返回问题列表。"""
     problems = []
@@ -481,13 +552,18 @@ def check_spec_consistency() -> list:
             problems.append(f"{spec.type_id}: 未知存储根 {spec.root!r}")
         if "{id}" not in spec.primary:
             problems.append(f"{spec.type_id}: primary 缺少 {{id}} 占位")
-        if spec.container not in ("json_dir", "py_package", "csv_dir") and "/" in spec.primary:
+        if spec.container not in ("json_dir", "py_package", "csv_dir",
+                                  "csv_bundle") and "/" in spec.primary:
             problems.append(f"{spec.type_id}: 单文件容器的 primary 不应含子目录")
         if spec.config:
             if "{id}" not in spec.config:
                 problems.append(f"{spec.type_id}: config 缺少 {{id}} 占位")
             if spec.container not in ("json_dir", "csv_dir"):
                 problems.append(f"{spec.type_id}: 只有目录型容器能声明 config")
+        if spec.container == "csv_bundle":
+            problems.extend(_check_members(spec))
+        elif spec.members:
+            problems.append(f"{spec.type_id}: 只有 csv_bundle 容器能声明成员")
         keys = spec.field_keys()
         if len(set(keys)) != len(keys):
             problems.append(f"{spec.type_id}: 字段 key 重复")
@@ -518,7 +594,7 @@ def check_spec_consistency() -> list:
                 problems.append(f"{spec.type_id}: id_pattern 无法编译（{exc}）")
     for name in ("settings_keys", "packable", "addressable", "id_required",
                  "label", "max_items", "id_pattern", "ui_pick",
-                 "trait_values", "trait_pick"):
+                 "trait_values", "trait_pick", "members"):
         if name not in {f.name for f in fields(ResourceTypeSpec)}:
             problems.append(f"ResourceTypeSpec 缺少字段 {name}")
     return problems

@@ -3,31 +3,33 @@ import random
 from typing import Optional, Dict, Tuple
 
 from core.models import BodyPreset, ModelTuning, Personality
-from persistence.name_repo import NameRepo, DEFAULT_NAME_TABLE
+from persistence.name_repo import NameRepo
+from persistence.material_tables import DEFAULT_MATERIAL_TABLE
 from core.behavior_runtime import behavior_hook
 from persistence.static_table import weighted_choice
 
 
 class CreationService:
     def __init__(self, name_repo: Optional[NameRepo] = None,
-                 name_table: str = DEFAULT_NAME_TABLE):
+                 material_table: str = DEFAULT_MATERIAL_TABLE):
         self._name_repo = name_repo or NameRepo()
-        self.name_table = name_table or DEFAULT_NAME_TABLE
+        self.material_table = material_table or DEFAULT_MATERIAL_TABLE
         self._name_data_cache = {}
 
-    def set_name_table(self, table_name: str):
-        self.name_table = table_name or DEFAULT_NAME_TABLE
+    def set_material_table(self, group: str):
+        """切换取材表组；只有姓名表需要在这里留缓存。"""
+        self.material_table = group or DEFAULT_MATERIAL_TABLE
         # 表切换后丢弃缓存
-        self._name_data_cache.pop(self.name_table, None)
-        self._name_data_cache.pop(DEFAULT_NAME_TABLE, None)
+        self._name_data_cache.pop(self.material_table, None)
+        self._name_data_cache.pop(DEFAULT_MATERIAL_TABLE, None)
 
     def _load_name_data(self) -> Tuple[list, list, list, list]:
-        if self.name_table not in self._name_data_cache:
-            surnames, weights, names, nicks = self._name_repo.load(self.name_table)
-            if not surnames and not names and not nicks and self.name_table != DEFAULT_NAME_TABLE:
-                surnames, weights, names, nicks = self._name_repo.load(DEFAULT_NAME_TABLE)
-            self._name_data_cache[self.name_table] = (surnames, weights, names, nicks)
-        return self._name_data_cache[self.name_table]
+        if self.material_table not in self._name_data_cache:
+            surnames, weights, names, nicks = self._name_repo.load(self.material_table)
+            if not surnames and not names and not nicks and self.material_table != DEFAULT_MATERIAL_TABLE:
+                surnames, weights, names, nicks = self._name_repo.load(DEFAULT_MATERIAL_TABLE)
+            self._name_data_cache[self.material_table] = (surnames, weights, names, nicks)
+        return self._name_data_cache[self.material_table]
 
     def generate_random_name_nick(self) -> Tuple[str, str]:
         surnames, weights, names, nicks = self._load_name_data()

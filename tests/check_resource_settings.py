@@ -2,7 +2,7 @@
 
 用法：``python tests/check_resource_settings.py``
 
-资源域设置（静态表选择 / 风格选择 / active_world）已从共享的 ``settings.json``
+资源域设置（取材表选择 / 风格选择 / active_world）已从共享的 ``settings.json``
 独立到 ``data/user/resource_settings.json``（见 ``persistence/resource_settings_repo.py``），
 由资源中心页面即时落盘。本检查锁住这条边界：
 
@@ -63,17 +63,14 @@ def _read(path):
 
 # ---------------- 1. 缺省归属资源侧 ----------------
 _defaults = ResourceSettingsRepo(data_dir=_fresh_dir()).load()
-check("缺省含四个带缺省值的资源键",
-      {k: _defaults[k] for k in ("name_table", "news_table",
-                                 "selected_styles", "selected_quip_styles")}
-      == {"name_table": "default", "news_table": "default",
+check("缺省含三个带缺省值的资源键",
+      {k: _defaults[k] for k in ("material_table", "selected_styles",
+                                 "selected_quip_styles")}
+      == {"material_table": "default",
           "selected_styles": ["chinese_mix"], "selected_quip_styles": ["events"]},
       _defaults)
-check("active_world / preset_table / personality_table 无缺省（读取方各自回退）",
-      "active_world" not in _defaults
-      and "preset_table" not in _defaults
-      and "personality_table" not in _defaults,
-      sorted(_defaults))
+check("active_world 无缺省（读取方各自回退）",
+      "active_world" not in _defaults, sorted(_defaults))
 _shared_repo = SettingsRepo(data_dir=_fresh_dir())
 check("SettingsRepo._defaults 不含资源键",
       all(k not in _shared_repo._defaults for k in RESOURCE_SETTINGS_KEYS),
@@ -82,22 +79,22 @@ check("SettingsRepo._defaults 不含资源键",
 # ---------------- 2. 读写往返与过滤 ----------------
 _dir = _fresh_dir()
 _repo = ResourceSettingsRepo(data_dir=_dir)
-_repo.save({"name_table": "wuxia", "selected_styles": ["A", "B"],
+_repo.save({"material_table": "wuxia", "selected_styles": ["A", "B"],
             "active_world": "pack-1", "bogus_key": 123})
 _loaded = _repo.load()
 check("save/load 往返且未知键被过滤",
-      _loaded["name_table"] == "wuxia"
+      _loaded["material_table"] == "wuxia"
       and _loaded["selected_styles"] == ["A", "B"]
       and _loaded["active_world"] == "pack-1"
       and "bogus_key" not in _loaded,
       _loaded)
 
 _repo.save({})
-check("空值不落盘（不清空已有文件）", _repo.load()["name_table"] == "wuxia")
+check("空值不落盘（不清空已有文件）", _repo.load()["material_table"] == "wuxia")
 
 # ---------------- 3. 旧值迁移（settings.json → resource_settings.json） ----------------
 _dir = _fresh_dir()
-_legacy = {"name_table": "western", "preset_table": "fantasy",
+_legacy = {"material_table": "western",
            "selected_quip_styles": ["Legacy"], "active_world": "old-pack",
            "world_setting": "appear", "theme_mode": "Dark"}
 with open(os.path.join(_dir, "user", "settings.json"), "w", encoding="utf-8") as fh:
@@ -105,28 +102,26 @@ with open(os.path.join(_dir, "user", "settings.json"), "w", encoding="utf-8") as
 _shared = SettingsRepo(data_dir=_dir).load()
 _migrated = ResourceSettingsRepo(data_dir=_dir).load()
 check("旧资源键搬进 resource_settings.json",
-      _migrated["name_table"] == "western"
-      and _migrated["preset_table"] == "fantasy"
+      _migrated["material_table"] == "western"
       and _migrated["selected_quip_styles"] == ["Legacy"]
       and _migrated["active_world"] == "old-pack",
       _migrated)
 check("load 返回的 dict 仍含资源键（对外形状不变）",
-      _shared["name_table"] == "western" and _shared["theme_mode"] == "Dark",
-      {k: _shared.get(k) for k in ("name_table", "theme_mode")})
+      _shared["material_table"] == "western" and _shared["theme_mode"] == "Dark",
+      {k: _shared.get(k) for k in ("material_table", "theme_mode")})
 check("迁移补上缺省资源键",
-      _migrated["news_table"] == "default"
-      and _migrated["selected_styles"] == ["chinese_mix"])
+      _migrated["selected_styles"] == ["chinese_mix"])
 
 # 迁移幂等：settings.json 残留旧值时不覆盖现值
-_repo.save({"name_table": "newer"})
+_repo.save({"material_table": "newer"})
 SettingsRepo(data_dir=_dir).load()
 check("再次迁移不覆盖资源侧已改的现值",
-      ResourceSettingsRepo(data_dir=_dir).load()["name_table"] == "newer")
+      ResourceSettingsRepo(data_dir=_dir).load()["material_table"] == "newer")
 
 # ---------------- 4. save 分流：资源键不写回共享设置 ----------------
 _dir = _fresh_dir()
 _full = dict(_legacy)
-_full["name_table"] = "split-test"
+_full["material_table"] = "split-test"
 SettingsRepo(data_dir=_dir).save(_full)
 _raw_shared = _read(os.path.join(_dir, "user", "settings.json"))
 check("save 写出的 settings.json 不含资源键",
@@ -136,22 +131,22 @@ check("save 保留共享键", _raw_shared.get("world_setting") == "appear"
       and _raw_shared.get("theme_mode") == "Dark")
 _raw_resource = _read(os.path.join(_dir, "user", "resource_settings.json"))
 check("资源键落到 resource_settings.json",
-      _raw_resource.get("name_table") == "split-test"
+      _raw_resource.get("material_table") == "split-test"
       and _raw_resource.get("active_world") == "old-pack",
       _raw_resource)
 
 # ---------------- 5. 锁键保护 ----------------
 _dir = _fresh_dir()
-ResourceSettingsRepo(data_dir=_dir).save({"name_table": "disk-value",
+ResourceSettingsRepo(data_dir=_dir).save({"material_table": "disk-value",
                                           "selected_styles": ["Keep"]})
 _locked_shared = SettingsRepo(data_dir=_dir,
                               world_state=_FakeWorldState(
-                                  locked=("name_table", "world_setting")))
-_locked_shared.save({"name_table": "attempted",
+                                  locked=("material_table", "world_setting")))
+_locked_shared.save({"material_table": "attempted",
                      "selected_styles": ["Changed"],
                      "world_setting": "attempted"})
 check("锁定的资源键保持磁盘现值",
-      _read(os.path.join(_dir, "user", "resource_settings.json"))["name_table"]
+      _read(os.path.join(_dir, "user", "resource_settings.json"))["material_table"]
       == "disk-value")
 check("未锁定的资源键正常更新",
       ResourceSettingsRepo(data_dir=_dir).load()["selected_styles"] == ["Changed"])
@@ -163,23 +158,23 @@ check("active_world 不在锁定键内、正常落盘",
 
 # 磁盘上没有的锁定键：不得写入
 _dir = _fresh_dir()
-ResourceSettingsRepo(data_dir=_dir).save({"name_table": "x"})
+ResourceSettingsRepo(data_dir=_dir).save({"selected_styles": ["A"]})
 SettingsRepo(data_dir=_dir,
-             world_state=_FakeWorldState(locked=("preset_table",))).save(
-    {"name_table": "y", "preset_table": "z"})
+             world_state=_FakeWorldState(locked=("material_table",))).save(
+    {"material_table": "z", "selected_styles": ["B"]})
 check("磁盘上没有的锁定键被丢弃",
-      "preset_table" not in _read(os.path.join(_dir, "user", "resource_settings.json")),
+      "material_table" not in _read(os.path.join(_dir, "user", "resource_settings.json")),
       _read(os.path.join(_dir, "user", "resource_settings.json")))
 check("锁定键不影响其他资源键落盘",
-      _read(os.path.join(_dir, "user", "resource_settings.json"))["name_table"] == "y")
+      _read(os.path.join(_dir, "user", "resource_settings.json"))["selected_styles"] == ["B"])
 
 # ---------------- 6. 无锁时一切照常 ----------------
 _dir = _fresh_dir()
-SettingsRepo(data_dir=_dir).save({"name_table": "free",
+SettingsRepo(data_dir=_dir).save({"material_table": "free",
                                   "active_world": "w1",
                                   "world_setting": "giant"})
 check("无 world_state 时资源键自由落盘",
-      _read(os.path.join(_dir, "user", "resource_settings.json"))["name_table"] == "free"
+      _read(os.path.join(_dir, "user", "resource_settings.json"))["material_table"] == "free"
       and _read(os.path.join(_dir, "user", "resource_settings.json"))["active_world"] == "w1")
 
 print(f"PASSED ({_checked} assertions)")

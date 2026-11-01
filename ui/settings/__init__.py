@@ -278,7 +278,7 @@ class SettingsPanel(ctk.CTkScrollableFrame):
 
     # ───────────────── 世界包联动（规则段） ─────────────────
     def _set_world_controls_locked(self):
-        """按包锁定的设置键禁用规则段控件（静态表菜单的锁在资源中心页）。"""
+        """按包锁定的设置键禁用规则段控件（取材表菜单的锁在资源中心页）。"""
         locked = self.world_state.locked_keys() if self.world_state is not None else set()
         self.world_setting_button.configure(
             state="disabled" if "world_setting" in locked else "normal")

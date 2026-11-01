@@ -183,16 +183,8 @@ class ExplorationContext:
         return self.catalog.news_service
 
     @property
-    def news_table(self) -> str:
-        return self.catalog.news_table
-
-    @property
-    def preset_table(self) -> str:
-        return self.catalog.preset_table
-
-    @property
-    def personality_table(self) -> str:
-        return self.catalog.personality_table
+    def material_table(self) -> str:
+        return self.catalog.material_table
 
     # ---------- 常用配置 ----------
 
@@ -228,17 +220,8 @@ class ExplorationContext:
     def update_world_setting(self, world_setting: str):
         self.catalog.update_world_setting(world_setting)
 
-    def update_name_table(self, table_name: str):
-        self.catalog.update_name_table(table_name)
-
-    def update_news_table(self, table_name: str):
-        self.catalog.update_news_table(table_name)
-
-    def update_preset_table(self, table_name: str):
-        self.catalog.update_preset_table(table_name)
-
-    def update_personality_table(self, table_name: str):
-        self.catalog.update_personality_table(table_name)
+    def update_material_table(self, group: str):
+        self.catalog.update_material_table(group)
 
     def get_landmark_count(self, style: str) -> int:
         return self.catalog.get_landmark_count(style)

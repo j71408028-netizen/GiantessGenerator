@@ -21,7 +21,8 @@ from typing import Any, Dict, List, Optional
 from core.logic import ALL_PART_NAMES
 from core.resource_ref import Ref
 from persistence import ScenarioRepo
-from persistence.name_repo import NameRepo, DEFAULT_NAME_TABLE
+from persistence.material_tables import DEFAULT_MATERIAL_TABLE
+from persistence.name_repo import NameRepo
 from persistence.landmark_repo import LandmarkRepo, DEFAULT_LANDMARK_STYLE
 from persistence.quip_repo import QuipRepo, DEFAULT_QUIP_STYLE
 from persistence.preset_repo import PresetRepo
@@ -31,7 +32,7 @@ from persistence.settings_repo import SettingsRepo
 from services.exploration.address_index import LANDMARK_KIND, AddressIndex
 from services.exploration.detail_pools import build_detail_pools
 from services.creation_service import CreationService
-from services.news import DEFAULT_NEWS_TABLE, NewsService
+from services.news import NewsService
 from services.state_service import StateService
 
 
@@ -82,17 +83,16 @@ class ExplorationCatalog:
 
         # ---------- 3. 核心服务 ----------
         self.state_service = StateService()
+        self.material_table = settings.get("material_table", DEFAULT_MATERIAL_TABLE)
         self.name_repo = NameRepo(world_state=world_state)
         self.creation_service = CreationService(
             name_repo=self.name_repo,
-            name_table=settings.get("name_table", DEFAULT_NAME_TABLE)
+            material_table=self.material_table
         )
-        self.news_table = settings.get("news_table", DEFAULT_NEWS_TABLE)
-        self.news_service = NewsService(news_table=self.news_table, world_state=world_state)
-        self.preset_table = settings.get("preset_table", "default")
-        self.personality_table = settings.get("personality_table", "default")
-        self.preset_repo.set_table(self.preset_table)
-        self.personality_repo.set_table(self.personality_table)
+        self.news_service = NewsService(group=self.material_table,
+                                        world_state=world_state)
+        self.preset_repo.set_group(self.material_table)
+        self.personality_repo.set_group(self.material_table)
 
         # ---------- 4. 常用配置（从设置提取，便于快速访问） ----------
         self.comparison_count = settings.get("comparison_count", 5)
@@ -140,24 +140,14 @@ class ExplorationCatalog:
         self.world_setting = world_setting
         self.settings["world_setting"] = world_setting
 
-    def update_name_table(self, table_name: str):
-        self.settings["name_table"] = table_name
-        self.creation_service.set_name_table(table_name)
-
-    def update_news_table(self, table_name: str):
-        self.news_table = table_name or DEFAULT_NEWS_TABLE
-        self.settings["news_table"] = self.news_table
-        self.news_service.set_table(self.news_table)
-
-    def update_preset_table(self, table_name: str):
-        self.preset_table = table_name or "default"
-        self.settings["preset_table"] = self.preset_table
-        self.preset_repo.set_table(self.preset_table)
-
-    def update_personality_table(self, table_name: str):
-        self.personality_table = table_name or "default"
-        self.settings["personality_table"] = self.personality_table
-        self.personality_repo.set_table(self.personality_table)
+    def update_material_table(self, group: str):
+        """切换取材表组：四张表一起换，不存在半混搭状态。"""
+        self.material_table = group or DEFAULT_MATERIAL_TABLE
+        self.settings["material_table"] = self.material_table
+        self.creation_service.set_material_table(self.material_table)
+        self.news_service.set_group(self.material_table)
+        self.preset_repo.set_group(self.material_table)
+        self.personality_repo.set_group(self.material_table)
 
     # ==================== 统计数据查询 ====================
 
@@ -182,10 +172,8 @@ class ExplorationCatalog:
         self.comparison_order = self.settings.get("comparison_order", "match")
         self.reverse_details_order = self.settings.get("reverse_details_order", False)
         self.selected_parts = self.settings.get("selected_parts", ALL_PART_NAMES.copy())
-        self.creation_service.set_name_table(self.settings.get("name_table", DEFAULT_NAME_TABLE))
-        self.update_news_table(self.settings.get("news_table", DEFAULT_NEWS_TABLE))
-        self.update_preset_table(self.settings.get("preset_table", "default"))
-        self.update_personality_table(self.settings.get("personality_table", "default"))
+        self.update_material_table(
+            self.settings.get("material_table", DEFAULT_MATERIAL_TABLE))
 
     def update_styles(self, selected_styles: list, selected_quip_styles: list):
         """更新风格选择并重新加载合并数据"""

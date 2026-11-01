@@ -1,10 +1,10 @@
-"""资源设置仓库（静态表选择 / 风格选择 / 激活世界包）。
+"""资源设置仓库（取材表选择 / 风格选择 / 激活世界包）。
 
 这些键属于「资源中心」域：改动即时生效、由资源中心页面直接写盘，与主设置页的
 「保存并返回」节奏无关，因此独立成 ``data/user/resource_settings.json``（与
 ``dungeon_settings.json`` 同先例：配置随其归属域走）。
 
-- 静态表：``name_table`` / ``news_table`` / ``preset_table`` / ``personality_table``
+- 取材表：``material_table``（组名，整组四张 CSV 一起切换）
 - 风格：``selected_styles`` / ``selected_quip_styles``
 - 世界包激活态：``active_world``
 
@@ -20,10 +20,9 @@ from persistence.json_store import load_json_with_backup, write_json_atomic
 from persistence.resources.registry import RESOURCE_SETTINGS_KEYS
 
 
-# 缺省值（preset_table / personality_table / active_world 无缺省：读取方各自回退）
+# 缺省值（active_world 无缺省：读取方各自回退）
 RESOURCE_SETTING_DEFAULTS = {
-    "name_table": "default",
-    "news_table": "default",
+    "material_table": "default",
     "selected_styles": ["chinese_mix"],
     "selected_quip_styles": ["events"],
 }

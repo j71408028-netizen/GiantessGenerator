@@ -30,6 +30,8 @@ from persistence.style_addr import load_address as _load_style_addr
 from persistence.style_addr import save_address as _save_style_addr
 from persistence.landmark_repo import write_csv as _write_landmark_csv
 from persistence.resources import registry as _registry
+from persistence import material_tables
+from core.resource_spec import MATERIAL_MEMBERS
 from dungeon.terms import SCENARIO_RESOURCE_KEY, is_default_scenario
 from core.address_model import world_of
 from core.behavior_runtime import (
@@ -233,22 +235,10 @@ class WorldManager:
             styles += self._keep_free_styles(
                 "quips", set(styles), settings.get("selected_quip_styles"))
             settings["selected_quip_styles"] = styles
-        if manifest.owns("names"):
-            tables = list(manifest.resources.get("names", []))
-            if settings.get("name_table") not in tables and tables:
-                settings["name_table"] = tables[0]
-        if manifest.owns("news"):
-            tables = list(manifest.resources.get("news", []))
-            if settings.get("news_table") not in tables and tables:
-                settings["news_table"] = tables[0]
-        if manifest.owns("presets"):
-            tables = list(manifest.resources.get("presets", []))
-            if settings.get("preset_table") not in tables and tables:
-                settings["preset_table"] = tables[0]
-        if manifest.owns("personalities"):
-            tables = list(manifest.resources.get("personalities", []))
-            if settings.get("personality_table") not in tables and tables:
-                settings["personality_table"] = tables[0]
+        if manifest.owns("materials"):
+            groups = list(manifest.resources.get("materials", []))
+            if settings.get("material_table") not in groups and groups:
+                settings["material_table"] = groups[0]
 
     def _keep_free_styles(self, rtype: str, pack_styles: set, selected) -> List[str]:
         """命名空间合并下保留在选取中的自由风格。
@@ -411,28 +401,19 @@ class WorldManager:
                 if os.path.isfile(src_addr):
                     shutil.copy2(src_addr,
                                  os.path.join(dst_dir, dst + _ADDR_SUFFIX))
-        if manifest.owns("presets"):
-            for table in manifest.resources.get("presets", []):
-                dst_dir = os.path.join(static_root, "presets")
-                os.makedirs(dst_dir, exist_ok=True)
-                dst = self._target_name(dst_dir, table, ".csv", manifest)
-                shutil.copy2(
-                    os.path.join(installed, "presets", f"{table}.csv"),
-                    os.path.join(dst_dir, f"{dst}.csv"))
-                renamed[("presets", table)] = dst
-                if dst != table:
-                    manifest.settings["preset_table"] = dst
-        if manifest.owns("personalities"):
-            for table in manifest.resources.get("personalities", []):
-                dst_dir = os.path.join(static_root, "personalities")
-                os.makedirs(dst_dir, exist_ok=True)
-                dst = self._target_name(dst_dir, table, ".csv", manifest)
-                shutil.copy2(
-                    os.path.join(installed, "personalities", f"{table}.csv"),
-                    os.path.join(dst_dir, f"{dst}.csv"))
-                renamed[("personalities", table)] = dst
-                if dst != table:
-                    manifest.settings["personality_table"] = dst
+        # 取材表：整组目录搬回自由层（四个成员一起走，组名冲突时整体改名）。
+        for group in manifest.resources.get("materials", []):
+            dst_dir = os.path.join(static_root, "materials")
+            os.makedirs(dst_dir, exist_ok=True)
+            dst = self._target_name(dst_dir, group, "", manifest)
+            src_dir = os.path.join(installed, "materials", group)
+            if not os.path.isdir(src_dir):
+                continue
+            shutil.rmtree(os.path.join(dst_dir, dst), ignore_errors=True)
+            shutil.copytree(src_dir, os.path.join(dst_dir, dst))
+            renamed[("materials", group)] = dst
+            if dst != group:
+                manifest.settings["material_table"] = dst
         # 枚举包目录（而非仅清单声明），覆盖激活期间在包内新建的方案
         scenarios_root = os.path.join(installed, SCENARIO_RESOURCE_KEY)
         if os.path.isdir(scenarios_root):
@@ -478,26 +459,6 @@ class WorldManager:
                             challenge_mgr._register_key(f"{dst}.chal", key)
                         except Exception as e:
                             print(f"[WorldPack] 附带挑战包秘钥注册失败 {dst}.chal: {e}")
-        for table in manifest.resources.get("names", []):
-            dst_dir = os.path.join(static_root, "names")
-            os.makedirs(dst_dir, exist_ok=True)
-            dst = self._target_name(dst_dir, table, ".csv", manifest)
-            shutil.copy2(
-                os.path.join(installed, "names", f"{table}.csv"),
-                os.path.join(dst_dir, f"{dst}.csv"))
-            renamed[("names", table)] = dst
-            if dst != table:
-                manifest.settings["name_table"] = dst
-        for table in manifest.resources.get("news", []):
-            dst_dir = os.path.join(static_root, "news")
-            os.makedirs(dst_dir, exist_ok=True)
-            dst = self._target_name(dst_dir, table, ".csv", manifest)
-            shutil.copy2(
-                os.path.join(installed, "news", f"{table}.csv"),
-                os.path.join(dst_dir, f"{dst}.csv"))
-            renamed[("news", table)] = dst
-            if dst != table:
-                manifest.settings["news_table"] = dst
         # 行为包是静态资源目录，目录名冲突时整体改名。
         for behavior in manifest.resources.get("behaviors", []):
             src = resolve_behavior_source(
@@ -564,8 +525,7 @@ class WorldManager:
             self, world_id: str, name: str,
             settings: Dict[str, Any],
             landmark_repo=None, quip_repo=None,
-            preset_repo=None, personality_repo=None,
-            scenario_repo=None, name_repo=None, news_service=None,
+            scenario_repo=None,
             challenge_mgr=None,
             version: str = "1.0", author: str = "", description: str = "",
             selected_resources: Optional[Dict[str, List[str]]] = None,
@@ -584,9 +544,8 @@ class WorldManager:
         os.makedirs(target, exist_ok=True)
         try:
             self._collect_resources(manifest, target, settings,
-                                    landmark_repo, quip_repo, preset_repo,
-                                    personality_repo, scenario_repo,
-                                    name_repo, news_service,
+                                    landmark_repo, quip_repo,
+                                    scenario_repo,
                                     challenge_mgr,
                                     selected_resources)
             if manifest.owns("behaviors"):
@@ -611,9 +570,8 @@ class WorldManager:
 
     def _collect_resources(self, manifest: WorldPackManifest, target: str,
                            settings: Dict[str, Any],
-                           landmark_repo, quip_repo, preset_repo,
-                           personality_repo, scenario_repo,
-                           name_repo, news_service,
+                           landmark_repo, quip_repo,
+                           scenario_repo,
                            challenge_mgr,
                            selected_resources: Optional[Dict[str, List[str]]] = None) -> None:
         resources: Dict[str, Any] = {}
@@ -643,24 +601,19 @@ class WorldManager:
                     _save_style_addr(os.path.join(target, "quips"),
                                      style, style_addr)
             resources["quips"] = styles
-        tables = [t for t in selected.get("presets", [])
-                  if preset_repo is not None and t in preset_repo.get_tables()]
-        if tables:
-            os.makedirs(os.path.join(target, "presets"), exist_ok=True)
-            for table in tables:
-                preset_repo.write_csv(
-                    os.path.join(target, "presets", f"{table}.csv"),
-                    preset_repo.load(table))
-            resources["presets"] = tables
-        tables = [t for t in selected.get("personalities", [])
-                  if personality_repo is not None and t in personality_repo.get_tables()]
-        if tables:
-            os.makedirs(os.path.join(target, "personalities"), exist_ok=True)
-            for table in tables:
-                personality_repo.write_csv(
-                    os.path.join(target, "personalities", f"{table}.csv"),
-                    personality_repo.load(table))
-            resources["personalities"] = tables
+        # 取材表：整组打包。缺席成员按回落后解析到的文件一并复制，
+        # 包内组因此是当时的完整搭配快照，不依赖自由层的内置组。
+        groups = [g for g in selected.get("materials", [])
+                  if g in material_tables.list_groups(self.data_dir)]
+        if groups:
+            group = groups[0]
+            group_target = os.path.join(target, "materials", group)
+            os.makedirs(group_target, exist_ok=True)
+            for member in MATERIAL_MEMBERS:
+                src = material_tables.member_path(group, member.key, self.data_dir)
+                if os.path.isfile(src):
+                    shutil.copy2(src, os.path.join(group_target, member.file_name()))
+            resources["materials"] = [group]
         scenario_ids = [d for d in selected.get("scenarios", [])
                        if not is_default_scenario(d)
                        and scenario_repo is not None and scenario_repo.exists(d)]
@@ -685,22 +638,6 @@ class WorldManager:
                 collected.append(filename)
         if collected:
             resources["challenges"] = collected
-        tables = [t for t in selected.get("names", [])
-                  if name_repo is not None and t in name_repo.get_tables()]
-        if tables:
-            os.makedirs(os.path.join(target, "names"), exist_ok=True)
-            for table in tables:
-                shutil.copy2(name_repo.resolve(table),
-                             os.path.join(target, "names", f"{table}.csv"))
-            resources["names"] = tables
-        tables = [t for t in selected.get("news", [])
-                  if news_service is not None and t in news_service.get_tables()]
-        if tables:
-            os.makedirs(os.path.join(target, "news"), exist_ok=True)
-            for table in tables:
-                shutil.copy2(news_service.resolve(table),
-                             os.path.join(target, "news", f"{table}.csv"))
-            resources["news"] = tables
         # 行为包只能单选：优先静态目录，其次当前激活世界包内的同名目录。
         behavior_names = selected.get("behaviors", [])[:1]
         if behavior_names:

@@ -75,7 +75,7 @@ for spec in RESOURCE_TYPES:
 # ---------------- 2. 派生映射 ----------------
 # 领域契约：资源域的设置键集合。改了就要写迁移，所以在这里钉住。
 _EXPECTED_SETTING_KEYS = {
-    "name_table", "news_table", "preset_table", "personality_table",
+    "material_table",
     "selected_styles", "selected_quip_styles", "active_world",
 }
 
@@ -169,7 +169,8 @@ if os.path.isdir(_DATA):
         check(isinstance(ids, list), f"{spec.type_id}.list_ids 返回列表")
         for resource_id in ids:
             target = (os.path.join(directory, resource_id)
-                      if spec.container in ("json_dir", "py_package")
+                      if spec.container in ("json_dir", "py_package",
+                                            "csv_dir", "csv_bundle")
                       else registry.free_path(spec.type_id, resource_id, _DATA))
             check(os.path.exists(target),
                   f"{spec.type_id}/{resource_id} 列出后定位不到主文件", target)
@@ -323,14 +324,44 @@ try:
     check(registry.resource_id_from_path(
               "landmarks", os.path.join(landmarks_dir, "v1.2.csv")) == "v1.2",
           "路径反推 id 同样保留点号")
-    check(registry.resource_id_from_entry("presets", "v1.2.csv") == "v1.2",
+    check(registry.resource_id_from_entry("challenges", "v1.2.chal") == "v1.2",
           "带后缀容器只剥声明后缀")
+
+    # 取材表：多成员容器（一个目录 = 一组四张 CSV，成员可缺席回落）
+    material_dir = os.path.join(_tmp, "static", "materials", "default")
+    os.makedirs(material_dir, exist_ok=True)
+    for member_key, header in (
+            ("names", ["surname", "ppm", "name", "nick"]),
+            ("presets", ["name", "height_ratio", "leg_ratio", "foot_length_ratio"]),
+            ("personalities", ["name", "init_intrusion", "step_intrusion"]),
+            ("news", ["size_category", "intrusion", "destruction", "text"])):
+        with open(os.path.join(material_dir, f"{member_key}.csv"), "w",
+                  encoding="utf-8-sig", newline="") as handle:
+            csv.writer(handle).writerow(header)
+    material_primary = os.path.join(material_dir, "names.csv")
+    check(registry.resource_id_from_path("materials", material_primary) == "default",
+          "多成员容器从主成员文件反推组名", registry.resource_id_from_path(
+              "materials", material_primary))
+    check(registry.list_ids("materials", _tmp) == ["default"],
+          "多成员容器按目录枚举组", registry.list_ids("materials", _tmp))
+    check(not [d for d in registry.validate_resource("materials", material_primary)
+               if d.is_error()], "四成员齐全的组通过校验")
+    os.remove(os.path.join(material_dir, "news.csv"))
+    absent = registry.validate_resource("materials", material_primary)
+    check(not [d for d in absent if d.is_error()]
+          and any(d.code == "absent_member" for d in absent),
+          "非必填成员缺席只给回落提示", [d.code for d in absent])
+    for member_key in ("names", "presets", "personalities"):
+        os.remove(os.path.join(material_dir, f"{member_key}.csv"))
+    empty = registry.validate_resource("materials", material_dir)
+    check(any(d.code == "empty_bundle" for d in empty),
+          "成员全缺的组校验报空", [d.code for d in empty])
 
     # 打包成员核对：成员形状全部由 primary 模板派生
     members = {"landmarks/chinese_mix.csv", "quips/events/quips.csv",
-               "presets/default.csv", "behaviors/imperial_units/x.py"}
+               "materials/default/news.csv", "behaviors/imperial_units/x.py"}
     declared = {"landmarks": ["chinese_mix"], "quips": ["events"],
-                "presets": ["default"], "behaviors": ["imperial_units"]}
+                "materials": ["default"], "behaviors": ["imperial_units"]}
     check(registry.missing_members(declared, members) == [],
           "声明齐全时无缺失", registry.missing_members(declared, members))
     for type_id, resource_id, expect in (
@@ -338,14 +369,14 @@ try:
             ("quips", "absent", "quips/absent/quips.csv"),
             ("scenarios", "absent", "scenarios/absent/config.json"),
             ("challenges", "absent.chal", "challenges/absent.chal"),
-            ("names", "absent", "names/absent.csv"),
+            ("materials", "absent", "materials/absent/*.csv"),
             ("behaviors", "absent", "behaviors/absent/*.py")):
         got = registry.missing_members({type_id: [resource_id]}, members)
         check(got == [expect], f"{type_id} 缺失成员路径由 primary 模板派生", got)
     check(world_pack._missing_members(
               world_pack.WorldPackManifest(world_id="w", name="n",
-                                           resources={"presets": ["absent"]}),
-              members) == ["presets/absent.csv"],
+                                           resources={"materials": ["absent"]}),
+              members) == ["materials/absent/*.csv"],
           "world_pack 的成员核对委托给注册表")
 
     # 类型专属规则：行为包只能选一个、包名要能当 Python 标识符

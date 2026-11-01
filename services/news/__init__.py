@@ -8,20 +8,23 @@
 
 import csv
 import datetime
-import os
 import random
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from core.logic import get_size_category
 from core.resource_spec import spec_of
-from paths import data_dir
-from persistence.resources.registry import free_dir as _free_dir_of
+from persistence.material_tables import (
+    DEFAULT_MATERIAL_TABLE,
+    group_dir,
+    list_groups,
+    member_path,
+)
 
 
 # 列清单来自资源声明：表头顺序即索引优先级顺序
-NEWS_COLUMNS = spec_of("news").field_keys()
-DEFAULT_NEWS_TABLE = "default"
+NEWS_COLUMNS = spec_of("materials").member("news").field_keys()
+MEMBER_KEY = "news"
 _REPLACEMENT_KEYS = {
     1: ("{a}", "{1}"),
     2: ("{b}", "{2}"),
@@ -51,46 +54,33 @@ class NewsArticle:
 
 
 class NewsService:
-    """加载静态新闻表，并按角色当前状态选择新闻。"""
+    """加载取材表组内的新闻表，并按角色当前状态选择新闻。"""
 
-    def __init__(self, news_dir: Optional[str] = None, news_table: str = DEFAULT_NEWS_TABLE,
-                 world_state=None):
+    def __init__(self, group: Optional[str] = None, world_state=None):
         self._world_state = world_state
-        self._free_dir = news_dir or _free_dir_of("news", data_dir())
-        self._table = news_table or DEFAULT_NEWS_TABLE
+        self._group = group or DEFAULT_MATERIAL_TABLE
         self._cache: Optional[List[Dict[str, str]]] = None
 
     def _read_dir(self) -> str:
-        if self._world_state is not None and self._world_state.owns("news"):
-            return self._world_state.pack_path("news")
-        return self._free_dir
+        return group_dir(self._group, world_state=self._world_state)
 
-    def get_tables(self) -> List[str]:
-        """返回可用新闻表名（文件名不含 .csv 后缀）。"""
-        read_dir = self._read_dir()
-        if not os.path.isdir(read_dir):
-            return []
-        return sorted(
-            os.path.splitext(filename)[0]
-            for filename in os.listdir(read_dir)
-            if filename.lower().endswith(".csv")
-        )
+    def get_groups(self) -> List[str]:
+        """返回可用取材表组名。"""
+        return list_groups(world_state=self._world_state)
 
-    def resolve(self, table_name: str) -> str:
-        """返回指定新闻表 CSV 的完整路径。"""
-        name = table_name or DEFAULT_NEWS_TABLE
-        if not name.lower().endswith(".csv"):
-            name += ".csv"
-        return os.path.join(self._read_dir(), name)
+    def resolve(self, group: Optional[str] = None) -> str:
+        """返回指定组内新闻表的完整路径（缺席时已回落到内置组）。"""
+        return member_path(group or self._group, MEMBER_KEY,
+                           world_state=self._world_state)
 
-    def set_table(self, table_name: str):
-        self._table = table_name or DEFAULT_NEWS_TABLE
+    def set_group(self, group: Optional[str]):
+        self._group = group or DEFAULT_MATERIAL_TABLE
         self._cache = None
 
     def _load(self) -> List[Dict[str, str]]:
         if self._cache is not None:
             return self._cache
-        path = self.resolve(self._table)
+        path = self.resolve()
         rows: List[Dict[str, str]] = []
         try:
             with open(path, "r", encoding="utf-8-sig", newline="") as f:

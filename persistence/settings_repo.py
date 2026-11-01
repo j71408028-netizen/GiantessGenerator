@@ -40,7 +40,7 @@ class SettingsRepo:
             # 副本独占设置（audio_levels / dungeon_font / story_recent_count /
             # auto_save_replay / fps_max）不在此表：它们住 data/user/dungeon_settings.json，
             # 见 persistence/dungeon_settings_repo.py。这里只保留与主程序共用的键。
-            # 资源域键（静态表选择 / 风格选择 / active_world）同理不在此表：它们住
+            # 资源域键（取材表选择 / 风格选择 / active_world）同理不在此表：它们住
             # data/user/resource_settings.json，见 persistence/resource_settings_repo.py。
             # 网络代理（可留空）：语音合成与 AI 文本生成**共用**，见 core/netproxy.py。
             # 留空则回退到环境变量（DUNGEON_NET_PROXY / HTTPS_PROXY / HTTP_PROXY）。

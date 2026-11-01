@@ -153,7 +153,7 @@ def resource_id_from_path(type_id: str, path: str) -> str:
     """从主文件路径反推资源 id（目录型容器取目录名）。"""
     spec = _spec(type_id)
     norm = os.path.normpath(path)
-    if spec.container in ("json_dir", "py_package", "csv_dir"):
+    if spec.container in ("json_dir", "py_package", "csv_dir", "csv_bundle"):
         if not os.path.isdir(norm):
             depth = primary_relpath(type_id, "__id__").count("/")
             for _ in range(depth):
@@ -183,7 +183,7 @@ def is_resource_entry(type_id: str, directory: str, name: str) -> bool:
         return False
     if name.startswith(".") or name == "__pycache__":
         return False
-    if spec.container in ("json_dir", "py_package", "csv_dir"):
+    if spec.container in ("json_dir", "py_package", "csv_dir", "csv_bundle"):
         return True  # 目录项即资源
     suffix = primary_suffix(type_id)
     if not suffix:
@@ -194,7 +194,8 @@ def is_resource_entry(type_id: str, directory: str, name: str) -> bool:
 
 def resource_id_from_entry(type_id: str, name: str) -> str:
     """目录项名 → 资源 id（目录型与无后缀容器保留原名，其余去掉声明后缀）。"""
-    if _spec(type_id).container in ("json_dir", "py_package", "csv_dir"):
+    if _spec(type_id).container in ("json_dir", "py_package", "csv_dir",
+                                    "csv_bundle"):
         return name
     suffix = primary_suffix(type_id)
     if suffix and name.lower().endswith(suffix.lower()):
@@ -265,6 +266,13 @@ def missing_members(declared: Dict[str, Any],
                         for item in member_set):
                     missing.append(f"{prefix}*.py")
                 continue
+            if spec.container == "csv_bundle":
+                # 成员可缺席（读取时回落），归档里只要有一份就算成立
+                prefix = f"{PACK_RESOURCE_PATHS[type_id]}/{resource_id}/"
+                if not any(item.startswith(prefix) and item.endswith(".csv")
+                           for item in member_set):
+                    missing.append(f"{prefix}*.csv")
+                continue
             member = pack_member(type_id, resource_id)
             if member not in member_set:
                 missing.append(member)
@@ -328,6 +336,8 @@ def validate_resource(type_id: str, path: str) -> List[Diagnostic]:
         diagnostics.extend(_validate_csv(spec, path))
     elif spec.container == "csv_dir":
         diagnostics.extend(_validate_csv_dir(spec, path))
+    elif spec.container == "csv_bundle":
+        diagnostics.extend(_validate_csv_bundle(spec, path))
     elif spec.container == "json_dir":
         diagnostics.extend(_validate_dir_manifest(spec, path))
     elif spec.container == "py_package":
@@ -430,6 +440,29 @@ def _validate_csv_dir(spec, path: str) -> List[Diagnostic]:
     return diagnostics
 
 
+def _validate_csv_bundle(spec, path: str) -> List[Diagnostic]:
+    """多成员 CSV 组：逐成员校验表头；非必填成员缺席只提示回落。"""
+    directory = path if os.path.isdir(path) else os.path.dirname(path)
+    diagnostics: List[Diagnostic] = []
+    present = 0
+    for member in spec.members:
+        target = os.path.join(directory, member.file_name())
+        if not os.path.isfile(target):
+            if member.required:
+                diagnostics.append(_error(
+                    "missing_member", f"组内缺少必填成员 {member.file_name()}"))
+            else:
+                diagnostics.append(_warning(
+                    "absent_member",
+                    f"组内缺少 {member.file_name()}，读取时回落到内置组"))
+            continue
+        present += 1
+        diagnostics.extend(_validate_csv(member, target))
+    if not present:
+        diagnostics.insert(0, _error("empty_bundle", "组内没有任何成员文件"))
+    return diagnostics
+
+
 def _validate_dir_manifest(spec, path: str) -> List[Diagnostic]:
     """目录型容器：主文件在目录内，按 JSON 规则校验主文件。"""
     primary = path
@@ -477,8 +510,8 @@ def catalog_entry(type_id: str, resource_id: str,
     if not envelope.get("content_hash"):
         target = free_path(type_id, resource_id, data_dir)
         if not os.path.exists(target) and spec.container in (
-                "json_dir", "py_package", "csv_dir"):
-            # 目录型容器（含目录内 CSV）按整个目录算哈希
+                "json_dir", "py_package", "csv_dir", "csv_bundle"):
+            # 目录型容器（含目录内 CSV 与多成员 CSV 组）按整个目录算哈希
             target = os.path.join(directory, resource_id)
         if os.path.exists(target):
             envelope["content_hash"] = content_hash(target, spec.container)

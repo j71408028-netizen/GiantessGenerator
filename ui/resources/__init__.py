@@ -1,8 +1,8 @@
 """资源中心标签页：顶部导航「在线资源 / 社区 / 本地资源」。
 
 在线资源与社区为联网能力预留占位；本地资源是本页功能区：世界包、风格组、
-副本方案、静态表、挑战包以分区卡片呈现，各分区**启用项排在未启用项之前**
-（世界包=激活包、风格组=已选风格、静态表=当前选中表、副本方案/挑战包=随
+副本方案、取材表、挑战包以分区卡片呈现，各分区**启用项排在未启用项之前**
+（世界包=激活包、风格组=已选风格、取材表=当前组、副本方案/挑战包=随
 世界包附带的资源）。改动**即时生效**：每次选择立即写回
 ``resource_settings.json``（经 :meth:`SettingsRepo.save_resource_keys`，只动
 资源域键）并同步生成上下文；世界包的启用/停用/删除同样即时执行。
@@ -25,17 +25,19 @@ if TYPE_CHECKING:
     from persistence.quip_repo import QuipRepo
 
 from core.address_model import world_of
+from core.resource_spec import MATERIAL_MEMBERS
 from paths import icon_dir
 from persistence import PresetRepo, PersonalityRepo
 from persistence.landmark_repo import DEFAULT_LANDMARK_STYLE
-from persistence.name_repo import NameRepo, DEFAULT_NAME_TABLE
+from persistence.material_tables import DEFAULT_MATERIAL_TABLE, present_members
+from persistence.name_repo import NameRepo
 from persistence.resources import registry
 from persistence.resources.catalog_store import refresh_catalog
 from persistence.resources.registry import LIST_RESOURCE_TYPES
 from persistence.world_pack import list_behavior_packs, pack_icon_path
 from dungeon.terms import is_default_scenario
 from services.challenges import ChallengeService
-from services.news import DEFAULT_NEWS_TABLE, NewsService
+from services.news import NewsService
 from ui.resources.dialogs import WorldPackCreateDialog
 from ui.ctk.widgets import StyleListBox, OptionButton
 from ui.ctk.ctk_image import pil_to_ctk
@@ -143,10 +145,7 @@ class ResourceHubPanel(ctk.CTkFrame):
             quip_repo: 'QuipRepo',
             initial_settings: Dict,
             on_styles_changed: Callable,
-            on_name_table_changed: Optional[Callable] = None,
-            on_news_table_changed: Optional[Callable] = None,
-            on_preset_table_changed: Optional[Callable] = None,
-            on_personality_table_changed: Optional[Callable] = None,
+            on_material_table_changed: Optional[Callable] = None,
             gui_ref=None,
             world_manager=None,
             name_repo: Optional[NameRepo] = None,
@@ -160,10 +159,7 @@ class ResourceHubPanel(ctk.CTkFrame):
         self.quip_repo = quip_repo
         self.settings = initial_settings
         self.on_styles_changed = on_styles_changed
-        self.on_name_table_changed = on_name_table_changed
-        self.on_news_table_changed = on_news_table_changed
-        self.on_preset_table_changed = on_preset_table_changed
-        self.on_personality_table_changed = on_personality_table_changed
+        self.on_material_table_changed = on_material_table_changed
         self.gui_ref = gui_ref
         self.world_manager = world_manager
         self.world_state = getattr(world_manager, "world_state", None) \
@@ -172,10 +168,8 @@ class ResourceHubPanel(ctk.CTkFrame):
         self.preset_repo = preset_repo or PresetRepo(world_state=self.world_state)
         self.personality_repo = personality_repo or PersonalityRepo(world_state=self.world_state)
 
-        self.name_table = self.settings.get("name_table", DEFAULT_NAME_TABLE)
-        self.news_table = self.settings.get("news_table", DEFAULT_NEWS_TABLE)
-        self.preset_table = self.settings.get("preset_table", "default")
-        self.personality_table = self.settings.get("personality_table", "default")
+        self.material_table = self.settings.get(
+            "material_table", DEFAULT_MATERIAL_TABLE)
         self.selected_styles = self.settings.get("selected_styles", [DEFAULT_LANDMARK_STYLE])
         self.selected_quip_styles = self.settings.get("selected_quip_styles", [])
 
@@ -254,7 +248,7 @@ class ResourceHubPanel(ctk.CTkFrame):
         """联网资源占位页：布局与导航均已就位，等下载能力接入后填充主区。"""
         self._build_placeholder(
             self.online_view, "🌐", "联网资源",
-            "在线下载静态表、风格素材、副本方案与世界包的能力将在这里提供。\n"
+            "在线下载取材表、风格素材、副本方案与世界包的能力将在这里提供。\n"
             "当前版本请通过「本地资源」使用与管理资源。")
 
     def _build_community_view(self):
@@ -269,7 +263,7 @@ class ResourceHubPanel(ctk.CTkFrame):
         self._build_world_section()
         self._build_styles_section()
         self._build_scenarios_section()
-        self._build_tables_section()
+        self._build_materials_section()
         self._build_challenges_section()
 
     def _add_section(self, title, note=None, action=None):
@@ -359,7 +353,7 @@ class ResourceHubPanel(ctk.CTkFrame):
             "世界包", note="启用中的世界包会接管其打包的资源",
             action=("＋ 新建", self._create_world_pack))
         # 行内容统一由 __init__ 末尾的 _refresh_local_sections 首次填充
-        # （此刻静态表菜单尚未创建，行刷新里的锁键逻辑还不能跑）。
+        # （此刻取材表菜单尚未创建，行刷新里的锁键逻辑还不能跑）。
 
     def _refresh_world_rows(self):
         """重建世界包卡片：激活包在最前（启用项优先），其余按名称排列。
@@ -494,68 +488,60 @@ class ResourceHubPanel(ctk.CTkFrame):
                 badge="随包启用" if scenario_id in bundled else None,
                 buttons=buttons)
 
-    # ───────────────── 分区：静态表 ─────────────────
+    # ───────────────── 分区：取材表 ─────────────────
     @staticmethod
     def _pinned_front(values, current):
-        """把当前选中项排到最前（静态表的"启用项优先"）。"""
+        """把当前选中项排到最前（"启用项优先"）。"""
         rest = [v for v in values if v != current]
         return [current] + rest if current else rest
 
-    def _build_tables_section(self):
+    def _build_materials_section(self):
         body, _ = self._add_section(
-            "静态表", note="每类表生效中的即为启用项，切换即时生效")
+            "取材表", note="一组四张表同时生效，切换即时生效")
         body.columnconfigure(0, weight=2, uniform="hub_tables")
         body.columnconfigure(1, weight=3, uniform="hub_tables")
-        row = 0
 
-        _, ctrl = self._make_table_row(body, row, "姓名表")
-        row += 1
-        self.name_table_var = tk.StringVar(value=self.name_table)
-        name_tables = self._pinned_front(self.name_repo.get_tables(), self.name_table)
-        self.name_table_menu = self._make_option_button(
-            ctrl, name_tables,
-            self._on_name_table_changed, self.name_table_var
+        _, ctrl = self._make_table_row(body, 0, "当前取材表")
+        self.material_table_var = tk.StringVar(value=self.material_table)
+        groups = self._pinned_front(self._material_groups(), self.material_table)
+        if not groups:
+            groups = [DEFAULT_MATERIAL_TABLE]
+        self.material_table_menu = self._make_option_button(
+            ctrl, groups, self._on_material_table_changed, self.material_table_var
         )
 
-        _, ctrl = self._make_table_row(body, row, "新闻表")
-        row += 1
-        self.news_table_var = tk.StringVar(value=self.news_table)
-        news_service = NewsService(news_table=self.news_table,
-                                   world_state=self.world_state)
-        news_tables = self._pinned_front(news_service.get_tables(), self.news_table)
-        if not news_tables:
-            news_tables = [DEFAULT_NEWS_TABLE]
-        self.news_table_menu = self._make_option_button(
-            ctrl, news_tables,
-            self._on_news_table_changed, self.news_table_var
-        )
+        self._material_members_frame = ctk.CTkFrame(body, fg_color="transparent")
+        self._material_members_frame.grid(
+            row=1, column=0, columnspan=2, sticky='ew', padx=10, pady=(0, 8))
+        self._refresh_material_members()
 
-        _, ctrl = self._make_table_row(body, row, "身材表")
-        row += 1
-        self.preset_table_var = tk.StringVar(value=self.preset_table)
-        preset_tables = self._pinned_front(self.preset_repo.get_tables(),
-                                           self.preset_table)
-        if not preset_tables:
-            preset_tables = ["default"]
-        self.preset_table_menu = self._make_option_button(
-            ctrl, preset_tables,
-            self._on_preset_table_changed, self.preset_table_var
-        )
+    def _material_groups(self):
+        """可用取材表组名（包内 + 自由层）。"""
+        return self.name_repo.get_groups()
 
-        _, ctrl = self._make_table_row(body, row, "性格表")
-        row += 1
-        self.personality_table_var = tk.StringVar(value=self.personality_table)
-        personality_tables = self._pinned_front(
-            self.personality_repo.get_tables(), self.personality_table)
-        if not personality_tables:
-            personality_tables = ["default"]
-        self.personality_table_menu = self._make_option_button(
-            ctrl, personality_tables,
-            self._on_personality_table_changed, self.personality_table_var
-        )
+    def _refresh_material_members(self):
+        """重建组内成员明细：文件名 + 是否回落内置。"""
+        frame = self._material_members_frame
+        self._clear(frame)
+        present = set(present_members(self.material_table,
+                                      self._resource_data_dir(), self.world_state))
+        for member in MATERIAL_MEMBERS:
+            row = ctk.CTkFrame(frame, fg_color="transparent")
+            row.pack(fill='x')
+            ctk.CTkLabel(row, text=member.label, width=64, anchor='w',
+                         font=ui_fonts.ui_font(11),
+                         text_color=SETTINGS_TEXT_SOFT).pack(side='left')
+            ctk.CTkLabel(row, text=member.file_name(), anchor='w',
+                         font=ui_fonts.ui_font(11),
+                         text_color=SETTINGS_TEXT_SOFT).pack(side='left')
+            if member.key not in present:
+                ctk.CTkLabel(row, text="回落内置", anchor='w',
+                             font=ui_fonts.ui_font(11),
+                             text_color=SETTINGS_TEXT_SOFT).pack(
+                    side='left', padx=(8, 0))
 
     def _make_table_row(self, parent, row, text):
-        """静态表分区的一行：标签在左，下拉控件在右。"""
+        """取材表分区的一行：标签在左，下拉控件在右。"""
         label = ctk.CTkLabel(
             parent, text=text, anchor='w',
             font=_FONT, text_color=SETTINGS_LABEL
@@ -633,6 +619,15 @@ class ResourceHubPanel(ctk.CTkFrame):
         """切回本页时刷新：拾取挑战模式 / 副本编辑页的外部增删。"""
         self._refresh_scenario_rows()
         self._refresh_challenge_rows()
+        self._refresh_material_options()
+
+    def _refresh_material_options(self):
+        """重读取材表组列表与成员明细（外部增删目录后切回本页可见）。"""
+        groups = self._pinned_front(self._material_groups(), self.material_table)
+        if not groups:
+            groups = [DEFAULT_MATERIAL_TABLE]
+        self.material_table_menu.configure(values=groups)
+        self._refresh_material_members()
 
     def _goto_page(self, page_key):
         if self.gui_ref is not None and hasattr(self.gui_ref, "show_page"):
@@ -649,10 +644,7 @@ class ResourceHubPanel(ctk.CTkFrame):
     def _persist_resource_keys(self):
         """把本页当前选择写进共享 settings 并即时落盘（只动资源域键）。"""
         self.settings.update({
-            "name_table": self.name_table,
-            "news_table": self.news_table,
-            "preset_table": self.preset_table,
-            "personality_table": self.personality_table,
+            "material_table": self.material_table,
             "selected_styles": self.selected_styles,
             "selected_quip_styles": self.selected_quip_styles,
         })
@@ -686,10 +678,7 @@ class ResourceHubPanel(ctk.CTkFrame):
         return {
             "landmarks": lambda: self.landmark_repo.get_styles(),
             "quips": lambda: self.quip_repo.get_styles(),
-            "presets": lambda: self.preset_repo.get_tables() if self.preset_repo else [],
-            "personalities": lambda: (
-                self.personality_repo.get_tables() if self.personality_repo else []),
-            "names": lambda: self.name_repo.get_tables() if self.name_repo else [],
+            "materials": lambda: self._material_groups(),
             "topics": self._available_topics,
             "scenarios": self._available_scenarios,
             "challenges": self._available_challenges,
@@ -742,51 +731,21 @@ class ResourceHubPanel(ctk.CTkFrame):
         return behaviors
 
     def _set_table_menus_locked(self):
-        """按包锁定的资源键禁用静态表菜单（规则段的体型/种子锁在设置页）。"""
+        """按包锁定的资源键禁用取材表菜单（规则段的体型/种子锁在设置页）。"""
         locked = self.world_state.locked_keys() if self.world_state is not None else set()
-        self.name_table_menu.configure(
-            state="disabled" if "name_table" in locked else "normal")
-        self.news_table_menu.configure(
-            state="disabled" if "news_table" in locked else "normal")
-        self.preset_table_menu.configure(
-            state="disabled" if "preset_table" in locked else "normal")
-        self.personality_table_menu.configure(
-            state="disabled" if "personality_table" in locked else "normal")
+        self.material_table_menu.configure(
+            state="disabled" if "material_table" in locked else "normal")
 
     def _sync_table_vars(self):
-        """激活/卸载/解散后，按 self.settings 回读静态表选择。"""
-        name_tables = self._pinned_front(self.name_repo.get_tables(),
-                                         self.settings.get("name_table", DEFAULT_NAME_TABLE))
-        self.name_table = name_tables[0]
-        self.name_table_var.set(self.name_table)
-        self.name_table_menu.configure(values=name_tables)
-
-        news_table = self.settings.get("news_table", DEFAULT_NEWS_TABLE)
-        news_service = NewsService(news_table=news_table,
-                                   world_state=self.world_state)
-        news_tables = self._pinned_front(news_service.get_tables(), news_table)
-        if not news_tables:
-            news_tables = [DEFAULT_NEWS_TABLE]
-        self.news_table = news_tables[0]
-        self.news_table_var.set(self.news_table)
-        self.news_table_menu.configure(values=news_tables)
-
-        preset_table = self.settings.get("preset_table", "default")
-        preset_tables = self._pinned_front(self.preset_repo.get_tables(), preset_table)
-        if not preset_tables:
-            preset_tables = ["default"]
-        self.preset_table = preset_tables[0]
-        self.preset_table_var.set(self.preset_table)
-        self.preset_table_menu.configure(values=preset_tables)
-
-        personality_table = self.settings.get("personality_table", "default")
-        personality_tables = self._pinned_front(
-            self.personality_repo.get_tables(), personality_table)
-        if not personality_tables:
-            personality_tables = ["default"]
-        self.personality_table = personality_tables[0]
-        self.personality_table_var.set(self.personality_table)
-        self.personality_table_menu.configure(values=personality_tables)
+        """激活/卸载/解散后，按 self.settings 回读取材表选择。"""
+        group = self.settings.get("material_table", DEFAULT_MATERIAL_TABLE)
+        groups = self._pinned_front(self._material_groups(), group)
+        if not groups:
+            groups = [DEFAULT_MATERIAL_TABLE]
+        self.material_table = groups[0]
+        self.material_table_var.set(self.material_table)
+        self.material_table_menu.configure(values=groups)
+        self._refresh_material_members()
 
     def _after_world_state_change(self):
         """世界包状态变化后：回读本页状态 → 推给上下文 → 全局刷新。"""
@@ -795,14 +754,8 @@ class ResourceHubPanel(ctk.CTkFrame):
         self.selected_quip_styles = self.settings.get("selected_quip_styles", [])
         self._sync_all_states()
         if self.gui_ref is not None:
-            for method, arg in [
-                ("on_name_table_changed", self.name_table),
-                ("on_news_table_changed", self.news_table),
-                ("on_preset_table_changed", self.preset_table),
-                ("on_personality_table_changed", self.personality_table),
-            ]:
-                if hasattr(self.gui_ref, method):
-                    getattr(self.gui_ref, method)(arg)
+            if hasattr(self.gui_ref, "on_material_table_changed"):
+                self.gui_ref.on_material_table_changed(self.material_table)
             if hasattr(self.gui_ref, "refresh_world_ui"):
                 self.gui_ref.refresh_world_ui()
         self._refresh_local_sections()
@@ -835,12 +788,7 @@ class ResourceHubPanel(ctk.CTkFrame):
                     cfg["world_id"], cfg["name"], self.settings,
                     landmark_repo=self.landmark_repo,
                     quip_repo=self.quip_repo,
-                    preset_repo=getattr(self.gui_ref, "_preset_repo", None) if self.gui_ref else None,
-                    personality_repo=getattr(self.gui_ref, "_personality_repo", None) if self.gui_ref else None,
                     scenario_repo=getattr(self.gui_ref, "_scenario_repo", None) if self.gui_ref else None,
-                    name_repo=self.name_repo,
-                    news_service=getattr(getattr(self.gui_ref, "context", None),
-                                         "news_service", None),
                     challenge_mgr=challenge_mgr,
                     version=cfg["version"],
                     author=cfg["author"],
@@ -895,32 +843,12 @@ class ResourceHubPanel(ctk.CTkFrame):
         self._after_world_state_change()
 
     # ───────────────── 回调 ─────────────────
-    def _on_name_table_changed(self, choice):
-        self.name_table = choice or DEFAULT_NAME_TABLE
-        self.name_table_var.set(choice)
-        if self.on_name_table_changed:
-            self.on_name_table_changed(self.name_table)
-        self._persist_resource_keys()
-
-    def _on_news_table_changed(self, choice):
-        self.news_table = choice or DEFAULT_NEWS_TABLE
-        self.news_table_var.set(self.news_table)
-        if self.on_news_table_changed:
-            self.on_news_table_changed(self.news_table)
-        self._persist_resource_keys()
-
-    def _on_preset_table_changed(self, choice):
-        self.preset_table = choice or "default"
-        self.preset_table_var.set(self.preset_table)
-        if self.on_preset_table_changed:
-            self.on_preset_table_changed(self.preset_table)
-        self._persist_resource_keys()
-
-    def _on_personality_table_changed(self, choice):
-        self.personality_table = choice or "default"
-        self.personality_table_var.set(self.personality_table)
-        if self.on_personality_table_changed:
-            self.on_personality_table_changed(self.personality_table)
+    def _on_material_table_changed(self, choice):
+        self.material_table = choice or DEFAULT_MATERIAL_TABLE
+        self.material_table_var.set(self.material_table)
+        self._refresh_material_members()
+        if self.on_material_table_changed:
+            self.on_material_table_changed(self.material_table)
         self._persist_resource_keys()
 
     # ───────────────── 风格选择逻辑 ─────────────────
