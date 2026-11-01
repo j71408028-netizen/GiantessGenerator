@@ -55,6 +55,9 @@ TABLE_SETTING_KEYS = {
 WORLD_SETTING_KEYS = ("world_setting", "seed", *TABLE_SETTING_KEYS)
 WORLD_SETTING_VALUES = {"appear", "abs_giant", "rel_giant"}
 
+#: 世界包清单 ``traits`` 字段的词表：包声明的世界观基调（slug 见 core.resource_spec.TRAIT_LABELS）。
+WORLD_TRAIT_VALUES = ("realistic", "fantasy", "anime", "scifi")
+
 _WORLD_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
@@ -112,6 +115,9 @@ class WorldPackManifest:
     version: str = "1.0"
     author: str = ""
     description: str = ""
+    # 包声明的世界观基调与主语言（可选；空 = 未标注）。traits 词表见 WORLD_TRAIT_VALUES。
+    traits: List[str] = field(default_factory=list)
+    language: str = ""
     app_min_version: str = ""
     created_at: str = field(
         default_factory=lambda: datetime.datetime.now().isoformat(timespec="seconds"))
@@ -140,6 +146,10 @@ class WorldPackManifest:
         }
         if self.behavior_api is not None:
             data["behavior_api"] = self.behavior_api
+        if self.traits:
+            data["traits"] = list(self.traits)
+        if self.language:
+            data["language"] = self.language
         return data
 
     @classmethod
@@ -154,6 +164,10 @@ class WorldPackManifest:
             version=data.get("version", "1.0"),
             author=data.get("author", ""),
             description=data.get("description", ""),
+            traits=[t for t in (data.get("traits") or [])
+                    if isinstance(t, str) and t],
+            language=(data.get("language") or "")
+            if isinstance(data.get("language"), str) else "",
             app_min_version=data.get("app_min_version", ""),
             created_at=data.get("created_at", ""),
             worlds=data.get("worlds", []),
@@ -181,6 +195,10 @@ class WorldPackManifest:
                 f"behavior_api 必须为正整数或省略（实际: {self.behavior_api!r}）")
         if not isinstance(self.name, str) or not self.name.strip():
             errors.append("name 不能为空")
+        if any(not isinstance(t, str) or not t.strip() for t in self.traits):
+            errors.append(f"traits 必须为非空字符串列表（实际: {self.traits!r}）")
+        if not isinstance(self.language, str):
+            errors.append(f"language 必须为字符串（实际: {self.language!r}）")
         for key in self.settings:
             if key not in WORLD_SETTING_KEYS:
                 errors.append(

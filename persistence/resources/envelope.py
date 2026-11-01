@@ -37,10 +37,15 @@ ENVELOPE_DEFAULTS: Dict[str, Any] = {
     "source": {},
     "status": "draft",
     "tags": [],
+    "traits": [],
+    "language": "",
 }
 
-#: ``status`` 的合法取值（本地草稿 / 已发布 / 已停用）
-STATUS_VALUES = ("draft", "published", "deprecated")
+#: ``status`` 的合法取值（本地草稿 / 预览发布 / 稳定发布 / 已停用）
+STATUS_VALUES = ("draft", "preview", "stable", "deprecated")
+
+#: 存量 ``status`` 的别名映射（读取侧归一，磁盘原样保留）
+STATUS_ALIASES = {"published": "stable"}
 
 #: ``source.kind`` 的合法取值
 SOURCE_KINDS = ("local", "import", "server")
@@ -77,6 +82,7 @@ def default_envelope(type_id: str, resource_id: str) -> dict:
     data["schema"] = schema_for(type_id)
     data["id"] = resource_id
     data["tags"] = []
+    data["traits"] = []
     data["source"] = {}
     return data
 
@@ -88,10 +94,17 @@ def normalize_envelope(data: Any, type_id: str, resource_id: str) -> dict:
         result.update(data)
     if not isinstance(result.get("tags"), list):
         result["tags"] = []
+    if not isinstance(result.get("traits"), list):
+        result["traits"] = []
+    result["traits"] = [str(t) for t in result["traits"] if str(t)]
     if not isinstance(result.get("source"), dict):
         result["source"] = {}
+    if not isinstance(result.get("language"), str):
+        result["language"] = ""
     if not isinstance(result.get("version"), str) or not result["version"]:
         result["version"] = ENVELOPE_DEFAULTS["version"]
+    if result.get("status") in STATUS_ALIASES:
+        result["status"] = STATUS_ALIASES[result["status"]]
     if result.get("status") not in STATUS_VALUES:
         result["status"] = ENVELOPE_DEFAULTS["status"]
     if not result.get("schema"):

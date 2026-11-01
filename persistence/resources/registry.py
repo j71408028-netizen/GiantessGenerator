@@ -490,6 +490,8 @@ def catalog_entry(type_id: str, resource_id: str,
         "content_hash": envelope.get("content_hash", ""),
         "status": envelope.get("status", "draft"),
         "tags": list(envelope.get("tags") or []),
+        "traits": list(envelope.get("traits") or []),
+        "language": envelope.get("language", ""),
         "schema": schema_for(type_id),
     }
 

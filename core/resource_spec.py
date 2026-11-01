@@ -100,7 +100,11 @@ class ResourceTypeSpec:
     - ``max_items``：世界包一次可声明的份数上限（0 = 不限）；
     - ``id_pattern``：本类型专属的资源 id 正则（空 = 用全局 ``RESOURCE_ID_RE``）；
       行为包要按 Python 标识符取名，比全局规则宽，不能共用一个正则；
-    - ``ui_pick``：界面上的选择粒度，见 ``PICK_MODES``。
+    - ``ui_pick``：界面上的选择粒度，见 ``PICK_MODES``；
+    - ``trait_values``：本类型的特色（``traits``）词表，声明在信封 ``traits``
+      字段里的合法取值；空 = 该类型暂未启用特色，界面对其隐藏该筛选项。
+      词表外的值不清洗、原样保留；
+    - ``trait_pick``：特色在界面上的选择粒度，见 ``PICK_MODES``。
     """
 
     type_id: str
@@ -117,6 +121,8 @@ class ResourceTypeSpec:
     max_items: int = 0
     id_pattern: str = ""
     ui_pick: str = "multi"
+    trait_values: Tuple[str, ...] = ()
+    trait_pick: str = "single"
     note: str = ""
 
     def id_regex(self):
@@ -232,6 +238,28 @@ _QUIP_FIELDS = _csv_fields(
 
 
 # ---------------------------------------------------------------------------
+# 特色词表
+# ---------------------------------------------------------------------------
+# ASCII slug → 中文显示名，全局一张表，slug 跨类型唯一。
+# 各类型启用哪些取值见 ResourceTypeSpec.trait_values。
+
+TRAIT_LABELS: Dict[str, str] = {
+    "realistic": "物理写实",
+    "fantasy": "奇幻",
+    "anime": "二次元",
+    "scifi": "科幻",
+    "longform": "长线剧情",
+    "gameplay": "游戏为主",
+    "multi_ending": "多结局",
+}
+
+
+def trait_label(value: str) -> str:
+    """特色 slug 的中文显示名；未知值原样返回。"""
+    return TRAIT_LABELS.get(str(value or ""), str(value or ""))
+
+
+# ---------------------------------------------------------------------------
 # 类型清单
 # ---------------------------------------------------------------------------
 # 顺序即界面展示顺序（世界包创建对话框的打包列表按此排列），也是诊断里的遍历顺序。
@@ -256,6 +284,7 @@ RESOURCE_TYPES: Tuple[ResourceTypeSpec, ...] = (
         fields=_QUIP_FIELDS,
         settings_keys=("selected_quip_styles",),
         addressable=True,
+        trait_values=("realistic", "fantasy", "anime", "scifi"),
         note="描述风格：目录即一份资源，quips.csv 每行一个条目，"
              "config.json 存自定义类型与后续匹配配置",
     ),
@@ -308,6 +337,8 @@ RESOURCE_TYPES: Tuple[ResourceTypeSpec, ...] = (
         primary="{id}/config.json",
         label="副本方案",
         fields=_SCENARIO_FIELDS,
+        trait_values=("longform", "gameplay", "multi_ending"),
+        trait_pick="multi",
         note="副本方案：目录内含 config.json 与 images/ components/ audio/ 等素材",
     ),
     ResourceTypeSpec(
@@ -428,6 +459,12 @@ def pick_mode(type_id: str) -> str:
     return spec.ui_pick if spec is not None else "multi"
 
 
+def trait_values_of(type_id: str) -> Tuple[str, ...]:
+    """某类型的特色词表；未知类型或未启用返回空元组。"""
+    spec = spec_of(type_id)
+    return spec.trait_values if spec is not None else ()
+
+
 def check_spec_consistency() -> list:
     """声明自身的结构自洽检查（守卫与开发者工具共用），返回问题列表。"""
     problems = []
@@ -463,6 +500,13 @@ def check_spec_consistency() -> list:
             problems.append(f"{spec.type_id}: 可打包的类型必须有界面显示名")
         if spec.ui_pick not in PICK_MODES:
             problems.append(f"{spec.type_id}: 未知选择粒度 {spec.ui_pick!r}")
+        if spec.trait_pick not in PICK_MODES:
+            problems.append(f"{spec.type_id}: 未知特色选择粒度 {spec.trait_pick!r}")
+        if not spec.trait_values and spec.trait_pick != "single":
+            problems.append(f"{spec.type_id}: 未启用特色却声明了多选")
+        for value in spec.trait_values:
+            if value not in TRAIT_LABELS:
+                problems.append(f"{spec.type_id}: 特色取值缺少显示名 {value!r}")
         if spec.max_items < 0:
             problems.append(f"{spec.type_id}: max_items 不能为负")
         if spec.max_items == 1 and spec.ui_pick != "single":
@@ -473,7 +517,8 @@ def check_spec_consistency() -> list:
             except re.error as exc:
                 problems.append(f"{spec.type_id}: id_pattern 无法编译（{exc}）")
     for name in ("settings_keys", "packable", "addressable", "id_required",
-                 "label", "max_items", "id_pattern", "ui_pick"):
+                 "label", "max_items", "id_pattern", "ui_pick",
+                 "trait_values", "trait_pick"):
         if name not in {f.name for f in fields(ResourceTypeSpec)}:
             problems.append(f"ResourceTypeSpec 缺少字段 {name}")
     return problems
