@@ -174,8 +174,15 @@ data/static/behaviors/imperial_units/imperial_units.py:45
 ### 2.7 资源类型清单只有一份声明
 
 「资源」指成组、可替换、可打包的内容（地标风格、描述风格、副本方案、挑战包、
-行为包、话题表、小游戏、四张静态表）。**类型清单只写在 `core/resource_spec.py`**：
+行为包、话题表、小游戏、取材表）。**类型清单只写在 `core/resource_spec.py`**：
 容器形状、主文件模板、字段清单、id 规则、存储根、设置键、界面显示名与选择粒度。
+
+取材表（`materials`）是唯一的多成员容器（`csv_bundle`）：一个目录就是一份资源，
+内含 `names.csv` / `presets.csv` / `personalities.csv` / `news.csv` 四个成员。
+四张表共用一套角色状态坐标系——新闻表的索引列正是身材表算出的尺寸等级与性格表
+演化的介入度/破坏性——所以只能整组替换，资源设置里也只占一个键（`material_table`）。
+成员可缺席：缺哪个就落到内置 `default` 组里的同名文件（`persistence/material_tables.py`），
+这样只覆盖一两张表不必复制整套，以后新增成员类型也不必迁移存量组。
 
 派生出口是 `persistence/resources/registry.py`，其余模块一律从这里取值：
 
