@@ -76,8 +76,9 @@ class DungeonSettingsRepo:
         # 音量走总线单一真相源（夹取 0-100、结构坏掉整体回退缺省）
         data["audio_levels"] = buses.levels_from_settings(data)
         data["dungeon_font"] = str(data.get("dungeon_font") or "")
+        # 下限 2 与运行时一致（dungeon/window/base.py 至少保留最近两段）
         try:
-            data["story_recent_count"] = max(1, min(200, int(
+            data["story_recent_count"] = max(2, min(200, int(
                 data.get("story_recent_count",
                          dungeon_settings.DEFAULT_STORY_RECENT_COUNT))))
         except (TypeError, ValueError):

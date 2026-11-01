@@ -243,7 +243,7 @@ check("落盘后不再标脏", _win._settings_dirty is False, _win._settings_dir
 check("工具条图标含设置齿轮", "settings" in iu_panel.ICON_SHAPES)
 _gear = iu_panel.icon_rgba(iu_panel.ICON_SHAPES["settings"], 16)
 check("齿轮图标有可见像素", int(_gear[:, :, 3].max()) > 0)
-check("设置面板可循环挑选段落字体",
+check("字体候选表非空（段落字体是主窗口设置页的启动项）",
       bool(window_fonts.font_family_choices()))
 
 _overlay_src = _src("dungeon", "window", "overlay.py")

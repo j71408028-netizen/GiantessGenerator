@@ -23,7 +23,6 @@ from imgui_bundle import imgui
 
 from dungeon import settings as dungeon_settings
 from dungeon.audio import buses
-from dungeon.window import fonts
 from dungeon.window import imgui_util as iu
 from dungeon.window.ui import _panel_flags
 
@@ -43,7 +42,6 @@ _SETTINGS_TITLE = (238, 242, 250, 255)
 _SETTINGS_HINT = (150, 160, 176, 255)
 _SETTINGS_SECTION = (255, 205, 120, 255)
 _SETTINGS_LABEL = (212, 218, 228, 255)
-_SETTINGS_MUTED = (168, 176, 190, 255)
 _SETTINGS_FRAME_BG = (30, 34, 48, 236)
 _SETTINGS_FRAME_BG_HOVERED = (44, 50, 68, 246)
 _SETTINGS_FRAME_BG_ACTIVE = (54, 62, 84, 250)
@@ -58,24 +56,7 @@ _SETTINGS_PANEL = "##dungeon_settings"
 _SETTINGS_PANEL_W = 560
 #: 居中定位用的面板高度估算（实际高度由 ``always_auto_resize`` 按内容定；
 #: 这里只决定卡片大致落在屏幕中部）。
-_SETTINGS_PANEL_H = 470
-
-
-def _normalize_family(name):
-    """字体家族名归一化（去空白/连字符/下划线、小写），仅用于比对。"""
-    return (str(name or "").strip()
-            .replace(" ", "").replace("-", "").replace("_", "").lower())
-
-
-def _font_choice_index(choices, current):
-    """当前家族在候选表里的下标；认不出返回 -1。"""
-    target = _normalize_family(current)
-    if not target:
-        return -1
-    for index, (display, family) in enumerate(choices):
-        if target in (_normalize_family(family), _normalize_family(display)):
-            return index
-    return -1
+_SETTINGS_PANEL_H = 330
 
 
 class OverlayHandler:
@@ -275,24 +256,12 @@ class OverlayHandler:
             self._settings_dirty = False
             self.set_dungeon_settings({})
 
-    def _cycle_dungeon_font(self, choices, index, step):
-        if not choices:
-            return
-        if index < 0:
-            index = 0 if step > 0 else len(choices) - 1
-        else:
-            index = (index + step) % len(choices)
-        display, family = choices[index]
-        # 字体图集在加载期构建，运行中不重建：只写进设置，下次进入副本生效。
-        self.set_dungeon_settings({"dungeon_font": family})
-        self._settings_dirty = False
-        self._notify(f"段落字体：{display}（下次进入副本生效）")
-
     def _draw_settings_panel(self, w, h):
         """副本设置面板：半透明全屏遮罩之上的居中卡片（顶层窗口）。
 
-        只放副本身份的**独占设置**（音量 / 帧率 / 记忆窗口 / 自动回放 / 段落
-        字体 / 组件代管区停靠侧）。整块浮在三种文本组件之上、遮罩压暗正文，
+        只放能在副本窗口内**即时生效**的运行期设置（音量 / 帧率上限 / 组件
+        代管区停靠侧）；下次进副本才生效的启动项（记忆窗口 / 段落字体）在主
+        窗口设置页。整块浮在三种文本组件之上、遮罩压暗正文，
         卡片是中性的深色，
         因此底部渐变栏 / 卡片 / NVL 三种版式下都不打架：玩家在哪一版里，
         它都只是「当前画面之上的一张设置卡」。
@@ -323,7 +292,7 @@ class OverlayHandler:
         slider_w = max(80.0, inner_w - label_w - float(round(10 * s)))
 
         imgui.push_style_color(imgui.Col_.text, iu.u32(*_SETTINGS_TITLE))
-        imgui.text("副本设置")
+        imgui.text("窗口设置")
         imgui.pop_style_color()
         imgui.same_line()
         imgui.push_style_color(imgui.Col_.text, iu.u32(*_SETTINGS_HINT))
@@ -356,21 +325,6 @@ class OverlayHandler:
             self._apply_settings_live({"fps_max": float(new_fps)})
         if released:
             self._flush_settings_overlay()
-        changed, new_recent, released = self._settings_slider(
-            "记忆窗口", "##dungeon_set_recent",
-            self._settings_int("story_recent_count",
-                               dungeon_settings.DEFAULT_STORY_RECENT_COUNT),
-            2, 200, label_w, slider_w, "%d")
-        if changed:
-            self._apply_settings_live({"story_recent_count": int(new_recent)})
-        if released:
-            self._flush_settings_overlay()
-        changed, new_replay = imgui.checkbox(
-            "自动保存副本回放##dungeon_set_replay",
-            bool((self.dungeon_settings or {}).get("auto_save_replay", False)))
-        if changed:
-            self._apply_settings_live({"auto_save_replay": bool(new_replay)},
-                                      persist=True)
 
         imgui.spacing()
         # ---- 界面：窗口视觉设置，玩家实时决定，改完立即重排组件 ----
@@ -389,33 +343,6 @@ class OverlayHandler:
             if imgui.radio_button(f"{label}##dungeon_set_dock_{value}",
                                   current_side == value):
                 self._apply_settings_live({"dock_side": value}, persist=True)
-
-        imgui.spacing()
-        # ---- 段落字体（改了下一次进入生效） ----
-        self._settings_section("段落字体")
-        choices = fonts.font_family_choices()
-        current = str((self.dungeon_settings or {}).get("dungeon_font")
-                      or getattr(self, "dungeon_font", "") or "")
-        index = _font_choice_index(choices, current)
-        if 0 <= index < len(choices):
-            display = choices[index][0]
-        else:
-            display = current or "跟随系统"
-        arrow_w = float(round(34 * s))
-        row_h = float(imgui.get_frame_height())
-        if imgui.button("<##dungeon_font_prev", iu.v2(arrow_w, row_h)):
-            self._cycle_dungeon_font(choices, index, -1)
-        imgui.same_line()
-        if imgui.button(">##dungeon_font_next", iu.v2(arrow_w, row_h)):
-            self._cycle_dungeon_font(choices, index, 1)
-        imgui.same_line()
-        imgui.push_style_color(imgui.Col_.text, iu.u32(*_SETTINGS_LABEL))
-        imgui.text(display)
-        imgui.pop_style_color()
-        imgui.same_line()
-        imgui.push_style_color(imgui.Col_.text, iu.u32(*_SETTINGS_MUTED))
-        imgui.text("· 下次进入副本生效")
-        imgui.pop_style_color()
 
         imgui.spacing()
         if imgui.button("完成", iu.v2(inner_w, float(round(34 * s)))):

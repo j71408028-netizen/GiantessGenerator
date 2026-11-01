@@ -15,7 +15,6 @@ if TYPE_CHECKING:
 from core.logic import ALL_PART_NAMES, normalize_blocked_words
 from core import netproxy
 from persistence import DungeonSettingsRepo
-from dungeon.audio import buses
 import services.ui_mode as ui_mode
 from ui.ctk.widgets import CollapsibleBlock, OptionButton
 from ui.ctk import fonts as ui_fonts
@@ -50,8 +49,10 @@ class SettingsPanel(ctk.CTkScrollableFrame):
     ):
         super().__init__(parent, fg_color="transparent", **kwargs)
         self.settings_repo = settings_repo
-        # 副本独占设置（音量 / 段落字体 / 记忆窗口 / 自动回放 / 帧率）独立成
-        # data/user/dungeon_settings.json，见 persistence/dungeon_settings_repo.py。
+        # 副本独占设置独立成 data/user/dungeon_settings.json，见
+        # persistence/dungeon_settings_repo.py。本页只放「下次进副本生效」的
+        # 启动项（记忆窗口 / 段落字体）；音量 / 帧率 / 回放 / 停靠侧这类能在
+        # 副本窗口内即时生效的，只在副本设置面板里调。
         self.dungeon_settings_repo = DungeonSettingsRepo()
         self.dungeon_settings = self.dungeon_settings_repo.load()
         self.settings = initial_settings
@@ -79,10 +80,6 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.quip_rate_factor = self.settings.get("quip_rate_factor", 1.0)
         self.info_update_rate = self.settings.get("info_update_rate", 0.5)
         self.blocked_words = normalize_blocked_words(self.settings.get("blocked_words", []))
-        # 音频总线玩家电平（总音量 / 音乐 / 语音 / 音效），见 dungeon/audio/buses.py
-        self.audio_levels = buses.levels_from_settings(self.dungeon_settings)
-        self._bus_level_vars = {}
-        self._bus_level_labels = {}
 
         self._create_widgets()
         self._sync_parts_states()
@@ -472,61 +469,18 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.dungeon_font_entry = self._make_entry(ctrl, self.dungeon_font_var, width=150)
         self.dungeon_font_entry.pack(side='left')
 
-        # 「朗读副本对话」总开关已撤掉：不想听就把下面「音量」里的语音拧到 0
-        self._build_audio_section(self.disp_body, row)
-
-    def _build_audio_section(self, parent, row):
-        """音量：四条总线各一根 0-100 滑条（缺省 100 = 不衰减）。
-
-        与方案里的「档位」不同——档位是作者配内容时选的响度，这里拧的是玩家
-        自己那层总电平；两者相乘，见 ``dungeon/audio/buses.py`` 的三层单位表。
-        滑条只改内存中的待保存值，点「保存并返回」才落盘。
-        """
-        self._section_label(parent, row, "音量")
-        row += 1
-        for bus in buses.BUSES:
-            _, ctrl = self._make_row(parent, row, buses.BUS_LABELS[bus])
-            row += 1
-            var = tk.IntVar(value=self.audio_levels.get(bus, buses.MAX_LEVEL))
-            ctk.CTkSlider(
-                ctrl, from_=0, to=buses.MAX_LEVEL,
-                number_of_steps=buses.MAX_LEVEL // 5, variable=var, width=120,
-                command=lambda value, b=bus: self._on_bus_level_change(b, value),
-            ).pack(side='left')
-            label = ctk.CTkLabel(
-                ctrl, text=str(var.get()), width=30, anchor='w',
-                font=_FONT, text_color=SETTINGS_LABEL)
-            label.pack(side='left', padx=(6, 0))
-            self._bus_level_vars[bus] = var
-            self._bus_level_labels[bus] = label
-
-    def _on_bus_level_change(self, bus, value):
-        label = self._bus_level_labels.get(bus)
-        if label is not None:
-            label.configure(text=str(int(float(value))))
-
-    def _sync_audio_levels(self):
-        """按内存里的副本设置刷新音频滑条（面板常驻，需显式回读）。"""
-        self.audio_levels = buses.levels_from_settings(self.dungeon_settings)
-        for bus, var in self._bus_level_vars.items():
-            level = self.audio_levels.get(bus, buses.MAX_LEVEL)
-            var.set(level)
-            self._bus_level_labels[bus].configure(text=str(level))
-
     def _sync_dungeon_settings(self):
         """进入设置页时回读副本独占设置并刷新相关控件。
 
         设置页常驻，而副本窗口本身也能改这份设置（``dungeon_settings.json``），
-        所以进页时从仓库重读一次，避免显示陈旧值。
+        所以进页时从仓库重读一次，避免显示陈旧值。副本窗口只即时改运行期参数
+        （音量 / 帧率 / 回放 / 停靠侧），不会动本页这两个启动项。
         """
         self.dungeon_settings = self.dungeon_settings_repo.load()
         self.dungeon_font_var.set(self.dungeon_settings.get("dungeon_font")
                                   or ui_fonts.dungeon_font_default())
         self.story_recent_var.set(
             str(self.dungeon_settings.get("story_recent_count", 20)))
-        self.auto_save_replay_var.set(
-            bool(self.dungeon_settings.get("auto_save_replay", False)))
-        self._sync_audio_levels()
 
     def _on_ui_mode_changed(self, value):
         """记录「下次启动用哪套界面」，仅此而已。
@@ -546,12 +500,16 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         ui_mode.save_startup_mode(pref)
 
     def _story_recent_count_value(self) -> int:
-        """剧情概要保留的最近段落数（1~200，非法输入回退到原值/20）。"""
+        """剧情概要保留的最近段落数（2~200，非法输入回退到原值/20）。
+
+        下限与副本运行时一致（``dungeon/window/base.py`` 夹到 2）：历史窗口
+        至少要留最近两段，1 是假选项。
+        """
         try:
             value = int(float(self.story_recent_var.get().strip()))
         except (ValueError, AttributeError):
             return int(self.dungeon_settings.get("story_recent_count", 20) or 20)
-        return max(1, min(200, value))
+        return max(2, min(200, value))
 
     def _build_archive_block(self):
         self._setup_body_grid(self.archive_body, "archive")
@@ -561,11 +519,6 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         row += 1
         self.auto_save_report_var = tk.BooleanVar(value=self.settings.get("auto_save_report", False))
         self.auto_save_report_switch = self._make_switch(ctrl, self.auto_save_report_var)
-
-        _, ctrl = self._make_row(self.archive_body, row, "自动保存副本回放")
-        row += 1
-        self.auto_save_replay_var = tk.BooleanVar(value=self.dungeon_settings.get("auto_save_replay", False))
-        self.auto_save_replay_switch = self._make_switch(ctrl, self.auto_save_replay_var)
 
         _, ctrl = self._make_row(self.archive_body, row, "以低分辨率保存图片")
         row += 1
@@ -842,13 +795,12 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.settings["selected_parts"] = selected_parts
         self.settings["reverse_details_order"] = self.reverse_details_var.get()
 
-        # 副本独占设置落自己的文件（data/user/dungeon_settings.json）。
+        # 副本独占设置落自己的文件（data/user/dungeon_settings.json）。这里只写
+        # 下次进副本才生效的启动项；运行期参数（音量 / 帧率 / 回放 / 停靠侧）
+        # 由副本设置面板即时改，本页不碰，避免两套控件争夺同一份文件。
         self.dungeon_settings = self.dungeon_settings_repo.update({
             "dungeon_font": dungeon_font,
-            "audio_levels": {bus: int(self._bus_level_vars[bus].get())
-                             for bus in buses.BUSES},
             "story_recent_count": self._story_recent_count_value(),
-            "auto_save_replay": self.auto_save_replay_var.get(),
         })
 
         # 先保存当前（自由）设置，再应用世界包启用/卸载更改
