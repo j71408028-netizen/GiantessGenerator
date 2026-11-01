@@ -98,6 +98,18 @@ def installed_dir(data_dir: str, world_id: str) -> str:
     return os.path.join(worlds_dir(data_dir), world_id)
 
 
+WORLD_ICON_NAME = "icon.png"
+
+
+def pack_icon_path(data_dir: str, world_id: str) -> Optional[str]:
+    """世界包封面的约定路径：包目录内的 icon.png（缺失时返回 None）。
+
+    随包导出/导入按整目录打包，icon.png 会自动随包携带，不进 manifest。
+    """
+    path = os.path.join(installed_dir(data_dir, world_id), WORLD_ICON_NAME)
+    return path if os.path.isfile(path) else None
+
+
 @dataclass
 class WorldPackManifest:
     """世界包清单（world.json）的数据模型。

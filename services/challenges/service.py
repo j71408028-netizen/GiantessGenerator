@@ -85,6 +85,11 @@ class ChallengeService:
             return False
         return os.path.normpath(os.path.dirname(file_path)) == os.path.normpath(pack_dir)
 
+    def pack_icon_path(self, file_path: str) -> Optional[str]:
+        """挑战包封面的约定路径：.chal 同目录同名 .png 旁车文件（缺失返回 None）。"""
+        path = os.path.splitext(file_path)[0] + ".png"
+        return path if os.path.isfile(path) else None
+
     def _pack_keys(self) -> Dict[str, str]:
         """世界包附带挑战包目录内的 keys.json（包名基名 -> 秘钥）。"""
         pack_dir = self.pack_challenges_dir()

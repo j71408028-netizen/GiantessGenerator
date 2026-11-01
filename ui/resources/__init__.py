@@ -12,9 +12,10 @@
 """
 import os
 import tkinter as tk
-from typing import Dict, Callable, Optional, TYPE_CHECKING
+from typing import Dict, Callable, List, Optional, TYPE_CHECKING
 
 import customtkinter as ctk
+from PIL import Image
 
 import ui.ctk.dialogs
 
@@ -24,18 +25,20 @@ if TYPE_CHECKING:
     from persistence.quip_repo import QuipRepo
 
 from core.address_model import world_of
+from paths import icon_dir
 from persistence import PresetRepo, PersonalityRepo
 from persistence.landmark_repo import DEFAULT_LANDMARK_STYLE
 from persistence.name_repo import NameRepo, DEFAULT_NAME_TABLE
 from persistence.resources import registry
 from persistence.resources.catalog_store import refresh_catalog
 from persistence.resources.registry import LIST_RESOURCE_TYPES
-from persistence.world_pack import list_behavior_packs
+from persistence.world_pack import list_behavior_packs, pack_icon_path
 from dungeon.terms import is_default_scenario
 from services.challenges import ChallengeService
 from services.news import DEFAULT_NEWS_TABLE, NewsService
 from ui.resources.dialogs import WorldPackCreateDialog
 from ui.ctk.widgets import StyleListBox, OptionButton
+from ui.ctk.ctk_image import pil_to_ctk
 from ui.ctk import fonts as ui_fonts
 from ui.ctk.theme import (
     SETTINGS_PANEL_BG, SETTINGS_HOVER, SETTINGS_INPUT_HOVER,
@@ -45,6 +48,83 @@ from ui.ctk.theme import (
 )
 
 _FONT = ui_fonts.ui_font(13)
+
+
+class IconCard(ctk.CTkFrame):
+    """方形资源卡片：图标 + 名称（+右上角徽标），可选底部小按钮与点击动作。
+
+    ``icon_path`` 缺失或加载失败时回退到 ``fallback_emoji`` 文本占位。
+    """
+
+    def __init__(self, parent, title, icon_path=None, fallback_emoji="📦",
+                 badge=None, badge_color=SETTINGS_OK, buttons=(),
+                 on_click=None, size=112, icon_size=52, **kwargs):
+        super().__init__(parent, width=size, height=132, corner_radius=10,
+                         border_width=1, fg_color=SETTINGS_PANEL_BG,
+                         border_color=SETTINGS_INPUT_BORDER, **kwargs)
+        self.pack_propagate(False)
+        self.grid_propagate(False)
+        self._on_click = on_click
+        self._icon_image = None
+
+        if icon_path:
+            try:
+                self._icon_image = pil_to_ctk(Image.open(icon_path).convert("RGBA"),
+                                              (icon_size, icon_size))
+            except Exception as exc:
+                print(f"[ResourceHub] 图标加载失败 {icon_path}: {exc}")
+        if self._icon_image is not None:
+            ctk.CTkLabel(self, image=self._icon_image, text="").pack(pady=(12, 3))
+        else:
+            ctk.CTkLabel(self, text=fallback_emoji,
+                         font=ui_fonts.ui_font(30)).pack(pady=(12, 3))
+
+        ctk.CTkLabel(self, text=title, font=ui_fonts.ui_font(12),
+                     text_color=SETTINGS_LABEL, wraplength=size - 14,
+                     justify='center').pack(fill='x', padx=6,
+                                            expand=True)
+
+        if buttons:
+            row = ctk.CTkFrame(self, fg_color="transparent")
+            row.pack(side='bottom', fill='x', padx=6, pady=(0, 8))
+            for text, command, color in buttons:
+                ctk.CTkButton(
+                    row, text=text, width=42, height=22, command=command,
+                    fg_color="transparent", text_color=color,
+                    hover_color=SETTINGS_HOVER, border_width=1,
+                    border_color=SETTINGS_INPUT_BORDER, corner_radius=7,
+                    font=ui_fonts.ui_font(11)).pack(
+                    side='right', padx=(4, 0), expand=True, fill='x')
+
+        if badge:
+            ctk.CTkLabel(self, text=badge, font=ui_fonts.ui_font(11),
+                         text_color=badge_color, fg_color=SETTINGS_INPUT_BG,
+                         corner_radius=6).place(relx=1.0, x=-8, y=8,
+                                                anchor='ne')
+
+        if on_click:
+            self._bind_card(self)
+
+    def _bind_card(self, widget):
+        """点击与悬停绑定铺到全部子控件上（CTk 控件的点击落在内部部件上）。
+
+        按钮自身有 command，跳过绑定避免双重触发。
+        """
+        if isinstance(widget, ctk.CTkButton):
+            return
+        widget.bind("<Button-1>", lambda _e: self._on_click(), add="+")
+        widget.bind("<Enter>", lambda _e: self._on_hover(True), add="+")
+        widget.bind("<Leave>", lambda _e: self._on_hover(False), add="+")
+        if not isinstance(widget, ctk.CTkLabel):  # 叶子控件不进入其内部
+            for child in widget.winfo_children():
+                self._bind_card(child)
+
+    def _on_hover(self, entered):
+        try:
+            self.configure(border_color=SETTINGS_INPUT_HOVER if entered
+                           else SETTINGS_INPUT_BORDER)
+        except Exception:
+            pass
 
 
 class ResourceHubPanel(ctk.CTkFrame):
@@ -267,6 +347,12 @@ class ResourceHubPanel(ctk.CTkFrame):
             btn.pack(side='right', padx=(6, 0))
         return row
 
+    def _grid_cards(self, frame, cards, cols=6):
+        """卡片按固定列数从左往右铺成网格（不拉伸占满整行宽度）。"""
+        for i, card in enumerate(cards):
+            card.grid(row=i // cols, column=i % cols, padx=4, pady=4,
+                      sticky='w')
+
     # ───────────────── 分区：世界包 ─────────────────
     def _build_world_section(self):
         self._world_rows_frame, self._world_new_btn = self._add_section(
@@ -276,7 +362,10 @@ class ResourceHubPanel(ctk.CTkFrame):
         # （此刻静态表菜单尚未创建，行刷新里的锁键逻辑还不能跑）。
 
     def _refresh_world_rows(self):
-        """重建世界包行：激活包在最前（启用项优先），其余按名称排列。"""
+        """重建世界包卡片：激活包在最前（启用项优先），其余按名称排列。
+
+        图标取包目录内的 icon.png，缺失时用内置默认图标。
+        """
         frame = self._world_rows_frame
         self._clear(frame)
         available = self.world_manager is not None
@@ -293,20 +382,27 @@ class ResourceHubPanel(ctk.CTkFrame):
 
         if not packs:
             self._note_row(frame, "暂无世界包，点击右上角「＋ 新建」创建")
+            self._set_table_menus_locked()
+            return
+
+        default_icon = os.path.join(icon_dir(), "world_pack.png")
+        cards: List[IconCard] = []
         for p in packs:
-            name = p["name"]
+            icon = pack_icon_path(self.world_manager.data_dir, p["world_id"]) \
+                or default_icon
             if active and p["world_id"] == active_id:
-                self._item_row(
-                    frame, name, badge="启用中",
+                cards.append(IconCard(
+                    frame, p["name"], icon_path=icon, fallback_emoji="🌍",
+                    badge="启用中",
                     buttons=(
                         ("停用", self._deactivate_world_pack, SETTINGS_TEXT_SOFT),
                         ("删除", self._dissolve_world_pack, SETTINGS_ERR),
-                    ))
+                    )))
             else:
-                self._item_row(
-                    frame, name,
-                    buttons=(("启用", lambda n=name: self._activate_world_pack(n),
-                              SETTINGS_OK),))
+                cards.append(IconCard(
+                    frame, p["name"], icon_path=icon, fallback_emoji="🌍",
+                    on_click=lambda n=p["name"]: self._activate_world_pack(n)))
+        self._grid_cards(frame, cards)
         self._set_table_menus_locked()
 
     def _activate_world_pack(self, pack_name):
@@ -495,31 +591,36 @@ class ResourceHubPanel(ctk.CTkFrame):
         self._refresh_challenge_rows()
 
     def _refresh_challenge_rows(self):
-        """重建挑战包行：随世界包附带的（启用）包排在最前。"""
+        """重建挑战包卡片：随世界包附带的（启用）包排在最前。
+
+        图标取 .chal 同目录同名 .png 旁车文件，缺失时用内置默认图标；
+        点击卡片深跳到「挑战模式」。
+        """
         frame = self._challenge_rows_frame
         self._clear(frame)
         try:
-            metas = ChallengeService(
-                self.settings_repo, world_state=self.world_state
-            ).get_all_metas()
+            manager = ChallengeService(self.settings_repo,
+                                       world_state=self.world_state)
+            metas = manager.get_all_metas()
         except Exception as exc:
             self._note_row(frame, f"挑战包读取失败: {exc}")
             return
         if not metas:
             self._note_row(frame, "暂无挑战包，可在「挑战模式」页创建")
             return
+
+        default_icon = os.path.join(icon_dir(), "challenge_pack.png")
+        cards: List[IconCard] = []
         for meta in metas:
             filename = meta.get("filename", "")
             title = meta.get("pack_base") or (
                 os.path.splitext(filename)[0] if filename else "未命名")
-            intro = (meta.get("intro", "") or "").strip()
-            if len(intro) > 40:
-                intro = intro[:40] + "…"
-            char_name = meta.get("character_name", "")
-            subtitle = f"角色：{char_name}" + (f" · {intro}" if intro else "")
-            self._item_row(
-                frame, title, subtitle=subtitle,
-                badge="随包启用" if meta.get("bundled") else None)
+            icon = manager.pack_icon_path(meta.get("file_path", "")) or default_icon
+            cards.append(IconCard(
+                frame, title, icon_path=icon, fallback_emoji="⚡",
+                badge="随包启用" if meta.get("bundled") else None,
+                on_click=lambda: self._goto_page("challenge")))
+        self._grid_cards(frame, cards)
 
     # ───────────────── 本地分区统一刷新 ─────────────────
     def _refresh_local_sections(self):
