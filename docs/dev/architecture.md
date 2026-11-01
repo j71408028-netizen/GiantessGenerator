@@ -70,9 +70,11 @@ tests/run_checks.py            # 59/59
 
 ### 2.1 `@behavior_hook` 的 scope 不是模块路径 ⚠️ 最高优先
 
-`core/logic/`（四子模块合计）里有 11 处 `@behavior_hook("logic", ...)`，另有 1 处
-`behavior_const("logic", "PREDEFINED_TAGS", ...)`。`behavior_hook(scope, name)` 把 key
-拼成 `f"{scope}.{name}"`，**scope 是写死的字面量，与文件在哪个模块无关**。
+`@behavior_hook("logic", ...)` 共 11 处、`behavior_const("logic", ...)` 1 处：
+8 处函数钩子在 `core/logic/`（四子模块合计），报告侧描述专属的 3 处函数钩子
+（`replace_quip_tags` / `select_quip_with_budget` / `build_size_description`）与
+`PREDEFINED_TAGS` 常量在 `services/exploration/quips.py`。`behavior_hook(scope, name)`
+把 key 拼成 `f"{scope}.{name}"`，**scope 是写死的字面量，与文件在哪个模块无关**。
 
 这个 key 是**已部署世界包行为包的公开契约**：
 

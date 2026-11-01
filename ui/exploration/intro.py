@@ -10,7 +10,7 @@ import ui.ctk.dialogs
 import customtkinter
 import customtkinter as ctk
 from core import imaging
-from core.logic import get_predefined_tags
+from services.exploration.quips import get_predefined_tags
 from services.state_service import StateService
 from ui.ctk.avatar import (
     AvatarFrame, COMPACT_AVATAR_SIZE, PROFILE_AVATAR_SIZE,

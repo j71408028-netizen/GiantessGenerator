@@ -19,11 +19,13 @@ from typing import List
 
 from core.behavior_runtime import behavior_const, get_runtime
 from core.logic import (
-    ALL_PART_NAMES, format_size, get_size_category, replace_quip_tags,
+    ALL_PART_NAMES, format_size, get_size_category,
     get_comparisons, compute_casualty, compute_environment_factor,
-    select_quip_with_budget, comparison_lines,
 )
 from services.character.spatial import SpatialProfile, priors_for_tags
+from services.exploration.quips import (
+    comparison_lines, replace_quip_tags, select_quip_with_budget,
+)
 
 # 报告引擎的伤亡 / 耐久模型参数（常量钩子的 key 是公开契约；消费一律走
 # resolve_value，此处不保留模块级名字）。终局坐标锁 (4, 4)、突破的 will

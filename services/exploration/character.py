@@ -14,7 +14,8 @@ import os
 import tempfile
 from typing import Any, Dict, Optional, Union
 
-from core.logic import ALL_PART_NAMES, apply_size_unlock_updates, build_size_description
+from core.logic import ALL_PART_NAMES, apply_size_unlock_updates
+from services.exploration.quips import build_size_description
 from core.models import CharacterSnapshot, ReportData
 from persistence.character_repo import CharacterRepo
 from services.creation_service import CreationService

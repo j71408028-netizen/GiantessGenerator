@@ -5,6 +5,13 @@
 
 ## `logic`（模块函数与常量）
 
+默认实现的位置：与副本 / 结算共用的基础设施算法（`apply_size_unlock_updates` /
+`compute_environment_factor` / `compute_casualty` / `format_size` /
+`length_unit_label` / `should_skip_by_part_tags` / `contains_blocked_word` /
+`get_comparisons`）在 `core/logic/`；报告侧描述专属的（`PREDEFINED_TAGS` /
+`replace_quip_tags` / `select_quip_with_budget` / `build_size_description`）在
+`services/exploration/quips.py`。key 都是公开契约，与文件位置无关。
+
 | 目标 | 签名 / 形态 | 说明                                                                                         |
 |------|------|--------------------------------------------------------------------------------------------|
 | `logic.PREDEFINED_TAGS` | `List[str]` | 预定义标签常量。覆盖可注册列表值，或返回列表的可调用对象；读取入口为 `logic.get_predefined_tags()`。                          |

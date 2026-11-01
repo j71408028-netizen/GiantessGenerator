@@ -32,7 +32,7 @@ def check(name, ok, extra=""):
 
 import random  # noqa: E402
 
-from core.logic import select_quip_with_budget  # noqa: E402
+from services.exploration.quips import select_quip_with_budget  # noqa: E402
 from core.models import CharacterSnapshot, EvolutionRecord, Landmark  # noqa: E402
 from core.resource_ref import Ref  # noqa: E402
 from services.character.spatial import (  # noqa: E402

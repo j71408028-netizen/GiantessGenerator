@@ -29,7 +29,7 @@ def check(name, ok, extra=""):
         failures.append(name)
 
 
-from core.logic import select_quip_with_budget  # noqa: E402
+from services.exploration.quips import select_quip_with_budget  # noqa: E402
 from core.models import Landmark  # noqa: E402
 from core.resource_ref import Ref  # noqa: E402
 from services.character.spatial import SpatialProfile, priors_for_tags  # noqa: E402

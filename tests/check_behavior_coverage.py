@@ -45,6 +45,7 @@ import services.chat  # noqa: E402,F401
 import services.character.offline  # noqa: E402,F401
 import services.character.profile_text  # noqa: E402,F401
 import services.exploration.arbiter  # noqa: E402,F401
+import services.exploration.quips  # noqa: E402,F401  注册报告侧描述钩子
 import services.exploration.report  # noqa: E402,F401
 import services.creation_service  # noqa: E402,F401
 import services.state_service  # noqa: E402,F401
