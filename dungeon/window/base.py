@@ -91,8 +91,8 @@ class DungeonWindowBase:
     def __init__(self, parent, name, nick, personality, preset, original_height,
                  intro_hidden, intro_visible, tags, uploaded_image,
                  scenario_config, scenario_repo,
-                 merged_landmarks, merged_quips,
-                 selected_styles, selected_quip_styles, detail_pools, height,
+                 merged_landmarks,
+                 selected_styles, height,
                  ai_config, greed: int,
                  is_replay=False, replay_data=None, scenario_id=None, dungeon_font=None,
                  body_parts=None, character=None, character_repo=None, gui=None,
@@ -114,10 +114,7 @@ class DungeonWindowBase:
         self.scenario_config = scenario_config
         self.scenario_repo = scenario_repo
         self.merged_landmarks = merged_landmarks
-        self.merged_quips = merged_quips
         self.selected_styles = selected_styles
-        self.selected_quip_styles = selected_quip_styles
-        self.detail_pools = detail_pools
         self.height = height
         self.ai_config = ai_config or {}
         self.greed = greed
@@ -685,8 +682,6 @@ class DungeonWindowBase:
         # 上一轮"同时在场"已提示过的独特地标（避免在场期间逐轮重复，见
         # dungeon/prompts.py::_copresent_unique_line）
         self.prompted_presence_landmark = ""
-        self.quips_working = dict(self.merged_quips) if self.merged_quips else {}
-        self.used_quips = set()
 
         self.size_cat = get_size_category(self.height)
 

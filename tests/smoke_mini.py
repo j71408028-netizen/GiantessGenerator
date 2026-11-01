@@ -266,7 +266,7 @@ def main():
 
         challenge_name = "冒烟挑战"
         app.challenge_service.create_challenge(
-            app.current_state.giantess_id, [inv.landmark_style], [inv.quip_style],
+            app.current_state.giantess_id, [inv.landmark_style],
             inv.scenario_id, "冒烟测试用挑战包", challenge_name)
         created_packs.append(os.path.join(
             data_dir(), "packs", "challenges", f"{challenge_name}.chal"))

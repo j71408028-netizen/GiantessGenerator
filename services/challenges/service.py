@@ -355,16 +355,16 @@ class ChallengeService:
         return payload[len(self.MAGIC):]
 
     def create_challenge(self, character_id: str, landmark_styles: List[str],
-                         quip_styles: List[str], scenario_id: str,
+                         scenario_id: str,
                          intro: str, pack_name: str) -> str:
         """
         创建一个新的挑战包
 
-        收集角色数据、地标数据、描述数据、副本配置，序列化后加密并打包为 .chal 文件。
+        收集角色数据、地标数据、副本配置，序列化后加密并打包为 .chal 文件。
+        描述不再进包：副本提示词不读取描述数据（文本校准块取代）。
 
         :param character_id: 角色ID
         :param landmark_styles: 地标风格组列表
-        :param quip_styles: 描述风格组列表
         :param scenario_id: 副本方案ID
         :param intro: 挑战包简介
         :param pack_name: 包名（不含扩展名或含扩展名均可）
@@ -372,7 +372,7 @@ class ChallengeService:
         :raises ValueError: 缺少必要仓库、角色或副本加载失败等
         """
         self._ensure_storage_dir()
-        if not all([self.character_repo, self.landmark_repo, self.quip_repo, self.scenario_repo]):
+        if not all([self.character_repo, self.landmark_repo, self.scenario_repo]):
             raise ValueError("创建挑战包需要提供所有仓库实例")
 
         # 生成随机秘钥
@@ -389,18 +389,6 @@ class ChallengeService:
             landmarks = self.landmark_repo.load(style)
             landmark_data[style] = [asdict(lm) for lm in landmarks]
 
-        # 加载描述风格数据（需要序列化为可JSON格式）
-        quip_data = {}
-        for style in quip_styles:
-            data = self.quip_repo.load(style)
-            # 将嵌套字典的键 (size_category, (index, direction)) 转为字符串
-            serializable = {}
-            for size_cat, matrix in data.items():
-                serializable[size_cat] = {}
-                for (i, d), qlist in matrix.items():
-                    serializable[size_cat][f"{i}_{d}"] = qlist
-            quip_data[style] = serializable
-
         # 加载副本配置
         scenario_config = self.scenario_repo.load_config(scenario_id)
         if not scenario_config:
@@ -414,8 +402,6 @@ class ChallengeService:
             "character_data": asdict(character_data),          # 角色数据（dataclass 转字典）
             "landmark_styles": landmark_styles,
             "landmark_data": landmark_data,                    # 地标数据字典
-            "quip_styles": quip_styles,
-            "quip_data": quip_data,                            # 描述风格数据字典
             "scenario_id": scenario_id,
             "scenario_config": scenario_config,                  # 副本配置字典
             "created_at": datetime.datetime.now().isoformat()

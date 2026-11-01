@@ -1,8 +1,7 @@
-import math
 import random
 import re
 
-from core.logic import ALL_PART_NAMES, format_size, get_comparisons, replace_quip_tags, \
+from core.logic import ALL_PART_NAMES, format_size, get_comparisons, \
     should_skip_by_part_tags, contains_blocked_word
 from core.scale_reference import (destruction_calibration_line,
                                   destruction_level_title,
@@ -133,9 +132,6 @@ class DungeonPromptBuilder:
         presence = self._copresent_unique_line()
         if presence:
             context_parts.append(presence)
-        quip = self._get_nearest_quip_no_consume()
-        if quip:
-            context_parts.append(f"她的态度类似：{quip}")
         if getattr(session, "option_choice", None):
             choice = session.option_choice
             choice_prompt = choice.get("prompt", "")
@@ -413,31 +409,6 @@ class DungeonPromptBuilder:
 
     def _blocked_words(self):
         return (getattr(self.context, "settings", None) or {}).get("blocked_words", [])
-
-    def _get_nearest_quip_no_consume(self):
-        session = self.context
-        if not session.selected_quip_styles:
-            return ""
-        matrix = session.quips_working.get(session.size_cat, {})
-        blocked_words = self._blocked_words()
-        usable = {}
-        for (i, d), quips in matrix.items():
-            if (i, d) in session.locked_coords:
-                continue
-            kept = [q for q in quips if not contains_blocked_word(q.get("text", ""), blocked_words)]
-            if kept:
-                usable[(i, d)] = kept
-        if not usable:
-            return ""
-        intrusion = session.dungeon_state.intrusion
-        destruction = session.dungeon_state.destruction
-        distance = min(math.hypot(i - intrusion, d - destruction) for i, d in usable)
-        nearest = [(i, d) for i, d in usable if abs(math.hypot(i - intrusion, d - destruction) - distance) < 1e-9]
-        selected = random.choice(nearest)
-        quip_dict = random.choice(usable[selected])
-        text = quip_dict["text"].replace("{name}", session.name).replace("{nick}", session.nick)
-        text = replace_quip_tags(text, quip_dict["style"], session.size_cat, session.detail_pools)
-        return text.replace("{name}", session.name).replace("{nick}", session.nick)
 
 
 AIPromptBuilder = DungeonPromptBuilder

@@ -15,7 +15,8 @@
 7. 结局传送：写回 ``position``、坏地址不动位置、未建角色时暂存；
 8. 独特地标的「同时在场」触发：同段 / 相邻两段 / 缺她 / 隔两段 / 防重复；
 9. 文本校准块：坐标数值行、谓词与上界、尺度行复用本章换算句、
-   ``direction`` 顺挫澄清句。
+   ``direction`` 顺挫澄清句；
+10. 描述数据与副本绝缘：提示词模块与窗口基类不再读取描述数据。
 
 坐标带出预算属于后续阶段，不在本文件断言。
 """
@@ -368,7 +369,7 @@ def _prompt_session(chapters, current):
         prompted_parts=set(), keyword_match_given=set(), last_ai_text="",
         prompted_presence_landmark="",
         option_choice=None, story_summary=None, replay_data=[], _detail_queries=None,
-        pending_insertions=[], selected_quip_styles=[],
+        pending_insertions=[],
         settings={"blocked_words": []}, height=480.0,
         merged_landmarks=[], _chapter_landmark_cache=None,
         body_parts={}, dungeon_state=DungeonState(intrusion=2.0, destruction=2.0),
@@ -427,7 +428,7 @@ check("校准：谓词与上界随坐标出现",
       and "尚未到" in _calib_prompt)
 check("校准：尺度行给出密度与后果上限规则",
       "本段只发生一件与此级别相称的事" in _calib_prompt
-      and "不超过她脚掌覆盖的范围" in _calib_prompt)
+      and "而非毁灭或颠覆整个场景" in _calib_prompt)
 check("校准：无换算句时尺度行只写身高",
       "尺度：她的身高 480.0 米；" in _calib_prompt, _calib_prompt[:800])
 _calib_session = _prompt_session(_chapters, "城里")
@@ -454,6 +455,16 @@ check("校准：系统提示词澄清 direction 只表顺挫",
       and "不表示事情更激烈还是更收敛" in _system_prompt
       and "内容的深浅以“当前坐标”一行为准" in _system_prompt,
       _system_prompt[:600])
+
+# ---------------- 7c. 描述数据与副本绝缘 ----------------
+import dungeon.prompts as _prompts_mod  # noqa: E402
+import dungeon.window.base as _base_mod  # noqa: E402
+
+for _mod in (_prompts_mod, _base_mod):
+    with open(_mod.__file__, encoding="utf-8") as _f:
+        _src = _f.read()
+    check(f"绝缘：{_mod.__name__} 不再读取描述数据", "quip" not in _src.lower(),
+          _mod.__file__)
 
 # ---------------- 8. 结局传送 ----------------
 check("传送：合法地址原样返回", scene.landing_position(_CELL) == _CELL)
@@ -549,7 +560,7 @@ def _presence_session(history, chapters=None, merged=None):
         prompted_parts=set(), keyword_match_given=set(), last_ai_text="",
         prompted_presence_landmark="",
         option_choice=None, story_summary=None, replay_data=[], _detail_queries=None,
-        pending_insertions=[], selected_quip_styles=[],
+        pending_insertions=[],
         settings={"blocked_words": []},
         merged_landmarks=merged if merged is not None else [],
         _chapter_landmark_cache=None,

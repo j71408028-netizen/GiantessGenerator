@@ -63,12 +63,11 @@ class ChallengeModePanel(ctk.CTkFrame):
                                             fg_color=CHAL_PANEL_BG)
         self.pack_name_entry.pack(fill='x', pady=(0, 6), padx=10)
 
-        # ---- 三列布局 ----
+        # ---- 两列布局 ----
         three_col = ctk.CTkFrame(form_body, fg_color="transparent")
         three_col.pack(fill='x', pady=2, padx=10)
         three_col.grid_columnconfigure(0, weight=1)
         three_col.grid_columnconfigure(1, weight=1)
-        three_col.grid_columnconfigure(2, weight=1)
 
         # 左列：角色 + 副本方案
         left_col = ctk.CTkFrame(three_col, fg_color="transparent")
@@ -134,16 +133,6 @@ class ChallengeModePanel(ctk.CTkFrame):
         self.landmark_selector.add_button("默认", self.landmark_selector.set_default, padx=0)
         self.landmark_selector.add_button("全选", self.landmark_selector.select_all, padx=10)
 
-        # 右列：描述风格组
-        right_col = ctk.CTkFrame(three_col, fg_color="transparent")
-        right_col.grid(row=0, column=2, sticky='nsew', padx=(10, 0))
-
-        self.quip_selector = StyleListBox(right_col, "描述风格组", height=2,
-                                          on_change=self._on_quip_selection_changed)
-        self.quip_selector.pack(fill='x', pady=2)
-        self.quip_selector.add_button("清空", self.quip_selector.clear_selection, padx=0)
-        self.quip_selector.add_button("全选", self.quip_selector.select_all, padx=10)
-
         # 简介（可用 / 分隔背景与目标文本，卡片视图中会自动着色）
         ctk.CTkLabel(form_body, text="简介（可用 / 分隔背景与目标文本）", font=ui_fonts.ui_font(11, "bold"),
                      text_color=CHAL_TEXT_SOFT).pack(anchor='w', pady=(6, 2), padx=10)
@@ -175,11 +164,9 @@ class ChallengeModePanel(ctk.CTkFrame):
 
         # 挑战风格选择：按维度互斥的已选集合
         self._sel_lm = []
-        self._sel_qp = []
 
         self._init_char_data()
         self._sync_landmark_styles()
-        self._sync_quip_styles()
 
     def _init_char_data(self):
         self.char_map = {}
@@ -239,42 +226,16 @@ class ChallengeModePanel(ctk.CTkFrame):
         self.landmark_selector.sync_items(display_items, idx or None)
         self._sel_lm = self.landmark_selector.get_selected_raw_names() or (selected if kept else [])
 
-    def _sync_quip_styles(self, filter_world=None):
-        styles = self.gui._quip_repo.get_styles()
-        size_order = ["small", "medium", "large", "huge", "colossal"]
-        display_items = []
-        kept = []
-        for style in styles:
-            reg_world = world_of(self.gui._quip_repo.load_style_address(style))
-            if filter_world and reg_world and reg_world != filter_world:
-                continue  # 同一维度自动筛选：隐藏其它维度的描述风格
-            quips = self.gui._quip_repo.load(style)
-            counts = []
-            for size in size_order:
-                matrix = quips.get(size, {})
-                total = sum(len(qlist) for qlist in matrix.values())
-                counts.append(str(total))
-            display_items.append(f"{style} ({', '.join(counts)})")
-            kept.append(style)
-        selected = [s for s in getattr(self, "_sel_qp", []) if s in kept]
-        idx = [i for i, s in enumerate(kept) if s in selected]
-        self.quip_selector.sync_items(display_items, idx or None)
-        self._sel_qp = self.quip_selector.get_selected_raw_names()
-
     def _lock_world_from_selection(self):
         """当前已选风格共同锁定的维度；未注册返回 None。"""
         for s in getattr(self, "_sel_lm", []):
             w = world_of(self.gui._landmark_repo.load_style_address(s))
             if w:
                 return w
-        for s in getattr(self, "_sel_qp", []):
-            w = world_of(self.gui._quip_repo.load_style_address(s))
-            if w:
-                return w
         return None
 
     def _apply_world_lock(self, forced=None):
-        """同一维度互斥：两栏风格按维度自动筛选，剔除混选。"""
+        """同一维度互斥：地标风格按维度自动筛选，剔除混选。"""
         lock = forced if forced is not None else self._lock_world_from_selection()
 
         def _filter_for_world(names, repo):
@@ -286,11 +247,8 @@ class ChallengeModePanel(ctk.CTkFrame):
             return out
 
         self._sel_lm = _filter_for_world(self._sel_lm, self.gui._landmark_repo)
-        self._sel_qp = _filter_for_world(self._sel_qp, self.gui._quip_repo)
         self._sync_landmark_styles(lock)
-        self._sync_quip_styles(lock)
         self._sel_lm = self.landmark_selector.get_selected_raw_names() or self._sel_lm
-        self._sel_qp = self.quip_selector.get_selected_raw_names() or self._sel_qp
 
     def _on_landmark_selection_changed(self):
         prev = list(getattr(self, "_sel_lm", []))
@@ -306,20 +264,6 @@ class ChallengeModePanel(ctk.CTkFrame):
         self._sel_lm = names
         self._apply_world_lock(forced)
 
-    def _on_quip_selection_changed(self):
-        prev = list(getattr(self, "_sel_qp", []))
-        names = self.quip_selector.get_selected_raw_names()
-        forced = None
-        for n in names:
-            if n in prev:
-                continue
-            w = world_of(self.gui._quip_repo.load_style_address(n))
-            if w:
-                forced = w
-                break
-        self._sel_qp = names
-        self._apply_world_lock(forced)
-
     def _update_info_bar(self, count: int):
         self.info_label.configure(text=f"挑战包: {count} 个")
 
@@ -332,9 +276,8 @@ class ChallengeModePanel(ctk.CTkFrame):
                   else "▶ 创建挑战包"))
 
     def refresh_world_resources(self):
-        """世界包状态变化后，刷新地标/描述风格组、副本方案下拉框与挑战包列表。"""
+        """世界包状态变化后，刷新地标风格组、副本方案下拉框与挑战包列表。"""
         self._sync_landmark_styles()
-        self._sync_quip_styles()
         dungeons = self.gui._scenario_repo.list_all()
         self.dungeon_combo.configure(values=dungeons)
         if hasattr(self, '_dungeon_dropdown'):
@@ -486,12 +429,9 @@ class ChallengeModePanel(ctk.CTkFrame):
             return
 
         lms = self.landmark_selector.get_selected_raw_names()
-        qps = self.quip_selector.get_selected_raw_names()
         if not lms:
             ui.ctk.dialogs.showerror("错误", "请至少选择一个地标风格组")
             return
-        if not qps:
-            qps = []
 
         dg = self.dungeon_combo.get()
         if not dg:
@@ -506,7 +446,7 @@ class ChallengeModePanel(ctk.CTkFrame):
         def _do_work():
             try:
                 key = self.challenge_mgr.create_challenge(
-                    cid, lms, qps, dg, intro, pack_name
+                    cid, lms, dg, intro, pack_name
                 )
                 self.after(0, lambda k=key: self._on_create_ok(k))
             except Exception as e:
@@ -568,16 +508,12 @@ class ChallengeModePanel(ctk.CTkFrame):
         ai_config = resolve_ai_config(gui_settings)
 
         landmark_styles = data.get("landmark_styles", [])
-        quip_styles_data = data.get("quip_styles", [])
 
         saved_styles = self.gui.context.selected_styles.copy()
-        saved_quip = self.gui.context.selected_quip_styles.copy()
 
         self.gui.context.selected_styles = landmark_styles
-        self.gui.context.selected_quip_styles = quip_styles_data
         self.gui.context.reload_merged_data()
         self.gui.selected_styles = self.gui.context.selected_styles
-        self.gui.selected_quip_styles = self.gui.context.selected_quip_styles
 
         # L4：run() 返回结果对象（挑战模式无入口阶段，暂无需要处理的分支）。
         # 会话在独立子进程里跑（DPG/GLFW 独占子进程），参数与窗口构造一致。
@@ -591,9 +527,8 @@ class ChallengeModePanel(ctk.CTkFrame):
             original_height=original_height, intro_hidden=intro_hidden,
             intro_visible=intro_visible, tags=tags, uploaded_image=None,
             scenario_config=scenario_config,
-            merged_landmarks=self.gui.context.landmarks_for_dungeon(), merged_quips=self.gui.context.quips,
-            selected_styles=landmark_styles, selected_quip_styles=quip_styles_data,
-            detail_pools=self.gui.context.detail_pools, height=height,
+            merged_landmarks=self.gui.context.landmarks_for_dungeon(),
+            selected_styles=landmark_styles, height=height,
             ai_config=ai_config,
             greed=greed, is_replay=False, replay_data=None,
             scenario_id=scenario_id, body_parts=body_parts,
@@ -601,7 +536,5 @@ class ChallengeModePanel(ctk.CTkFrame):
         )
 
         self.gui.context.selected_styles = saved_styles
-        self.gui.context.selected_quip_styles = saved_quip
         self.gui.context.reload_merged_data()
         self.gui.selected_styles = self.gui.context.selected_styles
-        self.gui.selected_quip_styles = self.gui.context.selected_quip_styles
