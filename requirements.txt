@@ -1,6 +1,9 @@
 # Runtime dependencies. Build tooling (PyInstaller) is installed by the
 # platform-specific packaging scripts so normal development installs stay lean.
 customtkinter==6.0.0
+# 必需：主题「跟随系统」读系统亮暗（ui/ctk/theme.py::system_mode）。原是
+# customtkinter 的传递依赖，被直接 import 后按仓库约定显式声明。
+darkdetect>=0.8
 # 副本窗口的渲染后端（原为 Dear PyGui，2026-10 迁至 imgui-bundle，计划/评估/探针见
 # .workbuddy/imgui-migration/；P8 起 dearpygui 已从依赖里移除）。
 # 实际版本下限是 3.11——该版本只发 cp311/cp312/cp313/cp314 wheel，没有 cp310

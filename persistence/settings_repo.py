@@ -28,7 +28,10 @@ class SettingsRepo:
             "seed": 0,
             "theme_mode": "Light",
             "color_theme": "blue",
-            "theme_palette": "Slate",
+            # 默认配色用于系统浅色；系统深色时改用 theme_dark_palette，
+            # 留空表示跟随默认配色（配色即外观，见 ui/ctk/theme.py 的 mode 声明）。
+            "theme_palette": "Classic",
+            "theme_dark_palette": "Slate",
             "ai_provider": "zhipu",
             "ai_configs": {
                 "zhipu": {"name": "智谱AI", "url": "https://open.bigmodel.cn/api/paas/v4/", "model": "glm-4.7-flash", "api_key": ""},

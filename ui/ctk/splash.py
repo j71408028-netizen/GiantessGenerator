@@ -64,11 +64,12 @@ def _apply_titlebar_theme(win):
         pass
 
 
-def splash_process(conn, theme_mode, color_theme, title, palette=None):
+def splash_process(conn, color_theme, title, palette=None):
     """子进程入口（multiprocessing.Process 目标）。
 
     palette 为界面配色名（assets/theme/<palette>.json）；不传时用默认配色，
-    保证启动屏与随后构建的主界面同色。
+    保证启动屏与随后构建的主界面同色。配色声明 mode 时由 apply_palette()
+    同步外观模式。
 
     协议：
     - 主进程 -> 启动屏: ("progress", value, detail)
@@ -78,7 +79,6 @@ def splash_process(conn, theme_mode, color_theme, title, palette=None):
     - 启动屏 -> 主进程: ("geometry", state, geometry_str)
     """
     ensure_cwd()
-    ctk.set_appearance_mode(theme_mode)
     ctk.set_default_color_theme(color_theme)
 
     # 启动屏在独立进程里，配色必须在构建 LoadingPage 之前切换，

@@ -8,7 +8,13 @@
   亮暗成对 ``[light, dark]``，成员引用色阶）；
 - ``vars`` 页面常量（对外接口），通过 ``{"$role": ...}`` / ``{"$pair": ...}``
   / ``{"$prim": ...}`` / ``{"$map": ...}`` 引用上层；内容调色板
-  （preview/graph/intro/quip）刻意保留字面色值，不进语义层。
+  （preview/graph/intro/quip）刻意保留字面色值，不进语义层；
+- ``mode``（可选）配色的声明外观，``"light"`` / ``"dark"``。声明后即
+  「单观感配色」：成对 token 允许只写一侧（roles / ``$pair`` /
+  vars 列表可写成单引用或单元素列表），加载时镜像补齐为 ``[c, c]``
+  双槽，运行时机制与成对写法完全一致，``apply_palette()`` 会把
+  customtkinter 的外观模式同步为该配色声明的模式。未声明则保持
+  亮暗双写的传统配色，不触碰外观模式。
 
 ``vars`` 按界面模块分组，常量名前缀即所属模块：``NAV_`` 导航栏、
 ``CHALLENGE_`` 挑战模式、``PARAMS_DLG_`` 参数对话框……**一个常量只服务
@@ -42,7 +48,11 @@ import ui.ctk.ctk_patch  # noqa: E402,F401
 from paths import assets_dir
 
 #: 没有持久化配色记录时使用的默认配色。
-DEFAULT_PALETTE = "Slate"
+DEFAULT_PALETTE = "Classic"
+
+#: 默认配色的声明外观；``apply_palette()`` 成功后会更新为实际值
+#: （"Light" / "Dark"，配色未声明 mode 时为 None）。
+PALETTE_MODE = None
 
 #: 配色显示名（设置页下拉框用）；未登记的配色直接显示文件名。
 PALETTE_DISPLAY_NAMES = {
@@ -83,18 +93,75 @@ def current_palette():
     return globals().get("PALETTE_NAME", DEFAULT_PALETTE)
 
 
+def palette_mode():
+    """当前配色的声明外观（"Light" / "Dark"）；未声明 mode 时为 None。"""
+    return globals().get("PALETTE_MODE")
+
+
+def palette_modes():
+    """{配色名: 声明外观（"Light" / "Dark"/None）}，设置页按模式给选项排序用。"""
+    return {name: _load_palette(name)[1] for name in available_palettes()}
+
+
+def palette_display_modes():
+    """{显示名: 声明外观（"Light" / "Dark" / None）}，与下拉框候选对齐。"""
+    modes = palette_modes()
+    return {display: modes.get(name)
+            for name, display in palette_display_names().items()}
+
+
+def palette_display_names_by_mode():
+    """按声明外观分组的配色显示名：浅色在前、深色随后，未声明殿后。
+
+    下拉框只排序不筛选，任意配色仍可选中。
+    """
+    rank = {"Light": 0, "Dark": 1}
+    modes = palette_display_modes()
+    return sorted(modes, key=lambda display: (
+        rank.get(modes[display], 2), display))
+
+
+def system_mode():
+    """操作系统当前的亮暗（"Light" / "Dark"），用于解析系统配色。"""
+    try:
+        import darkdetect
+        detected = darkdetect.theme()
+    except Exception:
+        detected = None
+    return "Dark" if detected == "Dark" else "Light"
+
+
+def resolve_system_palette(default_palette, dark_palette=None):
+    """按系统亮暗解析生效配色。
+
+    浅色用默认配色；深色且配置了深色配色时用深色配色，留空（跟随默认）
+    则仍用默认配色。
+    """
+    if system_mode() == "Dark" and dark_palette:
+        return dark_palette
+    return default_palette or DEFAULT_PALETTE
+
+
 def _load_palette(name=DEFAULT_PALETTE):
-    """读取并解析 assets/theme/<name>.json 为 {常量名: 值} 扁平字典。
+    """读取并解析 assets/theme/<name>.json 为 (扁平字典, 声明外观)。
 
     解析规则：色阶引用形如 "family.step"（字符串含点号即视为引用，
     引用不到会直接报错，便于检查拼写）；亮暗对还原为 **list**（可就地
-    改写，见模块文档）；``//`` 开头的键是注释说明，加载时跳过。
+    改写，见模块文档），单值写法镜像补齐为双槽；``//`` 开头的键是
+    注释说明，加载时跳过。声明外观取顶层 ``mode`` 键（大小写不敏感），
+    未声明为 None。
     """
     path = os.path.join(theme_dir(), f"{name}.json")
     with open(path, encoding="utf-8") as f:
         doc = json.load(f)
     primitives = doc["primitives"]
     roles = doc["roles"]
+    raw_mode = doc.get("mode")
+    mode = None
+    if raw_mode:
+        mode = str(raw_mode).capitalize()
+        if mode not in ("Light", "Dark"):
+            raise ValueError(f"配色 {name!r} 的 mode 无效: {raw_mode!r}")
 
     def _ref(spec):
         fam, _, step = spec.partition(".")
@@ -104,6 +171,12 @@ def _load_palette(name=DEFAULT_PALETTE):
             raise ValueError(f"未知的色阶引用 {spec!r}") from None
 
     def _pair(items):
+        # 成对 token 规范为 [亮, 暗] 双槽 list。单值写法（非列表或单元素）
+        # 镜像补齐，保证运行时拿到的始终是可就地改写的双槽对象。
+        if not isinstance(items, list):
+            items = [items]
+        if len(items) == 1:
+            items = [items[0], items[0]]
         return [_ref(x) if isinstance(x, str) and "." in x else x for x in items]
 
     def _resolve(v):
@@ -125,8 +198,8 @@ def _load_palette(name=DEFAULT_PALETTE):
             return _ref(v)
         return v
 
-    return {name_: _resolve(v) for name_, v in doc["vars"].items()
-            if not name_.startswith("//")}
+    return ({name_: _resolve(v) for name_, v in doc["vars"].items()
+             if not name_.startswith("//")}, mode)
 
 
 def _merge(target, source):
@@ -188,10 +261,11 @@ def apply_palette(name):
     """切换到指定配色，就地更新本模块与所有导入方持有的常量。
 
     成对 token 原地改写（已建控件随之生效），单色 token 重新绑定到各模块
-    的全局名（新建控件生效）。调用方随后应执行 ``refresh_widgets()``
-    与各面板的 ``update_theme()``。
+    的全局名（新建控件生效）。配色声明了 mode 时同步 customtkinter 的
+    外观模式（声明的模式优先于调用方此前设置的值）。调用方随后应执行
+    ``refresh_widgets()`` 与各面板的 ``update_theme()``。
     """
-    new_palette = _load_palette(name)
+    new_palette, new_mode = _load_palette(name)
     current = globals()
 
     # 上一套配色的独有常量（如 Slate 的 SLATE 色阶）：从本模块与各导入方移除。
@@ -212,7 +286,11 @@ def apply_palette(name):
     _PALETTE_KEYS.clear()
     _PALETTE_KEYS.update(new_palette)
     current["PALETTE_NAME"] = name
+    current["PALETTE_MODE"] = new_mode
     globals()["__all__"] = sorted(_PALETTE_KEYS)
+    if new_mode:
+        import customtkinter as ctk
+        ctk.set_appearance_mode(new_mode)
     return name
 
 
@@ -232,9 +310,10 @@ def refresh_widgets():
         pass
 
 
-palette = _load_palette(DEFAULT_PALETTE)
+palette, _loaded_mode = _load_palette(DEFAULT_PALETTE)
 _PALETTE_KEYS.update(palette)
 PALETTE_NAME = DEFAULT_PALETTE
+PALETTE_MODE = _loaded_mode
 globals().update(palette)
 
 __all__ = sorted(_PALETTE_KEYS)

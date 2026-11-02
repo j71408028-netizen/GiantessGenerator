@@ -22,7 +22,7 @@ from persistence import QuipRepo, ScenarioRepo, CharacterRepo
 from services.worlds import WorldManager
 from ui.ctk.loading import LoadingWindow
 from ui.ctk.splash import splash_process
-from ui.ctk.theme import DEFAULT_PALETTE, apply_palette
+from ui.ctk.theme import DEFAULT_PALETTE, apply_palette, resolve_system_palette
 
 
 def _load_repos(state):
@@ -64,14 +64,14 @@ def _build_settings(state):
     state["manager"].create_settings_panel()
 
 
-def _launch_splash(theme_mode, color_theme, palette):
+def _launch_splash(color_theme, palette):
     """启动独立进程启动屏，返回 (Pipe 连接, Process)；失败时返回 (None, None)。"""
     parent_conn = child_conn = None
     try:
         parent_conn, child_conn = multiprocessing.Pipe()
         proc = multiprocessing.Process(
             target=splash_process,
-            args=(child_conn, theme_mode, color_theme, "「正在初始化」", palette),
+            args=(child_conn, color_theme, "「正在初始化」", palette),
             daemon=True,
         )
         proc.start()
@@ -271,15 +271,16 @@ def run_professional(boot):
     settings_repo = boot["settings_repo"]
     world_manager = boot["world_manager"]
 
-    theme_mode = settings.get("theme_mode", "Light")
     color_theme = settings.get("color_theme", "blue")
-    ctk.set_appearance_mode(theme_mode)
     ctk.set_default_color_theme(color_theme)
 
     # 界面配色必须在任何控件创建前切换：UI 模块在 import 期就把 token 绑成了
     # 模块级常量，apply_palette() 会就地改写这些对象并同步各模块的同名全局量，
-    # 因此这里切换后后续构建的控件直接用新配色。
-    palette = settings.get("theme_palette", DEFAULT_PALETTE)
+    # 因此这里切换后后续构建的控件直接用新配色。配色声明了 mode 时会同步
+    # 外观模式；系统深色时按设置解析出深色配色，未配置则沿用默认配色。
+    palette = resolve_system_palette(
+        settings.get("theme_palette") or DEFAULT_PALETTE,
+        settings.get("theme_dark_palette"))
     try:
         apply_palette(palette)
     except Exception as e:
@@ -294,7 +295,7 @@ def run_professional(boot):
     # 一起复制过去，子进程再建第二个 Tk 就有污染这条连接的风险（打包自检里那种
     # 只有 ``XIO: fatal IO error 22``、没有 Python 栈的日志正是这一路数）。
     # Windows/macOS 默认 spawn，子进程从干净的解释器起步，本来就没这个问题。
-    splash_conn, splash_proc = _launch_splash(theme_mode, color_theme, palette)
+    splash_conn, splash_proc = _launch_splash(color_theme, palette)
 
     # 真实主窗口先创建但保持隐藏：初始化期间不参与拖动/缩放等窗口事件，界面在“后台”逐步构建，完成后原位替换。
     root = ctk.CTk()

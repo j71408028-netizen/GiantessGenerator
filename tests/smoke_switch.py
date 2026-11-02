@@ -124,14 +124,15 @@ def build_professional(boot):
     """构建专业模式界面（简化掉启动屏与分步任务，其余与真实启动一致）。"""
     import customtkinter as ctk
     from ui.ctk import fonts as ui_fonts
-    from ui.ctk.theme import DEFAULT_PALETTE, apply_palette
+    from ui.ctk.theme import DEFAULT_PALETTE, apply_palette, resolve_system_palette
     from app.window_manager import MainWindowManager
 
     settings = boot["settings"]
-    ctk.set_appearance_mode(settings.get("theme_mode", "Light"))
     ctk.set_default_color_theme(settings.get("color_theme", "blue"))
     try:
-        apply_palette(settings.get("theme_palette", DEFAULT_PALETTE))
+        apply_palette(resolve_system_palette(
+            settings.get("theme_palette") or DEFAULT_PALETTE,
+            settings.get("theme_dark_palette")))
     except Exception as e:
         print(f"[Warning] 应用配色失败: {e}")
 

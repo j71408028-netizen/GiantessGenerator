@@ -29,6 +29,7 @@ from ui.ctk.loading import LoadingPage
 from ui.ctk.theme import (
     APP_BG, APP_BORDER_STRONG, APP_HOVER, APP_TEXT_SOFT,
     DEFAULT_PALETTE, apply_palette, current_palette, refresh_widgets,
+    resolve_system_palette, system_mode,
 )
 from ui.ctk import fonts as ui_fonts
 
@@ -65,12 +66,15 @@ class MainWindowManager:
         self.current_style = self._landmark_repo.default_style
         self.current_quip_style = self._quip_repo.default_style
 
-        # 主题在 main() 创建任何控件前已经应用。这里仅读取当前值，避免重复切换
-        # 全局外观模式导致已创建控件再次重绘。
-        self.theme_mode = self.settings.get("theme_mode", "Light")
+        # 主题在 main() 创建任何控件前已经应用：配色即外观，配色声明 mode 时
+        # apply_palette() 已同步外观模式，这里不再触碰全局外观。
         self.color_theme = self.settings.get("color_theme", "blue")
         # 启动阶段 main() 已按设置切换过配色，这里记录当前生效值即可。
         self.theme_palette = current_palette()
+
+        # 跟随系统：轮询系统亮暗，变化时按设置重新解析生效配色并整体切换。
+        self._last_system_mode = system_mode()
+        self.root.after(2000, self._poll_system_mode)
 
         # Windows 下禁用 customtkinter 的标题栏切换（withdraw/deiconify 会导致整窗闪烁、
         # 并可能丢失窗口图标），改为直接调用 DWM API，避免浅色/深色切换时的加载闪烁。
@@ -431,20 +435,33 @@ class MainWindowManager:
         if hasattr(self, 'settings_panel'):
             self.settings_panel._sync_parts_states()
 
+    def _effective_palette(self):
+        """按系统亮暗解析生效配色：深色用深色配色，留空则跟随默认配色。"""
+        return resolve_system_palette(
+            self.settings.get("theme_palette") or DEFAULT_PALETTE,
+            self.settings.get("theme_dark_palette"))
+
+    def _poll_system_mode(self):
+        """每 2 秒检查一次系统亮暗；解析出的配色变化时整体切换。"""
+        if not self._closing:
+            mode = system_mode()
+            if mode != self._last_system_mode:
+                self._last_system_mode = mode
+                if self._effective_palette() != current_palette():
+                    self.apply_settings()
+            self.root.after(2000, self._poll_system_mode)
+
     def apply_settings(self):
         # SettingsPanel 在保存前只修改控件变量；保存完成后从 settings 读取
-        # 唯一有效值，再一次性切换全局外观并刷新原生 Tk 控件。
+        # 唯一有效值，再一次性切换配色并刷新原生 Tk 控件。外观模式由配色
+        # 声明的 mode 决定，不再单独设置。
         loading_page = LoadingPage(self.root, title="「正在切换主题」")
         loading_page.place(relwidth=1, relheight=1)
         loading_page.lift()
         loading_page.update_progress(0.15, "读取主题设置...")
 
-        saved_theme_mode = self.settings.get("theme_mode", "Light")
-        saved_palette = self.settings.get("theme_palette") or DEFAULT_PALETTE
+        saved_palette = self._effective_palette()
         palette_changed = saved_palette != current_palette()
-
-        self.theme_mode = saved_theme_mode
-        ctk.set_appearance_mode(saved_theme_mode)
         loading_page.update_progress(0.30, "应用界面主题...")
 
         if palette_changed:
