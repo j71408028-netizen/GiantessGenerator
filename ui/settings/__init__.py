@@ -25,10 +25,14 @@ from ui.ctk.theme import (
     SETTINGS_LABEL,
 )
 from ui.ctk.theme import (
-    DEFAULT_PALETTE, current_palette, palette_display_names,
+    DEFAULT_PALETTE, palette_display_modes, palette_display_names,
+    palette_display_names_by_mode,
 )
 
 _FONT = ui_fonts.ui_font(13)
+
+#: 系统深色配色下拉框的「不覆盖默认」选项。
+FOLLOW_DEFAULT_PALETTE = "跟随默认值"
 
 # 信息更新覆写概率四档：显示名 → 覆写概率
 INFO_UPDATE_OPTIONS = {"保守": 0.25, "中等": 0.5, "高效": 0.75, "激进": 1.0}
@@ -64,10 +68,17 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             if world_manager is not None else None
         self.parts_checkboxes = {}
 
-        self.theme_mode = self.settings.get("theme_mode", "Light")
-        # 界面配色（assets/theme/ 下的一套 token）。默认取当前已生效的配色，
-        # 这样即使设置里没存过也不会与界面实际配色不一致。
-        self.theme_palette = self.settings.get("theme_palette") or current_palette()
+        # 界面配色（assets/theme/ 下的一套 token）：默认配色用于系统浅色，
+        # 系统深色配色留空表示跟随默认配色。
+        self._palette_names = palette_display_names()
+        self._palette_options = {display: name
+                                 for name, display in self._palette_names.items()}
+        self.theme_palette = self.settings.get("theme_palette") or DEFAULT_PALETTE
+        if self.theme_palette not in self._palette_names:
+            self.theme_palette = DEFAULT_PALETTE
+        self.theme_dark_palette = self.settings.get("theme_dark_palette") or ""
+        if self.theme_dark_palette not in self._palette_names:
+            self.theme_dark_palette = ""
         self.user_seed = self.settings.get("seed", 0)
         self.comparison_count = self.settings.get("comparison_count", 5)
         self.comparison_order = self.settings.get("comparison_order", "match")
@@ -207,10 +218,12 @@ class SettingsPanel(ctk.CTkScrollableFrame):
             control.pack(side='left')
         return control
 
-    def _make_option_button(self, parent, values, command, variable=None, expand=True):
+    def _make_option_button(self, parent, values, command, variable=None,
+                            expand=True, text_colors=None):
         """行内选项控件统一用 widgets.OptionButton：按钮 + 顶部锚定下拉列表。"""
         return self._pack_control(OptionButton(
             parent, values=values, command=command, variable=variable,
+            text_colors=text_colors,
             width=120, height=28, corner_radius=7, font=_FONT,
             fg_color=SETTINGS_INPUT_BG, border_color=SETTINGS_INPUT_BORDER,
             hover_color=SETTINGS_INPUT_HOVER, text_color=SETTINGS_LABEL,
@@ -402,32 +415,33 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self._section_label(self.disp_body, row, "主题")
         row += 1
 
-        _, ctrl = self._make_row(self.disp_body, row, "色彩")
-        row += 1
-        palette_options = {display: name
-                           for name, display in palette_display_names().items()}
-        self.palette_var = tk.StringVar(value=self.theme_palette)
-        self.palette_menu = self._make_option_button(
-            ctrl, list(palette_options.keys()),
-            self._on_palette_option_changed, self.palette_var
-        )
-        for display, value in palette_options.items():
-            if value == self.theme_palette:
-                self.palette_menu.set(display)
-                break
+        palette_choices = palette_display_names_by_mode()
+        palette_modes = palette_display_modes()
+        palette_text_colors = {
+            display: (SETTINGS_TEXT_SOFT
+                      if palette_modes.get(display) == "Light"
+                      else SETTINGS_LABEL)
+            for display in palette_choices
+        }
 
-        _, ctrl = self._make_row(self.disp_body, row, "主题模式")
+        _, ctrl = self._make_row(self.disp_body, row, "默认配色")
         row += 1
-        theme_options = {"亮色": "Light", "暗色": "Dark", "跟随系统": "System"}
-        self.theme_mode_var = tk.StringVar(value=self.theme_mode)
-        self.theme_mode_button = self._make_option_button(
-            ctrl, list(theme_options.keys()),
-            self._on_theme_option_changed, self.theme_mode_var
+        self.palette_var = tk.StringVar(value=self._palette_names[self.theme_palette])
+        self.palette_menu = self._make_option_button(
+            ctrl, palette_choices, self._on_palette_option_changed,
+            self.palette_var, text_colors=palette_text_colors
         )
-        for display, value in theme_options.items():
-            if value == self.theme_mode:
-                self.theme_mode_button.set(display)
-                break
+        self.palette_menu.set(self._palette_names[self.theme_palette])
+
+        _, ctrl = self._make_row(self.disp_body, row, "系统深色配色")
+        row += 1
+        self.dark_palette_var = tk.StringVar()
+        self.dark_palette_menu = self._make_option_button(
+            ctrl, [FOLLOW_DEFAULT_PALETTE] + palette_choices,
+            self._on_dark_palette_changed, self.dark_palette_var,
+            text_colors=palette_text_colors
+        )
+        self._set_dark_palette_menu(self.theme_dark_palette)
 
         self._section_label(self.disp_body, row, "界面选项")
         row += 1
@@ -662,43 +676,35 @@ class SettingsPanel(ctk.CTkScrollableFrame):
     def _on_info_update_changed(self, choice):
         self.info_update_rate = INFO_UPDATE_OPTIONS.get(choice, 0.5)
 
-    def _on_theme_option_changed(self, choice):
-        theme_options = {"亮色": "Light", "暗色": "Dark", "跟随系统": "System"}
-        self.theme_mode = theme_options.get(choice, "Light")
-        self.theme_mode_var.set(choice)  # 保持显示文字
+    def _set_dark_palette_menu(self, name):
+        """把系统深色配色名写回下拉框；空值显示「跟随默认值」。"""
+        self.dark_palette_menu.set(
+            self._palette_names.get(name, FOLLOW_DEFAULT_PALETTE))
+
+    def _on_dark_palette_changed(self, choice):
+        self.theme_dark_palette = self._palette_options.get(choice, "")
 
     def _on_palette_option_changed(self, choice):
         """记录待保存的界面配色；真正的换色在保存返回时由主窗口统一执行。"""
-        palette_options = {display: name
-                           for name, display in palette_display_names().items()}
-        self.theme_palette = palette_options.get(choice, DEFAULT_PALETTE)
+        self.theme_palette = self._palette_options.get(choice, DEFAULT_PALETTE)
 
     def _on_world_changed(self):
         self.world_setting = self.world_setting_var.get()
         if self.on_world_setting_changed:
             self.on_world_setting_changed(self.world_setting)
 
-    def _on_theme_changed(self):
-        mode = self.theme_mode_var.get()
-        self.theme_mode = mode
-        # 主题只保存在编辑状态中。点击“保存并返回主页面”后，才由主窗口
-        # 管理器统一写入设置并应用，避免全局实际主题与 settings 暂存值分离。
-
     def sync_saved_theme(self):
         """进入设置页时丢弃未保存的主题选择，显示持久化值。"""
-        saved_mode = self.settings.get("theme_mode", "Light")
-        self.theme_mode = saved_mode
-        # 设置轮换控件显示值
-        theme_options = {"亮色": "Light", "暗色": "Dark", "跟随系统": "System"}
-        for display, value in theme_options.items():
-            if value == saved_mode:
-                self.theme_mode_button.set(display)
-                break
-
-        saved_palette = self.settings.get("theme_palette") or current_palette()
+        saved_palette = self.settings.get("theme_palette") or DEFAULT_PALETTE
+        if saved_palette not in self._palette_names:
+            saved_palette = DEFAULT_PALETTE
         self.theme_palette = saved_palette
-        # palette_display_names() 是 {配色名: 显示名}，这里要反查显示名
-        self.palette_menu.set(palette_display_names().get(saved_palette, saved_palette))
+        self.palette_menu.set(self._palette_names[saved_palette])
+
+        saved_dark = self.settings.get("theme_dark_palette") or ""
+        saved_dark = saved_dark if saved_dark in self._palette_names else ""
+        self.theme_dark_palette = saved_dark
+        self._set_dark_palette_menu(saved_dark)
         self._sync_dungeon_settings()
 
     def _on_order_changed(self):
@@ -759,15 +765,13 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         # 从 OptionMenu 获取实际值
         world_options = {"出现": "appear", "绝对巨大化": "abs_giant", "相对巨大化": "rel_giant"}
         order_options = {"匹配度": "match", "尺寸升序": "size_asc", "尺寸降序": "size_desc"}
-        theme_options = {"亮色": "Light", "暗色": "Dark", "跟随系统": "System"}
 
         world_setting = world_options.get(self.world_setting_var.get(), "appear")
         comparison_order = order_options.get(self.order_var.get(), "match")
-        theme_mode = theme_options.get(self.theme_mode_var.get(), "Light")
 
         self.settings.update({
-            "theme_mode": theme_mode,
             "theme_palette": self.theme_palette or DEFAULT_PALETTE,
+            "theme_dark_palette": self.theme_dark_palette,
             "seed": seed,
             "comparison_count": count,
             "comparison_order": comparison_order,
