@@ -610,8 +610,9 @@ class OptionButton(customtkinter.CTkButton):
     展开盖住按钮（见 ``_TopAnchoredDropdown``）。选中后写回 ``variable``（无
     variable 时直接改按钮文字）并触发 ``command``，顺序与 CTkOptionMenu 一致：
     先落值后回调。对外接口：``set()`` / ``get()`` / ``configure(values=,
-    state=)`` / ``cget("values")``；候选随外部状态变化用 ``configure(values=)``
-    重建弹层列表。空取值显示 ``placeholder``。
+    text_colors=, state=)`` / ``cget("values")``；候选随外部状态变化用
+    ``configure(values=)`` 重建弹层列表，``text_colors`` 可按候选单独指定
+    文字色（dict 按文字匹配，list 按顺序）。空取值显示 ``placeholder``。
     替代原 ScrollableComboBox（无搜索需求时过重）、DropdownOptionButton 与
     CycleOptionButton 三套控件。
     """
@@ -620,9 +621,9 @@ class OptionButton(customtkinter.CTkButton):
                  width=120, height=28, corner_radius=7, border_width=1, font=None,
                  fg_color=None, border_color=None, hover_color=None,
                  text_color=None, text_color_disabled=None, placeholder="…",
-                 popup_height=200, popup_width=None, popup_fg_color=None,
-                 popup_hover_color=None, popup_text_color=None,
-                 popup_border_color=None, **kwargs):
+                 text_colors=None, popup_height=200, popup_width=None,
+                 popup_fg_color=None, popup_hover_color=None,
+                 popup_text_color=None, popup_border_color=None, **kwargs):
         self._placeholder = placeholder
         self._variable = variable
         self._option_command = command
@@ -647,6 +648,7 @@ class OptionButton(customtkinter.CTkButton):
                          **kwargs)
         self._dropdown = _TopAnchoredDropdown(
             attach=self, values=self._values, command=self._pick,
+            text_colors=text_colors,
             height=popup_height,
             button_height=28,
             # 弹层宽度与按钮一致（Win11 设置项风格），可用 popup_width 放宽
@@ -681,6 +683,8 @@ class OptionButton(customtkinter.CTkButton):
         return self._current
 
     def configure(self, **kwargs):
+        if "text_colors" in kwargs:
+            self._dropdown.configure(text_colors=kwargs.pop("text_colors"))
         if "values" in kwargs:
             self._values = list(kwargs.pop("values") or [])
             if self._current not in self._values and self._variable is None:
