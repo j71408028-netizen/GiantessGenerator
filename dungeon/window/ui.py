@@ -1603,8 +1603,9 @@ class DungeonWindowUI:
             return
         unit = self._pending_units.pop(0)
         # 首句已带段落类型前缀，后续句是同一逻辑段落的延续，不再加前缀；
-        # 说话人按单元携带的标记解析结果（Solea/Bulla 对话分支）
-        item = {"type_str": "", "text": unit.text, "speaker": unit.speaker}
+        # 说话人 / 高亮按单元携带的解析结果（分句器解析 @说话人@ 与 == 标记）
+        item = {"type_str": "", "text": unit.text, "speaker": unit.speaker,
+                "highlight": bool(getattr(unit, "highlight", False))}
         self.story_history.append(item)
         self._reveal_start(item, unit.text)
         self._speak_item(item)

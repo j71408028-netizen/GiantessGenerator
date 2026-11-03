@@ -8,7 +8,8 @@ from core.scale_reference import (destruction_calibration_line,
                                   intrusion_calibration_line,
                                   intrusion_level_title)
 from dungeon.audio.chapters import find_chapter, is_terminating_chapter
-from .coupling import (COMMON_OUTPUT_RULE, DEFAULT_COUPLING_LEVEL, coupling_prompts,
+from .coupling import (COMMON_OUTPUT_RULE, DEFAULT_COUPLING_LEVEL,
+                       HIGHLIGHT_MARKER_RULE, coupling_prompts,
                        normalize_coupling_level, section_instruction)
 from .details import search_replay_details
 from .models import DungeonTextType
@@ -110,10 +111,11 @@ class DungeonPromptBuilder:
         # 段落描写指令按耦合等级取用（见 dungeon.coupling.COUPLING_PROMPTS）
         type_value = text_type.value if hasattr(text_type, "value") else str(text_type)
         instruction = section_instruction(level, type_value, "生成一段合适的叙述。")
+        terminating = is_terminating_chapter(find_chapter(
+            getattr(session, "chapters", None),
+            getattr(session, "current_chapter", None)))
         # 结束章节：所有段落类型都被覆盖为「结局」，提示词也要相应改为终章语气
-        if is_terminating_chapter(find_chapter(
-                getattr(session, "chapters", None),
-                getattr(session, "current_chapter", None))):
+        if terminating:
             instruction = coupling_prompts(level)["terminating"]
         context_parts = []
         if session.last_ai_text:
@@ -185,13 +187,15 @@ class DungeonPromptBuilder:
         # Solea/Bulla 的对话分支：要求 AI 用 @说话人@ 行内标记区分说话人与台词，
         # 分句器解析后供 UI 组件渲染名牌（见 dungeon/splitter.py）
         speaker_rule = pack.get("speaker_rule")
-        if (speaker_rule and not is_terminating_chapter(find_chapter(
-                getattr(session, "chapters", None),
-                getattr(session, "current_chapter", None)))
+        if (speaker_rule and not terminating
                 and type_value in ("dialog", "branch")):
             result += "\n\n" + speaker_rule.format(
                 name=session.name, nick=session.nick,
                 protagonist=self.protagonist_title())
+        # 高亮标记（==...==）：分句器把它折算成显示段落的高亮，标记本身不上屏。
+        # 结局段落整体就是高亮色，不必再要求模型标注。
+        if not terminating:
+            result += "\n\n" + HIGHLIGHT_MARKER_RULE
 
         # 延迟插入：本段之后将固定插入一段内容，生成时需带上前后衔接限制
         pending = getattr(session, "pending_insertions", None)

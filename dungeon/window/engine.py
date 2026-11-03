@@ -10,7 +10,8 @@ from dungeon.audio.chapters import find_chapter, is_terminating_chapter, overflo
 from dungeon.details import build_detail_query_prompt, parse_detail_queries
 from dungeon.models import DungeonTextType
 from dungeon.response import canonical_history_entry, extract_stream_text, parse_final_json
-from dungeon.splitter import split_full_text, split_stream_units, strip_speaker_markers
+from dungeon.splitter import (split_full_text, split_stream_units,
+                              strip_display_markers)
 from core.ai import describe_ai_error
 from core.logic import apply_size_unlock_updates, compute_casualty
 
@@ -94,7 +95,8 @@ class DungeonStoryEngine:
                 prefix = self._display_type_prefix(next_type)
 
                 self._pending_units = []
-                current_item = {"type_str": prefix, "text": "", "speaker": None}
+                current_item = {"type_str": prefix, "text": "", "speaker": None,
+                                "highlight": False}
                 self.story_history.append(current_item)
 
                 if pregen is None:
@@ -133,13 +135,14 @@ class DungeonStoryEngine:
                 ai_text, direction, custom_directions = self._parse_final_json(full_response_buffer)
 
                 # 最终切分：整段正文按内置分句器定格，首句已由游标展示（或由此起
-                # 始），其余排队。说话人标记（@X@）在切分时解析进显示单元，
-                # 落盘与下游一律用净文本
+                # 始），其余排队。说话人（@X@）与高亮（==）标记在切分时解析进显示
+                # 单元，落盘与下游一律用净文本
                 final_units = split_full_text(ai_text)
                 self._pending_units = final_units[1:]
-                first_text = strip_speaker_markers(ai_text)
+                first_text = strip_display_markers(ai_text)
                 if final_units:
                     current_item["speaker"] = final_units[0].speaker
+                    current_item["highlight"] = final_units[0].highlight
                     current_item["text"] = final_units[0].text
                     first_text = final_units[0].text
                 else:
@@ -165,8 +168,8 @@ class DungeonStoryEngine:
                 if len(self.messages) > window + 1:
                     self.messages = [self.messages[0]] + self.messages[-window:]
 
-                # 落盘与结算链统一用剥离说话人标记后的净文本
-                clean_text = strip_speaker_markers(ai_text)
+                # 落盘与结算链统一用剥离显示层标记后的净文本
+                clean_text = strip_display_markers(ai_text)
                 before_state = self.dungeon_state
                 step_override = 0.0 if self._in_terminating_chapter() else None
                 self.dungeon_state = self.dungeon_logic.evolve_attributes(
@@ -183,6 +186,9 @@ class DungeonStoryEngine:
                     "step": self.step_num,
                     "type": next_type.value,
                     "text": clean_text,
+                    # 回放以逻辑段落为单位，把「本段有高亮」整体记下（显示层按
+                    # 显示段落渲染，回放只出整段）
+                    "highlight": any(u.highlight for u in final_units),
                     "intrusion_before": before_state.intrusion,
                     "destruction_before": before_state.destruction,
                     "step_intrusion_before": before_state.step_intrusion,
@@ -311,10 +317,13 @@ class DungeonStoryEngine:
         units = split_full_text(paragraph.text)
         self._pending_units = list(units[1:])
         first = units[0] if units else None
+        # 脚本正文里的高亮标记同样只作用于显示层，对话历史与回放存净文本
+        clean_text = strip_display_markers(paragraph.text)
         item = {
             "type_str": prefix,
-            "text": first.text if first is not None else paragraph.text,
+            "text": first.text if first is not None else clean_text,
             "speaker": first.speaker if first is not None else None,
+            "highlight": first.highlight if first is not None else False,
         }
         self.story_history.append(item)
         self._update_text_display()
@@ -326,7 +335,7 @@ class DungeonStoryEngine:
         # 固定文本段与 AI 段落一样进对话历史，后续 AI 章节才接得上上下文；
         # 一律用规范 JSON 形状（见 response.canonical_history_entry）
         self.messages.append({"role": "assistant", "content": canonical_history_entry(
-            paragraph.text, directive.direction,
+            clean_text, directive.direction,
             {**directive.builtin_directions, **custom_directions})})
         window = self._message_window_size()
         if len(self.messages) > window + 1:
@@ -351,7 +360,8 @@ class DungeonStoryEngine:
         step_info = {
             "step": self.step_num,
             "type": display_type.value,
-            "text": paragraph.text,
+            "text": clean_text,
+            "highlight": any(u.highlight for u in units),
             "intrusion_before": before_state.intrusion,
             "destruction_before": before_state.destruction,
             "step_intrusion_before": before_state.step_intrusion,
@@ -364,7 +374,7 @@ class DungeonStoryEngine:
         }
         if in_ending:
             step_info["ending_chapter"] = True
-        self._finish_step(display_type, paragraph.text, step_info)
+        self._finish_step(display_type, clean_text, step_info)
 
     def _finish_script_chapter(self):
         """固定文本播完：与「段落数超限」走同一个收口。
@@ -512,25 +522,23 @@ class DungeonStoryEngine:
 
         后续已完成的句不直接上屏，排队到 ``_pending_units``，等用户点击后
         由 ``_try_advance_paragraph`` 逐句揭示。同一文本整体重算，天然幂等。
-        显示单元携带说话人（``@说话人@`` 标记解析，见 dungeon/splitter.py）。
+        显示单元携带说话人（``@说话人@``）与高亮（``==``）标记的解析结果
+        （见 dungeon/splitter.py）。
 
         **上屏速度与 chunk 到达解耦**：这里只更新游标目标（``_reveal_extend``），
         实际出字由帧时钟按 30 字/秒推进，因此 AI 吐字再快也不会加速上屏。
         分句器读的是 ``partial_text``（已收全文），不受限速影响、始终领先。
         """
         units, tail = split_stream_units(partial_text)
-        if units:
-            current_item["speaker"] = units[0].speaker
-            head = units[0].text
-        else:
-            current_item["speaker"] = None
-            head = tail
+        head = units[0] if units else tail
+        current_item["speaker"] = head.speaker
+        current_item["highlight"] = head.highlight
         self._pending_units = list(units[1:])
         # 只延长目标，不直写 current_item["text"]——游标位置由限速循环掌握。
         # current_item["text"] 仍是落盘/回放用的净文本（见 _finish_step），
         # 游标收尾后会由 _reveal_snap 对齐到全文。
-        if head:
-            self._reveal_extend(current_item, head)
+        if head.text:
+            self._reveal_extend(current_item, head.text)
 
     def _apply_prompted_unlocks(self, text: str):
         """把 AI 针对被注意到部位返回的段落写入该部位解锁信息（写入规则与报告正文一致）。

@@ -1,15 +1,17 @@
-"""S3 自检：内置分句器（含说话人标记解析）（无 GUI，可进 CI 门禁）。
+"""S3 自检：内置分句器（含说话人 / 高亮标记解析）（无 GUI，可进 CI 门禁）。
 
 用法：``python tests/check_splitter.py``
 输出：控制台一行 ASCII 结论。
 
 覆盖：
-1. 无标记回归：正文无 ``@说话人@`` 时切分行为与解析说话人前一致；
+1. 无标记回归：正文无 ``@说话人@`` / ``==`` 时切分行为与引入标记前一致；
 2. 说话人标记：单元起点的完整 ``@X@`` 解析为 ``DisplayUnit.speaker`` 并从正文剥离；
 3. 引号闭合断点：一段对话保持为单个显示段落；
 4. 流式幂等：逐字累加重算 ``split_stream_units``，已完成单元集合单调一致；
    未闭合的半截标记在尾部被抑制显示；
-5. 中间标记不解析（原样保留）；落盘净化 ``strip_speaker_markers``。
+5. 中间标记不解析（原样保留）；落盘净化 ``strip_speaker_markers``；
+6. 高亮标记：``==`` 按显示段落生效（沾一点就整段高亮）、标记不上屏、
+   未闭合的开标记作用到段落末尾、落盘净化 ``strip_display_markers``。
 """
 
 import os
@@ -18,6 +20,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dungeon.splitter import (DisplayUnit, split_full_text, split_stream_units,
+                              strip_display_markers, strip_highlight_markers,
                               strip_speaker_markers)
 
 failures = []
@@ -35,9 +38,11 @@ def check(name, ok, extra=""):
 # ---------------- 1. 无标记回归 ----------------
 units, tail = split_stream_units("你好世界，这里是平原。她转身离开了！")
 check("无标记：句末标点切分",
-      [u.text for u in units] == ["你好世界，这里是平原。", "她转身离开了！"] and tail == "",
+      [u.text for u in units] == ["你好世界，这里是平原。", "她转身离开了！"]
+      and tail.text == "",
       str((units, tail)))
 check("无标记：speaker 全为 None", all(u.speaker is None for u in units))
+check("无标记：highlight 全为 False", all(u.highlight is False for u in units))
 
 units = split_full_text("第一条消息；第二条消息……")
 check("无标记：分号归一为句号、破折号归一为省略号",
@@ -87,9 +92,9 @@ check("流式：最终定格与 split_full_text 一致",
 
 # 半截标记：起点 @ 未闭合时抑制显示，收全后解析
 units, tail = split_stream_units("@李队长")
-check("流式：未闭合标记抑制显示", units == [] and tail == "", str((units, tail)))
+check("流式：未闭合标记抑制显示", units == [] and tail.text == "", str((units, tail)))
 units, tail = split_stream_units("@李队长@“桥")
-check("流式：标记闭合后解析并显示正文", tail == "“桥", str((units, tail)))
+check("流式：标记闭合后解析并显示正文", tail.text == "“桥", str((units, tail)))
 
 # ---------------- 5. 中间标记不解析 + 落盘净化 ----------------
 units = split_full_text("有人在弹幕里写着@某人@，没人当真。")
@@ -103,6 +108,42 @@ check("净化：剥离全部标记",
 check("净化：无标记原样返回",
       strip_speaker_markers("普通叙述。") == "普通叙述。")
 check("净化：空串安全", strip_speaker_markers("") == "")
+
+# ---------------- 6. 高亮标记（以显示段落为渲染单位） ----------------
+units = split_full_text("==她终于俯下身。==人群安静了下来。")
+check("高亮：成对标记整句高亮且标记不上屏",
+      units == [DisplayUnit(speaker=None, text="她终于俯下身。", highlight=True),
+                DisplayUnit(speaker=None, text="人群安静了下来。", highlight=False)],
+      str(units))
+
+units = split_full_text("==第一句强调。第二句跟着强调。==第三句恢复。")
+check("高亮：跨多个显示段落时逐段生效",
+      [u.highlight for u in units] == [True, True, False], str(units))
+
+units = split_full_text("==没写收尾标记的强调。后面也算在内。")
+check("高亮：未闭合的开标记作用到段落末尾",
+      [u.highlight for u in units] == [True, True], str(units))
+
+units = split_full_text("她==终于==站了起来。她只是笑了笑。")
+check("高亮：句内标记折算到所属显示段落",
+      [u.highlight for u in units] == [True, False]
+      and units[0].text == "她终于站了起来。", str(units))
+
+units = split_full_text("这是一段普通叙述。====空标记不生效。")
+check("高亮：空标记对不生效", [u.highlight for u in units] == [False, False],
+      str(units))
+
+units, tail = split_stream_units("==她终于")
+check("高亮：流式未闭合时正文照常显示且已高亮",
+      units == [] and tail.text == "她终于" and tail.highlight is True,
+      str((units, tail)))
+
+check("高亮：落盘净化剥离标记",
+      strip_highlight_markers("==她终于俯下身。==人群安静。") == "她终于俯下身。人群安静。"
+      and strip_highlight_markers("") == "")
+check("净化：显示层标记一次性剥离",
+      strip_display_markers("@李队长@==“先撤。”==") == "“先撤。”",
+      strip_display_markers("@李队长@==“先撤。”=="))
 
 # ---------------- 结论 ----------------
 if failures:

@@ -13,9 +13,15 @@ AI 自身的换行与句读不稳定，分句不依赖其分段习惯，而是�
 时不处理、原样保留。流式过程中未闭合的半截标记按提示抑制显示（整体重算
 幂等，收全后自然解析）。Velum 等级正文无标记，行为与过去完全一致。
 
+高亮标记：正文里的 ``==`` 是一对开合标记（:data:`HIGHLIGHT_MARK`），**以显示
+段落为渲染单位**——某个显示段落只要被高亮区盖住，整段就按高亮颜色渲染，标记
+本身不进显示文本。因此高亮可以写在任何进入显示层的文本里：固定文本章节的脚本
+段落、插入触发器的段落、以及 AI 生成的句子（提示词见
+``coupling.HIGHLIGHT_MARKER_RULE``）。未闭合的开标记一直作用到逻辑段落末尾。
+
 逻辑段落仍是一次 AI 输出的整体（属性演化、回放、压缩都以它为单位），
-显示段落只是它的 UI 呈现单位；说话人信息只活在显示层，不进持久化——
-落盘正文用 :func:`strip_speaker_markers` 剥离标记。
+显示段落只是它的 UI 呈现单位；说话人与高亮只活在显示层，不进持久化——
+落盘正文用 :func:`strip_display_markers` 剥离标记。
 """
 
 import re
@@ -35,12 +41,16 @@ _END_PUNCT = "。！？!?…"
 # 截断处不允许出现的悬空标点，归一化时清除
 _TRAILING_NOISE = "，、：:，"
 
+#: 高亮标记：成对的 ``==``，见模块 docstring
+HIGHLIGHT_MARK = "=="
+
 
 class DisplayUnit(NamedTuple):
-    """一个显示段落：speaker 为 None 表示叙述句。"""
+    """一个显示段落：speaker 为 None 表示叙述句，highlight 决定整段渲染色。"""
 
     speaker: Optional[str]
     text: str
+    highlight: bool = False
 
 
 def _normalize_unit_end(unit: str) -> str:
@@ -90,18 +100,64 @@ def strip_speaker_markers(text: str) -> str:
     return _SPEAKER_MARKER_ANY_RE.sub("", text)
 
 
+def scan_highlight_markers(text: str) -> tuple:
+    """剥离 ``==`` 高亮标记，返回 ``(净文本, 逐字符高亮掩码)``。
+
+    掩码与净文本逐字符对齐，供分句器把高亮折算到显示段落上（显示段落是渲染
+    单位：只要被高亮区盖住就整段高亮）。开标记之后进入高亮区，成对的收标记
+    退出；**未闭合的开标记一直作用到逻辑段落末尾**——作者只写一次也能整段
+    高亮，模型漏写收尾标记时也不会白写。文本里没有标记时掩码全为 ``False``。
+    """
+    if not text:
+        return text or "", []
+    if HIGHLIGHT_MARK not in text:
+        return text, [False] * len(text)
+    clean = []
+    mask = []
+    highlighted = False
+    index = 0
+    length = len(text)
+    while index < length:
+        if text.startswith(HIGHLIGHT_MARK, index):
+            highlighted = not highlighted
+            index += len(HIGHLIGHT_MARK)
+            continue
+        clean.append(text[index])
+        mask.append(highlighted)
+        index += 1
+    return "".join(clean), mask
+
+
+def strip_highlight_markers(text: str) -> str:
+    """剥离正文中全部高亮标记（落盘 / 概要 / 对话历史用的净文本）。"""
+    if not text:
+        return text
+    return text.replace(HIGHLIGHT_MARK, "")
+
+
+def strip_display_markers(text: str) -> str:
+    """剥离全部显示层标记（说话人 + 高亮），返回可直接落盘的净文本。"""
+    return strip_highlight_markers(strip_speaker_markers(text))
+
+
 def split_stream_units(text: str):
     """把（部分）正文切成 ``(完整单元列表, 未完结尾部)``。
 
-    单元是 :class:`DisplayUnit`（含说话人）；尾部是供显示的文本——起点若为
-    半截标记会被抑制。纯函数：对同一文本重复调用结果一致，流式过程中每收到
-    新数据整体重算。
+    单元与结尾部都是 :class:`DisplayUnit`；结尾部的 ``speaker`` 恒为 ``None``
+    （起点的半截标记按显示提示被抑制）。纯函数：对同一文本重复调用结果一致，
+    流式过程中每收到新数据整体重算。
     """
     units = []
+    clean_text, mask = scan_highlight_markers(text)
+    text = clean_text
     seg_start = 0
     depth = 0
     i = 0
     n = len(text)
+
+    def highlighted(start: int, end: int) -> bool:
+        """该段被高亮区盖住（显示段落是渲染单位，沾一点就整段高亮）。"""
+        return any(mask[start:end])
 
     def try_flush(end: int, min_chars: int) -> bool:
         nonlocal seg_start
@@ -114,7 +170,8 @@ def split_stream_units(text: str):
             return False
         unit = _normalize_unit_end(display)
         if unit:
-            units.append(DisplayUnit(speaker=speaker, text=unit))
+            units.append(DisplayUnit(speaker=speaker, text=unit,
+                                     highlight=highlighted(seg_start, end)))
         seg_start = end
         return True
 
@@ -163,20 +220,25 @@ def split_stream_units(text: str):
                 continue
         i += 1
 
-    return units, _suppress_incomplete_marker(text[seg_start:].strip())
+    tail_text = _suppress_incomplete_marker(text[seg_start:].strip())
+    tail = DisplayUnit(speaker=None, text=tail_text,
+                       highlight=bool(tail_text) and highlighted(seg_start, n))
+    return units, tail
 
 
 def split_full_text(text: str) -> list:
     """完整正文的最终切分：无结尾断点的尾部作为最后一个显示段落。
 
     返回 :class:`DisplayUnit` 列表；若尾部起点是未闭合标记则原样保留
-    （落盘前的净化见 :func:`strip_speaker_markers`）。
+    （落盘前的净化见 :func:`strip_display_markers`）。
     """
     if not text:
         return []
     units, tail = split_stream_units(text)
-    if tail:
-        speaker, display = _split_leading_marker(tail)
-        units.append(DisplayUnit(speaker=speaker,
-                                 text=_normalize_unit_end(display) or display))
+    if tail.text:
+        speaker, display = _split_leading_marker(tail.text)
+        units.append(DisplayUnit(
+            speaker=speaker,
+            text=_normalize_unit_end(display) or display,
+            highlight=tail.highlight))
     return [u for u in units if u.text]

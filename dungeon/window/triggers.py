@@ -22,6 +22,7 @@ from dungeon.overrides import (active_override, describe as describe_overrides,
 from dungeon.models import DungeonState, DungeonTextType
 from dungeon.response import canonical_history_entry
 from dungeon.rules import TriggerRules
+from dungeon.splitter import scan_highlight_markers
 from dungeon.window.fx import parse_fx_params
 from dungeon.window.minigame import BACKEND_PY, resolve_mini_game
 
@@ -708,10 +709,12 @@ class TriggerHandler:
         in_ending = self._in_terminating_chapter()
         if in_ending:
             text_type = DungeonTextType.BACKGROUND
-        highlight = bool(item.get("highlight"))
+        # 插入段文本可以直接写高亮标记（==...==），与旧版触发器的「高亮」字段
+        # 取并集；标记只作用于显示层，对话历史与回放存净文本
+        inserted_text, highlight_mask = scan_highlight_markers(item["text"])
+        highlight = bool(item.get("highlight")) or any(highlight_mask)
 
         # 插入段同样走限速上屏：先空文本上屏，再由游标逐字揭开
-        inserted_text = item["text"]
         anim_item = {
             "type_str": self._display_type_prefix(text_type),
             "text": "",
@@ -745,7 +748,7 @@ class TriggerHandler:
         step_info = {
             "step": self.step_num,
             "type": text_type.value,
-            "text": item["text"],
+            "text": inserted_text,
             "highlight": highlight,
             "intrusion_before": before_state.intrusion,
             "destruction_before": before_state.destruction,
@@ -756,6 +759,6 @@ class TriggerHandler:
         if in_ending:
             step_info["ending_chapter"] = True
 
-        self._finish_step(text_type, item["text"], step_info)
+        self._finish_step(text_type, inserted_text, step_info)
         # 插入段消费后下一次点击必然生成：立即补射预生成
         self._maybe_pregen_next()

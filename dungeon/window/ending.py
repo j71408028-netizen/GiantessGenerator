@@ -3,6 +3,7 @@
 import threading
 
 from dungeon import process_log
+from dungeon.splitter import strip_highlight_markers
 
 
 class EndingHandler:
@@ -104,7 +105,7 @@ class EndingHandler:
                 buffer += chunk
                 current_item["text"] = buffer.strip()
                 self._schedule_text_update()
-            current_item["text"] = buffer.strip()
+            current_item["text"] = strip_highlight_markers(buffer.strip())
             self.ending_text = current_item["text"]
             self._schedule_text_update()
             process_log.log(f"[Ending] 结局已生成：{name}")

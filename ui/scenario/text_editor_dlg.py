@@ -78,7 +78,9 @@ class ScriptTextDialog(BaseDialog):
                   "  方向写 +1 / -1 / 0（同时作用于介入度与破坏性），"
                   "或写 破坏性-1 / 热度+1 只改一路。\n"
                   "类型与方向都写全的段落才演化（改变坐标并产生伤亡）；"
-                  "缺任一项只推进步数。"),
+                  "缺任一项只推进步数。\n"
+                  "高亮用成对的 == 写在正文里（==这一句==），按显示段落整段高亮，"
+                  "标记本身不上屏。"),
             justify='left', anchor='w', wraplength=640,
             font=self.UI_FONT_SMALL, text_color=CHAPTER_HINT).pack(
             fill='x', pady=(6, 0))

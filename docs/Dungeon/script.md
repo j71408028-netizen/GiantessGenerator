@@ -241,6 +241,21 @@ AI 生成**（`normalize_fixed_text` 把缺路径的配置归一成空 dict，�
 叙述段落安静地过去，需要她长起来的地方才写指令。没写类型的段落按「环境」步长推进且
 **不显示类型前缀**（视作纯叙述）；结束章节内一律覆盖为「结局」并冻结，与 §3.2 同一条规则。
 
+**高亮标记**（`dungeon.splitter.HIGHLIGHT_MARK`，语法是成对的 `==`）：对显示层生效，
+**以显示段落为渲染单位**——被高亮区盖住的显示段落整段按高亮颜色渲染，标记本身不上屏：
+
+```text
+[对话 +1]
+==她第一次俯下身，看清了掌心里的他。==人群安静下来，没人敢出声。
+```
+
+- 开标记之后进入高亮区，成对的收标记退出；**未闭合的开标记一直作用到逻辑段落末尾**
+  （只写一次即是整段高亮）。标记落在句子中间也算——整句都会被高亮。
+- 同一套语法对 **AI 生成的句子**同样有效（提示词规则 `coupling.HIGHLIGHT_MARKER_RULE`），
+  插入触发器的段落也可以直接写（见 §6 的 `insert`）。
+- 回放 / 概要 / 对话历史 / 报告一律剥离标记存净文本（`splitter.strip_display_markers`）；
+  回放按 `step_info["highlight"]`（该逻辑段落是否有高亮）复现为整段高亮。
+
 | 规则 | 行为 |
 |---|---|
 | 进对话历史 | 固定文本段与 AI 段落一样写进 `messages`（规范 JSON 形状，见 `response.canonical_history_entry`），**后续 AI 章节才接得上上下文** |
@@ -332,7 +347,7 @@ AI 生成**（`normalize_fixed_text` 把缺路径的配置归一成空 dict，�
 
 | 类型 | 展示名 | `action_data` | 状态 |
 |---|---|---|---|
-| `insert` | 插入文本 | `text, text_type, highlight, delayed` | 运行时；`delayed` 表示等下一段 AI 段落返回后再显示。**固定文本章节内跳过**（插入依赖 AI 对话历史与预生成，与文本流冲突，见 §2.5；校验器给 warning） |
+| `insert` | 插入文本 | `text, text_type, delayed`（旧配置的 `highlight` 仍认） | 运行时；`delayed` 表示等下一段 AI 段落返回后再显示。高亮不再用字段开关，直接在 `text` 里写 `==...==`（见 §2.5「高亮标记」）；旧的 `highlight: true` 依旧按整段高亮复现，编辑器保存时迁成语法。**固定文本章节内跳过**（插入依赖 AI 对话历史与预生成，与文本流冲突，见 §2.5；校验器给 warning） |
 | `option` | 弹出选项 | `prompt, options[{id, prompt, text}]` | 运行时；选择按编号记入 `选择:<名字>` |
 | `effect` | 效果覆盖 | `filter, bgm_level, voice_fx, sensitivity, duration` | 运行时；限时改写章节环境（背景滤镜 / 音乐档位 / 语音效果 / 敏感效果），`duration` 步后各维度交还章节默认值；只写出来的维度才被覆盖，详见 §7 |
 | `fx` | 窗口视效 | `fx, duration, intensity` | 运行时；操作整个会话窗口的瞬时画面（闪光 / 振动 / 反色 / 色差分离），`duration` 为绝对时间（秒，0.1~10），按 `intensity`（0~100）定峰值亮度 / 振幅 / 错位幅度；详见 §7 |
@@ -500,7 +515,7 @@ AI 生成**（`normalize_fixed_text` 把缺路径的配置归一成空 dict，�
 
 | 记录 | 说明 |
 |---|---|
-| 普通步进 | 读取处按 `not entry.get("kind")` 识别：`engine._replay_next_step`、`persistence`、`archive_export._render_replay_entries` |
+| 普通步进 | 读取处按 `not entry.get("kind")` 识别：`engine._replay_next_step`、`persistence`、`archive_export._render_replay_entries`；`text` 一律是剥离显示层标记的净文本，`highlight` 记「本段有高亮」、回放按整段高亮复现（显示层的高亮单位是显示段落，回放只出整段） |
 | `kind: "chapter"` | 章节进入；`goto` 触发器记录额外带 `chapter_background`，回放时不依赖当前章节配置即可复现 |
 | `kind: "trigger"` | 触发器触发，回放时走 `_replay_trigger` |
 | `ending_chapter: true` | 结束章节产生的步进记录，回放时按「结局」类型展示 |

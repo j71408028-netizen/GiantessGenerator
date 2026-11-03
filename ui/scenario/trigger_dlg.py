@@ -46,7 +46,8 @@ class TriggerEditDialog(BaseDialog):
     # 当前动作类型的参数说明（固定显示在动作设置下方，只留要点，2~3 行）
     ACTION_DESCRIPTIONS = {
         "insert": (
-            "把文本插入故事正文；勾选「延迟插入」则等下一段 AI 段落返回后再显示。"
+            "把文本插入故事正文；勾选「延迟插入」则等下一段 AI 段落返回后再显示。\n"
+            "高亮用语法写：需要强调的句子用 == 包起来（==这一句==）。"
         ),
         "option": (
             "至少填 2 项，编号从 0 开始；玩家的选择按编号记入本触发器的选择记录。\n"
@@ -404,11 +405,6 @@ class TriggerEditDialog(BaseDialog):
             attr_control, ["background", "branch", "dialog", "interaction", "action"],
             variable=self.insert_type_var, width=140)
         self.insert_type_button.pack(side='left')
-        row += 1
-
-        self.highlight_var = tk.BooleanVar(value=False)
-        self._checkbox_field(self._form_row(frame, row, "高亮"), "",
-                             self.highlight_var).pack(side='left')
         row += 1
 
         self.delayed_var = tk.BooleanVar(value=False)
@@ -1368,7 +1364,7 @@ class TriggerEditDialog(BaseDialog):
         data = {"type": action_type}
         if action_type == "insert":
             data.update({"text": self.insert_text.get("1.0", "end-1c").strip(),
-                         "text_type": self.insert_type_var.get(), "highlight": bool(self.highlight_var.get()),
+                         "text_type": self.insert_type_var.get(),
                          "delayed": bool(self.delayed_var.get())})
         elif action_type == "option":
             data["options"] = [{"id": i, "prompt": entry.get().strip()}
@@ -1393,9 +1389,13 @@ class TriggerEditDialog(BaseDialog):
         self._show_action_frame(action_type or "none")
         if action_type == "insert":
             self.insert_text.delete("1.0", "end")
-            self.insert_text.insert("1.0", action_data.get("text", ""))
+            # 旧版「高亮」勾选项已退役，改用 == 语法：勾过的配置在这里补齐开标记
+            # （未闭合的开标记作用到段落末尾，与整段高亮完全等价）
+            insert_text = action_data.get("text", "")
+            if action_data.get("highlight") and "==" not in insert_text:
+                insert_text = "==" + insert_text
+            self.insert_text.insert("1.0", insert_text)
             self.insert_type_var.set(action_data.get("text_type") or "background")
-            self.highlight_var.set(bool(action_data.get("highlight", False)))
             self.delayed_var.set(bool(action_data.get("delayed", False)))
         elif action_type == "option":
             for entry in self.option_entries:
@@ -1466,7 +1466,7 @@ class TriggerEditDialog(BaseDialog):
     def _insert_template(self):
         self._set_action_template("insert", "新插入",
                                   {"text": "", "text_type": "background",
-                                   "highlight": False, "delayed": False})
+                                   "delayed": False})
 
     def _option_template(self):
         self._set_action_template("option", "新选项",

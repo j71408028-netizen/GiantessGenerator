@@ -59,9 +59,10 @@ from dungeon.window.ui import (  # noqa: E402
 class _Unit:
     """分句器切出的显示段落替身（只带游标路径读到的字段）。"""
 
-    def __init__(self, text, speaker=None):
+    def __init__(self, text, speaker=None, highlight=False):
         self.text = text
         self.speaker = speaker
+        self.highlight = highlight
 
 
 class _CursorHost(DungeonWindowUI):

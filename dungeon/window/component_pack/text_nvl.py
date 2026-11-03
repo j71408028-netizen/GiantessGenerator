@@ -37,7 +37,7 @@ class NvlTextComponent(_TextDisplayBase):
          "default": _DEFAULT_LABEL_COLOR},
         {"key": "highlight_color", "label": "高亮颜色", "type": "color",
          "default": _HIGHLIGHT_COLOR,
-         "note": "highlight 段落的正文颜色"},
+         "note": "== 标记的高亮段落正文颜色"},
         {"key": "use_serif", "label": "衬线字体", "type": "bool",
          "default": True, "note": "宋体等衬线字体（找不到时回退默认字体）"},
         {"key": "show_indicator", "label": "显示继续指示", "type": "bool",

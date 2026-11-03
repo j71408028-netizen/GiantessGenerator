@@ -50,7 +50,7 @@ class CardTextComponent(_TextDisplayBase):
          "default": _DEFAULT_LABEL_COLOR},
         {"key": "highlight_color", "label": "高亮颜色", "type": "color",
          "default": _HIGHLIGHT_COLOR,
-         "note": "highlight 段落的正文颜色"},
+         "note": "== 标记的高亮段落正文颜色"},
         {"key": "glass", "label": "毛玻璃", "type": "bool",
          "default": True,
          "note": "在卡片身后采样背景的模糊副本；关闭后只有半透明染色"},
