@@ -28,7 +28,6 @@ from ui.hosting.x11_boot import boot_x11  # noqa: E402
 
 boot_x11()
 
-from core.logic import get_comparisons  # noqa: E402
 from paths import data_dir, ensure_cwd  # noqa: E402
 from core import appearance  # noqa: E402
 from services.exploration.context import ExplorationContext  # noqa: E402
@@ -147,22 +146,19 @@ def main():
               px.block_bar(50, 100, 10))
 
         # ---------- 调查 ----------
+        styles_before = list(context.selected_styles)
+        quips_before = list(context.selected_quip_styles)
         app.investigate()
         root.update_idletasks()
         inv = app.investigation
-        check("调查掷出地标风格", bool(inv.landmark_style), inv.landmark_style)
-        check("调查掷出描述风格", bool(inv.quip_style), inv.quip_style)
-        check("调查掷出副本方案", inv.has_scenario, inv.scenario_id)
-        check("风格写入上下文",
-              context.selected_styles == [inv.landmark_style]
-              and context.selected_quip_styles == [inv.quip_style])
+        check("调查掷出剧本", inv.has_scenario, inv.scenario_id)
+        check("调查掷出取材表", inv.has_material, inv.material_table)
+        check("调查不改写风格选择",
+              context.selected_styles == styles_before
+              and context.selected_quip_styles == quips_before,
+              f"{context.selected_styles} / {context.selected_quip_styles}")
         check("地标数据非空", len(context.merged_landmarks) > 0,
               f"{len(context.merged_landmarks)} 个地标")
-        low, high = app.params_panel.height_range()
-        check("掷出的风格在当前规模区间可用",
-              bool(get_comparisons(context.merged_landmarks,
-                                   {"身高": (low + high) / 2}, limit=1)),
-              f"{low:.0f}~{high:.0f} m")
         check("重复调查不报错", _repeat_investigate(app))
 
         # ---------- 创建角色 ----------
@@ -235,7 +231,8 @@ def main():
         # 桩对象，只验证参数装配：配置来源、模式、行动点消耗与风格临时接管。
         _install_dungeon_stub()
         real_load_config = app._scenario_repo.load_config
-        real_config = real_load_config(inv.scenario_id)
+        # 用当前这次调查的剧本：中间的重掷会换掉 app.investigation
+        real_config = real_load_config(app.investigation.scenario_id)
         app._scenario_repo.load_config = lambda did: dict(
             real_load_config(did) or {}, entry_action_cost=7)
 
@@ -266,28 +263,30 @@ def main():
 
         challenge_name = "冒烟挑战"
         app.challenge_service.create_challenge(
-            app.current_state.giantess_id, [inv.landmark_style],
-            inv.scenario_id, "冒烟测试用挑战包", challenge_name)
+            app.current_state.giantess_id, list(context.selected_styles),
+            app.investigation.scenario_id, "冒烟测试用挑战包", challenge_name)
         created_packs.append(os.path.join(
             data_dir(), "packs", "challenges", f"{challenge_name}.chal"))
         metas = app.challenge_service.get_all_metas()
         check("挑战包已被识别", any(m.get("pack_base") == challenge_name for m in metas))
 
-        app.investigation.challenge_base = challenge_name
-        app.investigation.challenge_title = challenge_name
         styles_before = list(context.selected_styles)
 
-        # 「挑战」键只开确认屏，不直接进副本；确认屏上点「进入挑战」才装配副本。
+        # 顶栏入口：列表 → 详情 → 「进入挑战」才装配副本。
         _LAST_CALL["kwargs"] = None
-        app.enter_challenge()
-        check("挑战键打开的是确认屏",
+        app.open_challenges()
+        check("挑战入口打开的是列表",
+              type(app._screen).__name__ == "ChallengesScreen")
+        app.open_challenge(challenge_name)
+        check("列表进入的是详情屏",
               type(app._screen).__name__ == "ChallengeScreen")
-        check("确认屏读到挑战包信息",
-              (app.challenge_meta() or {}).get("character_name") == state.name,
-              str((app.challenge_meta() or {}).get("character_name")))
-        check("确认屏未装配副本", _LAST_CALL["kwargs"] is None)
+        check("详情屏读到挑战包信息",
+              (app.pending_challenge_meta() or {}).get("character_name") == state.name,
+              str((app.pending_challenge_meta() or {}).get("character_name")))
+        check("详情屏未装配副本", _LAST_CALL["kwargs"] is None)
         app._screen.enter_btn.invoke()
-        check("确认后确认屏已退出", app._screen is None)
+        check("详情屏已退出（退回列表）",
+              type(app._screen).__name__ == "ChallengesScreen")
         call = _LAST_CALL["kwargs"]
         check("挑战已装配", call is not None and call.get("mode") == "challenge")
         check("挑战包配置已注入", bool(call["scenario_config"]))
@@ -299,6 +298,7 @@ def main():
               call["personality"].name)
         check("挑战包风格已还原", context.selected_styles == styles_before,
               str(context.selected_styles))
+        app.pop_screen()          # 退出挑战列表，回到主界面
 
         # ---------- 整窗换屏 ----------
         _check_screens(app, settings)
@@ -379,7 +379,7 @@ def main():
 # ==================== 辅助 ====================
 def _repeat_investigate(app):
     app.investigate()
-    return app.investigation.has_scenario and bool(app.investigation.landmark_style)
+    return app.investigation.has_scenario and app.investigation.has_material
 
 
 def _render_details(app):

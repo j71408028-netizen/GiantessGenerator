@@ -9,7 +9,10 @@
 于是「还没创建」与「已创建」两态看起来是同一个位置上的同一块形像。
 
 被牺牲的呈现：参照身高恒为 1.6 米、巨大化模式恒为随机（按规模档位抽），
-性格与身材只能在预置表内选择，不能再自定义参数。
+性格恒为随机，身材只能在当前取材组的预置表内选择，不能再自定义比例。
+
+性格不设选项：候选表跟着取材组走，一般用户既认不全也选不动；身材是唯一
+看得见的一项，保留「点一下换一个」的循环选择。
 """
 
 import tkinter as tk
@@ -79,11 +82,6 @@ class MiniParamsPanel(px.Panel):
         self.will_row = px.CycleRow(body, "意愿", WILL_CHOICES, tone="accent",
                                     button_width=96)
         self.will_row.pack(fill='x', pady=3)
-
-        self.personality_row = px.CycleRow(
-            body, "性格", [("随机", None)], tone="report",
-            button_width=96)
-        self.personality_row.pack(fill='x', pady=3)
 
         self.preset_row = px.CycleRow(
             body, "身材", [("随机", None)], tone="dungeon",
@@ -180,7 +178,7 @@ class MiniParamsPanel(px.Panel):
             "will": greed > 0,
             "greed": greed,
             "selected_personality_index": -1,
-            "current_personality_obj": self.personality_row.get(),
+            "current_personality_obj": None,
             "current_preset_obj": self.preset_row.get(),
             "intro_hidden": "",
             "intro_visible": "",
@@ -190,12 +188,9 @@ class MiniParamsPanel(px.Panel):
         }
 
     def refresh_choices(self):
-        """重新读取性格 / 身材表（世界包切换或表格变化后调用）。"""
-        personalities = [("随机", None)] + [
-            (p.name, p) for p in self.personality_repo.load()]
+        """重读身材表（取材表切换后调用）；性格恒为随机，没有候选可刷。"""
         presets = [("随机", None)] + [
             (p.name, p) for p in self.preset_repo.load()]
-        self.personality_row.set_options(personalities)
         self.preset_row.set_options(presets)
         self.refresh_preview()
 
@@ -205,8 +200,7 @@ class MiniParamsPanel(px.Panel):
         self.name_var.set(name)
 
     def reset(self):
-        """卸下角色后清空性格 / 身材的选择与已选形象。"""
-        self.personality_row.set_value(None)
+        """卸下角色后清空身材选择与已选形象。"""
         self.preset_row.set_value(None)
         self.uploaded_image_path = None
         self._preview_hint.configure(text="点击换图")

@@ -275,9 +275,46 @@ class AIScreen(Screen):
                                   text_color="danger")
 
 
-# ==================== 挑战包确认 ====================
+# ==================== 挑战包 ====================
+class ChallengesScreen(Screen):
+    """挑战包列表：一行一个包，点一行进包内详情。
+
+    挑战是独立内容（自带角色、地标与描述，不消耗行动点），入口在顶栏；它不
+    参与「调查」的掷选，因此这里总是列出全部已安装的包。
+    """
+
+    TITLE = "挑战包"
+
+    def _build(self, body):
+        metas = self.app.challenge_metas()
+        if not metas:
+            px.label(body, "尚未安装挑战包。", tone="text_dim", size=10).pack(
+                anchor='w', pady=(10, 2))
+            px.label(body, "把 .chal 放进资源中心后即可在此进入。",
+                     tone="text_off", size=10).pack(anchor='w')
+            return
+
+        px.label(body, f"共 {len(metas)} 个", tone="text_dim", size=10).pack(
+            anchor='w', pady=(0, 4))
+
+        listing = px.ScrollFrame(body, fill="ink_alt", border="line")
+        listing.pack(fill='both', expand=True)
+        for meta in metas:
+            title = self.app.challenge_title(meta)
+            if meta.get("bundled"):
+                title += "（世界包）"
+            character = meta.get("character_name") or "—"
+            row = px.PixelButton(
+                listing.body, f"{title}　{character}",
+                lambda base=meta.get("pack_base", ""): self.app.open_challenge(base),
+                tone="challenge", height=24, anchor='w')
+            row.pack(fill='x', pady=1)
+            listing.bind_wheel(row)
+
+
+# ==================== 挑战包详情 ====================
 class ChallengeScreen(Screen):
-    """抽中挑战包后的确认屏：先看清包里是什么，再决定进不进。
+    """挑战包确认屏：先看清包里是什么，再决定进不进。
 
     挑战用的是挑战包自带的角色、地标与描述，不和当前进度共用资源，因此进入前
     值得先看一眼：角色是谁、走哪个副本、带了哪些风格、以及一段简介。
@@ -286,8 +323,7 @@ class ChallengeScreen(Screen):
     TITLE = "挑战包"
 
     def _build(self, body):
-        meta = self.app.challenge_meta() or {}
-        inv = self.app.investigation
+        meta = self.app.pending_challenge_meta() or {}
 
         info = px.ScrollFrame(body, fill="ink_alt", border="line")
         info.pack(fill='both', expand=True)
@@ -296,7 +332,7 @@ class ChallengeScreen(Screen):
         grid.columnconfigure(1, weight=1)
 
         rows = [
-            ("名称", inv.challenge_title or meta.get("pack_base", "—")),
+            ("名称", self.app.challenge_title(meta) or "—"),
             ("角色", meta.get("character_name", "—")),
             ("副本", meta.get("scenario_id", "") or "—"),
             ("地标", "、".join(meta.get("landmark_styles") or []) or "—"),
@@ -336,6 +372,64 @@ class ChallengeScreen(Screen):
         # 先退掉确认屏再启动副本窗口，副本结束返回时直接回到主界面。
         self.app.pop_screen()
         self.app.launch_challenge()
+
+
+# ==================== 世界包 ====================
+class WorldScreen(Screen):
+    """世界包：列出已部署的包，点一行启用；「不启用」退回自由资源。
+
+    启用会接管包内声明的资源（地标、描述、取材表、行为包、话题表），因此先
+    确认再落地；已有启用中的包时，切换会先卸下当前包并恢复自由设置。
+    """
+
+    TITLE = "世界包"
+
+    def _build(self, body):
+        app = self.app
+        px.label(body, "一次只启用一个；启用会接管它声明的资源。",
+                 tone="text_off", size=10, wraplength=300, justify='left').pack(
+            anchor='w', pady=(0, 4))
+
+        listing = px.ScrollFrame(body, fill="ink_alt", border="line")
+        listing.pack(fill='both', expand=True)
+        active_id = app.active_world_id()
+
+        free_tone = "text_dim" if active_id else "ok"
+        free = px.PixelButton(
+            listing.body, "（不启用）自由资源", lambda: self._choose(None),
+            tone=free_tone, height=24, anchor='w')
+        free.pack(fill='x', pady=1)
+        listing.bind_wheel(free)
+
+        packs = app.world_packs()
+        for pack in packs:
+            world_id = pack.get("world_id")
+            active = world_id == active_id
+            version = f"  v{pack.get('version')}" if pack.get("version") else ""
+            mark = "　●启用中" if active else ""
+            row = px.PixelButton(
+                listing.body, f"{pack.get('name') or world_id}{version}{mark}",
+                lambda wid=world_id: self._choose(wid),
+                tone="ok" if active else "text", height=24, anchor='w')
+            row.pack(fill='x', pady=1)
+            listing.bind_wheel(row)
+
+        if not packs:
+            px.label(listing.body, "尚未部署世界包（.world.zip 在资源中心导入）。",
+                     tone="text_off", size=10, wraplength=290,
+                     justify='left').pack(anchor='w', pady=(2, 4))
+
+    def _choose(self, world_id):
+        if world_id == self.app.active_world_id():
+            self.app.pop_screen()
+            return
+        self.app.ask(self.app.describe_world_switch(world_id),
+                     lambda: self._apply(world_id))
+
+    def _apply(self, world_id):
+        # 先退出世界屏再切换：切换会重载资源，留在屏上只看得到旧清单。
+        self.app.pop_screen()
+        self.app.set_world(world_id)
 
 
 # ==================== 聊天 ====================

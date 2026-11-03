@@ -1,8 +1,9 @@
 """挂件主窗口（低像素风）。
 
-一扇窗口就是一个「小游戏」：顶部是调查卡（掷出世界 / 地标 / 副本 / 挑战），
-中间是创建参数或角色卡，底部是四个动作按钮与报告区。所有原本需要弹窗的交互
-（角色列表、设置、AI 配置、消息与确认）都改成整窗换屏，见 ui/mini/screens.py。
+一扇窗口就是一个「小游戏」：顶部是调查卡（掷出剧本与取材，另附一条世界包
+线索），中间是创建参数或角色卡，底部是三个动作按钮与报告区。所有原本需要
+弹窗的交互（角色列表、设置、AI 配置、消息与确认）都改成整窗换屏，见
+ui/mini/screens.py。
 
 控件数量被刻意压到最低：选择项用「点一下换一个」的循环行，弹窗一律换成换屏，
 不再有下拉框、多页选项卡、滑杆与保存按钮。
@@ -17,6 +18,7 @@ from tkinter import filedialog
 
 from core.ai import resolve_ai_config
 from core.models import BodyPreset, CharacterSnapshot, Personality
+from core.resource_spec import type_labels
 from services.chat import events as chat_events
 from services.challenges import ChallengeService
 from core import appearance
@@ -25,8 +27,9 @@ from ui.mini import topmost as topmost_ctl
 from ui.mini.investigation import Investigation, Investigator
 from ui.mini.params_panel import MiniParamsPanel
 from ui.mini.report_view import MiniReportView
-from ui.mini.screens import (AIScreen, ChallengeScreen, CharactersScreen,
-                             MessageScreen, SettingsScreen)
+from ui.mini.screens import (AIScreen, ChallengeScreen, ChallengesScreen,
+                             CharactersScreen, MessageScreen, SettingsScreen,
+                             WorldScreen)
 from ui.mini.state_card import MiniStateCard
 
 DEFAULT_GEOMETRY = "360x620"
@@ -73,6 +76,8 @@ class MiniApp:
         self.current_state: CharacterSnapshot = None
         self.investigation = Investigation()
         self.investigator = Investigator(self)
+        self.pending_challenge_base = ""
+        self._challenge_metas = None
         self.auto_answer = None      # 测试用：True/False 时跳过确认屏直接应答
         self._screen_stack = []
         self._screen = None
@@ -203,37 +208,54 @@ class MiniApp:
         px.PixelButton(bar, "☰", lambda: self.push_screen("settings"),
                        tone="text_dim", width=26, height=22).pack(
             side='right', pady=4)
+        # 挑战是独立内容（自带角色与数据），入口与「调查」无关，放在顶栏。
+        px.PixelButton(bar, "◆", self.open_challenges,
+                       tone="challenge", width=26, height=22).pack(
+            side='right', pady=4)
 
     def _build_investigation_card(self, parent):
         card = px.panel(parent, fill="ink_alt", border="line", bevel=True)
         card.pack(fill='x', padx=6, pady=3)
 
-        grid = px.transparent(card)
-        grid.pack(fill='x', padx=6, pady=(6, 2))
-        grid.columnconfigure(1, weight=1)
-        grid.columnconfigure(3, weight=1)
+        # 世界是「当前状态」而不是一次掷出的结果，因此单独一行、与掷选隔开。
+        world_row = px.transparent(card)
+        world_row.pack(fill='x', padx=6, pady=(6, 2))
+        world_row.columnconfigure(1, weight=1)
+        px.label(world_row, "▚ 世界", tone="text_off").grid(
+            row=0, column=0, sticky='w')
+        self._world_label = px.label(world_row, "未启用", tone="text_dim")
+        self._world_label.grid(row=0, column=1, sticky='w', padx=(4, 0))
+        px.PixelButton(world_row, "切换", self.open_worlds, tone="text_dim",
+                       size=11, width=44, height=20).grid(
+            row=0, column=2, sticky='e')
 
+        self._hint_btn = px.PixelButton(card, "", self.open_worlds,
+                                        tone="accent", size=11, height=20,
+                                        anchor='w')
+
+        self._inv_divider = px.divider(card)
+        self._inv_divider.pack(fill='x', padx=6, pady=(4, 2))
+
+        grid = px.transparent(card)
+        grid.pack(fill='x', padx=6, pady=(0, 2))
+        grid.columnconfigure(1, weight=1)
         self._inv_labels = {}
-        for row, (key, title) in enumerate([("world", "世界"), ("landmark", "地标")]):
-            self._inv_labels[key] = self._inv_cell(grid, row, 0, title)
-        for row, (key, title) in enumerate([("dungeon", "副本"), ("quip", "描述")]):
-            self._inv_labels[key] = self._inv_cell(grid, row, 2, title)
+        for row, (key, title) in enumerate([("scenario", "剧本"),
+                                            ("material", "取材")]):
+            px.label(grid, f"{title}▸", tone="text_off").grid(
+                row=row, column=0, sticky='w', padx=(0, 4), pady=1)
+            value = px.label(grid, "—", tone="text")
+            value.grid(row=row, column=1, sticky='w', pady=1)
+            self._inv_labels[key] = value
 
         px.PixelButton(card, "▶  调查  ◀", self.investigate, tone="accent",
                        size=14, height=28).pack(
             fill='x', padx=6, pady=(2, 6))
 
-    def _inv_cell(self, grid, row, column, title):
-        px.label(grid, f"{title}▸", tone="text_off").grid(
-            row=row, column=column, sticky='w', padx=(0, 2), pady=1)
-        value = px.label(grid, "—", tone="text")
-        value.grid(row=row, column=column + 1, sticky='ew', padx=(0, 6), pady=1)
-        return value
-
     def _build_actions(self, parent):
         row = px.transparent(parent)
         row.pack(fill='x', padx=6, pady=3)
-        # 挂件宽度有限：显式给窄宽度，四个按钮同排才不会溢出。
+        # 挂件宽度有限：显式给窄宽度，三个按钮同排才不会溢出。
         size = dict(size=13, height=26, width=68)
 
         self.create_btn = px.PixelButton(
@@ -242,14 +264,11 @@ class MiniApp:
             row, "报告", self.generate_report, tone="report", **size)
         self.dungeon_btn = px.PixelButton(
             row, "副本", self.enter_dungeon, tone="dungeon", **size)
-        self.challenge_btn = px.PixelButton(
-            row, "挑战", self.enter_challenge, tone="challenge", **size)
 
     def _set_mode(self, mode: str):
         """参数模式（未创建角色）与角色模式（已创建）之间的切换。"""
         self.mode = mode
-        for btn in (self.create_btn, self.report_btn,
-                    self.dungeon_btn, self.challenge_btn):
+        for btn in (self.create_btn, self.report_btn, self.dungeon_btn):
             btn.pack_forget()
 
         if mode == "params":
@@ -262,8 +281,7 @@ class MiniApp:
             self.state_card.grid()
             self.state_card.start_auto_recovery()
         self.report_btn.pack(side='left', fill='x', expand=True, padx=3)
-        self.dungeon_btn.pack(side='left', fill='x', expand=True, padx=3)
-        self.challenge_btn.pack(side='left', fill='x', expand=True, padx=(3, 0))
+        self.dungeon_btn.pack(side='left', fill='x', expand=True, padx=(3, 0))
 
     # ==================== 换屏 ====================
     def push_screen(self, key: str):
@@ -295,8 +313,12 @@ class MiniApp:
             return SettingsScreen(self.root, self)
         if key == "ai":
             return AIScreen(self.root, self)
+        if key == "challenges":
+            return ChallengesScreen(self.root, self)
         if key == "challenge":
             return ChallengeScreen(self.root, self)
+        if key == "worlds":
+            return WorldScreen(self.root, self)
         if key == "chat":
             from ui.mini.screens import ChatScreen
             return ChatScreen(self.root, self)
@@ -386,50 +408,63 @@ class MiniApp:
     # ==================== 调查 ====================
     def _first_investigate(self):
         """启动后掷出第一次调查，让挂件一打开就有可玩的配置。"""
-        self.investigate(initial=True)
+        self.investigate()
 
-    def investigate(self, initial: bool = False):
+    def investigate(self):
         self._set_status("正在调查…")
         self.root.update_idletasks()
+        position = getattr(self.current_state, "position", "") if self.current_state else ""
         try:
-            self.investigation = self.investigator.investigate()
+            inv = self.investigator.investigate(position or "")
         except Exception as e:
             self._set_status(f"调查失败：{e}")
             self.notify(f"调查失败：\n{e}", tone="danger", title="出错了")
             return
 
+        self.investigation = inv
+        # 取材表是单选资源，掷中即生效；风格不在这里动，由资源中心决定。
+        self.investigator.apply_material(inv.material_table)
         self.context.apply_context_settings()
         self.params_panel.refresh_choices()
         self._refresh_investigation_ui()
         self._sync_world_hint()
         self._save_settings()
 
-        inv = self.investigation
-        if initial:
-            self._set_status(f"调查完成：{inv.world_text()} / {inv.scenario_text()}")
-        else:
-            self._set_status(
-                f"调查完成：{inv.world_text()} · 地标 {inv.landmark_text()}"
-                f" · 副本 {inv.scenario_text()} · 描述 {inv.quip_text()}"
-                + ("　★抽中挑战包" if inv.has_challenge else ""))
+        detail = f"剧本 {inv.scenario_text()} · 取材 {inv.material_text()}"
+        if inv.has_world_hint:
+            detail += f" · 线索 {inv.world_hint_name}"
+        if inv.address_note:
+            detail += f"　（{inv.address_note}）"
+        self._set_status("调查完成：" + detail)
 
     def _refresh_investigation_ui(self):
         inv = self.investigation
+        state = self.world_state
+        active = state is not None and state.active
+        world_name = (state.pack_name if active else "") or "未启用"
+        self._world_label.configure(
+            text=self._shorten(world_name, 12),
+            text_color=px.color("ok") if active else px.color("text_dim"))
+
+        # 线索指向已启用的包时没有意义（多半是刚从这里启用的）。
+        has_hint = inv.has_world_hint and inv.world_hint_id != self.active_world_id()
+        if has_hint:
+            self._hint_btn.configure(
+                text=f"线索：{self._shorten(inv.world_hint_name, 14)}  ▸",
+                text_color=px.color("accent"),
+                border_color=px.color("accent"))
+            self._hint_btn.pack(fill='x', padx=6, pady=(0, 2),
+                                before=self._inv_divider)
+        else:
+            self._hint_btn.pack_forget()
+
         values = {
-            "world": inv.world_text(),
-            "landmark": inv.landmark_text(),
-            "dungeon": inv.scenario_text(),
-            "quip": inv.quip_text(),
+            "scenario": inv.scenario_text(),
+            "material": inv.material_text(),
         }
         for key, label in self._inv_labels.items():
             label.configure(text=self._shorten(values.get(key, "—")))
 
-        self.challenge_btn.configure(
-            state='normal' if inv.has_challenge else 'disabled',
-            text_color=px.color("challenge") if inv.has_challenge
-            else px.color("text_off"),
-            border_color=px.color("challenge") if inv.has_challenge
-            else px.color("line"))
         self.dungeon_btn.configure(
             state='normal' if inv.has_scenario else 'disabled',
             text_color=px.color("dungeon") if inv.has_scenario
@@ -722,31 +757,55 @@ class MiniApp:
             payload=payload, config=config, scenario_id=inv.scenario_id,
             character=character, mode="explore")
 
-    def enter_challenge(self):
-        """「挑战」键只负责亮起时看一眼挑战包：确认屏之后才真正进入。"""
-        inv = self.investigation
-        if not inv.has_challenge:
-            self.notify("本次调查没有抽到挑战包，请再调查一次。",
-                        tone="danger", title="无法进入")
+    # ==================== 挑战 ====================
+    def challenge_metas(self):
+        """全部挑战包元数据（开放 .chal 逐个解密，按一次进入列表读一次）。"""
+        if self._challenge_metas is None:
+            try:
+                self._challenge_metas = list(self.challenge_service.get_all_metas())
+            except Exception as e:
+                print(f"[Warning] 读取挑战包失败: {e}")
+                self._challenge_metas = []
+        return self._challenge_metas
+
+    @staticmethod
+    def challenge_title(meta) -> str:
+        """挑战包的显示名：文件名去扩展名，缺文件名时退回包基名。"""
+        meta = meta or {}
+        filename = meta.get("filename") or ""
+        title = filename[:-5] if filename.lower().endswith(".chal") else filename
+        return title or meta.get("pack_base", "")
+
+    def open_challenges(self):
+        """顶栏入口：列出全部挑战包（每次进入重读，新导入的包立刻可见）。"""
+        self._challenge_metas = None
+        self.push_screen("challenges")
+
+    def open_challenge(self, pack_base: str):
+        """从列表进到某个包的详情屏。"""
+        if not pack_base:
             return
-        if self.challenge_meta() is None:
-            self.notify("无法读取挑战包内容。", tone="danger", title="出错了")
-            return
+        self.pending_challenge_base = pack_base
         self.push_screen("challenge")
 
-    def challenge_meta(self):
-        """当前抽中的挑战包元数据（供确认屏展示）；读不到返回 None。"""
-        base = self.investigation.challenge_base
-        for meta in self.challenge_service.get_all_metas():
+    def pending_challenge_meta(self):
+        """详情屏当前展示的挑战包元数据；读不到返回 None。"""
+        base = self.pending_challenge_base
+        if not base:
+            return None
+        for meta in self.challenge_metas():
             if meta.get("pack_base") == base:
                 return meta
         return None
 
     def launch_challenge(self):
-        """确认屏点了「进入」之后才启动挑战副本。"""
-        inv = self.investigation
+        """详情屏点了「进入」之后才启动挑战副本。"""
+        base = self.pending_challenge_base
+        if not base:
+            self.notify("没有选中的挑战包。", tone="danger", title="无法进入")
+            return
         try:
-            data = self.challenge_service.open_challenge_by_name(inv.challenge_base)
+            data = self.challenge_service.open_challenge_by_name(base)
         except Exception as e:
             self.notify(f"打开挑战包失败：\n{e}", tone="danger", title="出错了")
             return
@@ -850,6 +909,76 @@ class MiniApp:
             if fresh is not None:
                 self.current_state = fresh
             self.state_card.update_state(self.current_state)
+
+    # ==================== 世界包 ====================
+    def active_world_id(self) -> str:
+        state = self.world_state
+        return state.world_id if state is not None and state.active else ""
+
+    def world_packs(self):
+        """已部署且清单可读的世界包（坏包不进列表）。"""
+        try:
+            return [p for p in self.world_manager.list_packs() if not p.get("error")]
+        except Exception:
+            return []
+
+    def open_worlds(self):
+        self.push_screen("worlds")
+
+    def describe_world_switch(self, world_id) -> str:
+        """启用 / 卸下的确认文案：先把会接管什么说清楚。"""
+        if not world_id:
+            return "卸下当前世界包？\n资源选择会恢复为自由设置。"
+        pack = next((p for p in self.world_packs()
+                     if p.get("world_id") == world_id), None)
+        if pack is None:
+            return f"启用「{world_id}」？"
+        labels = type_labels()
+        owned = "、".join(labels.get(t, t) for t in pack.get("owned_types") or [])
+        lines = [f"启用「{pack.get('name') or world_id}」？"]
+        if owned:
+            lines.append(f"将接管：{owned}。")
+        if self.active_world_id():
+            lines.append("会先卸下当前世界包，并恢复自由资源设置。")
+        return "\n".join(lines)
+
+    def set_world(self, world_id):
+        """启用 / 卸下世界包。失败只提示，不改动当前状态。"""
+        manager = self.world_manager
+        state = self.world_state
+        if world_id == self.active_world_id():
+            return
+        # deactivate 会从磁盘重载设置：先把内存里的改动落盘，避免丢失。
+        try:
+            self._settings_repo.save(self.settings)
+        except Exception as e:
+            print(f"[Warning] 世界包切换前保存设置失败: {e}")
+
+        try:
+            if state is not None and state.active:
+                manager.deactivate(self.settings, self._settings_repo)
+            if world_id:
+                manager.activate(world_id, self.settings, self._settings_repo)
+        except ValueError as e:
+            self.notify(f"世界包切换失败：{e}", tone="danger", title="出错了")
+            return
+
+        self._sync_resource_settings()
+        self._save_settings()
+        name = state.pack_name if state is not None and state.active else "自由资源"
+        # 可用的剧本与取材表随包变化：换世界后重掷一次本局提案。
+        self.investigate()
+        self._set_status(f"世界：{name}")
+
+    def _sync_resource_settings(self):
+        """世界包切换后按新设置重建风格、取材表与依赖它们的界面。"""
+        self.context.update_styles(
+            list(self.settings.get("selected_styles") or []),
+            list(self.settings.get("selected_quip_styles") or []))
+        self.context.apply_context_settings()
+        self.params_panel.refresh_choices()
+        self._sync_world_hint()
+        self._refresh_investigation_ui()
 
     # ==================== 设置（由设置屏调用） ====================
     def toggle_theme(self):

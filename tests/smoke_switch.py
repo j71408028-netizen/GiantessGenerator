@@ -301,8 +301,8 @@ def _mini_font_cache():
 
 
 def _mini_style(app):
-    """地标风格（世界包未激活时 world_id 合法为空，所以看风格而不是 world）。"""
-    return getattr(app.investigation, "landmark_style", "")
+    """本局掷出的剧本（世界包可能为空，所以看剧本而不是 world）。"""
+    return getattr(app.investigation, "scenario_id", "")
 
 
 # ==================== 主流程 ====================
@@ -388,7 +388,7 @@ def main():
                 app.investigate()
                 app.root.update_idletasks()
                 check("挂件调查可用", bool(_mini_style(app)),
-                      _mini_style(app) or "（未掷出风格）")
+                      _mini_style(app) or "（未掷出剧本）")
             except Exception as e:
                 check("挂件调查可用", False, f"{type(e).__name__}: {e}")
 
@@ -459,7 +459,7 @@ def main():
                 app3.investigate()
                 root3.update_idletasks()
                 check("挂件二次可用", bool(_mini_style(app3)),
-                      _mini_style(app3) or "（未掷出风格）")
+                      _mini_style(app3) or "（未掷出剧本）")
             except Exception as e:
                 check("挂件二次可用", False, f"{type(e).__name__}: {e}")
 
