@@ -7,26 +7,20 @@ from dungeon.audio.chapters import normalize_chapters
 from dungeon.admission import (FIELD_ADDRESS, FIELD_HEIGHT_MAX, FIELD_HEIGHT_MIN,
                                FIELD_MAX_DISTANCE, coerce_distance,
                                normalize_fields as normalize_admission_fields)
-from dungeon.coupling import (COUPLING_LEVELS, DEFAULT_COUPLING_LEVEL, VELUM,
+from dungeon.coupling import (COUPLING_LEVELS, DEFAULT_COUPLING_LEVEL,
                               coupling_initial_prompt,
                               coupling_label, normalize_coupling_level)
 from dungeon.rules import EvolutionRules
 from dungeon.schema import DEFAULT_TEXT_COMPONENT, normalize_text_component
-from dungeon.audio import buses
-from dungeon.audio.preview import VoicePreview
-from dungeon.audio.speech import (DEFAULT_OTHER_VOICES, DEFAULT_RATE, DEFAULT_VOICE_HER,
-                            DEFAULT_VOICE_PROTAGONIST, DEFAULT_VOICE_LEVEL,
-                            RECOMMENDED_VOICES, edge_tts_available, normalize_voice,
-                            voice_level)
+from dungeon.audio.speech import normalize_voice
 from ui.ctk.widgets import (CTkScrollableDropdownFrame, CTkSegmentedControl,
                                OptionButton)
 from ui.ctk.address_dlg import AddressTextDialog
-from ui.ctk.dialogs import (BaseDialog, InputDialog, DLG_BORDER_STRONG,
-                               DLG_PANEL_BG, DLG_TEXT, DLG_TEXT_SOFT)
+from ui.ctk.dialogs import BaseDialog, InputDialog
 from ui.scenario.chapter_trigger_mgr import ChapterTriggerManager
 from dungeon.terms import DEFAULT_SCENARIO_ID, scenario_config_of, scenario_id_of
 from dungeon.validate import format_diagnostics, has_errors
-from ui.scenario.evolution_attributes import EvolutionAtrrManager
+from ui.scenario.character_page import CharacterPage
 from ui.scenario.component_mgr import ComponentManager
 from ui.ctk.theme import (
     SC_BG, SC_PANEL_BG, SC_BORDER, SC_BORDER_STRONG,
@@ -35,57 +29,6 @@ from ui.ctk.theme import (
     SC_OK_HOVER, SC_ERR, SC_ERR_HOVER,
 )
 from ui.ctk import fonts as ui_fonts
-
-
-class VoicePickDialog(BaseDialog):
-    """音色选择：推荐音色单选 + 手填 edge-tts voice id。"""
-
-    def __init__(self, parent, title="选择音色", current=""):
-        super().__init__(parent)
-        self.title(title)
-        self.result = None
-        self.resizable(False, False)
-        self.protocol("WM_DELETE_WINDOW", self._cancel)
-
-        ctk.CTkLabel(self, text="推荐音色（也可在下方直接填 voice id）",
-                     font=self.UI_FONT, text_color=DLG_TEXT_SOFT).pack(
-            padx=20, pady=(16, 6))
-        self._var = ctk.StringVar(value=str(current or "").strip())
-        list_frame = ctk.CTkScrollableFrame(self, width=360, height=220,
-                                            fg_color=DLG_PANEL_BG)
-        list_frame.pack(padx=20, fill='both', expand=True)
-        for label, voice in RECOMMENDED_VOICES:
-            ctk.CTkRadioButton(list_frame, text=f"{label}  {voice}",
-                               variable=self._var, value=voice,
-                               font=self.UI_FONT,
-                               text_color=DLG_TEXT).pack(anchor='w', pady=2)
-
-        entry_row = ctk.CTkFrame(self, fg_color="transparent")
-        entry_row.pack(fill='x', padx=20, pady=(8, 0))
-        self._entry = ctk.CTkEntry(entry_row, height=28, font=self.UI_FONT,
-                                   fg_color=DLG_PANEL_BG,
-                                   border_color=DLG_BORDER_STRONG,
-                                   text_color=DLG_TEXT)
-        self._entry.insert(0, self._var.get())
-        self._entry.pack(fill='x', expand=True)
-
-        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.pack(pady=(12, 16))
-        self._make_std_button(btn_frame, "确定", True, self._ok).pack(side='left', padx=6)
-        self._make_std_button(btn_frame, "取消", False, self._cancel).pack(side='left', padx=6)
-
-        self.bind("<Return>", self._ok)
-        self.bind("<Escape>", self._cancel)
-        self._show_modal(focus_widget=self._entry)
-
-    def _ok(self, _event=None):
-        value = self._entry.get().strip() or self._var.get().strip()
-        self.result = value or None
-        self._close()
-
-    def _cancel(self):
-        self.result = None
-        self._close()
 
 
 def _format_optional_number(value):
@@ -142,9 +85,9 @@ class ScenarioEditor(ctk.CTkFrame):
         toolbar.pack(fill='x', padx=10, pady=6)
         self.dungeon_switch_btn = CTkSegmentedControl(
             toolbar,
-            values=[" 通用 ", "演化量", " 动态 ", " 组件 "],
+            values=[" 通用 ", " 角色 ", " 动态 ", " 组件 "],
             command=self._on_scenario_tab_switch,
-            width=320, font=ui_fonts.ui_font(13)
+            width=360, font=ui_fonts.ui_font(13)
         )
         self.dungeon_switch_btn.pack(side='left', padx=5, pady=(3, 1))
         # 初始化即选中“通用”
@@ -194,13 +137,16 @@ class ScenarioEditor(ctk.CTkFrame):
         self.prompt_panel = ctk.CTkFrame(self.content_frame, fg_color="transparent")
         self._build_prompt_ui(self.prompt_panel)  # 重写 UI 构建
 
-        self.evolution_panel = EvolutionAtrrManager(self.content_frame, self._scenario_repo, self)
+        self.character_panel = CharacterPage(
+            self.content_frame, self._scenario_repo, self)
+        # 主题切换由 window_manager 调 evolution_panel.update_theme，保持旧入口可用
+        self.evolution_panel = self.character_panel.evolution_panel
         self.chapter_trigger_panel = ChapterTriggerManager(
             self.content_frame, self._scenario_repo, self)
         self.component_panel = ComponentManager(self.content_frame, self._scenario_repo, self)
 
         # 默认显示通用面板
-        self.evolution_panel.pack_forget()
+        self.character_panel.pack_forget()
         self.chapter_trigger_panel.pack_forget()
         self.component_panel.pack_forget()
         self.prompt_panel.pack(fill='both', padx=9, expand=True)
@@ -287,14 +233,15 @@ class ScenarioEditor(ctk.CTkFrame):
         tab = value.strip()
         # 隐藏所有面板
         self.prompt_panel.pack_forget()
-        self.evolution_panel.pack_forget()
+        self.character_panel.pack_forget()
         self.chapter_trigger_panel.pack_forget()
         self.component_panel.pack_forget()
 
         if tab == "通用":
             self.prompt_panel.pack(fill='both', padx=9, expand=True)
-        elif tab == "演化量":
-            self.evolution_panel.pack(fill='both', expand=True)
+        elif tab == "角色":
+            self.character_panel.refresh_from_config()
+            self.character_panel.pack(fill='both', expand=True)
         elif tab == "动态":
             self.chapter_trigger_panel.refresh_list()
             self.chapter_trigger_panel.pack(fill='both', expand=True)
@@ -304,7 +251,7 @@ class ScenarioEditor(ctk.CTkFrame):
 
     # ------------------ 新版通用面板 ------------------
     def _build_prompt_ui(self, parent):
-        """通用面板：2×2 四张大卡片——基础设置 / 对话语音 / 初始提示 / 段落分类提示"""
+        """通用面板：基础设置（通栏）+ 初始提示 / 段落分类提示。"""
         for child in parent.winfo_children():
             child.destroy()
 
@@ -328,7 +275,7 @@ class ScenarioEditor(ctk.CTkFrame):
                       font=ui_fonts.ui_font(_F_BIG, "bold"),
                       command=self._save_prompts).pack(fill='x')
 
-        # ---------- 2×2 四张大卡片 ----------
+        # ---------- 上排通栏 + 下排两栏 ----------
         columns = ctk.CTkFrame(parent, fg_color="transparent")
         columns.pack(fill='both', expand=True, pady=(0, 5))
         columns.grid_columnconfigure(0, weight=1, uniform='col')
@@ -336,17 +283,18 @@ class ScenarioEditor(ctk.CTkFrame):
         columns.grid_rowconfigure(0, weight=0)   # 上排按内容高度
         columns.grid_rowconfigure(1, weight=1)   # 下排吃掉剩余高度
 
-        def _card(row, column, padx):
+        def _card(row, column, padx, columnspan=1):
             card = ctk.CTkFrame(columns, fg_color=_CARD_BG,
                                 border_width=0, corner_radius=10)
-            card.grid(row=row, column=column, sticky='nsew', padx=padx,
+            card.grid(row=row, column=column, columnspan=columnspan,
+                      sticky='nsew', padx=padx,
                       pady=(0, 8) if row == 0 else 0)
             inner = ctk.CTkFrame(card, fg_color="transparent")
             inner.pack(fill='both', expand=True, padx=12, pady=10)
             return card, inner
 
-        # ---- 左上：基础设置（耦合等级 / AP 消耗 / 主角称呼 / 进入准入 / 系统初始提示） ----
-        basic_card, left_inner = _card(0, 0, (0, 8))
+        # ---- 上排：基础设置（耦合等级 / AP 消耗 / 进入准入 / 系统初始提示） ----
+        basic_card, left_inner = _card(0, 0, (0, 0), columnspan=2)
 
         head_row = ctk.CTkFrame(left_inner, fg_color="transparent")
         head_row.pack(fill='x', padx=(0, 20))
@@ -372,25 +320,14 @@ class ScenarioEditor(ctk.CTkFrame):
         self.entry_cost_entry.pack(side='right')
         ctk.CTkLabel(head_row, text="AP 消耗量", font=ui_fonts.ui_font(_F_BIG),
                      text_color=_TITLE).pack(side='right', padx=(12, 6))
+        ctk.CTkLabel(left_inner,
+                     text="主角称呼与对话语音已移到「角色」页；进入准入见下。",
+                     font=ui_fonts.ui_font(_F_SMALL), text_color=_MUTED,
+                     anchor='w').pack(fill='x', pady=(6, 0))
 
         # 卡片宽度随窗口均分，文本按固定宽度折行即可（CTkLabel 的自然宽度
         # 不受 wraplength 约束，这里只用于排版）
-        _TEXT_W = 520
-
-        # 主角称呼：Solea/Bulla 对话分支里主角台词的说话人标注（Velum 不适用）
-        protagonist_row = ctk.CTkFrame(left_inner, fg_color="transparent")
-        protagonist_row.pack(fill='x', padx=(0, 20), pady=(10, 0))
-        ctk.CTkLabel(protagonist_row, text="主角称呼", font=ui_fonts.ui_font(_F_BIG),
-                     text_color=_TITLE).pack(side='left')
-        ctk.CTkLabel(protagonist_row, text="（仅 Solea / Bulla）", font=ui_fonts.ui_font(_F_SMALL),
-                     text_color=_MUTED).pack(side='left', padx=2)
-        self.protagonist_var = ctk.StringVar()
-        self.protagonist_entry = ctk.CTkEntry(
-            protagonist_row, textvariable=self.protagonist_var,
-            width=120, font=ui_fonts.ui_font(_F_BIG),
-            text_color=_DARK, placeholder_text="主角",
-            fg_color=SC_PANEL_BG, border_color=SC_BORDER_STRONG)
-        self.protagonist_entry.pack(side='right')
+        _TEXT_W = 860
 
         # ---- 进入准入：入口地址（主世界锚点，距离上限）与身高区间 ----
         admission_card = ctk.CTkFrame(left_inner, fg_color=SC_PANEL_BG,
@@ -451,96 +388,6 @@ class ScenarioEditor(ctk.CTkFrame):
             side='left', padx=(3, 4))
         ctk.CTkLabel(height_row, text="米", font=ui_fonts.ui_font(_F_SMALL),
                      text_color=_MUTED).pack(side='left')
-
-        # ---- 右上：对话语音（Solea/Bulla 的台词朗读，仅带说话人的对话句） ----
-        voice_outer, voice_inner = _card(0, 1, (8, 0))
-        ctk.CTkLabel(voice_inner, text="对话语音",
-                     font=ui_fonts.ui_font(_F_TITLE, "bold"),
-                     text_color=_TITLE, anchor='w').pack(fill='x')
-        voice_card = ctk.CTkFrame(voice_inner, fg_color="transparent")
-        voice_card.pack(fill='both', expand=True, pady=(4, 0))
-
-        voice_head = ctk.CTkFrame(voice_card, fg_color="transparent")
-        voice_head.pack(fill='x', padx=8, pady=(6, 2))
-        ctk.CTkLabel(voice_head, text="朗读对话", font=ui_fonts.ui_font(_F_SMALL),
-                     text_color=_TITLE).pack(side='left')
-        self.voice_enabled_var = ctk.BooleanVar(value=True)
-        ctk.CTkSwitch(voice_head, text="", variable=self.voice_enabled_var,
-                      width=44, height=22, progress_color=SC_LINK,
-                      button_color=SC_TEXT_SOFT,
-                      button_hover_color=SC_TEXT_SOFT).pack(side='right')
-        self.voice_hint_label = ctk.CTkLabel(
-            voice_card, text="", font=ui_fonts.ui_font(_F_SMALL),
-            text_color=_MUTED, anchor='w', justify='left',
-            wraplength=_TEXT_W)
-        self.voice_hint_label.pack(fill='x', padx=8, pady=(0, 4))
-
-        # 音色：她 / 主角 / 其他角色（其他角色是音色池，按名字稳定分配）
-        self.voice_her_var = ctk.StringVar()
-        self.voice_protagonist_var = ctk.StringVar()
-        self.voice_other_var = ctk.StringVar()
-        for label, var, placeholder, append in (
-                ("她的音色", self.voice_her_var, DEFAULT_VOICE_HER, False),
-                ("主角音色", self.voice_protagonist_var, DEFAULT_VOICE_PROTAGONIST, False),
-                # 其他角色是音色池：选一个就往池子里加一把嗓子
-                ("其他角色", self.voice_other_var,
-                 "、".join(DEFAULT_OTHER_VOICES), True)):
-            row = ctk.CTkFrame(voice_card, fg_color="transparent")
-            row.pack(fill='x', padx=8, pady=2)
-            ctk.CTkLabel(row, text=label, font=ui_fonts.ui_font(_F_SMALL),
-                         text_color=_TITLE, width=64, anchor='w').pack(side='left')
-            entry = ctk.CTkEntry(row, textvariable=var, height=26,
-                                 font=ui_fonts.ui_font(_F_SMALL),
-                                 text_color=_DARK, placeholder_text=placeholder,
-                                 fg_color=SC_BG, border_color=SC_BORDER_STRONG)
-            entry.pack(side='left', fill='x', expand=True, padx=(6, 4))
-            ctk.CTkButton(row, text="选", width=28, height=26,
-                          font=ui_fonts.ui_font(_F_SMALL),
-                          fg_color="transparent", border_width=1,
-                          border_color=SC_BORDER_STRONG, text_color=SC_LINK,
-                          hover_color=SC_HOVER, corner_radius=6,
-                          command=lambda v=var, a=append: self._pick_voice(v, a)).pack(side='left')
-
-        voice_tail = ctk.CTkFrame(voice_card, fg_color="transparent")
-        voice_tail.pack(fill='x', padx=8, pady=(2, 8))
-        ctk.CTkLabel(voice_tail, text="语速", font=ui_fonts.ui_font(_F_SMALL),
-                     text_color=_TITLE).pack(side='left')
-        self.voice_rate_var = ctk.StringVar(value=DEFAULT_RATE)
-        ctk.CTkEntry(voice_tail, textvariable=self.voice_rate_var, width=56,
-                     height=26, font=ui_fonts.ui_font(_F_SMALL),
-                     text_color=_DARK, fg_color=SC_BG,
-                     border_color=SC_BORDER_STRONG).pack(side='left', padx=(6, 10))
-        ctk.CTkLabel(voice_tail, text="音量", font=ui_fonts.ui_font(_F_SMALL),
-                     text_color=_TITLE).pack(side='left')
-        self.voice_level_var = ctk.StringVar(
-            value=buses.step_display(DEFAULT_VOICE_LEVEL))
-        OptionButton(voice_tail, values=[label for label, _ in buses.step_choices()],
-                     variable=self.voice_level_var, width=88, height=26,
-                     font=ui_fonts.ui_font(_F_SMALL),
-                     fg_color=SC_BG, border_color=SC_BORDER_STRONG,
-                     hover_color=SC_HOVER, text_color=_TITLE,
-                     popup_fg_color=SC_PANEL_BG, popup_hover_color=SC_HOVER,
-                     popup_text_color=_TITLE, popup_border_color=SC_BORDER_STRONG,
-                     ).pack(side='left', padx=(6, 0))
-        # 预听：听音色 + 语速 + 档位（章节级效果在章节对话框里单独预听）
-        self._preview_button = ctk.CTkButton(
-            voice_tail, text="预听", width=52, height=26,
-            font=ui_fonts.ui_font(_F_SMALL), fg_color="transparent",
-            border_width=1, border_color=SC_BORDER_STRONG, text_color=SC_LINK,
-            hover_color=SC_HOVER, corner_radius=6,
-            command=lambda: self._preview_voice("her"))
-        self._preview_button.pack(side='left', padx=(8, 0))
-        ctk.CTkButton(
-            voice_tail, text="其它音色", width=68, height=26,
-            font=ui_fonts.ui_font(_F_SMALL), fg_color="transparent",
-            border_width=1, border_color=SC_BORDER_STRONG, text_color=SC_TEXT_SOFT,
-            hover_color=SC_HOVER, corner_radius=6,
-            command=lambda: self._preview_voice("other")).pack(side='left', padx=(6, 0))
-        self._preview_status = ctk.CTkLabel(
-            voice_card, text="", font=ui_fonts.ui_font(_F_SMALL),
-            text_color=_MUTED, anchor='w', justify='left',
-            wraplength=_TEXT_W)
-        self._preview_status.pack(fill='x', padx=8, pady=(0, 4))
 
         ctk.CTkLabel(left_inner, text="系统初始提示",
                      font=ui_fonts.ui_font(_F_SMALL, "bold"),
@@ -738,15 +585,9 @@ class ScenarioEditor(ctk.CTkFrame):
             self.entry_address_max_distance))
         self.entry_height_min_var.set(_format_optional_number(self.entry_height_min))
         self.entry_height_max_var.set(_format_optional_number(self.entry_height_max))
-        self.protagonist_var.set(self.protagonist_title)
-        self.voice_enabled_var.set(bool(self.voice.get("enabled", True)))
-        self.voice_her_var.set(self.voice.get("voice_her", DEFAULT_VOICE_HER))
-        self.voice_protagonist_var.set(
-            self.voice.get("voice_protagonist", DEFAULT_VOICE_PROTAGONIST))
-        self.voice_other_var.set("、".join(self.voice.get("voice_other") or ()))
-        self.voice_rate_var.set(self.voice.get("rate", DEFAULT_RATE))
-        self.voice_level_var.set(buses.step_display(voice_level(self.voice)))
-        self._refresh_voice_hint()
+        # 主角称呼与对话语音在「角色」页，由它自己回填
+        self.character_panel.on_coupling_changed(self.coupling_level)
+        self.character_panel.refresh_from_config()
 
         for key, box in self.section_frames.items():
             box.delete("1.0", "end")
@@ -759,7 +600,6 @@ class ScenarioEditor(ctk.CTkFrame):
 
         # 转移矩阵无需显示，但已保存在 self.transition_matrix 中
 
-        self.evolution_panel.refresh_list()
         self.chapter_trigger_panel.refresh_list()
         self.component_panel.refresh_list()
         self._update_prompt_snapshot()
@@ -816,7 +656,7 @@ class ScenarioEditor(ctk.CTkFrame):
         return {
             "initial_prompt": self.initial_prompt_text.get("1.0", "end-1c").strip(),
             "coupling_level": self.coupling_level,
-            "protagonist_title": self.protagonist_var.get().strip(),
+            "protagonist_title": self.character_panel.protagonist_title(),
             "section_prompts": {key: box.get("1.0", "end-1c").strip()
                                 for key, box in self.section_frames.items()},
             "section_steps": {key: var.get() for key, var in self.section_step_vars.items()},
@@ -829,20 +669,8 @@ class ScenarioEditor(ctk.CTkFrame):
                 self.entry_height_min_var, self.entry_height_min),
             "entry_height_max_m": self._optional_number(
                 self.entry_height_max_var, self.entry_height_max),
-            "voice": self._voice_from_ui()
+            "voice": self.character_panel.collect_voice()
         }
-
-    def _voice_from_ui(self) -> dict:
-        """收集对话语音配置（音色池按「、」或逗号分隔，空则回退默认池）。"""
-        raw_others = re.split(r"[、,，;；\s]+", self.voice_other_var.get().strip())
-        return normalize_voice({
-            "enabled": bool(self.voice_enabled_var.get()),
-            "voice_her": self.voice_her_var.get().strip(),
-            "voice_protagonist": self.voice_protagonist_var.get().strip(),
-            "voice_other": [v for v in raw_others if v],
-            "rate": self.voice_rate_var.get().strip(),
-            "level": buses.step_from_display(self.voice_level_var.get()),
-        })
 
     def _pick_entry_address(self):
         """选择入口地址（主世界锚点；复用地址注册表对话框；消除 = 不做地址准入）。"""
@@ -866,103 +694,11 @@ class ScenarioEditor(ctk.CTkFrame):
         value = coerce_distance(text)
         return fallback if value is None else value
 
-    def _pick_voice(self, var, append: bool = False):
-        """打开音色选择器；``append`` 为真时把结果追加进已有的音色池。"""
-        current = var.get().strip()
-        dialog = VoicePickDialog(self, current=current)
-        picked = dialog.result
-        if not picked:
-            return
-        if append and current:
-            items = [item for item in re.split(r"[、,，;；\s]+", current) if item]
-            if picked not in items:
-                items.append(picked)
-            var.set("、".join(items))
-        else:
-            var.set(picked)
-
-    def _refresh_voice_hint(self):
-        """音色区提示：缺依赖 / 等级不适用 / 正常联网合成。"""
-        label = getattr(self, "voice_hint_label", None)
-        if label is None:
-            return
-        if not edge_tts_available():
-            text = "未安装 edge-tts（pip install edge-tts），运行时不会出声"
-        elif self.coupling_level == VELUM:
-            text = "仅 Solea / Bulla 的对话句会朗读，当前等级 Velum 不适用"
-        else:
-            text = "仅带说话人的对话句会朗读，需联网合成（首次约 1 秒）"
-        label.configure(text=text)
-
-    # ---------- 预听 ----------
-    def _preview_voice(self, kind: str = "her"):
-        """预听方案级语音（不带章节效果）：听音色 + 语速 + 档位。
-
-        ``kind``：``her`` 用她的音色，``other`` 用音色池里的第一个（配角音色按
-        名字分配，预听取池首做个代表）。章节级的**效果**在章节对话框里单独预听。
-        """
-        voice = self._voice_from_ui()
-        if kind == "other":
-            pool = voice.get("voice_other") or ()
-            voice_id = pool[0] if pool else ""
-        else:
-            voice_id = voice["voice_her"]
-        preview = self._ensure_preview()
-        if preview is None:
-            return
-        button = getattr(self, "_preview_button", None)
-        if button is not None:
-            button.configure(state="disabled", text="…")
-        self._set_preview_status("正在合成预听样例…（首次约 1 秒，需联网）")
-        preview.play(voice_id, rate=voice.get("rate", DEFAULT_RATE),
-                     level=voice.get("level"), effect=None,
-                     on_done=self._on_preview_done)
-
-    def _ensure_preview(self):
-        preview = getattr(self, "_preview", None)
-        if preview is None:
-            try:
-                preview = VoicePreview(
-                    logger=getattr(self, "_preview_log", []).append)
-            except Exception as exc:
-                self._set_preview_status(f"初始化预听失败：{exc}")
-                return None
-            self._preview = preview
-        return preview
-
-    def _set_preview_status(self, text: str):
-        label = getattr(self, "_preview_status", None)
-        if label is None:
-            return
-        try:
-            label.configure(text=text)
-        except Exception:
-            pass
-
-    def _on_preview_done(self, ok, message):
-        """工作线程的回调 → 回 Tk 主线程改按钮与状态（控件可能已销毁）。"""
-        try:
-            self.after(0, lambda: self._finish_preview(ok, message))
-        except Exception:
-            pass
-
-    def _finish_preview(self, ok, message):
-        button = getattr(self, "_preview_button", None)
-        if button is not None:
-            try:
-                button.configure(state="normal", text="预听")
-            except Exception:
-                pass
-        self._set_preview_status("" if ok else f"预听失败：{message}")
-
     def destroy(self):
-        """销毁时收预听（停播、收线程、清临时 WAV）。"""
-        preview, self._preview = getattr(self, "_preview", None), None
-        if preview is not None:
-            try:
-                preview.shutdown()
-            except Exception:
-                pass
+        """销毁时收预听（停播、收线程、清临时 WAV）——预听在「角色」页里。"""
+        panel = getattr(self, "character_panel", None)
+        if panel is not None:
+            panel.shutdown_preview()
         super().destroy()
 
     def _save_prompts(self):
@@ -977,7 +713,10 @@ class ScenarioEditor(ctk.CTkFrame):
         prompt_data = self._get_prompt_data_from_ui()
         config["initial_prompt"] = prompt_data["initial_prompt"]
         config["coupling_level"] = prompt_data["coupling_level"]
+        # 主角称呼与语音在「角色」页，由角色页自己防抖保存；这里一并写回，
+        # 保证「保存此页面」之后磁盘上的方案与界面完全一致
         config["protagonist_title"] = prompt_data["protagonist_title"]
+        config["voice"] = prompt_data["voice"]
         config["section_prompts"] = prompt_data["section_prompts"]
         config["section_steps"] = prompt_data["section_steps"]
         config["transition_matrix"] = prompt_data["transition_matrix"]
@@ -1149,10 +888,7 @@ class ScenarioEditor(ctk.CTkFrame):
         self.coupling_option.set(coupling_label(self.coupling_level))
         self.coupling_prompt_label.configure(
             text=coupling_initial_prompt(self.coupling_level))
-        # 主角称呼仅在 Solea/Bulla 生效：Velum 时置灰提示
-        state = "disabled" if self.coupling_level == VELUM else "normal"
-        self.protagonist_entry.configure(state=state)
-        # 对话语音依赖说话人标记，同样只在 Solea/Bulla 有意义
-        self._refresh_voice_hint()
+        # 主角称呼与对话语音依赖说话人标记，只在 Solea/Bulla 有意义（角色页置灰）
+        self.character_panel.on_coupling_changed(self.coupling_level)
 
 
