@@ -1,0 +1,161 @@
+"""副本人物表（cast）：配角设定与首次出场线索。
+
+表里只有配角，**不放她、也不放主角**：
+
+- 她：本局角色档案（跨方案复用）；
+- 主角：方案级 ``protagonist_title`` + ``protagonist_background``，唯一且视角固定；
+- 配角：本表的 ``key``（完整身份背景）与 ``extra``（作用 / 代词 / 说话方式三条线索）。
+
+表里所有描述都是**故事开始时的样子**，不是状态：谁死了、谁反目了不改这里，
+那是 ``StorySummarizer`` 的 facts。同理，首次出场时由 AI 补的线索也不回写配置。
+"""
+
+import re
+
+#: 定位：``key`` = 有完整身份背景的重要角色，``extra`` = 只有三条线索的群像
+CAST_ROLES = ("key", "extra")
+DEFAULT_CAST_ROLE = "key"
+
+#: 代词只有这两档参与渲染与音色分池；空串 = 不指定（不分性别，不猜）
+CAST_PRONOUNS = ("", "他", "她")
+
+#: 重要角色的建议上限。超了不报错，只提示——上限的用途是防提示词被挤爆
+MAX_KEY_MEMBERS = 6
+
+#: 别称串的切分符（作者手写 JSON 时容易写成逗号串）
+_ALIAS_SEPARATORS = re.compile(r"[、,，;；\s]+")
+
+
+def clean_name(value) -> str:
+    """去掉说话人标记的 ``@`` 与首尾空白（章节 cast 里两种写法都认）。"""
+    return str(value or "").strip().strip("@＠").strip()
+
+
+def _clean_list(raw) -> list:
+    if isinstance(raw, str):
+        raw = _ALIAS_SEPARATORS.split(raw)
+    if not isinstance(raw, list):
+        return []
+    items = []
+    for entry in raw:
+        name = clean_name(entry)
+        if name and name not in items:
+            items.append(name)
+    return items
+
+
+def normalize_member(raw, index: int = 0) -> dict:
+    """单个成员归一化：补 id / role / 代词，其余描述字段统一成去空白的字符串。
+
+    未知字段原样保留（读写一轮不丢作者手改的内容）。
+    """
+    member = dict(raw) if isinstance(raw, dict) else {}
+    name = str(member.get("name") or "").strip()
+    member["name"] = name
+    member["id"] = str(member.get("id") or "").strip() or name or f"cast{index + 1}"
+    role = str(member.get("role") or DEFAULT_CAST_ROLE).strip().lower()
+    member["role"] = role if role in CAST_ROLES else DEFAULT_CAST_ROLE
+    member["aliases"] = _clean_list(member.get("aliases"))
+    pronoun = str(member.get("pronoun") or "").strip()
+    member["pronoun"] = pronoun if pronoun in CAST_PRONOUNS else ""
+    for key in ("background", "purpose", "speech", "call_her", "voice"):
+        member[key] = str(member.get(key) or "").strip()
+    return member
+
+
+def normalize_cast(raw) -> list:
+    """方案级人物表归一化；非列表返回空表（旧方案没有这个字段）。"""
+    if not isinstance(raw, list):
+        return []
+    return [normalize_member(entry, index)
+            for index, entry in enumerate(raw) if isinstance(entry, dict)]
+
+
+def member_names(member) -> tuple:
+    """成员的可用称呼：本名 + 别称（用于说话人解析与音色匹配）。"""
+    names = [member.get("name") or ""]
+    names.extend(member.get("aliases") or ())
+    return tuple(n for n in (clean_name(x) for x in names) if n)
+
+
+def find_member(members, key):
+    """按 id / 称呼 / 别称查成员；查不到返回 ``None``。"""
+    target = clean_name(key)
+    if not target:
+        return None
+    for member in members or ():
+        if target in (member.get("id"), member.get("name")):
+            return member
+        if target in (member.get("aliases") or ()):
+            return member
+    return None
+
+
+def _meta_text(member) -> str:
+    """括号里的结构化线索：代词 / 别称 / 她怎么被称呼。"""
+    bits = []
+    if member.get("pronoun"):
+        bits.append(member["pronoun"])
+    aliases = [a for a in (member.get("aliases") or ()) if a != member.get("name")]
+    if aliases:
+        bits.append("也称「" + "」「".join(aliases) + "」")
+    if member.get("call_her"):
+        bits.append(f"称她为「{member['call_her']}」")
+    return "（" + "；".join(bits) + "）" if bits else ""
+
+
+def intro_line(member) -> str:
+    """一个成员的首次出场设定行；没有可渲染内容时返回空串（交给 AI 定）。
+
+    ``key`` 渲染 ``background``，``extra`` 渲染 ``purpose``；两者的 ``speech`` 都追加在后面。
+    """
+    body = member.get("background") if member.get("role") == "key" else member.get("purpose")
+    body = str(body or "").strip()
+    speech = str(member.get("speech") or "").strip()
+    if not body and not speech:
+        return ""
+    line = f"{member.get('name', '')}{_meta_text(member)}"
+    if body:
+        line += f"：{body}"
+    if speech:
+        line += f"｜说话：{speech}"
+    return line
+
+
+def render_first_seen(members) -> str:
+    """首次出场块：已填线索的渲染成设定行，没填的给出一条「由 AI 定」的指令。
+
+    调用方负责保证 ``members`` 都是本段第一次出场的成员——这里不判重。
+    """
+    members = [m for m in (members or ()) if m.get("name")]
+    if not members:
+        return ""
+    lines, blanks = [], []
+    for member in members:
+        line = intro_line(member)
+        if line:
+            lines.append(line)
+        else:
+            blanks.append(member["name"])
+
+    out = []
+    if lines:
+        out.append("【人物（故事开始时的设定）】")
+        out.extend(lines)
+    if blanks:
+        out.append("【本段首次出场】" + "、".join(blanks))
+    if not lines and not blanks:
+        return ""
+    if blanks:
+        out.append("你需要在这一段让上述角色自然出场，并确定三件事："
+                   "他们为什么在这个故事里、各自的代词、各自的说话方式。"
+                   "确定之后保持前后一致。")
+    out.append("（以上是起点不是现状，不必每段重述。）")
+    return "\n".join(out) + "\n"
+
+
+__all__ = [
+    "CAST_ROLES", "DEFAULT_CAST_ROLE", "CAST_PRONOUNS", "MAX_KEY_MEMBERS",
+    "clean_name", "normalize_member", "normalize_cast", "member_names",
+    "find_member", "intro_line", "render_first_seen",
+]

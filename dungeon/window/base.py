@@ -43,6 +43,7 @@ from dungeon.audio.speech import (SpeechDirector, VoiceCaster, normalize_voice,
 from dungeon.window.background import DungeonBackground
 from dungeon.window.fx import WindowFx
 from dungeon.audio.chapters import find_chapter, normalize_chapters
+from dungeon.cast import normalize_cast
 from dungeon.coupling import normalize_coupling_level
 from dungeon.scene import landmarks_for_chapter, place_label
 from dungeon.window.frame import FrameScheduler
@@ -112,6 +113,12 @@ class DungeonWindowBase:
         self.tags = tags
         self.uploaded_image = uploaded_image
         self.scenario_config = scenario_config
+        # 人物表与主角设定（会话级运行时视图，由 _init_session 从方案配置读入）；
+        # introduced_cast 记录已经给过「首次出场」设定块的成员，重试/预生成回退时
+        # 由 engine 快照还原，避免同一段被漏掉设定
+        self.protagonist_background = ""
+        self.cast = []
+        self.introduced_cast = set()
         self.scenario_repo = scenario_repo
         self.merged_landmarks = merged_landmarks
         self.selected_styles = selected_styles
@@ -642,6 +649,12 @@ class DungeonWindowBase:
         # （提示词构建器读取，留空回退「主角」；Velum 不使用）
         self.protagonist_title = str(
             scenario_config.get("protagonist_title", "") or "").strip()
+        # 主角的身份背景（故事开始时的样子）；留空时系统提示词不多这一块
+        self.protagonist_background = str(
+            scenario_config.get("protagonist_background", "") or "").strip()
+        # 人物表：配角（key / extra）；她与主角不在表里
+        self.cast = normalize_cast(scenario_config.get("cast"))
+        self.introduced_cast = set()
         self.section_prompts = scenario_config.get("section_prompts", {})
         self.evolution_attrs = scenario_config.get("evolution_attrs", [])
 

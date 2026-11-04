@@ -16,6 +16,8 @@
 见 ``DungeonState.chapter_steps``）可在条件规则中判定。
 """
 
+import re
+
 from dungeon.audio import buses
 from dungeon.audio.voice_fx import normalize_voice_fx
 
@@ -169,6 +171,19 @@ def normalize_chapter(raw, index: int = 0) -> dict:
     chapter["start"] = bool(chapter.get("start", False))
     chapter["ending"] = bool(chapter.get("ending", False))
     chapter["note"] = str(chapter.get("note") or "")
+
+    # 本章在场的人物（人物表的 id / 称呼 / 别称）：空 = 不声明，提示词不写在场行。
+    # 旧章节没有这个字段时不补键，读一轮不会往磁盘上多写一个空数组。
+    raw_cast = chapter.get("cast")
+    if isinstance(raw_cast, (list, str)):
+        entries = (re.split(r"[、,，;；\s]+", raw_cast)
+                   if isinstance(raw_cast, str) else raw_cast)
+        present = []
+        for entry in entries:
+            name = str(entry or "").strip().strip("@＠").strip()
+            if name and name not in present:
+                present.append(name)
+        chapter["cast"] = present
 
     # 地点与参照物：章节地址是作者的声明（展示 / 结局传送），缺省空值
     chapter["place"] = str(chapter.get("place") or "").strip()

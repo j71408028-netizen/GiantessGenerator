@@ -106,6 +106,12 @@ SCENARIO_FIELDS = (
     FieldSpec("coupling_level", "enum", "耦合等级", DEFAULT_COUPLING_LEVEL, choices=COUPLING_LEVELS),
     FieldSpec("protagonist_title", "str", "主角称呼", "",
               note="对话段落里主角台词的说话人标注；仅 Solea/Bulla 使用，留空回退「主角」"),
+    FieldSpec("protagonist_background", "text", "主角身份背景", "",
+              note="故事开始时的样子：他是谁、为什么在这儿、想要什么、怎么看她；"
+                   "之后的变化由剧情决定，不改这里"),
+    FieldSpec("cast", "list", "配角表", [],
+              note="重要角色（key）与群像（extra）；她与主角不在表里，"
+                   "所有描述都是故事开始时的样子"),
     FieldSpec("text_component", "enum", "文本组件", DEFAULT_TEXT_COMPONENT,
               choices=TEXT_COMPONENT_IDS,
               note="文本主组件三选一：text=底部渐变、text_card=底部卡片、text_nvl=全屏NVL"),
@@ -165,6 +171,9 @@ CHAPTER_FIELDS = (
     FieldSpec("start", "bool", "起始章节", False),
     FieldSpec("ending", "bool", "结束章节", False),
     FieldSpec("note", "str", "备注", ""),
+    FieldSpec("cast", "list", "本章在场的人物", [],
+              note="写人物表的 id / 称呼 / 别称；空 = 不声明，提示词不写在场行、"
+                   "也不注入任何人物设定"),
     FieldSpec("place", "str", "地点", "",
               note="展示名；提示词与窗口都用它，留空不显示"),
     FieldSpec("address", "str", "取景地址", "",
@@ -273,8 +282,44 @@ SERIES_METRICS = ("avg", "trend", "last", "count")
 # ---------------- 演化属性 ----------------
 
 EVOLUTION_ATTR_TYPES = ("intrusion", "destruction", "casualty", "custom")
-DISPLAY_STATES = ("show", "collapse")
+# 展示状态：显示 / 折叠 / 隐藏（隐藏的量只参与演化与条件，不进入任何展示组件）
+DISPLAY_STATES = ("show", "collapse", "internal")
 BUILTIN_EVOLUTION_ATTRS = ("intrusion", "destruction", "casualty")
+
+# 归属：这一项量是谁的。它是**分组键，不是数值来源**——介入度/破坏性/总伤亡仍然
+# 由 DungeonState 唯一持有，归属只决定它在编辑器里归到哪个角色、提示词怎么解释
+# 它的来处，以及日后组件按归属取用（见 docs/Dungeon/script.md §4）。
+EVOLUTION_OWNERS = ("her", "protagonist", "environment", "other")
+EVOLUTION_OWNER_LABELS = {
+    "her": "她",
+    "protagonist": "主角",
+    "environment": "环境",
+    "other": "其他角色",
+}
+#: 未填 owner 时的归属（旧方案不提 owner，按类型给一个合理的缺省，不写回配置）
+DEFAULT_OWNER_BY_TYPE = {
+    "intrusion": "her",
+    "destruction": "her",
+    "casualty": "environment",
+    "custom": "her",
+}
+
+
+def normalize_owner(value, attr_type: str = "custom") -> str:
+    """把任意来源的归属归一化为 ``EVOLUTION_OWNERS`` 之一。
+
+    未填或无法识别时按属性类型取缺省（``DEFAULT_OWNER_BY_TYPE``）——旧方案没有
+    ``owner`` 字段也能被角色页正确分组，且不会被写回配置。
+    """
+    text = str(value or "").strip()
+    if text in EVOLUTION_OWNERS:
+        return text
+    return DEFAULT_OWNER_BY_TYPE.get(str(attr_type or "custom"), "her")
+
+
+def owner_label(value, attr_type: str = "custom") -> str:
+    """归属的展示名（她 / 主角 / 环境 / 其他角色）。"""
+    return EVOLUTION_OWNER_LABELS[normalize_owner(value, attr_type)]
 
 
 # ---------------- 访问器与模板 ----------------
@@ -295,6 +340,8 @@ def empty_scenario_config() -> dict:
         "initial_prompt": "",
         "coupling_level": DEFAULT_COUPLING_LEVEL,
         "protagonist_title": "",
+        "protagonist_background": "",
+        "cast": [],
         "text_component": DEFAULT_TEXT_COMPONENT,
         "entry_action_cost": 0,
         "entry_address": "",
@@ -304,9 +351,12 @@ def empty_scenario_config() -> dict:
         "ending_policy": DEFAULT_ENDING_POLICY,
         "section_prompts": {key: "" for key in TEXT_TYPE_KEYS},
         "evolution_attrs": [
-            {"type": "intrusion", "name": "介入度", "display_state": "collapse"},
-            {"type": "destruction", "name": "破坏性", "display_state": "collapse"},
-            {"type": "casualty", "name": "总伤亡", "display_state": "collapse"},
+            {"type": "intrusion", "name": "介入度", "display_state": "collapse",
+             "owner": "her"},
+            {"type": "destruction", "name": "破坏性", "display_state": "collapse",
+             "owner": "her"},
+            {"type": "casualty", "name": "总伤亡", "display_state": "collapse",
+             "owner": "environment"},
         ],
         "chapters": [],
         "triggers": [],

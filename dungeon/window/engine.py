@@ -464,17 +464,21 @@ class DungeonStoryEngine:
 
     def _start_pregen(self):
         """后台预生成下一段：缓存 (user_prompt, messages快照, 原始响应, 段落类型)。"""
+        # build_user_prompt 有副作用：「被注意到的部位」标记为已提示、首次出场成员
+        # 标记为已介绍。预生成失败会改走实时路径重建提示词，这里先快照，失败时还原，
+        # 否则那一段就再也拿不到这些信息。快照必须在 try 之外——取段落类型也可能抛。
+        snapshot_given = set(self.keyword_match_given)
+        snapshot_introduced = set(getattr(self, "introduced_cast", ()) or ())
         try:
             next_type = self.dungeon_logic.get_next_text_type(self.current_text_type)
             # 结束章节：所有段落类型被覆盖为「结局」，步进为 0
             if self._in_terminating_chapter():
                 next_type = DungeonTextType.BACKGROUND
-            # build_user_prompt 会把「被注意到的部位」标记为已提示；快照，
-            # 预生成失败（走实时路径重建提示词）时还原，避免误标
-            snapshot_given = set(self.keyword_match_given)
             user_prompt = self.prompt_builder.build_user_prompt(next_type)
         except Exception as e:
             process_log.log(f"[Pregen] 组装预生成提示词失败: {e}")
+            self.keyword_match_given = snapshot_given
+            self.introduced_cast = snapshot_introduced
             return
         pre_messages = self.messages + [{"role": "user", "content": user_prompt}]
         self._pregen_inflight = True
@@ -489,6 +493,7 @@ class DungeonStoryEngine:
             except Exception as e:
                 process_log.log(f"[Pregen] 预生成失败，改回实时路径: {e}")
                 self.keyword_match_given = snapshot_given
+                self.introduced_cast = snapshot_introduced
                 return
             finally:
                 self._pregen_inflight = False

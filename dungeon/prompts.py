@@ -8,12 +8,14 @@ from core.scale_reference import (destruction_calibration_line,
                                   intrusion_calibration_line,
                                   intrusion_level_title)
 from dungeon.audio.chapters import find_chapter, is_terminating_chapter
+from dungeon import cast as cast_mod
 from .coupling import (COMMON_OUTPUT_RULE, DEFAULT_COUPLING_LEVEL,
                        HIGHLIGHT_MARKER_RULE, coupling_prompts,
                        normalize_coupling_level, section_instruction)
 from .details import search_replay_details
 from .models import DungeonTextType
 from .scene import place_label
+from .schema import owner_label
 
 
 # 部位名 → 触发正则：正文中出现即视为"注意到该部位"。
@@ -70,12 +72,84 @@ class DungeonPromptBuilder:
         title = str(getattr(self.context, "protagonist_title", "") or "").strip()
         return title or "主角"
 
+    def _protagonist_block(self) -> str:
+        """主角的身份背景（故事开始时的样子）。
+
+        主角是视角人物，「他是谁」与她的性格描述同级，所以随系统提示词每段都在；
+        文案必须点明这是起点，否则 AI 会把它当成每段都要维持的现状。
+        """
+        background = str(
+            getattr(self.context, "protagonist_background", "") or "").strip()
+        if not background:
+            return ""
+        return (f"【主角】{self.protagonist_title()}\n"
+                f"故事开始时：{background}\n"
+                "（以上是起点不是现状，不必每段重述。）\n")
+
+    def _cast_block(self) -> str:
+        """在场行 + 首次出场块（用户提示词侧）。
+
+        在场只认章节 ``cast`` 声明：没声明就不写这一行，旧方案逐字不变。
+        成员设定只在第一次出场时给一次，之后只留名字——这是「设定是初始值」
+        在注入层的落点。
+        """
+        session = self.context
+        members = getattr(session, "cast", None) or ()
+        if not members:
+            return ""
+        chapter = find_chapter(getattr(session, "chapters", None),
+                               getattr(session, "current_chapter", None))
+        declared = list((chapter or {}).get("cast") or ())
+        if not declared:
+            return ""
+        present, seen = [], set()
+        for key in declared:
+            member = cast_mod.find_member(members, key)
+            if member is None or member["id"] in seen:
+                continue
+            seen.add(member["id"])
+            present.append(member)
+        if not present:
+            return ""
+        introduced = getattr(session, "introduced_cast", None)
+        if not isinstance(introduced, set):
+            introduced = set(introduced or ())
+            session.introduced_cast = introduced
+        block = "【本段在场】" + "、".join(m["name"] for m in present) + "\n"
+        fresh = [m for m in present if m["id"] not in introduced]
+        if fresh:
+            block += cast_mod.render_first_seen(fresh)
+            introduced.update(m["id"] for m in fresh)
+        block += ("本段只让主角与到场的角色说话和行动；"
+                  "未到场者可以被人提起，但不要给台词。\n")
+        return block
+
+    def _custom_owner_hint(self) -> str:
+        """自定义演化量的归属说明（作者显式写了 ``owner`` 才出现）。
+
+        旧方案没有归属字段，这里返回空串，提示词逐字不变——不给已部署的方案
+        凭空补一段它没写过的设定。
+        """
+        attrs = [a for a in (getattr(self.context, "evolution_attrs", None) or [])
+                 if isinstance(a, dict) and a.get("type") == "custom"]
+        declared = [a for a in attrs if str(a.get("owner") or "").strip()]
+        if not declared:
+            return ""
+        pairs = "、".join(
+            f"{name}（归属：{owner_label(a.get('owner'), 'custom')}）"
+            for a in declared
+            if (name := str(a.get("name") or "").strip()))
+        if not pairs:
+            return ""
+        return f"这些自定义属性的归属：{pairs}；方向描述的是归属方身上的变化。\n"
+
     def build_system_prompt(self) -> str:
         session = self.context
         pack = coupling_prompts(self.coupling_level())
         height_match = self._get_height_match()
         height_info = f"身高：{height_match}\n" if height_match else ""
         custom_names = [a["name"] for a in session.evolution_attrs if a["type"] == "custom"]
+        owner_hint = self._custom_owner_hint()
         if custom_names:
             fields = ", ".join(f'"{name}": -1/0/1' for name in custom_names)
             output = f'"custom_directions": {{{fields}}},  // 自定义属性变化方向，每个属性值为 -1（下降）、0（平稳）、1（上升）\n'
@@ -92,7 +166,7 @@ class DungeonPromptBuilder:
             "direction 取值范围：-1（消极/挫败），0（中性），1（积极/满足）。\n"
             'direction 表示这一段对她是顺利（+1）还是受挫（-1），'
             "不表示事情更激烈还是更收敛；内容的深浅以“当前坐标”一行为准。\n"
-            f"{parse}\n你必须严格按照以下 JSON 格式输出，不要包含任何额外注释或文字：\n"
+            f"{parse}\n{owner_hint}你必须严格按照以下 JSON 格式输出，不要包含任何额外注释或文字：\n"
             "{\n    \"text\": \"叙述内容\",\n    \"direction\": 1,\n"
             f"    {output}}}\n如果某个自定义属性未提及或不适用，其值默认为 0。\n"
         )
@@ -100,6 +174,10 @@ class DungeonPromptBuilder:
         section_prompt = session.section_prompts.get("global", "")
         if section_prompt:
             global_prompt += "\n" + section_prompt
+        # 主角设定在设定区之前：它属于「你是谁」的一部分，但文案已标明是初始值
+        protagonist_block = self._protagonist_block()
+        if protagonist_block:
+            prompt += "\n\n" + protagonist_block
         if global_prompt:
             prompt += f"\n\n故事基调与设定：\n{global_prompt}"
         return prompt
@@ -181,7 +259,8 @@ class DungeonPromptBuilder:
                                 "仅供叙事参考）：\n" + "\n".join(f"- {h}" for h in hits) + "\n")
             session._detail_queries = []
         pack = coupling_prompts(level)
-        result = (f"{history}{chapter_line}{self._calibration_block()}{detail_block}"
+        result = (f"{history}{chapter_line}{self._cast_block()}"
+                  f"{self._calibration_block()}{detail_block}"
                   f"{pack['narrate'].format(instruction=instruction)}\n"
                   f"请严格按系统提示的 JSON 格式输出，不要添加额外解释。{reference}")
         # Solea/Bulla 的对话分支：要求 AI 用 @说话人@ 行内标记区分说话人与台词，

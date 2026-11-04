@@ -50,7 +50,8 @@ from dungeon.validate import (  # noqa: E402
 # 只钉「有哪些键」，不钉默认值：默认音色 / 默认档位改了不该让门禁红，字段少了或
 # 多了才该红。默认值的行为由下面的 normalize / 校验器覆盖。
 _GOLDEN_EMPTY_KEYS = {
-    "initial_prompt", "coupling_level", "protagonist_title", "text_component",
+    "initial_prompt", "coupling_level", "protagonist_title", "protagonist_background",
+    "cast", "text_component",
     "entry_action_cost", "entry_address", "entry_address_max_distance_m",
     "entry_height_min_m", "entry_height_max_m",
     "ending_policy",

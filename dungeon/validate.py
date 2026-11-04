@@ -21,6 +21,7 @@ from dataclasses import dataclass
 
 from dungeon import schema
 from dungeon import script_text
+from dungeon import cast as cast_mod
 from dungeon.admission import (FIELD_ADDRESS, FIELD_HEIGHT_MAX,
                                FIELD_HEIGHT_MIN, FIELD_MAX_DISTANCE,
                                coerce_distance, coerce_height)
@@ -212,7 +213,8 @@ def validate_scenario_config(config, *, scenario_dir: str = None) -> list:
     _validate_chapters(config.get("chapters"), chapters, chapter_names,
                        terminating, scenario_dir, add,
                        coupling_level=config.get("coupling_level"),
-                       custom_attrs=custom_attrs)
+                       custom_attrs=custom_attrs,
+                       cast_members=cast_mod.normalize_cast(config.get("cast")))
     _validate_scene(config, chapters, add)
     _validate_triggers(config.get("triggers"), chapter_names, terminating,
                        trigger_names, custom_attrs, scenario_dir, add,
@@ -300,6 +302,91 @@ def _validate_top_level(config: dict, add) -> None:
     if not isinstance(config.get("triggers"), list):
         add("error", "triggers", "触发器列表必须是数组")
     _validate_voice(config.get("voice"), config.get("coupling_level"), add)
+    _validate_protagonist_background(config.get("protagonist_background"), add)
+    _validate_cast(config.get("cast"), add)
+
+
+#: 描述性字段的建议长度：每段都会随提示词发送，超长会挤占预算
+_MAX_PROTAGONIST_BACKGROUND = 300
+_MAX_BACKGROUND = 200
+_MAX_LINE_NOTE = 60
+
+
+def _validate_protagonist_background(raw, add) -> None:
+    if raw is None:
+        return
+    if not isinstance(raw, str):
+        add("warning", "protagonist_background", "主角身份背景必须是字符串")
+        return
+    text = raw.strip()
+    if len(text) > _MAX_PROTAGONIST_BACKGROUND:
+        add("warning", "protagonist_background",
+            f"主角身份背景 {len(text)} 字，超过建议上限 {_MAX_PROTAGONIST_BACKGROUND}"
+            "（它随系统提示词每段发送）")
+
+
+def _validate_cast(raw, add) -> None:
+    """配角表：称呼 / id 唯一、枚举合法、描述长度。"""
+    if raw is None:
+        return
+    if not isinstance(raw, list):
+        add("error", "cast", "配角表必须是数组")
+        return
+    seen_ids = {}
+    name_owner = {}
+    key_count = 0
+    for index, entry in enumerate(raw):
+        path = f"cast[{index}]"
+        if not isinstance(entry, dict):
+            add("warning", path, "配角条目必须是对象，加载时会被跳过")
+            continue
+        name = str(entry.get("name") or "").strip()
+        if not name:
+            add("error", path + ".name", "配角缺少称呼（运行时这一条不会出场）")
+            continue
+        member = cast_mod.normalize_member(entry, index)
+        if member["role"] == "key":
+            key_count += 1
+        raw_role = str(entry.get("role") or "").strip().lower()
+        if raw_role and raw_role not in cast_mod.CAST_ROLES:
+            add("warning", path + ".role",
+                f"定位「{raw_role}」无效（允许：{', '.join(cast_mod.CAST_ROLES)}），"
+                "按重要角色处理")
+        raw_pronoun = str(entry.get("pronoun") or "").strip()
+        if raw_pronoun and raw_pronoun not in cast_mod.CAST_PRONOUNS:
+            add("warning", path + ".pronoun",
+                f"代词「{raw_pronoun}」无效（允许：他 / 她 / 留空），"
+                "音色不会按性别分配")
+        if member["id"] in seen_ids:
+            add("error", path + ".id",
+                f"id「{member['id']}」与 cast[{seen_ids[member['id']]}] 重复")
+        else:
+            seen_ids[member["id"]] = index
+        for alias in (member["name"],) + tuple(member["aliases"]):
+            owner = name_owner.get(alias)
+            if owner is not None and owner != member["id"]:
+                add("error", path,
+                    f"称呼「{alias}」已被另一个成员使用："
+                    "说话人标记与音色会串台，必须改掉")
+            else:
+                name_owner[alias] = member["id"]
+        if len(member["background"]) > _MAX_BACKGROUND:
+            add("warning", path + ".background",
+                f"身份背景 {len(member['background'])} 字，超过建议上限 {_MAX_BACKGROUND}")
+        for field, label in (("purpose", "作用"), ("speech", "说话方式")):
+            if len(member[field]) > _MAX_LINE_NOTE:
+                add("warning", f"{path}.{field}",
+                    f"{label} {len(member[field])} 字，超过建议上限 {_MAX_LINE_NOTE}"
+                    "（这一行只在首次出场时出现一次）")
+        if member["role"] == "key" and not member["background"]:
+            if member["purpose"] or member["speech"]:
+                add("info", path,
+                    "重要角色只填了作用 / 说话方式，没有身份背景："
+                    "首次出场块会比预期短")
+    if key_count > cast_mod.MAX_KEY_MEMBERS:
+        add("info", "cast",
+            f"重要角色 {key_count} 个（建议不超过 {cast_mod.MAX_KEY_MEMBERS}）："
+            "每个都会在首次出场时占一段提示词")
 
 
 def _validate_admission(config: dict, add) -> None:
@@ -484,6 +571,11 @@ def _validate_evolution_attrs(attrs, add) -> None:
             add("warning", path + ".display_state",
                 f"display_state「{attr['display_state']}」无效"
                 f"（允许：{', '.join(schema.DISPLAY_STATES)}）")
+        owner = str(attr.get("owner") or "").strip()
+        if owner and owner not in schema.EVOLUTION_OWNERS:
+            add("warning", path + ".owner",
+                f"归属「{owner}」无效"
+                f"（允许：{', '.join(schema.EVOLUTION_OWNERS)}）")
     for missing in (t for t in schema.BUILTIN_EVOLUTION_ATTRS if t not in present_types):
         label = {"intrusion": "介入度", "destruction": "破坏性", "casualty": "总伤亡"}[missing]
         add("warning", "evolution_attrs",
@@ -696,7 +788,8 @@ def _validate_voice_fx(raw_fx, path: str, add, coupling_level=None) -> None:
 
 
 def _validate_chapters(chapters_raw, effective, chapter_names, terminating,
-                       scenario_dir, add, coupling_level=None, custom_attrs=None) -> None:
+                       scenario_dir, add, coupling_level=None, custom_attrs=None,
+                       cast_members=None) -> None:
     """``chapters_raw`` 用于未知键检查；``effective`` 是 normalize 后的运行时视图。"""
     if not isinstance(chapters_raw, list):
         return  # 已在顶层报过
@@ -732,6 +825,14 @@ def _validate_chapters(chapters_raw, effective, chapter_names, terminating,
                 add("warning", f"{path}.background.filter_effect",
                     f"未知滤镜「{filter_key}」（允许：{', '.join(VISUAL_FILTER_KEYS)}）")
         raw_chapter = raw_by_name.get(name) or {}
+        raw_cast = raw_chapter.get("cast")
+        if raw_cast is not None and not isinstance(raw_cast, (list, str)):
+            add("warning", f"{path}.cast", "在场人物必须是数组或「、」分隔的字符串")
+        for key in chapter.get("cast") or ():
+            known_cast = cast_members if cast_members is not None else []
+            if cast_mod.find_member(known_cast, key) is None:
+                add("warning", f"{path}.cast",
+                    f"配角表里没有「{key}」：这一行不会注入任何人物设定")
         _validate_bgm(raw_chapter.get("bgm"), chapter.get("bgm"), path,
                       scenario_dir, add)
         _validate_voice_fx(raw_chapter.get("voice_fx"), path, add,

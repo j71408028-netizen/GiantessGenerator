@@ -209,6 +209,8 @@ _SCENARIO_FIELDS = (
     FieldSpec("initial_prompt", "text", "开场提示词", default=""),
     FieldSpec("coupling_level", "str", "耦合等级"),
     FieldSpec("protagonist_title", "str", "主角称谓", default=""),
+    FieldSpec("protagonist_background", "text", "主角身份背景", default=""),
+    FieldSpec("cast", "list", "配角表", default=()),
     FieldSpec("text_component", "str", "文本组件"),
     FieldSpec("entry_action_cost", "int", "进入消耗", default=0),
     FieldSpec("entry_address", "str", "进入准入地址", default=""),

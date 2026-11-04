@@ -17,6 +17,7 @@ import os
 import shutil
 
 from dungeon.audio.chapters import normalize_chapters
+from dungeon.cast import normalize_cast
 from dungeon.coupling import normalize_coupling_level
 from dungeon.admission import normalize_fields as normalize_admission_fields
 from dungeon.schema import (empty_scenario_config, normalize_ending_policy,
@@ -166,6 +167,13 @@ class ScenarioRepo:
             "triggers": config.get("triggers", []),
             "chapters": normalize_chapters(config.get("chapters", [])),
         })
+        # 人物表与主角设定：只在作者写过时才归一化。旧方案读一轮不会多出空字段，
+        # 提示词也就不会因为「有 cast 这个键」而改变行为。
+        if "protagonist_background" in config:
+            new_config["protagonist_background"] = str(
+                config.get("protagonist_background") or "").strip()
+        if "cast" in config:
+            new_config["cast"] = normalize_cast(config.get("cast"))
         # 旧配置把进化量写成 custom_attrs，迁移成 evolution_attrs 后移除旧键
         new_config.pop("custom_attrs", None)
         new_config.pop("custom_attrs_def", None)
