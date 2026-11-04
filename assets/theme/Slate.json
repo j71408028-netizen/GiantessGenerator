@@ -1095,6 +1095,21 @@
     "SC_ERR_HOVER": {
       "$role": "state-danger-tint"
     },
+    "SC_ACTION_BG": {
+      "$role": "bg-hover"
+    },
+    "SC_ACTION_HOVER": {
+      "$pair": "slate.600"
+    },
+    "SC_DELETE_BG": {
+      "$role": "state-danger-tint"
+    },
+    "SC_DELETE_HOVER": {
+      "$pair": "rose.700"
+    },
+    "SC_DELETE_TEXT": {
+      "$role": "state-danger"
+    },
     "//component": "组件管理 · ui/scenario/component_mgr.py",
     "COMPONENT_BG": {
       "$role": "bg-app"

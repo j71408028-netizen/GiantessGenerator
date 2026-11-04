@@ -105,6 +105,58 @@ class CTkSegmentedControl(customtkinter.CTkFrame):
         return self._current
 
 
+class CTkToggleButtons(customtkinter.CTkFrame):
+    """互斥的切换按钮组（选中实底、未选描边）。
+
+    与 ``CTkSegmentedControl`` 接口一致（values / command / set / get），
+    但每个按钮独立成块、不共享轨道，用于页面主视图切换这类需要更清晰
+    点按边界的场景。
+    """
+
+    def __init__(self, master, values=None, command=None, *,
+                 font=None, height=30, button_width=84, spacing=6,
+                 corner_radius=8, **kwargs):
+        super().__init__(master, fg_color="transparent", **kwargs)
+        self._command = command
+        self._values = list(values or [])
+        self._current = self._values[0] if self._values else None
+        self._font = font or ui_fonts.ui_font(13)
+        self._buttons = {}
+        for index, value in enumerate(self._values):
+            btn = customtkinter.CTkButton(
+                self, text=value, width=button_width, height=height,
+                corner_radius=corner_radius, font=self._font,
+                command=lambda v=value: self._select(v))
+            btn.grid(row=0, column=index, sticky='nsew',
+                     padx=(0 if index == 0 else spacing, 0))
+            self.grid_columnconfigure(index, weight=1)
+            self._buttons[value] = btn
+        self.set(self._current)
+
+    def set(self, value):
+        """选中指定按钮（不触发 command，与 CTkSegmentedButton 一致）。"""
+        if value not in self._values:
+            return
+        self._current = value
+        for val, btn in self._buttons.items():
+            active = val == value
+            btn.configure(
+                fg_color=SEG_SELECTED_BG if active else "transparent",
+                text_color=SEG_SELECTED_TEXT if active else WIDGET_TEXT_SOFT,
+                hover_color=SEG_SELECTED_HOVER if active else WIDGET_HOVER,
+                border_width=0 if active else 1,
+                border_color=SEG_TRACK_BORDER,
+            )
+
+    def _select(self, value):
+        self.set(value)
+        if self._command:
+            self._command(value)
+
+    def get(self):
+        return self._current
+
+
 class CTkScrollableDropdownFrame(customtkinter.CTkFrame):
     '''
     Advanced Scrollable Dropdown Frame class for customtkinter widgets

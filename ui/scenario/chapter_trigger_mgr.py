@@ -650,6 +650,10 @@ class ChapterTriggerManager(TreeviewManager):
         is_new = item is None
         if is_new:
             item = {"color": default_chapter_color(len(self._chapter_list()))}
+        # 人物表可能还有防抖保存没落盘：先 flush，章节多选才是最新成员
+        panel = getattr(self.scenario_editor, "character_panel", None)
+        if panel is not None:
+            panel.flush_pending()
         dlg = ChapterEditDialog(
             self, item,
             scenario_repo=self.scenario_editor._scenario_repo,
@@ -657,6 +661,7 @@ class ChapterTriggerManager(TreeviewManager):
             evolution_attrs=self.scenario_editor.evolution_attrs,
             all_chapters=self._chapter_list(),
             is_new=is_new,
+            cast_members=self.scenario_editor.cast,
         )
         return dlg.result
 

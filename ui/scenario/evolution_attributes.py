@@ -103,7 +103,7 @@ class EvolutionAtrrManager(TreeviewManager):
             self.toolbar_frame,
             values=[OWNER_ANY_LABEL] + [_labels_for_owner(k) for k in EVOLUTION_OWNERS],
             command=self._on_filter_change, width=280,
-            font=ui_fonts.ui_font(12))
+            font=ui_fonts.ui_font(13))
         self._filter_switch.pack(side='left', padx=4, pady=(3, 1))
         self._filter_switch.set(OWNER_ANY_LABEL)
 

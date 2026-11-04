@@ -11,6 +11,7 @@ from dungeon.coupling import (COUPLING_LEVELS, DEFAULT_COUPLING_LEVEL,
                               coupling_initial_prompt,
                               coupling_label, normalize_coupling_level)
 from dungeon.rules import EvolutionRules
+from dungeon.cast import normalize_cast
 from dungeon.schema import DEFAULT_TEXT_COMPONENT, normalize_text_component
 from dungeon.audio.speech import normalize_voice
 from ui.ctk.widgets import (CTkScrollableDropdownFrame, CTkSegmentedControl,
@@ -52,6 +53,8 @@ class ScenarioEditor(ctk.CTkFrame):
         self.section_prompts = {}
         self.coupling_level = DEFAULT_COUPLING_LEVEL
         self.protagonist_title = ""
+        self.protagonist_background = ""  # 主角身份背景（故事开始时的样子）
+        self.cast = []  # 人物表：重要角色（key）与群像（extra）
         # 对话语音（Solea/Bulla 台词朗读）：未配置时按默认值走
         self.voice = normalize_voice(None)
         self.text_component = DEFAULT_TEXT_COMPONENT  # 文本主组件三选一
@@ -201,6 +204,8 @@ class ScenarioEditor(ctk.CTkFrame):
     def _on_scenario_challenge_pack_select(self, choice):
         if not choice:
             return
+        # 切走前先落盘角色页挂起的防抖保存
+        self.character_panel.flush_pending()
         file_path = self._challenge_mgr.resolve_pack_path(choice)
         if file_path is None:
             ui.ctk.dialogs.showerror("错误", f"无法读取挑战包 '{choice}'，未找到对应秘钥")
@@ -231,6 +236,8 @@ class ScenarioEditor(ctk.CTkFrame):
     def _on_scenario_tab_switch(self, value):
         # 分段值可能带装饰空格（如 " 动态 "），统一去掉后再比较
         tab = value.strip()
+        # 角色页有防抖保存：换页前先落盘，动态页的章节多选要用最新人物表
+        self.character_panel.flush_pending()
         # 隐藏所有面板
         self.prompt_panel.pack_forget()
         self.character_panel.pack_forget()
@@ -612,6 +619,9 @@ class ScenarioEditor(ctk.CTkFrame):
         self.section_prompts = config.get("section_prompts", {})
         self.coupling_level = normalize_coupling_level(config.get("coupling_level"))
         self.protagonist_title = str(config.get("protagonist_title", "") or "").strip()
+        self.protagonist_background = str(
+            config.get("protagonist_background", "") or "").strip()
+        self.cast = normalize_cast(config.get("cast"))
         self.evolution_attrs = config.get("evolution_attrs", [])
         self.chapters = normalize_chapters(config.get("chapters", []))
         self.triggers = config.get("triggers", [])
@@ -705,6 +715,10 @@ class ScenarioEditor(ctk.CTkFrame):
         """仅保存提示词部分，不修改演化量和触发器"""
         if not self.current_scenario_id:
             return
+        # 角色页有防抖保存：先落盘，避免这里读到旧的主角背景 / 人物表
+        panel = getattr(self, "character_panel", None)
+        if panel is not None:
+            panel.flush_pending()
         # 加载现有配置
         config = self._scenario_repo.load_config(self.current_scenario_id)
         if config is None:
@@ -771,6 +785,7 @@ class ScenarioEditor(ctk.CTkFrame):
         if old_name == DEFAULT_SCENARIO_ID:
             ui.ctk.dialogs.showwarning("警告", "默认副本方案不可重命名")
             return
+        self.character_panel.flush_pending()
 
         dlg = InputDialog(self, title="重命名副本方案", prompt=f"将 '{old_name}' 重命名为:")
         new_name = dlg.get_input()
@@ -816,10 +831,13 @@ class ScenarioEditor(ctk.CTkFrame):
         if self._scenario_repo.exists(new_id):
             ui.ctk.dialogs.showerror("错误", "副本方案已存在")
             return
+        self.character_panel.flush_pending()
         empty_config = {
             "initial_prompt": "",
             "coupling_level": DEFAULT_COUPLING_LEVEL,
             "protagonist_title": "",
+            "protagonist_background": "",
+            "cast": [],
             "text_component": DEFAULT_TEXT_COMPONENT,
             "section_prompts": {k: "" for k in ["background","branch","dialog","interaction","action"]},
             "custom_attrs": [],
@@ -851,6 +869,8 @@ class ScenarioEditor(ctk.CTkFrame):
     def _on_scenario_select(self, choice):
         if self.current_scenario_id == choice:
             return
+        # 切走前先落盘角色页挂起的防抖保存（否则最近 700ms 的编辑会丢）
+        self.character_panel.flush_pending()
         # 如果提示词有修改，询问是否保存
         if self._is_prompt_modified():
             if ui.ctk.dialogs.askyesno("通用设置未保存", "当前通用设置已修改，是否保存？", parent=self):

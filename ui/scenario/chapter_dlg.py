@@ -17,6 +17,7 @@ from dungeon.audio.speech import DEFAULT_RATE, normalize_voice
 from dungeon.audio.voice_fx import (DEFAULT_INTENSITY, MAX_INTENSITY, PRESET_NONE,
                               SLOT_HER, SLOT_LABELS, SLOTS, label_of,
                               preset_keys_for)
+from dungeon.cast import normalize_cast
 from dungeon.script_text import parse_script
 from ui.ctk.address_dlg import AddressTextDialog
 from ui.ctk.dialogs import BaseDialog
@@ -85,7 +86,8 @@ class ChapterEditDialog(BaseDialog):
     ROLE_LABELS = (ROLE_NORMAL, ROLE_START, ROLE_ENDING)
 
     def __init__(self, parent, chapter: dict = None, scenario_repo=None, scenario_id=None,
-                 evolution_attrs=None, all_chapters=None, is_new: bool = True):
+                 evolution_attrs=None, all_chapters=None, is_new: bool = True,
+                 cast_members=None):
         super().__init__(parent)
         self.title("编辑章节")
         self.geometry(f"{self.DIALOG_WIDTH}x{self.DIALOG_HEIGHT}")
@@ -97,6 +99,7 @@ class ChapterEditDialog(BaseDialog):
         self._scenario_repo = scenario_repo
         self.scenario_id = scenario_id
         self.all_chapters = all_chapters or []
+        self.cast_members = normalize_cast(cast_members)
         self.result = None
         self.evolution_attrs = [a for a in (evolution_attrs or []) if isinstance(a, dict)]
         # 敏感效果只针对介入度、破坏性与自定义属性，总伤亡不在演化对象内
@@ -297,6 +300,12 @@ class ChapterEditDialog(BaseDialog):
         # 编辑已有章节时全部收起；新建时除固定文本外默认展开
         default_open = self.is_new
 
+        # 在场人物：人物表里谁在本章出场（唯一在场来源，空 = 不声明）
+        block = self._add_section(area, "在场人物", expanded=default_open,
+                                  status=self._cast_status)
+        self._build_cast_section(block.body)
+        self._refresh_section_status(block)
+
         # 固定文本：不进 AI 生成，默认收起（多数章节用不到）
         block = self._add_section(area, "固定文本", expanded=False,
                                   status=self._fixed_text_status)
@@ -441,6 +450,84 @@ class ChapterEditDialog(BaseDialog):
         attrs = [a for a in attrs if a]
         text = f"持续敏感：{len(self.sens_rows)} 条"
         return text + (f"（{'、'.join(attrs)}）" if attrs else "")
+
+    # ---------- 在场人物 ----------
+    def _build_cast_section(self, parent):
+        """人物表多选：勾上才算本章在场，空 = 不声明。"""
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
+        frame.pack(fill='x')
+        self._cast_rows = []
+
+        declared = [str(value or "").strip()
+                    for value in (self.chapter.get("cast") or [])
+                    if str(value or "").strip()]
+
+        if not self.cast_members and not declared:
+            ctk.CTkLabel(
+                frame, anchor='w', justify='left', wraplength=520,
+                font=self.UI_FONT_SMALL, text_color=CHAPTER_HINT,
+                text="人物表还是空的；先在「角色」页添加配角，再来勾选本章在场的人。"
+            ).pack(fill='x', pady=(0, 4))
+            return
+
+        consumed = set()
+        entries = []
+        for member in self.cast_members:
+            names = [member.get("id"), member.get("name")]
+            names.extend(member.get("aliases") or ())
+            names = [name for name in names if name]
+            matched = [value for value in declared
+                       if value in names and value not in consumed]
+            consumed.update(matched)
+            entries.append({
+                "label": member.get("name") or member.get("id"),
+                "declared": matched,
+                "var": tk.BooleanVar(value=bool(matched)),
+            })
+        # 章节里写了、但人物表已经删掉的成员：保留并默认勾选，提示作者处理
+        for value in declared:
+            if value in consumed:
+                continue
+            entries.append({"label": value, "declared": [value],
+                            "var": tk.BooleanVar(value=True)})
+
+        grid = ctk.CTkFrame(frame, fg_color="transparent")
+        grid.pack(fill='x')
+        for column in range(3):
+            grid.grid_columnconfigure(column, weight=1)
+        for index, entry in enumerate(entries):
+            self._checkbox_field(
+                grid, entry["label"], entry["var"], width=150).grid(
+                    row=index // 3, column=index % 3, sticky='w',
+                    padx=(0, 8), pady=2)
+            entry["var"].trace_add(
+                "write", lambda *_a: self._refresh_all_section_status())
+            self._cast_rows.append(entry)
+
+        ctk.CTkLabel(
+            frame, anchor='w', justify='left', wraplength=520,
+            font=self.UI_FONT_SMALL, text_color=CHAPTER_HINT,
+            text="勾选的人才会进本段提示词，不勾 = 不在场；"
+                 "人物设定只在首次出场时注入一次。"
+        ).pack(fill='x', pady=(4, 0))
+
+    def _cast_status(self) -> str:
+        rows = getattr(self, "_cast_rows", None)
+        if not rows:
+            return ""
+        names = [row["label"] for row in rows if row["var"].get()]
+        return "在场：" + "、".join(names) if names else ""
+
+    def _cast_from_ui(self) -> list:
+        values = []
+        for row in getattr(self, "_cast_rows", []):
+            if not row["var"].get():
+                continue
+            # 保留作者原来的写法（id / 称呼 / 别称），不强行改写成称呼
+            value = row["declared"][0] if row["declared"] else row["label"]
+            if value and value not in values:
+                values.append(value)
+        return values
 
     # ---------- 地点与取景 ----------
     def _build_place_section(self, parent):
@@ -1292,6 +1379,10 @@ class ChapterEditDialog(BaseDialog):
             "scene_landmarks": scene_landmarks,
             "common_private_name": common_private_name,
         }
+        cast = self._cast_from_ui()
+        # 旧章节没写过 cast 且本章也没勾人：不补键，磁盘内容一字不变
+        if cast or "cast" in self.chapter:
+            result["cast"] = cast
         if is_ending:
             delta_fields = {"介入度增量": "intrusion_delta",
                             "破坏性增量": "destruction_delta",
