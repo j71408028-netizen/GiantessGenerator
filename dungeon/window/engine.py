@@ -77,16 +77,19 @@ class DungeonStoryEngine:
                 pregen = self._take_pregen_for_next()
                 if pregen is not None:
                     next_type = pregen["text_type"]
-                    user_prompt = pregen["user_prompt"]
-                    self.messages = list(pregen["messages"])   # 已含本次 user 消息
+                    turn = pregen["turn"]
+                    self.messages = list(pregen["messages_before"])
                     full_response_buffer = pregen["response"]
+                    request_messages = None
                 else:
                     next_type = self.dungeon_logic.get_next_text_type(self.current_text_type)
                     # 结束章节：所有段落类型被覆盖为「结局」，步进为 0
                     if self._in_terminating_chapter():
                         next_type = DungeonTextType.BACKGROUND
-                    user_prompt = self.prompt_builder.build_user_prompt(next_type)
-                    self.messages.append({"role": "user", "content": user_prompt})
+                    turn = self.prompt_builder.build_turn(next_type)
+                    # 请求带完整提示词；历史只写 canonical（不存本轮现场快照）
+                    request_messages = self.messages + [
+                        {"role": "user", "content": turn.text}]
                     full_response_buffer = ""
                 # 本段是延迟插入的衔接段：生成成功后插入段晋升为下一段
                 delayed_insert_pending = bool(self.pending_insertions
@@ -103,7 +106,8 @@ class DungeonStoryEngine:
                     # 空响应重试一次：流式路径对空串无处兜底，且空响应
                     # 偶发（实测约 1/20），重试对用户不可见（首趟没上屏）
                     for _attempt in range(2):
-                        stream_generator = self.ai_client.generate_stream(self.messages, temperature=0.8)
+                        stream_generator = self.ai_client.generate_stream(
+                            request_messages, temperature=0.8)
 
                         for chunk in stream_generator:
                             if self._closing:
@@ -159,11 +163,16 @@ class DungeonStoryEngine:
                 # 首句定稿：带说话人（Solea/Bulla 对话分支）就该念出来
                 self._speak_item(current_item)
 
+                # user 回合只存稳定上下文（章节 / 地点 / 叙事指令）；
+                # 在场行、坐标、细节补充等现场快照留在本轮请求里，不进历史
+                self.messages.append({"role": "user", "content": turn.canonical})
                 # 对话历史中的 assistant 回合一律存规范 JSON 形状（见
                 # canonical_history_entry）：原始响应跑格式时若原样入史，
                 # 模型会模仿纯文本导致格式漂移自我强化
                 self.messages.append({"role": "assistant", "content": canonical_history_entry(
                     ai_text, direction, custom_directions)})
+                # 回合已解析并写入历史：提交首次出场 / 已提示部位 / 细节疑问消费
+                self.prompt_builder.commit_turn(turn.effects)
                 window = self._message_window_size()
                 if len(self.messages) > window + 1:
                     self.messages = [self.messages[0]] + self.messages[-window:]
@@ -200,7 +209,8 @@ class DungeonStoryEngine:
                 if step_override is not None:
                     step_info["ending_chapter"] = True
 
-                self._apply_prompted_unlocks(clean_text)
+                self._apply_prompted_unlocks(
+                    clean_text, turn.effects.prompted_parts)
                 self._finish_step(next_type, clean_text, step_info, check_unlock=True)
                 # 本逻辑段落定稿：游标目标已不再增长，直接把首句补满。
                 # 否则真流式下若首句比队列长，游标会继续按 30 字/秒慢慢爬，
@@ -404,8 +414,8 @@ class DungeonStoryEngine:
     def _start_detail_query(self, paragraph_text):
         """流式输出完成后立即在后台询问 AI 想了解的细节。
 
-        结果存入 ``_detail_queries``，由 ``build_user_prompt`` 在下一次
-        生成前检索回放缓存解答并消费。与正常生成互不阻塞。
+        结果存入 ``_detail_queries``，由 ``build_turn`` 在下一次生成前检索
+        回放缓存解答、``commit_turn`` 在成功后消费。与正常生成互不阻塞。
         """
         if self._in_fixed_text_chapter():
             return  # 固定文本章节没有 AI 生成，细节探究无处消费
@@ -463,44 +473,39 @@ class DungeonStoryEngine:
         self._start_pregen()
 
     def _start_pregen(self):
-        """后台预生成下一段：缓存 (user_prompt, messages快照, 原始响应, 段落类型)。"""
-        # build_user_prompt 有副作用：「被注意到的部位」标记为已提示、首次出场成员
-        # 标记为已介绍。预生成失败会改走实时路径重建提示词，这里先快照，失败时还原，
-        # 否则那一段就再也拿不到这些信息。快照必须在 try 之外——取段落类型也可能抛。
-        snapshot_given = set(self.keyword_match_given)
-        snapshot_introduced = set(getattr(self, "introduced_cast", ()) or ())
+        """后台预生成下一段：缓存 (turn, 生成前历史, 原始响应, 段落类型)。"""
+        # build_turn 不写会话状态；预生成失败直接丢弃产物即可，无需快照还原。
+        messages_before = list(self.messages)
         try:
             next_type = self.dungeon_logic.get_next_text_type(self.current_text_type)
             # 结束章节：所有段落类型被覆盖为「结局」，步进为 0
             if self._in_terminating_chapter():
                 next_type = DungeonTextType.BACKGROUND
-            user_prompt = self.prompt_builder.build_user_prompt(next_type)
+            turn = self.prompt_builder.build_turn(next_type)
         except Exception as e:
             process_log.log(f"[Pregen] 组装预生成提示词失败: {e}")
-            self.keyword_match_given = snapshot_given
-            self.introduced_cast = snapshot_introduced
             return
-        pre_messages = self.messages + [{"role": "user", "content": user_prompt}]
+        request_messages = messages_before + [
+            {"role": "user", "content": turn.text}]
         self._pregen_inflight = True
 
         def run():
             response = ""
             try:
-                for chunk in self.ai_client.generate_stream(pre_messages, temperature=0.8):
+                for chunk in self.ai_client.generate_stream(
+                        request_messages, temperature=0.8):
                     if self._closing:
                         return
                     response += chunk
             except Exception as e:
                 process_log.log(f"[Pregen] 预生成失败，改回实时路径: {e}")
-                self.keyword_match_given = snapshot_given
-                self.introduced_cast = snapshot_introduced
                 return
             finally:
                 self._pregen_inflight = False
             if not self._closing and response.strip():
                 self._pregen = {
-                    "user_prompt": user_prompt,
-                    "messages": pre_messages,
+                    "turn": turn,
+                    "messages_before": messages_before,
                     "response": response,
                     "text_type": next_type,
                 }
@@ -545,12 +550,14 @@ class DungeonStoryEngine:
         if head.text:
             self._reveal_extend(current_item, head.text)
 
-    def _apply_prompted_unlocks(self, text: str):
+    def _apply_prompted_unlocks(self, text: str, parts=None):
         """把 AI 针对被注意到部位返回的段落写入该部位解锁信息（写入规则与报告正文一致）。
 
         在 AI 段落返回后、触发器判定前调用，避免触发器（选项/插入/结局）打断正常流程时漏写。
+        ``parts`` 取本回合构建产物的 effects；不传时回退会话上的旧字段。
         """
-        parts = getattr(self, "prompted_parts", None) or set()
+        if parts is None:
+            parts = getattr(self, "prompted_parts", None) or set()
         if not parts:
             return
         char = self.character

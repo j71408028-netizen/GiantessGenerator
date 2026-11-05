@@ -209,17 +209,18 @@ run() → SessionResult
 ├─ 有非延迟插入段 → 直接消费显示
 └─ _generate_next_text()：后台线程
    ├─ _take_pregen_for_next：有预生成结果（或在途则等待）→ 直接采用，
-   │     否则 prompt_builder.build_user_prompt → messages 追加
+   │     否则 prompt_builder.build_turn → 请求用 turn.text；成功后才提交副作用
    ├─ ai_client.generate_stream → 逐块 extract_stream_text → split_stream_units
    │     真流式 chunk 只经 _reveal_extend 延长 target（不直写文本）；
    │     游标按 30 字/秒追赶；后续完成句排队到 _pending_units
    ├─ 完整响应 parse_final_json → 正文 / 方向 / 自定义方向；split_full_text 定格最终切分
    ├─ dungeon_logic.evolve_attributes（含敏感倍率）→ 伤亡结算
    ├─ replay_data.append(step_info)          # 回放记录
+   ├─ 历史追加 canonical user + assistant → commit_turn（提交本回合副作用）
    ├─ _apply_prompted_unlocks（写入角色尺寸解锁）
-   ├─ _start_detail_query：立即后台询问 AI「想了解的细节」（不阻塞推进）
-   └─ _finish_step → 记录阈值跨越关键事件 → check_triggers：
+   ├─ _finish_step → 记录阈值跨越关键事件 → check_triggers：
         章节跳转 / 插入段 / 选项弹窗 / 章节效果覆盖 / 结局（结局另起线程生成 → 保存）
+   ├─ _start_detail_query：立即后台询问 AI「想了解的细节」（不阻塞推进）
    └─ finally：下一次点击必然生成时 → _maybe_pregen_next 后台预生成下一段
 ```
 
@@ -234,12 +235,12 @@ run() → SessionResult
 | **覆盖层服务面** | 窗口向文本主组件提供受控调用：`ctx.toggle_overlay("log")` 调出**对话记录**（全量 `story_history` 快照、可滚动，居中半透明面板）、`ctx.toggle_overlay("settings")` / `ctx.toggle_settings()` 调出**副本设置**（半透明全屏遮罩 + 居中卡片，读写副本独占设置），`ctx.component(cid)` 只读访问兄弟组件实例；写操作与组件生命周期仍由窗口集中管理，主组件只拿到调度权而非所有权。覆盖层打开时为阅读模态：点击只关闭覆盖层（`ui.py::_on_mouse_click`，点在设置卡片内不算外部），空格/回车推进在 `_on_next_step` 入口挂起 |
 | **组件服务面（C13）** | 组件访问窗口的唯一入口集中在 `components.py::ComponentHandler`：几何 `component_viewport()`、帧时钟 `schedule / schedule_every / cancel_task`（**不碰 `self._frame`**）、状态查询 `session_waiting_for_input()`（继续指示与自动播放共用同一判定）/ `component_autoplay_on()`、字体 `text_font_tag() / bold_font_tag()`、顶部让位 `component_top_inset()`（聚合各组件的 `top_inset(ctx)` 可选钩子，与构建顺序无关）。契约的可执行版本是 `check_component_pack.py` 的替身 ctx——它**只**实现服务面，组件越界（读私有）在冒烟与 AST 扫描里都会失败 |
 | **组件代管区（slot）** | 文本主组件在 `layout` 阶段生成 `dungeon.window.layout.Slot`：几何 + `SlotStyle` + 可接纳的角色 / 形状 / 容量。`ComponentHandler` 的布局分两遍：先排文本主组件并收集代管区，按子组件声明的 `roles` / `shapes` 机械匹配并发布 `component_rect(cid)` / `component_slot(cid)`，再排其余组件。`surface=host` 由文本组件画底纹（卡片延伸）、`bare` 无底纹（渐变区）、`own` 子组件自绘。官方示例：`text_card` 的 `card_footer`、`text` 的 `scrim_band`、`text_nvl` 的 `nvl_header`，`attr_bar` 以 `status` / `band` 优先落入，没有可用代管区时回退左上角独立面板；`text_card` 另提供**上下两区**：`card_side`（上区，`log` / `rail`，高度上限 `360*s`）与 `card_side_low`（下区，任何 `rail` 组件可认领，高度与卡片相同、底端与卡片对齐，与上区同生共死），`proc_log` 展开时落上区、按 `SlotStyle.side` 从所在侧的屏幕边缘平移进入，卡片 + 代管区作为一组整体居中、卡片往另一侧让位，收起即释放，没有代管区时回退右上角面板；`text` 也提供对齐正文列一侧的 `scrim_side`（`log` / `rail`），停在渐变正文上方、不做横向让位，`proc_log` 按 `SlotStyle.enter_from="bottom"` + `enter_fade` 从下方升起淡入；`text_nvl` 提供贴着正文列的 `nvl_side`（`log` / `rail`），占满覆盖层高度，日志 + 正文整体居中，代管区缺省不带底纹 / 边框 / 分隔线，日志区与正文区共用覆盖层那一层背景（日志经自己的 `draw_own_surface` 可改成自绘面板）。三个文本组件的正文列 / 卡片宽度都有可读上限（`base.py::_MAX_TEXT_WIDTH`，1280 逻辑点）并在可用区域内居中，大屏上不会随窗口宽度无限拉长，卡片与代管区也不会被推到窗口两端。停靠哪一侧是**窗口视觉设置** `dock_side`（`dungeon_settings.json`，副本设置面板里由玩家实时改、改完立即重排组件），不是文本组件的方案参数；组件经服务面 `ctx.component_dock_side()` 读取。毛玻璃卡片经 `ctx.component_backdrop_blur()` 拿到背景的 1/8 缩小模糊副本与背景矩形，按卡片圆角 / UV 截取身后那块模糊影像（随换图 / 振动同步），再叠半透明染色与玻璃边缘；没有纹理时只保留半透明染色。未接入代管区的旧组件继续走 `top_inset` 兼容路径 |
-| **细节探究** | 流式输出完成后用刚生成的段落组装提问，后台线程询问 AI 还想了解哪些细节（最多 3 条，存 `_detail_queries`）；下次生成时用问题关键词在回放缓存中检索最相关段落作为「细节补充」注入提示词，随后消费掉这批问题 |
-| **预演化** | 步进收尾后（`finally`，插入晋升之后）若下一次点击必然触发生成（无选项/插入/结局排队），立即后台预生成下一段，缓存 `(user_prompt, messages 快照, 原始响应, 段落类型)`；玩家点击时 `_take_pregen_for_next` 直接采用（在途则等待收养，不重复发请求），首句仿流式揭示。选项选择后、插入段消费后各补射一次；预生成失败自动回退实时路径并还原 `keyword_match_given`。调用次数不变，只是提前发出 |
+| **细节探究** | 流式输出完成后用刚生成的段落组装提问，后台线程询问 AI 还想了解哪些细节（最多 3 条，存 `_detail_queries`）；下次生成时 `build_turn` 用问题关键词在回放缓存中检索最相关段落作为「细节补充」注入提示词，`commit_turn` 在回合成功后才清空这批问题 |
+| **预演化** | 步进收尾后（`finally`，插入晋升之后）若下一次点击必然触发生成（无选项/插入/结局排队），立即后台预生成下一段，缓存 `(turn, 生成前历史, 原始响应, 段落类型)`；玩家点击时 `_take_pregen_for_next` 直接采用（在途则等待收养，不重复发请求），首句仿流式揭示。选项选择后、插入段消费后各补射一次；`build_turn` 是纯构建，预生成失败自动回退实时路径且无需还原会话状态。调用次数不变，只是提前发出 |
 | **章节与触发器** | 会话开始先 `_enter_start_chapter()` 进入起始章节再 `check_triggers()`；完整条件是「所在章节 + 前置触发器 + 条件规则」三者同时满足 |
 | **结束章节** | 段落类型固定为「结局」（前缀 `【结局】`），步进 0（`evolve_attributes(step_override=0.0)`），触发器不能跳出或弹选项；节内段落数达到 `max_paragraphs` 时终止并结算 |
 | **章节上限兜底** | 普通章节节内段落数达到 `max_paragraphs`（默认 99）时，在 `_finish_step` 末尾（触发器判定之后）自动跳到 `overflow_target`（空串 = 离开章节） |
-| **剧情压缩** | `StorySummarizer` 按块（默认 20 段）与换章时机压缩；`build_user_prompt` 注入「全部压缩概要 + 关键事实 + 关键事件」。近期原文不再注入——对话历史（窗口大小即 `story_recent_count` 设置，`_message_window_size`）已逐字携带最近剧情，重复注入只会推高 prefill 与首字延迟。AI 额外输出 `facts`（跨块去重成事实卡）；确定性关键事件（章节进出、选项选择、介入度 / 破坏性跨整数阈值）由代码直接登记 |
+| **剧情压缩** | `StorySummarizer` 按块（默认 20 段）与换章时机压缩；`build_turn` 注入「全部压缩概要 + 关键事实 + 关键事件」。近期原文不再注入——对话历史（窗口大小即 `story_recent_count` 设置，`_message_window_size`）已逐字携带最近剧情，重复注入只会推高 prefill 与首字延迟。AI 额外输出 `facts`（跨块去重成事实卡）；确定性关键事件（章节进出、选项选择、介入度 / 破坏性跨整数阈值）由代码直接登记 |
 | **回放模式** | 不建 AI 客户端，`_replay_next_step` 逐条重放 `loaded_replay`（`kind == "trigger"` → `_replay_trigger`，`kind == "chapter"` → `_replay_chapter`） |
 | **过程日志（proc_log 组件）** | 右上角日志面板是官方组件包里的 `proc_log` 组件：方案在 `components` 里声明才构建（`_default` 已声明），默认收起，**F12** 切换展开 / 收起。数据源是 `dungeon/process_log.py`：组件 build 时订阅并取走缓冲积压（构造 / 会话初始化阶段的报错也会补显），此后任意线程的 `log()` 经订阅回调 → `ctx._frame.call()` 进主线程追加（上限 300 行，自动滚底）；组件 destroy 时退订。方案未配置该组件时按 F12 弹通知「日志查看已禁用」 |
 | **文本组件功能工具条** | 三种文本组件（text / text_card / text_nvl）各自在合适位置挂一条悬浮工具条（基类统一创建，圆角低透明度容器 + 四个图标按钮——图标为程序化生成的小纹理，无底色仅悬停色，常驻不可关）：播放（自动播放，A）/ 相机（截图，F2）/ 列表（过程日志面板，F12）/ 齿轮（副本设置，O），悬停有文字提示。渐变文本栏放渐变区右下角（继续指示 ▼ 左移让位），卡片文本栏骑在卡片右上角，NVL 顶部居中。按钮只转调窗口同名服务，与快捷键等效；自动播放由帧时钟任务采样（`toggle_autoplay` 挂 `every(_AUTOPLAY_INTERVAL = 0.2)`，只是采样频率），真正的推进节奏由**事件驱动**：上屏游标自然走完时 `_on_reveal_finished` 登记 `_advance_due = now + _AUTOPLAY_DWELL(0.5s) + _AUTOPLAY_DWELL_PER_CHAR(0.012) × 句长`，`_autoplay_tick` 三重检查（等待条件同源 → 游标已收尾 → 停留期已过）后才 `_on_next_step`，长句多停一点、不再固定 1.2 秒。等待条件与继续指示同源（选项 / 结局 / 生成 / 上屏未结束期间自动停），自动播放中播放图标转金色。窗口 `_on_mouse_click` 用 `toolbar_hovered()` 区分点按钮与点屏幕推进剧情。截图经 `RunnerParams.callbacks.after_swap` 的 `on_capture` 钩子（`glReadPixels` 抓整帧）交给 `PixelWorker` 存到 `data/user/screenshots/`（通知延后弹出，避免通知条被截进画面）。正文颜色为固定常量（`_DEFAULT_TEXT_COLOR`），可配置的是标签 / 高亮 / 渐变底色（见组件包 `param_specs`） |

@@ -32,6 +32,19 @@ def extract_stream_text(response_text: str):
         return raw_value.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
 
 
+def canonical_user_entry(chapter_line: str = "", instruction: str = "") -> str:
+    """对话历史里的 user 回合：只留章节 / 地点与叙事指令。
+
+    本回合的在场行、当前坐标、细节补充、选项与插入提示都是「这一次生成」的
+    现场快照；留在历史里会被下一轮误当成仍然成立的现状。
+    """
+    lines = [str(chapter_line or "").strip(), str(instruction or "").strip()]
+    body = "\n".join(line for line in lines if line)
+    if body:
+        body += "\n"
+    return body + "请严格按系统提示的 JSON 格式输出，不要添加额外解释。"
+
+
 def canonical_history_entry(text: str, direction: int,
                             custom_directions: dict) -> str:
     """把解析结果规范化为协议 JSON 文本，用作对话历史中的 assistant 消息。

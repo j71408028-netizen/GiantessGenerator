@@ -95,7 +95,7 @@
 | `preview.py` | 编辑器里的语音**预听**（纯领域，零 UI 依赖） | `VoicePreview.play(voice, slot, rate, level, effect, text, on_done)`（合成一次、按当前效果放一次；`on_done` 在工作线程回调，Tk 调用方自行 `after` 回主线程）、`stop` / `wait_idle` / `shutdown`（关编辑器时收尾）、`SAMPLE_TEXT` |
 | `actions.py` | 动作类型单一注册表 | `NEW_ACTIONS`（insert/option/effect/goto/none）、`ENDING_ACTION`（只读兼容）、`ACTION_LABELS`、`VISUAL_FILTERS` |
 | `coupling.py` | 耦合等级与对应提示词 | `coupling_prompts`、`section_instruction`、`normalize_coupling_level` |
-| `prompts.py` | 系统与玩家提示词构建 | `DungeonPromptBuilder.build_system_prompt / build_user_prompt` |
+| `prompts.py` | 系统与玩家提示词构建 | `DungeonPromptBuilder.build_system_prompt`、`build_turn`（纯构建）/ `commit_turn`（成功提交）、`build_user_prompt`（兼容旧调用方，构建后立即提交） |
 | `response.py` | AI 响应解析容错 | `extract_stream_text`、`parse_final_json` |
 | `splitter.py` | 内置确定性分句 | `split_stream_units`（流式：首句上屏，余句排队）、`split_full_text`（终局定格） |
 | `summary.py` | 剧情压缩与常驻记忆 | `StorySummarizer`（按块 / 按章节压缩 + 最近 N 段原文 + 关键事件 + 事实卡） |
@@ -226,12 +226,14 @@ WebSocket 不生效、VPN「系统代理」WinINET 对 Python 不可见）在两
 
 _generate_next_text()
   1. next_type = dungeon_logic.get_next_text_type(current_text_type)   结束章节内强制 → BACKGROUND
-  2. prompt    = prompt_builder.build_user_prompt(next_type)           含概要 / 最近段落 / 细节补充
-  3. AI 流式   → extract_stream_text → split_stream_units              首句流式上屏，余句入 _pending_units
+  2. turn      = prompt_builder.build_turn(next_type)                  纯构建：含概要 / 最近段落 / 细节补充
+  3. AI 流式   → extract_stream_text → split_stream_units              请求用 turn.text；首句流式上屏，余句入 _pending_units
   4. 末块      → parse_final_json → (正文, direction, custom_directions)
-  5. 演化      → dungeon_logic.evolve_attributes(...)                  step_override=0 时整段冻结
-  6. 解锁写入  → _apply_prompted_unlocks(正文) → _finish_step(...)
-  7. 后台      → _start_detail_query(正文)                             下次生成前用回放缓存解答
+  5. 历史追加  → messages += turn.canonical + canonical_history_entry  只存章节 / 叙事指令，不存现场快照
+     commit    → prompt_builder.commit_turn(turn.effects)              登记首次出场 / 已提示部位 / 消费疑问
+  6. 演化      → dungeon_logic.evolve_attributes(...)                  step_override=0 时整段冻结
+  7. 解锁写入  → _apply_prompted_unlocks(正文, turn.effects.prompted_parts)
+  8. _finish_step(...) → 后台 _start_detail_query(正文)                下次生成前用回放缓存解答
 
 _finish_step()
   a. _apply_effect_overrides()      章节效果覆盖倒计时递减，到期交还章节默认

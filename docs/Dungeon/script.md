@@ -555,7 +555,7 @@ AI 生成**（`normalize_fixed_text` 把缺路径的配置归一成空 dict，�
 |---|---|
 | 压缩时机 | 缓冲达到 `block_size`（默认 20 段）压一个块；`_enter_chapter` 离开章节时 `flush_chapter` 强制压本章余量；结局生成前再 flush 一次 |
 | 压缩方式 | 优先用 AI 生成不超过 100 字的第三人称概要；AI 不可用 / 失败时回退内部算法（首句 + 高频词 + 末句）；回放模式无 AI，走内部算法 |
-| 提示词内容 | `build_user_prompt` 注入 `prompt_block()`：**截至此刻的全部压缩概要** + **最近 N 段原文**；N = 副本独占设置 `story_recent_count`（`dungeon_settings.json`），默认 20，设置项「剧情概要保留段数」（1~200） |
+| 提示词内容 | `build_turn` 注入 `prompt_block()`：**截至此刻的全部压缩概要** + **最近 N 段原文**；N = 副本独占设置 `story_recent_count`（`dungeon_settings.json`），默认 20，设置项「剧情概要保留段数」（1~200） |
 | 存放 | 只存内存（`summaries`），不写入回放文件；回放按同样的块大小重新累计，不依赖保存时的概要内容 |
 
 ---
@@ -751,8 +751,10 @@ AI 定的线索**不回写配置**：方案跨局复用，写回会让下一局�
 会随 `messages` 窗口滑出，简报负责让「他是谁」不随窗口一起消失；简报只包含本章
 `cast` 声明的在场者，不会把整张人物表每段重发。
 
-`introduced_cast` 是会话内集合；预生成失败改走实时路径时由 `engine.py` 快照还原，
-否则那一段会漏掉成员设定。
+`introduced_cast` 是会话内集合。`build_turn` 只计算本段首次出场的成员，不写集合；
+回合成功后 `commit_turn` 才登记。预生成失败直接丢弃产物，不需要快照还原。
+写进 `messages` 的用户回合只保留章节 / 地点与叙事指令（`canonical_user_entry`），
+在场行与简报由下一轮提示词重新渲染，不留在历史里变成过期现状。
 
 ### 11.4 兼容
 

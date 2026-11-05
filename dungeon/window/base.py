@@ -248,7 +248,7 @@ class DungeonWindowBase:
         self._detail_queries = []
         self._detail_querying = False
         # 预演化：下一步的预生成结果（玩家点击前提前发出的生成调用）。
-        # _pregen = {"user_prompt", "messages", "response", "text_type"}
+        # _pregen = {"turn", "messages_before", "response", "text_type"}
         self._pregen = None
         self._pregen_inflight = False
         # 选项触发器状态

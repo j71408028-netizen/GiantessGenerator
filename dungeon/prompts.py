@@ -1,5 +1,6 @@
 import random
 import re
+from dataclasses import dataclass, field
 
 from core.logic import ALL_PART_NAMES, format_size, get_comparisons, \
     should_skip_by_part_tags, contains_blocked_word
@@ -15,6 +16,7 @@ from .coupling import (COMMON_OUTPUT_RULE, DEFAULT_COUPLING_LEVEL,
                        normalize_coupling_level, section_instruction)
 from .details import search_replay_details
 from .models import DungeonTextType
+from .response import canonical_user_entry
 from .scene import place_label
 from .schema import owner_label
 
@@ -52,6 +54,29 @@ _OTHER_OWNER_RE = re.compile(
 )
 
 
+@dataclass
+class TurnEffects:
+    """构建提示词时产生、但必须等回合成功后才生效的副作用。"""
+
+    #: 本段被选中提示的身体部位（同一次构建里也用于 _apply_prompted_unlocks）
+    prompted_parts: set = field(default_factory=set)
+    #: 本段首次出场的成员 id，提交后才写入 ``introduced_cast``
+    introduced_cast: set = field(default_factory=set)
+    #: 构建时读过细节疑问，提交后清空 ``_detail_queries``
+    consume_detail_queries: bool = False
+    #: 本段用过的「同时在场」地标，提交后才写入会话
+    prompted_presence_landmark: str = ""
+
+
+@dataclass
+class PromptTurn:
+    """一次提示词构建的产物：请求正文 + 历史正文 + 待提交副作用。"""
+
+    text: str
+    canonical: str
+    effects: TurnEffects
+
+
 class DungeonPromptBuilder:
     """副本提示词构建器。context 只需提供窗口当前使用的同名数据。
 
@@ -87,22 +112,25 @@ class DungeonPromptBuilder:
                 f"故事开始时：{background}\n"
                 "（以上是起点不是现状，不必每段重述。）\n")
 
-    def _cast_block(self) -> str:
+    def _cast_block(self):
         """在场行 + 首次出场块（用户提示词侧）。
 
         在场只认章节 ``cast`` 声明：没声明就不写这一行，旧方案逐字不变。
         成员设定只在第一次出场时给全量，之后每段给一份压缩简报——完整设定块
         会随对话历史滑出窗口，简报负责让「他是谁」不随窗口一起消失。
+
+        返回 ``(block, fresh_ids)``；构建阶段不写 ``introduced_cast``，
+        首次出场由 :meth:`commit_turn` 在回合成功后登记。
         """
         session = self.context
         members = getattr(session, "cast", None) or ()
         if not members:
-            return ""
+            return "", set()
         chapter = find_chapter(getattr(session, "chapters", None),
                                getattr(session, "current_chapter", None))
         declared = list((chapter or {}).get("cast") or ())
         if not declared:
-            return ""
+            return "", set()
         present, seen = [], set()
         for key in declared:
             member = cast_mod.find_member(members, key)
@@ -111,27 +139,23 @@ class DungeonPromptBuilder:
             seen.add(member["id"])
             present.append(member)
         if not present:
-            return ""
-        introduced = getattr(session, "introduced_cast", None)
-        if not isinstance(introduced, set):
-            introduced = set(introduced or ())
-            session.introduced_cast = introduced
+            return "", set()
+        introduced = getattr(session, "introduced_cast", None) or ()
         ledger = getattr(session, "characters", None)
         if not isinstance(ledger, CharacterLedger):
+            # 渲染用临时账本；构建阶段不把缓存挂到会话上
             ledger = CharacterLedger(members)
-            session.characters = ledger
         block = "【本段在场】" + "、".join(
             ledger.display_name(m) for m in present) + "\n"
         fresh = [m for m in present if m["id"] not in introduced]
         familiar = [m for m in present if m["id"] in introduced]
         if fresh:
             block += cast_mod.render_first_seen(fresh)
-            introduced.update(m["id"] for m in fresh)
         if familiar:
             block += ledger.render_brief(familiar)
         block += ("本段只让主角与到场的角色说话和行动；"
                   "未到场者可以被人提起，但不要给台词。\n")
-        return block
+        return block, {m["id"] for m in fresh}
 
     def _custom_owner_hint(self) -> str:
         """自定义演化量的归属说明（作者显式写了 ``owner`` 才出现）。
@@ -192,8 +216,23 @@ class DungeonPromptBuilder:
         return prompt
 
     def build_user_prompt(self, text_type: DungeonTextType) -> str:
+        """构建并立即提交本回合的副作用（兼容旧调用方）。
+
+        窗口运行时用 :meth:`build_turn` + :meth:`commit_turn`：预生成失败或
+        响应作废时不会提前消费首次出场与细节疑问。
+        """
+        turn = self.build_turn(text_type)
+        self.commit_turn(turn.effects)
+        return turn.text
+
+    def build_turn(self, text_type: DungeonTextType) -> PromptTurn:
+        """构建一次生成请求；不修改会话状态。
+
+        易变块（在场行 / 坐标 / 细节补充 / 选项 / 插入提示）只进 ``text``，
+        不进 ``canonical``——后者才是写进对话历史的部分。
+        """
         session = self.context
-        session.prompted_parts = set()
+        effects = TurnEffects()
         level = self.coupling_level()
         # 段落描写指令按耦合等级取用（见 dungeon.coupling.COUPLING_PROMPTS）
         type_value = text_type.value if hasattr(text_type, "value") else str(text_type)
@@ -209,8 +248,7 @@ class DungeonPromptBuilder:
             selected = self._select_prompted_part(self._detect_prompted_parts(session.last_ai_text))
             if selected:
                 part, match = selected
-                session.keyword_match_given.add(part)
-                session.prompted_parts.add(part)
+                effects.prompted_parts.add(part)
                 intrusion = getattr(getattr(session, "dungeon_state", None), "intrusion", 0.0)
                 if intrusion < 3:
                     context_parts.append("人们注意到了她的身体尺寸：" + match)
@@ -218,9 +256,11 @@ class DungeonPromptBuilder:
                     context_parts.append("她注意到了自己的身体尺寸：" + match)
         # 独特地标的另一条触发途径：她与被点名的地标"同时在场"时给出对比
         # （判定是内部的，见 _copresent_unique_line；措辞不出现"同时在场"）
-        presence = self._copresent_unique_line()
+        presence, presence_landmark = self._copresent_unique_line()
         if presence:
             context_parts.append(presence)
+        if presence_landmark:
+            effects.prompted_presence_landmark = presence_landmark
         if getattr(session, "option_choice", None):
             choice = session.option_choice
             choice_prompt = choice.get("prompt", "")
@@ -266,9 +306,11 @@ class DungeonPromptBuilder:
             if hits:
                 detail_block = ("细节补充（AI 此前想了解的细节，检索自过往正文，"
                                 "仅供叙事参考）：\n" + "\n".join(f"- {h}" for h in hits) + "\n")
-            session._detail_queries = []
+            effects.consume_detail_queries = True
         pack = coupling_prompts(level)
-        result = (f"{history}{chapter_line}{self._cast_block()}"
+        cast_block, introduced = self._cast_block()
+        effects.introduced_cast.update(introduced)
+        result = (f"{history}{chapter_line}{cast_block}"
                   f"{self._calibration_block()}{detail_block}"
                   f"{pack['narrate'].format(instruction=instruction)}\n"
                   f"请严格按系统提示的 JSON 格式输出，不要添加额外解释。{reference}")
@@ -308,7 +350,30 @@ class DungeonPromptBuilder:
             if choice_prompt:
                 result += "\n\n" + pack["option_notice"].format(
                     index=option_choice.get('index', 0), prompt=choice_prompt)
-        return result
+        canonical = canonical_user_entry(
+            chapter_line, pack["narrate"].format(instruction=instruction))
+        return PromptTurn(text=result, canonical=canonical, effects=effects)
+
+    def commit_turn(self, effects: TurnEffects) -> None:
+        """回合成功后提交构建期副作用；构建阶段本身不写会话状态。"""
+        session = self.context
+        parts = set(effects.prompted_parts or ())
+        session.prompted_parts = parts
+        given = getattr(session, "keyword_match_given", None)
+        if not isinstance(given, set):
+            given = set(given or ())
+            session.keyword_match_given = given
+        given.update(parts)
+        if effects.introduced_cast:
+            introduced = getattr(session, "introduced_cast", None)
+            if not isinstance(introduced, set):
+                introduced = set(introduced or ())
+                session.introduced_cast = introduced
+            introduced.update(effects.introduced_cast)
+        if effects.prompted_presence_landmark:
+            session.prompted_presence_landmark = effects.prompted_presence_landmark
+        if effects.consume_detail_queries:
+            session._detail_queries = []
 
     def _calibration_block(self) -> str:
         """本段写作校准块：坐标数值行 + 两级谓词 + 尺度上限，无坐标时为空串。
@@ -349,14 +414,16 @@ class DungeonPromptBuilder:
             return getter()
         return getattr(self.context, "merged_landmarks", None) or []
 
-    def _copresent_unique_line(self) -> str:
-        """她与独特地标"同时在场"时的身高对比行；不满足判据返回空串。
+    def _copresent_unique_line(self):
+        """她与独特地标"同时在场"时的身高对比行；不满足判据返回 ``("", "")``。
 
         判据是内部原则，不是提示词措辞：最近一或两个显示段落内，她的名字
         （或"她"）与独特地标的名字同段出现，或分处相邻两段。独特地标只经
         章节 ``landmarks`` 白名单进池（见 ``dungeon.scene``），被点名即视为
         本章可能在场；正文提到才触发对比。比例超出 ``get_comparisons`` 的
         可比范围、或上一轮刚提示过同一地标时不重复。
+
+        返回 ``(对比行, 地标名)``；地标名由调用方登记为回合副作用。
 
         身体部位提及（``_detect_prompted_parts``）是独特地标对比的另一条
         触发途径，与此并行。
@@ -367,12 +434,12 @@ class DungeonPromptBuilder:
                    if str(getattr(lm, "frequency", "") or "") == "unique"
                    and not contains_blocked_word(lm.name, blocked)]
         if not uniques:
-            return ""
+            return "", ""
         paragraphs = [str(item.get("text") or "")
                       for item in (getattr(session, "story_history", None) or [])
                       if str(item.get("text") or "").strip()][-2:]
         if not paragraphs:
-            return ""
+            return "", ""
         names = [n.strip() for n in (getattr(session, "name", "") or "",
                                      getattr(session, "nick", "") or "")
                  if (n or "").strip()]
@@ -390,22 +457,22 @@ class DungeonPromptBuilder:
                 break
         if present is None or present.name == getattr(
                 session, "prompted_presence_landmark", ""):
-            return ""
+            return "", ""
         if not session.body_parts or "身高" not in session.body_parts:
-            return ""
+            return "", ""
         comparisons = get_comparisons(
             [present], {"身高": session.body_parts["身高"]},
             order="match", limit=1, selected_tags=[], skip_base_prob=0.0,
             blocked_words=blocked)
         if not comparisons:
-            return ""
+            return "", ""
         comp = comparisons[0]
         landmark = comp["landmark"]
         suffix = ("高" if landmark.dimension == "vertical"
                   else ("长" if landmark.horizontal_type == "length" else "宽"))
-        session.prompted_presence_landmark = landmark.name
         return (f"她的身高 {format_size(session.height)}，"
-                f"约等于{landmark.name}{suffix}度的{comp['ratio']:.2f}倍。")
+                f"约等于{landmark.name}{suffix}度的{comp['ratio']:.2f}倍。",
+                landmark.name)
 
     def _get_height_match(self):
         session = self.context

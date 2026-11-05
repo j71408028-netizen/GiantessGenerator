@@ -11,7 +11,9 @@
 4. 字段按定位取用：``key`` 渲染 background 与别称 / 称她为、``extra`` 渲染 purpose 与 speech；
 5. 三条线索全空的成员交给 AI 定，不回写配置；
 6. 归一化（别称串 / id 缺省 / 非法 role / 章节 cast 的 @ 与分隔符）；
-7. 校验器：重名撞车、非法代词、章节 cast 指向不存在的成员。
+7. 校验器：重名撞车、非法代词、章节 cast 指向不存在的成员；
+8. 构建 / 提交分离：``build_turn`` 不写会话状态，``commit_turn`` 才生效，
+   canonical 历史只留章节与叙事指令。
 """
 
 import os
@@ -245,6 +247,46 @@ _diag_unknown = validate_scenario_config({
 check("校验：章节 cast 指向表里不存在的成员 → warning",
       any(d.level == "warning" and "查无此人" in d.message for d in _diag_unknown),
       " | ".join(d.message for d in _diag_unknown))
+
+# ---------------- 8. 构建 / 提交分离 ----------------
+_pure = make_session(cast_members=[_li, _wang],
+                     chapters=[{"name": "城里", "cast": ["李队长"]}])
+_builder = DungeonPromptBuilder(_pure)
+_turn_a = _builder.build_turn(_TEXT_TYPE)
+_turn_b = _builder.build_turn(_TEXT_TYPE)
+check("build_turn 不登记首次出场：连续构建两次都是完整设定",
+      "【人物（故事开始时的设定）】" in _turn_a.text
+      and "【人物（故事开始时的设定）】" in _turn_b.text
+      and not getattr(_pure, "introduced_cast", None))
+check("build_turn 不改会话的已提示部位 / 关键词",
+      _pure.prompted_parts == set() and _pure.keyword_match_given == set())
+check("canonical 只留章节与叙事指令，不含现场快照",
+      "当前章节：城里" in _turn_a.canonical
+      and "【本段在场】" not in _turn_a.canonical
+      and "本段只让主角与到场的角色说话和行动" not in _turn_a.canonical)
+
+_builder.commit_turn(_turn_a.effects)
+check("commit_turn 登记首次出场", "li" in _pure.introduced_cast)
+_turn_c = _builder.build_turn(_TEXT_TYPE)
+check("提交后下一段改用简报",
+      "【人物简报（当前状态）】" in _turn_c.text
+      and "【人物（故事开始时的设定）】" not in _turn_c.text, _turn_c.text[:400])
+
+_queries = make_session(cast_members=[_li], chapters=[{"name": "城里"}])
+_queries._detail_queries = ["她有多大"]
+_qbuilder = DungeonPromptBuilder(_queries)
+_qturn = _qbuilder.build_turn(_TEXT_TYPE)
+check("build_turn 不消费细节疑问",
+      _queries._detail_queries == ["她有多大"]
+      and _qturn.effects.consume_detail_queries)
+_qbuilder.commit_turn(_qturn.effects)
+check("commit_turn 才清空细节疑问", _queries._detail_queries == [])
+
+_wrapped = make_session(cast_members=[_li],
+                        chapters=[{"name": "城里", "cast": ["李队长"]}])
+DungeonPromptBuilder(_wrapped).build_user_prompt(_TEXT_TYPE)
+check("build_user_prompt 兼容旧调用方：构建即提交",
+      "li" in (_wrapped.introduced_cast or set()))
 
 # ---------------- 结论 ----------------
 print()
