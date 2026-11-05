@@ -9,6 +9,7 @@ from core.scale_reference import (destruction_calibration_line,
                                   intrusion_level_title)
 from dungeon.audio.chapters import find_chapter, is_terminating_chapter
 from dungeon import cast as cast_mod
+from .characters import CharacterLedger
 from .coupling import (COMMON_OUTPUT_RULE, DEFAULT_COUPLING_LEVEL,
                        HIGHLIGHT_MARKER_RULE, coupling_prompts,
                        normalize_coupling_level, section_instruction)
@@ -90,8 +91,8 @@ class DungeonPromptBuilder:
         """在场行 + 首次出场块（用户提示词侧）。
 
         在场只认章节 ``cast`` 声明：没声明就不写这一行，旧方案逐字不变。
-        成员设定只在第一次出场时给一次，之后只留名字——这是「设定是初始值」
-        在注入层的落点。
+        成员设定只在第一次出场时给全量，之后每段给一份压缩简报——完整设定块
+        会随对话历史滑出窗口，简报负责让「他是谁」不随窗口一起消失。
         """
         session = self.context
         members = getattr(session, "cast", None) or ()
@@ -115,11 +116,19 @@ class DungeonPromptBuilder:
         if not isinstance(introduced, set):
             introduced = set(introduced or ())
             session.introduced_cast = introduced
-        block = "【本段在场】" + "、".join(m["name"] for m in present) + "\n"
+        ledger = getattr(session, "characters", None)
+        if not isinstance(ledger, CharacterLedger):
+            ledger = CharacterLedger(members)
+            session.characters = ledger
+        block = "【本段在场】" + "、".join(
+            ledger.display_name(m) for m in present) + "\n"
         fresh = [m for m in present if m["id"] not in introduced]
+        familiar = [m for m in present if m["id"] in introduced]
         if fresh:
             block += cast_mod.render_first_seen(fresh)
             introduced.update(m["id"] for m in fresh)
+        if familiar:
+            block += ledger.render_brief(familiar)
         block += ("本段只让主角与到场的角色说话和行动；"
                   "未到场者可以被人提起，但不要给台词。\n")
         return block

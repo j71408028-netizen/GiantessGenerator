@@ -44,6 +44,7 @@ from dungeon.window.background import DungeonBackground
 from dungeon.window.fx import WindowFx
 from dungeon.audio.chapters import find_chapter, normalize_chapters
 from dungeon.cast import normalize_cast
+from dungeon.characters import CharacterLedger
 from dungeon.coupling import normalize_coupling_level
 from dungeon.scene import landmarks_for_chapter, place_label
 from dungeon.window.frame import FrameScheduler
@@ -654,6 +655,8 @@ class DungeonWindowBase:
             scenario_config.get("protagonist_background", "") or "").strip()
         # 人物表：配角（key / extra）；她与主角不在表里
         self.cast = normalize_cast(scenario_config.get("cast"))
+        # 运行期角色账本：重要角色带可变状态，群像只有初始字段
+        self.characters = CharacterLedger(self.cast)
         self.introduced_cast = set()
         self.section_prompts = scenario_config.get("section_prompts", {})
         self.evolution_attrs = scenario_config.get("evolution_attrs", [])

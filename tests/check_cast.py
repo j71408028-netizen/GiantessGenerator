@@ -7,7 +7,7 @@
 1. **空表零差异**：旧方案（没有 cast / protagonist_background 键）与空表新方案
    的系统提示词、用户提示词逐字一致——这是兼容性红线的第一条断言；
 2. 在场行只认章节 ``cast`` 声明，未声明就不写；
-3. 首次出场块只出现一次，第二次只剩名字；
+3. 首次出场块只出现一次；第二次改注入压缩简报到场角色；
 4. 字段按定位取用：``key`` 渲染 background 与别称 / 称她为、``extra`` 渲染 purpose 与 speech；
 5. 三条线索全空的成员交给 AI 定，不回写配置；
 6. 归一化（别称串 / id 缺省 / 非法 role / 章节 cast 的 @ 与分隔符）；
@@ -129,12 +129,15 @@ check("未声明的成员一个字都不进提示词", "王店主" not in _first
 check("框定语说明这是起点", "起点不是现状" in _first)
 check("在场约束只许到场者说话", "只让主角与到场的角色说话和行动" in _first)
 
-# ---------------- 3. 只给一次 ----------------
+# ---------------- 3. 首次全量，之后简报 ----------------
 _second = user_prompt(_declared)
-check("第二次出场只剩名字（设定块不再注入）",
+check("第二次出场改用人物简报（完整设定块不再注入）",
       "【本段在场】李队长" in _second
-      and "本地消防中队长" not in _second
-      and "【人物" not in _second, _second[:300])
+      and "【人物简报（当前状态）】" in _second
+      and "本地消防中队长" in _second
+      and "【人物（故事开始时的设定）】" not in _second, _second[:400])
+check("简报不重复完整设定块的结构化线索",
+      "也称「李队」「队长」" not in _second, _second[:400])
 check("第二次仍然写在场约束", "只让主角与到场的角色说话和行动" in _second)
 
 # ---------------- 4. extra 渲染 purpose，线索全空交给 AI ----------------
@@ -144,6 +147,11 @@ _extra_prompt = user_prompt(_wang_only)
 check("群像渲染作用与说话方式（不渲染 background）",
       "表现城区的物资已经见底" in _extra_prompt
       and "说话：絮叨，反复讲价钱" in _extra_prompt)
+_extra_second = user_prompt(_wang_only)
+check("群像第二次出场仍带初始线索（群像只有初始字段）",
+      "【人物简报（当前状态）】" in _extra_second
+      and "表现城区的物资已经见底" in _extra_second
+      and "说话：絮叨，反复讲价钱" in _extra_second, _extra_second[:300])
 
 _extra_full = cast.normalize_member({
     "name": "王店主", "role": "extra", "aliases": ["王老板"], "pronoun": "他",
