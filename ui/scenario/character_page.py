@@ -15,6 +15,7 @@
 """
 
 import re
+import tkinter as tk
 
 import customtkinter as ctk
 
@@ -61,6 +62,14 @@ PRONOUN_VALUES.update({p: p for p in CAST_PRONOUNS if p})
 
 #: 别称输入框的切分符（与 dungeon.cast 的归一化保持一致）
 _ALIAS_SEPARATORS = re.compile(r"[、,，;；\s]+")
+
+
+def _native_color(color, mode=None) -> str:
+    """把主题里的亮暗成对颜色解析成 tk 原生控件能用的单色。"""
+    if isinstance(color, (tuple, list)):
+        mode = mode or ctk.get_appearance_mode()
+        return color[1] if str(mode).lower() == "dark" else color[0]
+    return str(color)
 
 
 class VoicePickDialog(BaseDialog):
@@ -133,6 +142,7 @@ class CharacterPage(ctk.CTkFrame):
         self._save_job = None      # 主角称呼 / 背景 / 人物表 / 语音的防抖保存
         self._loading = False      # 回填期间抑制自动保存
         self._cast_cards = []      # 人物表卡片的状态（每张卡一组 Tk 变量）
+        self._cast_empty_hint = None  # 空表提示（有卡片时收起）
 
         # 语音：未配置时按默认值走（与方案配置同构，保存时整体写回）
         self._voice = normalize_voice(None)
@@ -327,17 +337,27 @@ class CharacterPage(ctk.CTkFrame):
         return entry
 
     def _text_field(self, parent, label, height=56, value=""):
-        """「标签 + 多行输入」一行；返回 ``(行容器, 文本框)``。"""
+        """「标签 + 多行输入」一行；返回 ``(行容器, 文本框)``。
+
+        用轻量 ``tk.Text`` 而不是 ``CTkTextbox``：后者每个实例带两条 CTk 滚动条，
+        创建时反复刷新空闲任务，人物表成批建卡会明显变慢。
+        """
         row = ctk.CTkFrame(parent, fg_color="transparent")
         row.pack(fill='x', pady=2)
         ctk.CTkLabel(row, text=label, font=ui_fonts.ui_font(_F_BODY),
                      text_color=SC_TITLE, width=64, anchor='nw').pack(
             side='left', anchor='n', pady=(4, 0))
-        box = ctk.CTkTextbox(row, height=height, wrap='word',
-                             font=ui_fonts.ui_font(_F_BODY), text_color=SC_TEXT,
-                             fg_color=SC_BG, border_width=1,
-                             border_color=SC_BORDER_STRONG)
-        box.pack(side='left', fill='x', expand=True, padx=(6, 4))
+        shell = ctk.CTkFrame(row, fg_color=SC_BG, border_width=1,
+                             border_color=SC_BORDER_STRONG, corner_radius=8,
+                             height=height)
+        shell.pack(side='left', fill='x', expand=True, padx=(6, 4))
+        shell.pack_propagate(False)
+        box = tk.Text(shell, wrap='word', font=ui_fonts.ui_font(_F_BODY),
+                      fg=_native_color(SC_TEXT), bg=_native_color(SC_BG),
+                      insertbackground=_native_color(SC_TEXT),
+                      relief='flat', bd=0, highlightthickness=0,
+                      padx=6, pady=4)
+        box.pack(fill='both', expand=True)
         box.insert("1.0", value)
         return row, box
 
@@ -426,18 +446,38 @@ class CharacterPage(ctk.CTkFrame):
         for child in host.winfo_children():
             child.destroy()
         self._cast_cards = []
+        self._cast_empty_hint = None
         if members is None:
             members = list(getattr(self.scenario_editor, "cast", None) or [])
         members = [m for m in normalize_cast(members) if m.get("name")]
         if not members:
-            ctk.CTkLabel(
-                host, text="（还没有配角；点右上「添加角色」）",
-                font=ui_fonts.ui_font(_F_SMALL), text_color=SC_TEXT_SOFT,
-                anchor='w').pack(fill='x', padx=6, pady=(0, 4))
+            self._show_cast_empty_hint()
         else:
             for member in members:
                 self._cast_card(host, member)
         self._update_cast_count()
+
+    def _sync_cast_cards(self, members):
+        """配置回填：数据与卡片当前值一致时跳过重建，避免每次进页都重拍控件。"""
+        incoming = [m for m in normalize_cast(members) if m.get("name")]
+        if incoming == self.collect_cast():
+            self._update_cast_count()
+            return
+        self._rebuild_cast_cards(incoming)
+
+    def _show_cast_empty_hint(self):
+        if self._cast_empty_hint is not None:
+            return
+        self._cast_empty_hint = ctk.CTkLabel(
+            self.cast_list, text="（还没有配角；点右上「添加角色」）",
+            font=ui_fonts.ui_font(_F_SMALL), text_color=SC_TEXT_SOFT,
+            anchor='w')
+        self._cast_empty_hint.pack(fill='x', padx=6, pady=(0, 4))
+
+    def _hide_cast_empty_hint(self):
+        hint, self._cast_empty_hint = self._cast_empty_hint, None
+        if hint is not None:
+            hint.destroy()
 
     def _update_cast_count(self):
         label = getattr(self, "_cast_count_label", None)
@@ -466,9 +506,9 @@ class CharacterPage(ctk.CTkFrame):
         body.grid(row=0, column=0, sticky='nsew', padx=(12, 6), pady=8)
         # 右缘动作区：上移 / 下移 / 删除（删除贴底，避免误触）
         rail = ctk.CTkFrame(card, fg_color="transparent")
-        rail.grid(row=0, column=1, sticky='ns', padx=(0, 6), pady=8)
+        rail.grid(row=0, column=1, sticky='ns', padx=9, pady=8)
 
-        state = {"original": dict(member), "rows": {}}
+        state = {"original": dict(member), "rows": {}, "frame": card}
         state["role"] = ctk.StringVar(
             value=ROLE_EXTRA_LABEL if member.get("role") == "extra"
             else ROLE_KEY_LABEL)
@@ -479,11 +519,12 @@ class CharacterPage(ctk.CTkFrame):
             value=member.get("pronoun") or PRONOUN_UNSET_LABEL)
         state["call_her"] = ctk.StringVar(value=member.get("call_her", ""))
         state["voice"] = ctk.StringVar(value=member.get("voice", ""))
-        state["detail_open"] = False
+        state["purpose"] = ctk.StringVar(value=member.get("purpose", ""))
+        state["speech"] = ctk.StringVar(value=member.get("speech", ""))
 
         rows = state["rows"]
 
-        # ---- 第一行：定位 / 称呼（详细按钮由布局按定位显示） ----
+        # ---- 第一行：定位 / 称呼 / 代词 ----
         head = ctk.CTkFrame(body, fg_color="transparent")
         rows["head"] = head
         OptionButton(
@@ -493,16 +534,24 @@ class CharacterPage(ctk.CTkFrame):
             hover_color=SC_HOVER, text_color=SC_TITLE,
             popup_fg_color=SC_PANEL_BG, popup_hover_color=SC_HOVER,
             popup_text_color=SC_TITLE, popup_border_color=SC_BORDER_STRONG,
-            command=lambda s=state: self._cast_role_changed(s)).pack(
+            command=lambda _choice, s=state: self._cast_role_changed(s)).pack(
                 side='left', padx=(0, 8))
         ctk.CTkLabel(head, text="称呼", font=ui_fonts.ui_font(_F_BODY),
                      text_color=SC_TITLE).pack(side='left')
         ctk.CTkEntry(head, textvariable=state["name"], width=110, height=28,
                      font=ui_fonts.ui_font(_F_BODY), text_color=SC_TEXT, fg_color=SC_BG,
                      border_color=SC_BORDER_STRONG).pack(
-                         side='left', fill='x', expand=True, padx=(6, 4))
-        state["detail_button"] = self._mini_button(
-            head, "详细 ▸", lambda s=state: self._toggle_cast_detail(s), width=66)
+                         side='left', fill='x', expand=True, padx=(6, 12))
+        ctk.CTkLabel(head, text="代词", font=ui_fonts.ui_font(_F_BODY),
+                     text_color=SC_TITLE).pack(side='left')
+        OptionButton(
+            head, values=list(PRONOUN_LABELS), variable=state["pronoun"],
+            width=74, height=28, font=ui_fonts.ui_font(_F_SMALL),
+            fg_color=SC_BG, border_color=SC_BORDER_STRONG,
+            hover_color=SC_HOVER, text_color=SC_TITLE,
+            popup_fg_color=SC_PANEL_BG, popup_hover_color=SC_HOVER,
+            popup_text_color=SC_TITLE, popup_border_color=SC_BORDER_STRONG,
+            ).pack(side='left', padx=(6, 0))
 
         # ---- 右缘动作区 ----
         self._rail_button(
@@ -515,21 +564,8 @@ class CharacterPage(ctk.CTkFrame):
             rail, "删除", lambda s=state: self._delete_cast_member(s),
             danger=True).pack(side='bottom', fill='x')
 
-        # ---- 代词 / 别称 / 称她为（后两项只属于重要角色） ----
-        meta = ctk.CTkFrame(body, fg_color="transparent")
-        rows["meta"] = meta
-        ctk.CTkLabel(meta, text="代词", font=ui_fonts.ui_font(_F_BODY),
-                     text_color=SC_TITLE, width=40, anchor='w').pack(side='left')
-        OptionButton(
-            meta, values=list(PRONOUN_LABELS), variable=state["pronoun"],
-            width=74, height=28, font=ui_fonts.ui_font(_F_SMALL),
-            fg_color=SC_BG, border_color=SC_BORDER_STRONG,
-            hover_color=SC_HOVER, text_color=SC_TITLE,
-            popup_fg_color=SC_PANEL_BG, popup_hover_color=SC_HOVER,
-            popup_text_color=SC_TITLE, popup_border_color=SC_BORDER_STRONG,
-            command=lambda s=state: self._update_cast_count()).pack(
-                side='left', padx=(4, 10))
-        alias_group = ctk.CTkFrame(meta, fg_color="transparent")
+        # ---- 别称 / 称她为（只属于重要角色） ----
+        alias_group = ctk.CTkFrame(body, fg_color="transparent")
         state["alias_group"] = alias_group
         ctk.CTkLabel(alias_group, text="别称", font=ui_fonts.ui_font(_F_BODY),
                      text_color=SC_TITLE).pack(side='left')
@@ -544,7 +580,29 @@ class CharacterPage(ctk.CTkFrame):
                      border_color=SC_BORDER_STRONG).pack(
                          side='left', fill='x', expand=True, padx=(6, 0))
 
-        # ---- 音色 ----
+        # ---- 身份背景（重要角色） ----
+        background_row, state["background_box"] = self._text_field(
+            body, "身份背景", height=58, value=member.get("background", ""))
+        rows["background"] = background_row
+        self._bind_text_autosave(state["background_box"])
+
+        # ---- 作用 / 说话方式（群像） ----
+        extra = ctk.CTkFrame(body, fg_color="transparent")
+        rows["extra"] = extra
+        ctk.CTkLabel(extra, text="作用", font=ui_fonts.ui_font(_F_BODY),
+                     text_color=SC_TITLE).pack(side='left')
+        ctk.CTkEntry(extra, textvariable=state["purpose"], width=92, height=28,
+                     font=ui_fonts.ui_font(_F_BODY), text_color=SC_TEXT, fg_color=SC_BG,
+                     border_color=SC_BORDER_STRONG).pack(
+                         side='left', fill='x', expand=True, padx=(6, 10))
+        ctk.CTkLabel(extra, text="说话方式", font=ui_fonts.ui_font(_F_BODY),
+                     text_color=SC_TITLE).pack(side='left')
+        ctk.CTkEntry(extra, textvariable=state["speech"], width=92, height=28,
+                     font=ui_fonts.ui_font(_F_BODY), text_color=SC_TEXT, fg_color=SC_BG,
+                     border_color=SC_BORDER_STRONG).pack(
+                         side='left', fill='x', expand=True, padx=(6, 0))
+
+        # ---- 音色（卡片最后一行） ----
         voice = ctk.CTkFrame(body, fg_color="transparent")
         rows["voice"] = voice
         ctk.CTkLabel(voice, text="音色", font=ui_fonts.ui_font(_F_BODY),
@@ -558,33 +616,13 @@ class CharacterPage(ctk.CTkFrame):
             voice, "选", lambda v=state["voice"]: self._pick_voice(v),
             width=28, color=SC_LINK).pack(side='left')
 
-        # ---- 身份背景（重要角色） / 作用（群像） ----
-        background_row, state["background_box"] = self._text_field(
-            body, "身份背景", height=58, value=member.get("background", ""))
-        rows["background"] = background_row
-        self._bind_text_autosave(state["background_box"])
-
-        purpose_row, state["purpose_box"] = self._text_field(
-            body, "作用", height=50, value=member.get("purpose", ""))
-        rows["purpose"] = purpose_row
-        self._bind_text_autosave(state["purpose_box"])
-
-        speech = ctk.CTkFrame(body, fg_color="transparent")
-        rows["speech"] = speech
-        ctk.CTkLabel(speech, text="说话方式", font=ui_fonts.ui_font(_F_BODY),
-                     text_color=SC_TITLE, width=64, anchor='w').pack(side='left')
-        state["speech"] = ctk.StringVar(value=member.get("speech", ""))
-        ctk.CTkEntry(speech, textvariable=state["speech"], height=28,
-                     font=ui_fonts.ui_font(_F_BODY), text_color=SC_TEXT, fg_color=SC_BG,
-                     border_color=SC_BORDER_STRONG).pack(
-                         side='left', fill='x', expand=True, padx=(6, 4))
-
         for var in (state["role"], state["name"], state["aliases"],
                     state["pronoun"], state["call_her"], state["voice"],
-                    state["speech"]):
+                    state["purpose"], state["speech"]):
             var.trace_add("write", lambda *_a: self._schedule_save())
 
         self._cast_cards.append(state)
+        self._hide_cast_empty_hint()
         self._layout_cast_card(state)
 
     def _layout_cast_card(self, state):
@@ -592,43 +630,32 @@ class CharacterPage(ctk.CTkFrame):
         rows = state["rows"]
         for row in rows.values():
             row.pack_forget()
+        state["alias_group"].pack_forget()
         role = ROLE_VALUES.get(state["role"].get(), DEFAULT_CAST_ROLE)
 
         rows["head"].pack(fill='x', pady=(0, 2))
-        rows["meta"].pack(fill='x', pady=2)
-        rows["voice"].pack(fill='x', pady=2)
         if role_supports(role, "aliases"):
-            state["alias_group"].pack(side='left', fill='x', expand=True)
-        else:
-            state["alias_group"].pack_forget()
+            state["alias_group"].pack(fill='x', pady=2)
         if role_supports(role, "background"):
-            state["detail_button"].pack_forget()
             rows["background"].pack(fill='x', pady=2)
         else:
-            state["detail_button"].pack(side='right', padx=(6, 0))
-            if state["detail_open"]:
-                rows["purpose"].pack(fill='x', pady=2)
-                rows["speech"].pack(fill='x', pady=2)
-            state["detail_button"].configure(
-                text="详细 ▾" if state["detail_open"] else "详细 ▸")
-
-    def _toggle_cast_detail(self, state):
-        state["detail_open"] = not state["detail_open"]
-        self._layout_cast_card(state)
+            rows["extra"].pack(fill='x', pady=2)
+        # 音色是卡片最后一行，与上面的字段拉开距离
+        rows["voice"].pack(fill='x', pady=(14, 0))
 
     def _cast_role_changed(self, state):
-        """切换定位后整张表重建：群像与重要角色显示不同的字段。"""
-        self._cast_changed()
-
-    def _cast_changed(self):
-        self._rebuild_cast_cards(self.collect_cast())
+        """切换定位只重排这一张卡，不重建整张表。"""
+        self._layout_cast_card(state)
+        self._update_cast_count()
         self._schedule_save()
 
     def _add_cast_member(self):
         members = self.collect_cast()
-        members.append({"name": self._next_cast_name(members),
-                        "role": DEFAULT_CAST_ROLE})
-        self._rebuild_cast_cards(members)
+        self._cast_card(self.cast_list, {
+            "name": self._next_cast_name(members),
+            "role": DEFAULT_CAST_ROLE,
+        })
+        self._update_cast_count()
         self._schedule_save()
 
     @staticmethod
@@ -640,22 +667,31 @@ class CharacterPage(ctk.CTkFrame):
         return f"角色{index}"
 
     def _move_cast_member(self, state, delta: int):
-        members = self.collect_cast()
         index = self._cast_state_index(state)
         target = index + delta
-        if index < 0 or not (0 <= target < len(members)):
+        if index < 0 or not (0 <= target < len(self._cast_cards)):
             return
-        members[index], members[target] = members[target], members[index]
-        self._rebuild_cast_cards(members)
+        self._cast_cards[index], self._cast_cards[target] = (
+            self._cast_cards[target], self._cast_cards[index])
+        self._reorder_cast_cards()
         self._schedule_save()
 
+    def _reorder_cast_cards(self):
+        """按 ``_cast_cards`` 的顺序重排已有卡片（只动 pack 顺序，不重建控件）。"""
+        for state in self._cast_cards:
+            state["frame"].pack_forget()
+        for state in self._cast_cards:
+            state["frame"].pack(fill='x', pady=4)
+
     def _delete_cast_member(self, state):
-        members = self.collect_cast()
         index = self._cast_state_index(state)
         if index < 0:
             return
-        del members[index]
-        self._rebuild_cast_cards(members)
+        state["frame"].destroy()
+        del self._cast_cards[index]
+        if not self._cast_cards:
+            self._show_cast_empty_hint()
+        self._update_cast_count()
         self._schedule_save()
 
     def _cast_state_index(self, state) -> int:
@@ -687,7 +723,7 @@ class CharacterPage(ctk.CTkFrame):
             member["call_her"] = state["call_her"].get().strip()
             member["voice"] = state["voice"].get().strip()
             member["background"] = self._box_text(state["background_box"])
-            member["purpose"] = self._box_text(state["purpose_box"])
+            member["purpose"] = state["purpose"].get().strip()
             member["speech"] = state["speech"].get().strip()
             raw.append(member)
         return normalize_cast(raw)
@@ -778,6 +814,20 @@ class CharacterPage(ctk.CTkFrame):
             except Exception:
                 pass
 
+    def update_theme(self, mode=None):
+        """配色切换后给原生 ``tk.Text`` 重新上色（CTk 控件由全局刷新负责）。"""
+        fg = _native_color(SC_TEXT, mode)
+        bg = _native_color(SC_BG, mode)
+        boxes = [getattr(self, "protagonist_background_box", None)]
+        boxes.extend(state["background_box"] for state in self._cast_cards)
+        for box in boxes:
+            if box is None:
+                continue
+            try:
+                box.configure(fg=fg, bg=bg, insertbackground=fg)
+            except Exception:
+                pass
+
     # ---------------- 与编辑器同步 ----------------
     def refresh_from_config(self):
         """方案切换后回填：主角称呼与背景、人物表、语音、演化量摘要与列表。"""
@@ -788,7 +838,7 @@ class CharacterPage(ctk.CTkFrame):
             self._set_box_text(
                 getattr(self, "protagonist_background_box", None),
                 getattr(self.scenario_editor, "protagonist_background", "") or "")
-            self._rebuild_cast_cards(
+            self._sync_cast_cards(
                 list(getattr(self.scenario_editor, "cast", None) or []))
             voice = normalize_voice(getattr(self.scenario_editor, "voice", None))
             self._voice = voice

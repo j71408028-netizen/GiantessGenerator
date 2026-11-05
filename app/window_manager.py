@@ -620,6 +620,7 @@ class MainWindowManager:
         if hasattr(self, 'scenario_editor'):
             self.scenario_editor.evolution_panel.update_theme(mode)
             self.scenario_editor.chapter_trigger_panel.update_theme(mode)
+            self.scenario_editor.character_panel.update_theme(mode)
         if hasattr(self, 'landmark_mgr'):
             self.landmark_mgr.update_theme(mode)
         if hasattr(self, 'quip_card_mgr'):

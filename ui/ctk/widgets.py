@@ -680,6 +680,7 @@ class OptionButton(customtkinter.CTkButton):
         self._variable = variable
         self._option_command = command
         self._values = list(values or [])
+        self._text_colors = text_colors
         self._current = ""
         if variable is not None:
             current = variable.get()
@@ -698,21 +699,25 @@ class OptionButton(customtkinter.CTkButton):
                              WIDGET_TEXT_MUTED if text_color_disabled is None
                              else text_color_disabled),
                          **kwargs)
-        self._dropdown = _TopAnchoredDropdown(
-            attach=self, values=self._values, command=self._pick,
-            text_colors=text_colors,
-            height=popup_height,
-            button_height=28,
+        # 弹层按需构建：每建一个 OptionButton 就配一整张滚动列表的话，卡片成批
+        # 创建时会明显卡顿；这里只记下构造参数，首次展开时再建。
+        self._dropdown = None
+        self._popup_config = {
+            "height": popup_height,
+            "button_height": 28,
             # 弹层宽度与按钮一致（Win11 设置项风格），可用 popup_width 放宽
-            width=popup_width if popup_width is not None else width,
-            fg_color=popup_fg_color or WIDGET_PANEL_BG,
-            button_color=popup_fg_color or WIDGET_PANEL_BG,
-            hover_color=popup_hover_color or WIDGET_HOVER,
-            text_color=popup_text_color or WIDGET_TEXT,
-            scrollbar_button_color=popup_hover_color or WIDGET_HOVER,
-            scrollbar_button_hover_color=popup_border_color or WIDGET_MENU_HOVER,
-            frame_border_color=popup_border_color or WIDGET_MENU_HOVER,
-            frame_border_width=1, justify="left")
+            "width": popup_width if popup_width is not None else width,
+            "fg_color": popup_fg_color or WIDGET_PANEL_BG,
+            "button_color": popup_fg_color or WIDGET_PANEL_BG,
+            "hover_color": popup_hover_color or WIDGET_HOVER,
+            "text_color": popup_text_color or WIDGET_TEXT,
+            "scrollbar_button_color": popup_hover_color or WIDGET_HOVER,
+            "scrollbar_button_hover_color": popup_border_color or WIDGET_MENU_HOVER,
+            "frame_border_color": popup_border_color or WIDGET_MENU_HOVER,
+            "frame_border_width": 1,
+            "justify": "left",
+        }
+        self.bind("<ButtonRelease-1>", self._ensure_dropdown, add="+")
         if variable is not None:
             variable.trace_add(
                 "write", lambda *_a: self.configure(
@@ -736,13 +741,16 @@ class OptionButton(customtkinter.CTkButton):
 
     def configure(self, **kwargs):
         if "text_colors" in kwargs:
-            self._dropdown.configure(text_colors=kwargs.pop("text_colors"))
+            self._text_colors = kwargs.pop("text_colors")
+            if self._dropdown is not None:
+                self._dropdown.configure(text_colors=self._text_colors)
         if "values" in kwargs:
             self._values = list(kwargs.pop("values") or [])
             if self._current not in self._values and self._variable is None:
                 self._current = self._values[0] if self._values else ""
                 self.configure(text=self._current or self._placeholder)
-            self._dropdown.configure(values=self._values)
+            if self._dropdown is not None:
+                self._dropdown.configure(values=self._values)
         return super().configure(**kwargs)
 
     def cget(self, attribute_name):
@@ -751,6 +759,15 @@ class OptionButton(customtkinter.CTkButton):
         return super().cget(attribute_name)
 
     # ── 内部实现 ──
+    def _ensure_dropdown(self, _event=None):
+        """首次点击时构建弹层并展开（之后的点击交给弹层自己的绑定）。"""
+        if self._dropdown is not None or self.cget("state") == "disabled":
+            return
+        self._dropdown = _TopAnchoredDropdown(
+            attach=self, values=self._values, command=self._pick,
+            text_colors=self._text_colors, **self._popup_config)
+        self._dropdown._iconify()
+
     def _pick(self, choice):
         self._current = choice
         if self._variable is not None:
