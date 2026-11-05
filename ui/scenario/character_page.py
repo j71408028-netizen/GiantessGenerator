@@ -27,7 +27,7 @@ from dungeon.audio.speech import (DEFAULT_OTHER_VOICES, DEFAULT_RATE,
                                   edge_tts_available, normalize_voice,
                                   voice_level)
 from dungeon.cast import (CAST_PRONOUNS, DEFAULT_CAST_ROLE,
-                          normalize_cast)
+                          normalize_cast, role_supports)
 from dungeon.coupling import VELUM
 from dungeon.schema import EVOLUTION_OWNER_LABELS, owner_label
 from ui.ctk.dialogs import BaseDialog, DLG_BORDER_STRONG, DLG_PANEL_BG, DLG_TEXT, DLG_TEXT_SOFT
@@ -515,7 +515,7 @@ class CharacterPage(ctk.CTkFrame):
             rail, "删除", lambda s=state: self._delete_cast_member(s),
             danger=True).pack(side='bottom', fill='x')
 
-        # ---- 代词 / 别称 / 称她为 ----
+        # ---- 代词 / 别称 / 称她为（后两项只属于重要角色） ----
         meta = ctk.CTkFrame(body, fg_color="transparent")
         rows["meta"] = meta
         ctk.CTkLabel(meta, text="代词", font=ui_fonts.ui_font(_F_BODY),
@@ -529,15 +529,17 @@ class CharacterPage(ctk.CTkFrame):
             popup_text_color=SC_TITLE, popup_border_color=SC_BORDER_STRONG,
             command=lambda s=state: self._update_cast_count()).pack(
                 side='left', padx=(4, 10))
-        ctk.CTkLabel(meta, text="别称", font=ui_fonts.ui_font(_F_BODY),
+        alias_group = ctk.CTkFrame(meta, fg_color="transparent")
+        state["alias_group"] = alias_group
+        ctk.CTkLabel(alias_group, text="别称", font=ui_fonts.ui_font(_F_BODY),
                      text_color=SC_TITLE).pack(side='left')
-        ctk.CTkEntry(meta, textvariable=state["aliases"], width=92, height=28,
+        ctk.CTkEntry(alias_group, textvariable=state["aliases"], width=92, height=28,
                      font=ui_fonts.ui_font(_F_BODY), text_color=SC_TEXT, fg_color=SC_BG,
                      border_color=SC_BORDER_STRONG).pack(
                          side='left', fill='x', expand=True, padx=(6, 10))
-        ctk.CTkLabel(meta, text="称她为", font=ui_fonts.ui_font(_F_BODY),
+        ctk.CTkLabel(alias_group, text="称她为", font=ui_fonts.ui_font(_F_BODY),
                      text_color=SC_TITLE).pack(side='left')
-        ctk.CTkEntry(meta, textvariable=state["call_her"], width=92, height=28,
+        ctk.CTkEntry(alias_group, textvariable=state["call_her"], width=92, height=28,
                      font=ui_fonts.ui_font(_F_BODY), text_color=SC_TEXT, fg_color=SC_BG,
                      border_color=SC_BORDER_STRONG).pack(
                          side='left', fill='x', expand=True, padx=(6, 0))
@@ -586,19 +588,22 @@ class CharacterPage(ctk.CTkFrame):
         self._layout_cast_card(state)
 
     def _layout_cast_card(self, state):
-        """按定位重排一张人物卡：群像折叠作用 / 说话方式，重要角色展开。"""
+        """按定位重排一张人物卡：两档各显示各的字段（字段表见 ``cast.ROLE_FIELDS``）。"""
         rows = state["rows"]
         for row in rows.values():
             row.pack_forget()
-        is_key = state["role"].get() == ROLE_KEY_LABEL
+        role = ROLE_VALUES.get(state["role"].get(), DEFAULT_CAST_ROLE)
 
         rows["head"].pack(fill='x', pady=(0, 2))
         rows["meta"].pack(fill='x', pady=2)
         rows["voice"].pack(fill='x', pady=2)
-        if is_key:
+        if role_supports(role, "aliases"):
+            state["alias_group"].pack(side='left', fill='x', expand=True)
+        else:
+            state["alias_group"].pack_forget()
+        if role_supports(role, "background"):
             state["detail_button"].pack_forget()
             rows["background"].pack(fill='x', pady=2)
-            rows["speech"].pack(fill='x', pady=2)
         else:
             state["detail_button"].pack(side='right', padx=(6, 0))
             if state["detail_open"]:

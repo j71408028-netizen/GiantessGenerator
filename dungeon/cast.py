@@ -6,6 +6,9 @@
 - 主角：方案级 ``protagonist_title`` + ``protagonist_background``，唯一且视角固定；
 - 配角：本表的 ``key``（完整身份背景）与 ``extra``（作用 / 代词 / 说话方式三条线索）。
 
+两档的字段不同：重要角色写身份背景，群像写作用与说话方式；别称与「称她为」只属于
+重要角色。可用字段见 ``ROLE_FIELDS``。
+
 表里所有描述都是**故事开始时的样子**，不是状态：谁死了、谁反目了不改这里，
 那是 ``StorySummarizer`` 的 facts。同理，首次出场时由 AI 补的线索也不回写配置。
 """
@@ -19,6 +22,13 @@ DEFAULT_CAST_ROLE = "key"
 #: 代词只有这两档参与渲染与音色分池；空串 = 不指定（不分性别，不猜）
 CAST_PRONOUNS = ("", "他", "她")
 
+#: 各档可用的描述字段（``id`` / ``role`` / ``name`` 两档都有，不列）。
+#: 渲染与编辑器共用这张表决定字段的去留。
+ROLE_FIELDS = {
+    "key": ("aliases", "pronoun", "background", "call_her", "voice"),
+    "extra": ("pronoun", "purpose", "speech", "voice"),
+}
+
 #: 重要角色的建议上限。超了不报错，只提示——上限的用途是防提示词被挤爆
 MAX_KEY_MEMBERS = 6
 
@@ -29,6 +39,16 @@ _ALIAS_SEPARATORS = re.compile(r"[、,，;；\s]+")
 def clean_name(value) -> str:
     """去掉说话人标记的 ``@`` 与首尾空白（章节 cast 里两种写法都认）。"""
     return str(value or "").strip().strip("@＠").strip()
+
+
+def role_supports(member_or_role, field: str) -> bool:
+    """这一档是否使用某个描述字段。
+
+    参数可以是成员对象（按它的 ``role``）或 ``role`` 取值本身；缺省按缺省档。
+    """
+    raw = member_or_role.get("role") if isinstance(member_or_role, dict) else member_or_role
+    role = str(raw or DEFAULT_CAST_ROLE).strip().lower()
+    return field in ROLE_FIELDS.get(role, ROLE_FIELDS[DEFAULT_CAST_ROLE])
 
 
 def _clean_list(raw) -> list:
@@ -92,26 +112,28 @@ def find_member(members, key):
 
 
 def _meta_text(member) -> str:
-    """括号里的结构化线索：代词 / 别称 / 她怎么被称呼。"""
+    """括号里的结构化线索：代词；重要角色另有别称与「称她为」。"""
     bits = []
     if member.get("pronoun"):
         bits.append(member["pronoun"])
-    aliases = [a for a in (member.get("aliases") or ()) if a != member.get("name")]
-    if aliases:
-        bits.append("也称「" + "」「".join(aliases) + "」")
-    if member.get("call_her"):
-        bits.append(f"称她为「{member['call_her']}」")
+    if role_supports(member, "aliases"):
+        aliases = [a for a in (member.get("aliases") or ()) if a != member.get("name")]
+        if aliases:
+            bits.append("也称「" + "」「".join(aliases) + "」")
+        if member.get("call_her"):
+            bits.append(f"称她为「{member['call_her']}」")
     return "（" + "；".join(bits) + "）" if bits else ""
 
 
 def intro_line(member) -> str:
     """一个成员的首次出场设定行；没有可渲染内容时返回空串（交给 AI 定）。
 
-    ``key`` 渲染 ``background``，``extra`` 渲染 ``purpose``；两者的 ``speech`` 都追加在后面。
+    重要角色渲染 ``background``，群像渲染 ``purpose`` 与 ``speech``。
     """
-    body = member.get("background") if member.get("role") == "key" else member.get("purpose")
-    body = str(body or "").strip()
-    speech = str(member.get("speech") or "").strip()
+    body_field = "background" if role_supports(member, "background") else "purpose"
+    body = str(member.get(body_field) or "").strip()
+    speech = (str(member.get("speech") or "").strip()
+              if role_supports(member, "speech") else "")
     if not body and not speech:
         return ""
     line = f"{member.get('name', '')}{_meta_text(member)}"
@@ -155,7 +177,8 @@ def render_first_seen(members) -> str:
 
 
 __all__ = [
-    "CAST_ROLES", "DEFAULT_CAST_ROLE", "CAST_PRONOUNS", "MAX_KEY_MEMBERS",
-    "clean_name", "normalize_member", "normalize_cast", "member_names",
-    "find_member", "intro_line", "render_first_seen",
+    "CAST_ROLES", "DEFAULT_CAST_ROLE", "CAST_PRONOUNS", "ROLE_FIELDS",
+    "MAX_KEY_MEMBERS", "clean_name", "role_supports", "normalize_member",
+    "normalize_cast", "member_names", "find_member", "intro_line",
+    "render_first_seen",
 ]

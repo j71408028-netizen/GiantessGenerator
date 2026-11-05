@@ -8,7 +8,7 @@
    的系统提示词、用户提示词逐字一致——这是兼容性红线的第一条断言；
 2. 在场行只认章节 ``cast`` 声明，未声明就不写；
 3. 首次出场块只出现一次，第二次只剩名字；
-4. ``key`` 渲染 background、``extra`` 渲染 purpose，两者的 speech 都追加；
+4. 字段按定位取用：``key`` 渲染 background 与别称 / 称她为、``extra`` 渲染 purpose 与 speech；
 5. 三条线索全空的成员交给 AI 定，不回写配置；
 6. 归一化（别称串 / id 缺省 / 非法 role / 章节 cast 的 @ 与分隔符）；
 7. 校验器：重名撞车、非法代词、章节 cast 指向不存在的成员。
@@ -122,8 +122,9 @@ check("首次出场块渲染 key 的 background 与结构化线索",
       "【人物（故事开始时的设定）】" in _first
       and "本地消防中队长" in _first
       and "也称「李队」「队长」" in _first
-      and "称她为「姑娘」" in _first
-      and "说话：短句、命令口吻" in _first, _first[:500])
+      and "称她为「姑娘」" in _first, _first[:500])
+check("重要角色不渲染说话方式（这一栏只属于群像）",
+      "短句、命令口吻" not in _first, _first[:500])
 check("未声明的成员一个字都不进提示词", "王店主" not in _first)
 check("框定语说明这是起点", "起点不是现状" in _first)
 check("在场约束只许到场者说话", "只让主角与到场的角色说话和行动" in _first)
@@ -143,6 +144,32 @@ _extra_prompt = user_prompt(_wang_only)
 check("群像渲染作用与说话方式（不渲染 background）",
       "表现城区的物资已经见底" in _extra_prompt
       and "说话：絮叨，反复讲价钱" in _extra_prompt)
+
+_extra_full = cast.normalize_member({
+    "name": "王店主", "role": "extra", "aliases": ["王老板"], "pronoun": "他",
+    "call_her": "姑娘", "purpose": "表现城区的物资已经见底",
+})
+_extra_full_prompt = user_prompt(make_session(
+    cast_members=[_extra_full], chapters=[{"name": "城里", "cast": ["王店主"]}]))
+check("群像不渲染别称与「称她为」（这两栏只属于重要角色）",
+      "王老板" not in _extra_full_prompt
+      and "姑娘" not in _extra_full_prompt, _extra_full_prompt[:400])
+
+check("字段归属：重要角色没有说话方式，群像没有别称 / 称她为",
+      cast.role_supports("key", "speech") is False
+      and cast.role_supports("extra", "speech") is True
+      and cast.role_supports("extra", "aliases") is False
+      and cast.role_supports("extra", "call_her") is False
+      and cast.role_supports("key", "background") is True
+      and cast.role_supports("key", "aliases") is True)
+
+_speech_only = cast.normalize_member({
+    "name": "赵司机", "role": "key", "speech": "说话很冲"})
+_speech_only_prompt = user_prompt(make_session(
+    cast_members=[_speech_only], chapters=[{"name": "城里", "cast": ["赵司机"]}]))
+check("重要角色只填了说话方式：当作没填，交给 AI 定",
+      "【本段首次出场】赵司机" in _speech_only_prompt
+      and "说话很冲" not in _speech_only_prompt, _speech_only_prompt[:400])
 
 _blank = cast.normalize_member({"name": "赵司机", "role": "extra"})
 _blank_session = make_session(cast_members=[_blank],

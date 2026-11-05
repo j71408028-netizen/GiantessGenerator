@@ -373,16 +373,15 @@ def _validate_cast(raw, add) -> None:
         if len(member["background"]) > _MAX_BACKGROUND:
             add("warning", path + ".background",
                 f"身份背景 {len(member['background'])} 字，超过建议上限 {_MAX_BACKGROUND}")
-        for field, label in (("purpose", "作用"), ("speech", "说话方式")):
-            if len(member[field]) > _MAX_LINE_NOTE:
-                add("warning", f"{path}.{field}",
-                    f"{label} {len(member[field])} 字，超过建议上限 {_MAX_LINE_NOTE}"
-                    "（这一行只在首次出场时出现一次）")
+        if cast_mod.role_supports(member, "purpose"):
+            for field, label in (("purpose", "作用"), ("speech", "说话方式")):
+                if len(member[field]) > _MAX_LINE_NOTE:
+                    add("warning", f"{path}.{field}",
+                        f"{label} {len(member[field])} 字，超过建议上限 {_MAX_LINE_NOTE}"
+                        "（这一行只在首次出场时出现一次）")
         if member["role"] == "key" and not member["background"]:
-            if member["purpose"] or member["speech"]:
-                add("info", path,
-                    "重要角色只填了作用 / 说话方式，没有身份背景："
-                    "首次出场块会比预期短")
+            add("info", path,
+                "重要角色没有身份背景：首次出场只会给出称呼，其余由 AI 当场定")
     if key_count > cast_mod.MAX_KEY_MEMBERS:
         add("info", "cast",
             f"重要角色 {key_count} 个（建议不超过 {cast_mod.MAX_KEY_MEMBERS}）："
