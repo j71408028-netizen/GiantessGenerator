@@ -27,7 +27,7 @@
 - `Dungeon` 是产品/功能名，不是上述概念的父类；`dungeon/` 目录同时放 Scenario 与 Run 的领域模块，是当前包结构，不代表包含关系。
 
 > **为什么暂时不改包名**：`dungeon.window.minigame` 是小游戏作者的公开导入路径
-> （`data/packs/minigames/*/game.py`、[小游戏框架](../designs/minigame.md)），且
+> （`data/packs/minigames/*/game.py`、[小游戏框架](../designs/dungeon/minigame.md)），且
 > `dungeon_*` 已散布在 UI / 设置 / 脚本里。术语澄清不需要包改名；将来若按引擎拆分，
 > 必须保留旧路径的兼容 shim。
 

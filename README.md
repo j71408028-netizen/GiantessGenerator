@@ -174,7 +174,7 @@ data/
 | 取材表           | 一个目录含姓名、身材、性格、新闻四张 .csv，缺的成员自动回落到内置 default 组 | 无程序内编辑器；推荐使用 Excel                        |
 | 世界包           | 把资源包 + 取材表打成一个可一键激活的 `<world_id>.world.zip`，激活期间接管各数据源 | [世界包行为包开发指南](docs/designs/behaviors/dev-guide.md) |
 | 行为包           | 世界包可选携带的 Python 代码包，激活期间覆盖核心算法                         | [世界包行为包开发指南](docs/designs/behaviors/dev-guide.md) |
-| 副本小游戏         | `mini_game` 触发器的运行时与作者 API                             | [小游戏框架](docs/designs/minigame.md)          |
+| 副本小游戏         | `mini_game` 触发器的运行时与作者 API                             | [小游戏框架](docs/designs/dungeon/minigame.md)          |
 | 挑战包           | 把角色与资源打包成秘钥保护的加密 `.chal`，玩家在挑战模式中达成副本结局                | 程序内「挑战模式」打包                                |
 | 世界地址          | 为你的世界申领注册表地址，供地标 / 描述风格跨世界引用                           | [地址系统作者指南](docs/designs/address-system/authoring.md)         |
 
@@ -227,7 +227,7 @@ data/
 
 - [世界包行为包开发指南](docs/designs/behaviors/dev-guide.md)：行为包的开发流程、注册 API 与可覆盖目标
 - [地址系统作者指南](docs/designs/address-system/authoring.md)：地标 / 描述风格的地址申领、注册与匹配规则
-- [副本文档索引](docs/Dungeon/README.md)：`docs/Dungeon/` 副本开发文档的入口与「按任务查」表（写方案从[数据模型](docs/Dungeon/script.md)进；小游戏框架见 [docs/designs/minigame.md](docs/designs/minigame.md)）
+- [副本文档索引](docs/Dungeon/README.md)：`docs/Dungeon/` 副本开发文档的入口与「按任务查」表（写方案从[数据模型](docs/designs/dungeon/script.md)进；小游戏框架见 [docs/designs/dungeon/minigame.md](docs/designs/dungeon/minigame.md)）
 
 **开发与架构**
 

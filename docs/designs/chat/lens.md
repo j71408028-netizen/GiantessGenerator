@@ -7,7 +7,7 @@
 > 这是**调整后的设计**（2026-10-27 落地）。类型本身的坐标、半径、语气与信息
 > 视角定义在 `services/chat/topic_kinds.py` 的 `TopicKind`（**一个话题一条**）；
 > 字段目录、预算裁剪与渲染在 `services/chat/topic_lens.py`。话题的候选排序、
-> 状态机仍看 [`chat_topics.md`](chat_topics.md)，本篇讲"类型 → 信息"这一层。
+> 状态机仍看 [`chat_topics.md`](README.md)，本篇讲"类型 → 信息"这一层。
 
 一句话：**类型管两件事——这一刻该聊什么（坐标/候选），以及这一刻你被允许
 知道什么（视角/字段/预算）**。存档不再是每轮全量塞进系统提示词的背景板。
@@ -332,7 +332,7 @@ reset_topic_kinds()          # 还原代码里的默认表
 
 ## 相关
 
-- 话题类型的坐标、候选、状态机与关系认知：[`chat_topics.md`](chat_topics.md)
-- 消息生命周期、协议解析、投递节奏：[`../dev/chat_delivery.md`](../dev/chat_delivery.md)
+- 话题类型的坐标、候选、状态机与关系认知：[`chat_topics.md`](README.md)
+- 消息生命周期、协议解析、投递节奏：[`../dev/chat_delivery.md`（实现细节在 `docs/dev/chat_delivery.md`）
 - 完整人设（报告 / 导出用）：`services/chat/persona.py` 的 `build_character_persona`
-- 演化坐标与不适应性：[`character_evolution.md`](character_evolution.md)
+- 演化坐标与不适应性：[`character_evolution.md`](../character_evolution.md)

@@ -20,9 +20,8 @@ SKIP = {'.git', 'build', 'dist', '__pycache__', '.workbuddy'}
 VIRTUALENV_PREFIXES = ('.venv', 'venv')
 LINK = re.compile(r'\]\(([^)\s]+?)(?:\s+"[^"]*")?\)')
 PATHISH = re.compile(r'docs/[\w/\-]+\.md')
-#: 只许内部互链（链接目标必须落在 designs/ 里）的目录；全组收口后应覆盖整个 designs/
+#: designs/ 组的边界：组内文档只许内部互链（见下方守卫逻辑）
 DESIGN_ROOT = ROOT / 'docs' / 'designs'
-DESIGN_BOUNDED = {DESIGN_ROOT / 'dungeon'}
 
 
 def _resolve_exact(start: pathlib.Path, target: str) -> str | None:
@@ -68,14 +67,13 @@ for p in ROOT.rglob('*.md'):
             if why:
                 bad.append(f'{p.relative_to(ROOT)}:{i} 链接失效 -> {t}（{why}）')
                 continue
-            # designs/dungeon/ 的边界：只允许指向 designs/ 内部（含 designs/ 顶层
-            # 与兄弟机制目录）。外部一律以纯文本路径出现，不放链接——副本机制文档
-            # 是 designs 的产物，Dungeon 开发文档反过来改时不应牵动这一组。
-            # 其余 designs/ 文档暂不收口（待各自整理时加入 DESIGN_BOUNDED）。
-            if p.parent in DESIGN_BOUNDED:
+            # designs/ 组「不外指」：组内文档（含子目录）的链接目标必须仍落在
+            # designs/ 里；外部的开发文档、工具说明一律以纯文本路径出现，不放链接。
+            # 依赖方向是单向的——外部文档指向 designs/，机制文档不反过来牵动它们。
+            if DESIGN_ROOT in p.parents:
                 resolved = (p.parent / t.split('#')[0]).resolve()
                 if DESIGN_ROOT not in resolved.parents:
-                    bad.append(f'{p.relative_to(ROOT)}:{i} designs/dungeon 外指链接 -> {t}')
+                    bad.append(f'{p.relative_to(ROOT)}:{i} designs 外指链接 -> {t}')
         # 代码/文档里以字符串写死的 docs 路径
         for m in PATHISH.finditer(line):
             why = _resolve_exact(ROOT, m.group(0))
