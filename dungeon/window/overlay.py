@@ -1,10 +1,12 @@
 """窗口级覆盖层服务：文本主组件（及键位）可调出的模态浮层。
 
 服务面（组件经 ctx 调用）：
-- ``ctx.toggle_overlay(name)``  调出/关闭覆盖层（``"log"`` 对话记录 / ``"settings"`` 副本设置）
+- ``ctx.toggle_overlay(name)``  调出/关闭覆盖层（``"log"`` 对话记录 /
+  ``"settings"`` 副本设置 / ``"characters"`` 人物档案）
 - ``ctx.close_overlay()``       关闭当前覆盖层
 - ``ctx.overlay_open()``        查询当前覆盖层名（None = 无覆盖层）
 - ``ctx.toggle_settings()``     直接调出/关闭副本设置面板（O 键 / 工具条按钮入口）
+- ``ctx.toggle_characters()``   直接调出/关闭人物档案（C 键 / 工具条按钮入口）
 - ``ctx.component(cid)``        只读访问兄弟组件实例
 
 覆盖层打开期间窗口进入「阅读模态」：点击只关闭覆盖层、不推进剧情。
@@ -23,6 +25,8 @@ from imgui_bundle import imgui
 
 from dungeon import settings as dungeon_settings
 from dungeon.audio import buses
+from dungeon.characters import (IDENTITY_TEMPORARY, CharacterLedger,
+                                PRESENCE_MENTIONED, PRESENCE_PRESENT)
 from dungeon.window import imgui_util as iu
 from dungeon.window.ui import _panel_flags
 
@@ -58,6 +62,12 @@ _SETTINGS_PANEL_W = 560
 #: 这里只决定卡片大致落在屏幕中部）。
 _SETTINGS_PANEL_H = 330
 
+# ---------- 人物档案（运行期只读视图 + 手动合并） ----------
+_CHARACTER_PANEL = "##dungeon_characters"
+_CHARACTER_PANEL_W = 640
+_CHARACTER_PANEL_H = 420
+_CHARACTER_ROLE_LABELS = {"key": "重要角色", "extra": "群像"}
+
 
 class OverlayHandler:
     """覆盖层服务：模态浮层的状态与立即模式绘制。"""
@@ -73,7 +83,7 @@ class OverlayHandler:
             self.close_overlay()
             return
         self.close_overlay()
-        if name in ("log", "settings"):
+        if name in ("log", "settings", "characters"):
             self._overlay_name = name
         else:
             self._notify(f"未知覆盖层：{name}")
@@ -95,6 +105,17 @@ class OverlayHandler:
             return
         self.toggle_overlay("settings")
 
+    def toggle_characters(self):
+        """调出/关闭运行期人物档案（C 键 / 工具条按钮入口）。"""
+        if getattr(self, "_is_entry_phase", False) or getattr(self, "_closing", False):
+            return
+        if getattr(self, "_mini_game_stage", None) is not None:
+            return
+        if getattr(self, "pending_option", None) is not None:
+            self._notify("请先处理当前选项")
+            return
+        self.toggle_overlay("characters")
+
     def component(self, cid):
         for comp in getattr(self, "_components", []):
             if comp.id == cid:
@@ -110,6 +131,11 @@ class OverlayHandler:
     def _on_settings_key(self, sender=None, app_data=None):
         self.toggle_settings()
 
+    def _on_characters_key(self, sender=None, app_data=None):
+        if getattr(self, "_is_entry_phase", False) or self._closing:
+            return
+        self.toggle_characters()
+
     def _on_escape_key(self, sender=None, app_data=None):
         if getattr(self, "_mini_game_stage", None) is not None:
             self._minigame_escape()
@@ -122,13 +148,17 @@ class OverlayHandler:
         """根窗口内的覆盖层部分（遮罩；对话记录整块都在这里）。"""
         if self.overlay_open() == "settings":
             self._draw_settings_scrim(w, h)
+        elif self.overlay_open() == "characters":
+            self._draw_settings_scrim(w, h)
         else:
             self._draw_log_overlay(w, h)
 
     def _draw_overlay_top(self, w, h):
-        """根窗口 ``end()`` 之后的顶层覆盖层窗口（副本设置面板）。"""
+        """根窗口 ``end()`` 之后的顶层覆盖层窗口（设置 / 人物档案）。"""
         if self.overlay_open() == "settings":
             self._draw_settings_panel(w, h)
+        elif self.overlay_open() == "characters":
+            self._draw_characters_panel(w, h)
 
     def _draw_log_overlay(self, w, h):
         """对话记录覆盖层：半透明遮罩 + 居中面板 + 历史段落。"""
@@ -354,6 +384,151 @@ class OverlayHandler:
         imgui.end()
         self._pop_settings_style()
         imgui.pop_font()
+
+    def _draw_characters_panel(self, w, h):
+        """运行期人物档案：在场 / 最近离开两档，只读为主。
+
+        临时称呼可以手动合并到已有角色——这是 AI 认错人时唯一的可靠兜底；
+        面板不提供「编辑设定」入口，运行期改设定会破坏方案跨局复用。
+        """
+        s = max(0.5, float(getattr(self, "_dpi_scale", 1.0) or 1.0))
+        margin = float(round(24 * s))
+        pad = float(round(16 * s))
+        panel_w = min(float(round(_CHARACTER_PANEL_W * s)),
+                      max(320.0, w - 2 * margin))
+        panel_h = min(float(round(_CHARACTER_PANEL_H * s)),
+                      max(260.0, h - 2 * margin))
+        x = max(0.0, (w - panel_w) / 2.0)
+        y = max(margin, (h - panel_h) / 2.0)
+
+        self._push_ui_font()
+        self._push_settings_style()
+        imgui.set_next_window_pos(iu.v2(x, y))
+        imgui.set_next_window_size(iu.v2(panel_w, panel_h),
+                                   imgui.Cond_.first_use_ever.value)
+        imgui.begin(_CHARACTER_PANEL, None,
+                    _panel_flags()
+                    | imgui.WindowFlags_.no_saved_settings.value)
+        inner_w = max(120.0, panel_w - 2 * pad)
+
+        imgui.push_style_color(imgui.Col_.text, iu.u32(*_SETTINGS_TITLE))
+        imgui.text("人物档案")
+        imgui.pop_style_color()
+        imgui.same_line()
+        imgui.push_style_color(imgui.Col_.text, iu.u32(*_SETTINGS_HINT))
+        imgui.text("　C / ESC 关闭")
+        imgui.pop_style_color()
+        imgui.separator()
+
+        ledger = getattr(self, "characters", None)
+        if not isinstance(ledger, CharacterLedger):
+            imgui.push_style_color(imgui.Col_.text, iu.u32(*_SETTINGS_HINT))
+            imgui.text("本局还没有角色账本")
+            imgui.pop_style_color()
+        else:
+            present, left = ledger.roster_sections()
+            imgui.begin_child("##dungeon_characters_scroll",
+                              iu.v2(inner_w, max(80.0, panel_h - 96 * s)),
+                              imgui.ChildFlags_.none.value,
+                              imgui.WindowFlags_.none.value)
+            self._settings_section("在场")
+            if not present:
+                imgui.push_style_color(imgui.Col_.text, iu.u32(*_SETTINGS_HINT))
+                imgui.text("暂无")
+                imgui.pop_style_color()
+            for rc in present:
+                self._draw_character_row(ledger, rc, inline=True)
+            imgui.spacing()
+            self._settings_section("最近离开")
+            if not left:
+                imgui.push_style_color(imgui.Col_.text, iu.u32(*_SETTINGS_HINT))
+                imgui.text("暂无")
+                imgui.pop_style_color()
+            for rc in left:
+                self._draw_character_row(ledger, rc, inline=False)
+            imgui.end_child()
+
+        imgui.spacing()
+        if imgui.button("关闭", iu.v2(inner_w, float(round(32 * s)))):
+            self.close_overlay()
+        self._overlay_rect = (x, y, panel_w, panel_h)
+        self._overlay_drawn = True
+        imgui.end()
+        self._pop_settings_style()
+        imgui.pop_font()
+
+    def _draw_character_row(self, ledger, rc, inline=True):
+        """一条角色：名字 + 身份状态 + 最近出现；展开后是别名 / 特征 / 关系。"""
+        label = _CHARACTER_ROLE_LABELS.get(rc.role, rc.role)
+        if rc.role == "key":
+            status = ("临时称呼 · 未揭示"
+                      if rc.status == IDENTITY_TEMPORARY else "已揭示")
+        else:
+            status = "群像"
+        presence = ("在场" if rc.presence == PRESENCE_PRESENT
+                    else ("被提起" if rc.presence == PRESENCE_MENTIONED else "离开"))
+        imgui.push_style_color(imgui.Col_.text, iu.u32(*_SETTINGS_TITLE))
+        imgui.text(rc.display_name)
+        imgui.pop_style_color()
+        imgui.same_line()
+        imgui.push_style_color(imgui.Col_.text, iu.u32(*_SETTINGS_HINT))
+        imgui.text(f"{label} · {status} · {presence}")
+        recent = rc.last_seen_chapter or "未知章节"
+        if rc.last_seen_step:
+            recent += f" · 第 {rc.last_seen_step} 段"
+        imgui.text(f"最近：{recent}")
+        imgui.pop_style_color()
+
+        if imgui.collapsing_header(f"详情##char_detail_{rc.id}"):
+            details = []
+            if rc.aka:
+                details.append("别名：" + "、".join(rc.aka))
+            if rc.traits:
+                details.append("特征：" + "、".join(rc.traits))
+            if rc.relation:
+                details.append("关系：" + rc.relation)
+            if rc.voice:
+                details.append("音色：" + rc.voice)
+            if rc.first_seen_step:
+                details.append(f"首次出场：第 {rc.first_seen_step} 段")
+            if details:
+                imgui.push_style_color(imgui.Col_.text, iu.u32(*_SETTINGS_LABEL))
+                for line in details:
+                    imgui.text_wrapped(line)
+                imgui.pop_style_color()
+            else:
+                imgui.push_style_color(imgui.Col_.text, iu.u32(*_SETTINGS_HINT))
+                imgui.text("暂无更多记录")
+                imgui.pop_style_color()
+
+        if inline and rc.role == "key" and rc.status == IDENTITY_TEMPORARY:
+            targets = [other for other in ledger
+                       if other.role == "key" and other.id != rc.id
+                       and not (rc.source == "authored"
+                                and other.source == "authored")]
+            if targets:
+                selected = getattr(self, "_character_merge_target", None) or {}
+                current = selected.get(rc.id)
+                target = next((t for t in targets if t.id == current), targets[0])
+                preview = f"合并到 {target.display_name}"
+                imgui.set_next_item_width(200)
+                if imgui.begin_combo(f"##char_merge_{rc.id}", preview):
+                    for option in targets:
+                        chosen = imgui.selectable(
+                            f"{option.display_name}##char_merge_item_{rc.id}_{option.id}",
+                            option.id == target.id)
+                        if chosen:
+                            selected[rc.id] = option.id
+                            target = option
+                    imgui.end_combo()
+                    self._character_merge_target = selected
+                imgui.same_line()
+                if imgui.button(f"确认合并##char_merge_btn_{rc.id}"):
+                    if ledger.merge(rc.id, target.id):
+                        self._notify(f"已合并到「{target.display_name}」")
+                        self._character_merge_target = {
+                            k: v for k, v in selected.items() if k != rc.id}
+        imgui.separator()
 
     def _point_in_overlay(self):
         """鼠标是否落在当前覆盖层面板内（设置卡片用）。"""

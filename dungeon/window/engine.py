@@ -7,7 +7,9 @@ import time
 from dungeon import process_log
 from dungeon import script_text
 from dungeon.audio.chapters import find_chapter, is_terminating_chapter, overflow_jump_target
-from dungeon.details import build_detail_query_prompt, parse_detail_queries
+from dungeon.characters import CharacterLedger
+from dungeon.details import (build_detail_query_prompt, parse_character_updates,
+                             parse_detail_queries)
 from dungeon.models import DungeonTextType
 from dungeon.response import canonical_history_entry, extract_stream_text, parse_final_json
 from dungeon.splitter import (split_full_text, split_stream_units,
@@ -209,6 +211,8 @@ class DungeonStoryEngine:
                 if step_override is not None:
                     step_info["ending_chapter"] = True
 
+                self._observe_characters(final_units, clean_text,
+                                         step_info["step"])
                 self._apply_prompted_unlocks(
                     clean_text, turn.effects.prompted_parts)
                 self._finish_step(next_type, clean_text, step_info, check_unlock=True)
@@ -216,8 +220,9 @@ class DungeonStoryEngine:
                 # 否则真流式下若首句比队列长，游标会继续按 30 字/秒慢慢爬，
                 # 玩家点「生成下一段」时被 _try_advance_paragraph 拦在 ②。
                 self._reveal_snap(current_item)
-                # 细节探究：立即在后台询问 AI 想了解的细节，下次生成前解答
-                self._start_detail_query(clean_text)
+                # 细节探究：立即在后台询问 AI 想了解的细节，下次生成前解答；
+                # 同一次调用搭车抽取角色状态（不增加请求次数）
+                self._start_detail_query(clean_text, step_info["step"])
                 success = True
 
             except Exception as e:
@@ -236,6 +241,33 @@ class DungeonStoryEngine:
                     self._maybe_pregen_next()
 
         threading.Thread(target=task, daemon=True).start()
+
+    def _observe_characters(self, units, text, step):
+        """把本段落里的说话人 / 点名登记进运行期账本（确定性通道）。
+
+        未知的 ``@X@`` 建临时角色；正文点名的已知角色记为「被提起」；
+        连续两段出现升级为「在场」。只在回合成功后调用，构建提示词不写账本。
+        """
+        ledger = getattr(self, "characters", None)
+        if not isinstance(ledger, CharacterLedger):
+            return
+        chapter = str(getattr(self, "current_chapter", "") or "")
+        ledger.decay(step)
+        ledger.note_mentions(text, step=step, chapter=chapter)
+        for unit in units or ():
+            speaker = getattr(unit, "speaker", None)
+            if speaker:
+                ledger.observe_speaker(speaker, step=step, chapter=chapter)
+
+    def _apply_character_updates(self, updates, text, step, chapter):
+        """吸收细节探究搭车抽取的角色状态（主线程执行）。"""
+        ledger = getattr(self, "characters", None)
+        if not isinstance(ledger, CharacterLedger) or self._closing:
+            return
+        changed = ledger.apply_updates(updates, text=text, step=step,
+                                       chapter=chapter)
+        if changed:
+            process_log.log(f"[Characters] 吸收 {changed} 个角色更新")
 
     # ---------- 固定文本章节（章节字段 fixed_text） ----------
     def _advance_script(self):
@@ -411,10 +443,11 @@ class DungeonStoryEngine:
             self._enter_chapter(target, record=True)
 
     # ---------- 细节探究 ----------
-    def _start_detail_query(self, paragraph_text):
+    def _start_detail_query(self, paragraph_text, step=None):
         """流式输出完成后立即在后台询问 AI 想了解的细节。
 
-        结果存入 ``_detail_queries``，由 ``build_turn`` 在下一次生成前检索
+        同一请求搭车抽取角色更新（``characters``）；结果存入
+        ``_detail_queries`` / 角色账本，由 ``build_turn`` 在下一次生成前检索
         回放缓存解答、``commit_turn`` 在成功后消费。与正常生成互不阻塞。
         """
         if self._in_fixed_text_chapter():
@@ -425,6 +458,7 @@ class DungeonStoryEngine:
         if client is None or self._closing:
             return
         self._detail_querying = True
+        chapter = str(getattr(self, "current_chapter", "") or "")
 
         def run():
             try:
@@ -433,14 +467,20 @@ class DungeonStoryEngine:
                           if isinstance(e, dict) and e.get("text")]
                 messages = build_detail_query_prompt(
                     paragraph_text, recent_texts=recent,
-                    chapter_name=getattr(self, "current_chapter", "") or "",
+                    chapter_name=chapter,
                     coupling_level=getattr(self, "coupling_level", None))
                 raw = client.generate(messages, temperature=0.5)
                 queries = parse_detail_queries(raw)
+                updates = parse_character_updates(raw)
                 if not self._closing:
                     self._detail_queries = queries
                     if queries:
                         process_log.log(f"[DetailQuery] 想了解的细节: {queries}")
+                    if updates:
+                        # 账本只在主线程改：后台线程把结果投递回帧时钟
+                        self._frame.call(
+                            self._apply_character_updates,
+                            updates, paragraph_text, step, chapter)
             except Exception as e:
                 process_log.log(f"[DetailQuery] 细节提问失败: {e}")
             finally:

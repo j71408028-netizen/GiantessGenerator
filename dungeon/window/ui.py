@@ -1277,6 +1277,8 @@ class DungeonWindowUI:
             self._on_autoplay_hotkey()
         if imgui.is_key_pressed(key.o):
             self._on_settings_key()
+        if imgui.is_key_pressed(key.c):
+            self._on_characters_key()
         if imgui.is_key_pressed(key.escape):
             self._on_escape_key()
         if (imgui.is_key_pressed(key.space) or imgui.is_key_pressed(key.enter)
@@ -1294,9 +1296,10 @@ class DungeonWindowUI:
         if self._component_toolbar_hovered():
             return
         if self.overlay_open():
-            # 阅读模态：点击只关闭覆盖层，不推进剧情。设置面板是可交互卡片，
-            # 点在面板内（空白处或控件外）不算「点击外部」，不关闭。
-            if not (self.overlay_open() == "settings" and self._point_in_overlay()):
+            # 阅读模态：点击只关闭覆盖层，不推进剧情。设置 / 人物档案是可交互
+            # 卡片，点在面板内（空白处或控件外）不算「点击外部」，不关闭。
+            if not (self.overlay_open() in ("settings", "characters")
+                    and self._point_in_overlay()):
                 self.close_overlay()
             return
         self._on_next_step()

@@ -92,6 +92,17 @@ def _shape_log(u, v):
     return 0.0
 
 
+def _shape_person(u, v):
+    """人物档案：头（圆）+ 肩（梯形）。"""
+    du, dv = u - 0.5, v - 0.30
+    if du * du + dv * dv <= 0.15 ** 2:
+        return 1.0
+    if 0.48 <= v <= 0.86:
+        half = 0.12 + 0.28 * (v - 0.48) / 0.38
+        return 1.0 if abs(u - 0.5) <= half else 0.0
+    return 0.0
+
+
 def _shape_gear(u, v):
     """齿轮（设置）：带齿外圈 + 中心圆孔。"""
     du, dv = u - 0.5, v - 0.5
@@ -107,7 +118,7 @@ def _shape_gear(u, v):
 #: 工具条图标形状函数（归一化 uv → 0~1 不透明度）。与旧 DPG 组件包同一套
 #: 形状，P4 迁移组件包时从这里取，避免两处漂移。
 ICON_SHAPES = {"play": _shape_play, "camera": _shape_camera, "log": _shape_log,
-               "settings": _shape_gear}
+               "person": _shape_person, "settings": _shape_gear}
 
 
 def icon_rgba(shape, size):

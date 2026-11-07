@@ -21,17 +21,19 @@ _BLINK_SECONDS = 0.65
 #: 正文 / 底部卡片的最大可读宽度（逻辑点）：大屏上不再随窗口无限拉长。
 _MAX_TEXT_WIDTH = 1280
 
-# 文本组件共享的悬浮工具条（自动播放 / 截图 / 日志面板 / 副本设置）。
+# 文本组件共享的悬浮工具条（自动播放 / 截图 / 日志 / 人物档案 / 副本设置）。
 _TOOLBAR_ACTIONS = (
     ("autoplay", "play", "自动播放（A）"),
     ("screenshot", "camera", "截图（F2）"),
     ("proclog", "log", "过程日志面板（F12）"),
+    ("characters", "person", "人物档案（C）"),
     ("settings", "settings", "副本设置（O）"),
 )
 _TOOLBAR_HANDLERS = {
     "autoplay": "toggle_autoplay",
     "screenshot": "take_screenshot",
     "proclog": "toggle_proc_log",
+    "characters": "toggle_characters",
     "settings": "toggle_settings",
 }
 _TOOLBAR_MARGIN = 12
