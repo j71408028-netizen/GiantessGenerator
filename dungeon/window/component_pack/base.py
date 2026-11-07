@@ -168,12 +168,17 @@ class _TextDisplayBase(DungeonComponent):
             for idx, item in enumerate(items):
                 newest = idx == total - 1
                 alpha = 1.0 if newest else _OLD_LINE_ALPHA
+                # 换行会把游标 x 弹回窗口内容起点（WindowPadding.x，根窗口为 0），
+                # 只钉一次的话标签行之后的正文、以及后续段落都会漂到最左——
+                # 每行开画前都重钉到正文列左缘，y 用游标现值（含行距）不变。
+                imgui.set_cursor_pos(iu.v2(x, imgui.get_cursor_pos().y))
                 label = str(item.get("speaker") or "").strip()
                 if label:
                     label = label_fmt.format(label=label) if label_fmt else label
                     imgui.push_style_color(imgui.Col_.text, iu.u32(*_dim(label_color, alpha)))
                     imgui.text(label)
                     imgui.pop_style_color()
+                    imgui.set_cursor_pos(iu.v2(x, imgui.get_cursor_pos().y))
                 body = highlight_color if item.get("highlight") else text_color
                 imgui.push_style_color(imgui.Col_.text, iu.u32(*_dim(body, alpha)))
                 imgui.push_text_wrap_pos(float(wrap_x))
