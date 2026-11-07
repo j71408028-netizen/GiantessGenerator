@@ -11,11 +11,26 @@
 import json
 import re
 
+from .cast import clean_name
+
 MAX_QUERIES = 3
 QUERY_CHARS = 24
 MATCH_CLIP_CHARS = 80
 # 二元组含这些字时区分度过低，不作为检索关键词
 _STOP_CHARS = "的了是在吗呢吧么啊"
+#: 角色抽取搭车：不增加调用次数，只扩展同一次细节提问的返回格式
+CHARACTER_UPDATE_HINT = (
+    "另外，如果本段出现了值得继续追踪的角色，把它们放进 characters 数组："
+    '[{"handle": "正文里实际出现的称呼", "true_name": "", "pronoun": "他/她/空", '
+    '"traits": ["特征", "近况"], "relation": "与她的关系", '
+    '"status": "temporary"}]。真名尚未揭示时 true_name 留空；正文明确揭示真名时'
+    ' status 写 "revealed" 并填 true_name。没有可登记的角色就输出空数组。'
+)
+#: 角色抽取的有界字段（与 CharacterLedger 的上限保持一致）
+CHARACTER_HANDLE_CHARS = 16
+CHARACTER_TRAIT_CHARS = 40
+CHARACTER_RELATION_CHARS = 60
+MAX_CHARACTER_TRAITS = 4
 
 
 def _clip(text, limit):
@@ -41,27 +56,79 @@ def build_detail_query_prompt(paragraph_text, recent_texts=(), chapter_name="",
         lines.extend(f"- {_clip(t, 100)}" for t in recent)
     lines.append("刚生成的段落：")
     lines.append(_clip(paragraph_text, 200))
+    lines.append(CHARACTER_UPDATE_HINT)
     return [
         {"role": "system", "content": pack["detail_system"]},
         {"role": "user", "content": "\n".join(lines)},
     ]
 
 
-def parse_detail_queries(raw) -> list:
-    """解析提问调用返回的问题列表；非 JSON 时按行拆分兜底。"""
+def _json_object(raw):
+    """取返回文本里的第一个 JSON 对象；不是 JSON 时返回 ``None``。"""
     raw = str(raw or "").strip()
     if raw.startswith("```"):
         raw = raw.strip("`").lstrip("json").strip()
     start = raw.find("{")
-    if start != -1:
-        try:
-            data, _ = json.JSONDecoder().raw_decode(raw[start:])
-            queries = data.get("queries")
-            if isinstance(queries, list):
-                return _clean(queries)
-        except json.JSONDecodeError:
-            pass
-    return _clean(raw.splitlines())
+    if start == -1:
+        return None
+    try:
+        data, _ = json.JSONDecoder().raw_decode(raw[start:])
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def parse_detail_queries(raw) -> list:
+    """解析提问调用返回的问题列表；非 JSON 时按行拆分兜底。"""
+    data = _json_object(raw)
+    if data is not None:
+        queries = data.get("queries")
+        if isinstance(queries, list):
+            return _clean(queries)
+    return _clean(str(raw or "").strip().splitlines())
+
+
+def parse_character_updates(raw) -> list:
+    """解析搭车返回的角色更新；旧格式没有 ``characters`` 时返回空列表。
+
+    解析失败、条目不是对象、没有可用称呼都直接跳过——这条通道是后台增益，
+    不能影响主生成流程。
+    """
+    data = _json_object(raw)
+    if data is None:
+        return []
+    items = data.get("characters")
+    if not isinstance(items, list):
+        return []
+    out = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        handle = _clip(clean_name(item.get("handle")), CHARACTER_HANDLE_CHARS)
+        true_name = _clip(clean_name(item.get("true_name")), CHARACTER_HANDLE_CHARS)
+        if not handle and not true_name:
+            continue
+        entry = {
+            "handle": handle,
+            "true_name": true_name,
+            "pronoun": (item.get("pronoun")
+                        if item.get("pronoun") in ("他", "她") else ""),
+            "status": ("revealed" if str(item.get("status") or "").strip().lower()
+                       == "revealed" else "temporary"),
+        }
+        traits = item.get("traits")
+        if isinstance(traits, (list, tuple)):
+            cleaned = []
+            for value in traits:
+                trait = _clip(value, CHARACTER_TRAIT_CHARS)
+                if trait and trait not in cleaned:
+                    cleaned.append(trait)
+            entry["traits"] = cleaned[-MAX_CHARACTER_TRAITS:]
+        relation = item.get("relation")
+        if relation is not None:
+            entry["relation"] = _clip(relation, CHARACTER_RELATION_CHARS)
+        out.append(entry)
+    return out
 
 
 def _clean(items) -> list:

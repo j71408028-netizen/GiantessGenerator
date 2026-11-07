@@ -12,8 +12,9 @@ from dungeon.audio.chapters import find_chapter, is_terminating_chapter
 from dungeon import cast as cast_mod
 from .characters import CharacterLedger
 from .coupling import (COMMON_OUTPUT_RULE, DEFAULT_COUPLING_LEVEL,
-                       HIGHLIGHT_MARKER_RULE, coupling_prompts,
-                       normalize_coupling_level, section_instruction)
+                       HIGHLIGHT_MARKER_RULE, SPEAKER_STABILITY_RULE,
+                       coupling_prompts, normalize_coupling_level,
+                       section_instruction)
 from .details import search_replay_details
 from .models import DungeonTextType
 from .response import canonical_user_entry
@@ -62,6 +63,8 @@ class TurnEffects:
     prompted_parts: set = field(default_factory=set)
     #: 本段首次出场的成员 id，提交后才写入 ``introduced_cast``
     introduced_cast: set = field(default_factory=set)
+    #: 本章 ``cast`` 声明的在场成员 id，提交后写入角色账本的观测状态
+    declared_present: set = field(default_factory=set)
     #: 构建时读过细节疑问，提交后清空 ``_detail_queries``
     consume_detail_queries: bool = False
     #: 本段用过的「同时在场」地标，提交后才写入会话
@@ -113,24 +116,25 @@ class DungeonPromptBuilder:
                 "（以上是起点不是现状，不必每段重述。）\n")
 
     def _cast_block(self):
-        """在场行 + 首次出场块（用户提示词侧）。
+        """在场行 + 首次出场块 + 观测到场者的简报（用户提示词侧）。
 
-        在场只认章节 ``cast`` 声明：没声明就不写这一行，旧方案逐字不变。
+        在场行只认章节 ``cast`` 声明：没声明就不写这一行，旧方案逐字不变。
         成员设定只在第一次出场时给全量，之后每段给一份压缩简报——完整设定块
         会随对话历史滑出窗口，简报负责让「他是谁」不随窗口一起消失。
+        AI 现编、当前确实在场的角色只进简报，不写进在场行。
 
-        返回 ``(block, fresh_ids)``；构建阶段不写 ``introduced_cast``，
-        首次出场由 :meth:`commit_turn` 在回合成功后登记。
+        返回 ``(block, fresh_ids, declared_ids)``；构建阶段不写会话状态，
+        首次出场与在场标记由 :meth:`commit_turn` 在回合成功后登记。
         """
         session = self.context
         members = getattr(session, "cast", None) or ()
-        if not members:
-            return "", set()
+        ledger = getattr(session, "characters", None)
+        if not isinstance(ledger, CharacterLedger):
+            # 渲染用临时账本；构建阶段不把缓存挂到会话上
+            ledger = CharacterLedger(members) if members else None
         chapter = find_chapter(getattr(session, "chapters", None),
                                getattr(session, "current_chapter", None))
         declared = list((chapter or {}).get("cast") or ())
-        if not declared:
-            return "", set()
         present, seen = [], set()
         for key in declared:
             member = cast_mod.find_member(members, key)
@@ -139,12 +143,12 @@ class DungeonPromptBuilder:
             seen.add(member["id"])
             present.append(member)
         if not present:
-            return "", set()
+            block = ledger.observed_brief() if ledger is not None else ""
+            if block:
+                block += ("本段只让主角与到场的角色说话和行动；"
+                          "未到场者可以被人提起，但不要给台词。\n")
+            return block, set(), set()
         introduced = getattr(session, "introduced_cast", None) or ()
-        ledger = getattr(session, "characters", None)
-        if not isinstance(ledger, CharacterLedger):
-            # 渲染用临时账本；构建阶段不把缓存挂到会话上
-            ledger = CharacterLedger(members)
         block = "【本段在场】" + "、".join(
             ledger.display_name(m) for m in present) + "\n"
         fresh = [m for m in present if m["id"] not in introduced]
@@ -153,9 +157,10 @@ class DungeonPromptBuilder:
             block += cast_mod.render_first_seen(fresh)
         if familiar:
             block += ledger.render_brief(familiar)
+        block += ledger.observed_brief(exclude_ids=seen)
         block += ("本段只让主角与到场的角色说话和行动；"
                   "未到场者可以被人提起，但不要给台词。\n")
-        return block, {m["id"] for m in fresh}
+        return block, {m["id"] for m in fresh}, set(seen)
 
     def _custom_owner_hint(self) -> str:
         """自定义演化量的归属说明（作者显式写了 ``owner`` 才出现）。
@@ -308,8 +313,9 @@ class DungeonPromptBuilder:
                                 "仅供叙事参考）：\n" + "\n".join(f"- {h}" for h in hits) + "\n")
             effects.consume_detail_queries = True
         pack = coupling_prompts(level)
-        cast_block, introduced = self._cast_block()
+        cast_block, introduced, declared_present = self._cast_block()
         effects.introduced_cast.update(introduced)
+        effects.declared_present.update(declared_present)
         result = (f"{history}{chapter_line}{cast_block}"
                   f"{self._calibration_block()}{detail_block}"
                   f"{pack['narrate'].format(instruction=instruction)}\n"
@@ -322,6 +328,10 @@ class DungeonPromptBuilder:
             result += "\n\n" + speaker_rule.format(
                 name=session.name, nick=session.nick,
                 protagonist=self.protagonist_title())
+            ledger = getattr(session, "characters", None)
+            if getattr(session, "cast", None) or (
+                    isinstance(ledger, CharacterLedger) and len(ledger)):
+                result += "\n" + SPEAKER_STABILITY_RULE
         # 高亮标记（==...==）：分句器把它折算成显示段落的高亮，标记本身不上屏。
         # 结局段落整体就是高亮色，不必再要求模型标注。
         if not terminating:
@@ -374,6 +384,14 @@ class DungeonPromptBuilder:
             session.prompted_presence_landmark = effects.prompted_presence_landmark
         if effects.consume_detail_queries:
             session._detail_queries = []
+        ledger = getattr(session, "characters", None)
+        if isinstance(ledger, CharacterLedger):
+            step = int(getattr(session, "step_num", 0) or 0)
+            chapter = str(getattr(session, "current_chapter", "") or "")
+            if effects.declared_present:
+                ledger.mark_declared(effects.declared_present, step=step,
+                                     chapter=chapter)
+            ledger.decay(step)
 
     def _calibration_block(self) -> str:
         """本段写作校准块：坐标数值行 + 两级谓词 + 尺度上限，无坐标时为空串。

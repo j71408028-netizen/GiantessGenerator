@@ -9,8 +9,12 @@
 3. 解析：id / 称呼 / 别称 / 当前称呼 / 真名；
 4. 临时称呼 → 揭示真名：旧称呼进 ``aka``，不再显示「真名尚未揭示」；
 5. 可变字段有界：特征裁剪、条数上限、关系裁剪；
-6. 群像不吸收任何可变更新；
-7. 简报只渲染传入的在场成员，超长时降级为「名字 + 在场」。
+6. 更新吸收：未知称呼登记成临时角色，群像不吸收任何可变更新；
+7. 简报只渲染传入的在场成员，超长时降级为「名字 + 在场」；
+8. 在场观测：``@说话人@`` 登记、连续两段升级在场、点名、章节声明、衰减；
+9. 揭示与合并：正文锚点才自动揭示，无锚点进待确认；设定成员永不自动合并；
+10. 容量淘汰：优先淘汰最久未见的非在场 emergent；
+11. 细节搭车解析：``parse_character_updates`` 新格式 / 旧格式 / 坏 JSON。
 """
 
 import os
@@ -41,7 +45,10 @@ from dungeon import cast  # noqa: E402
 from dungeon.characters import (BRIEF_CHARS, KEY_MUTABLE_FIELDS,  # noqa: E402
                                 MAX_TRAITS, CharacterLedger,
                                 IDENTITY_REVEALED, IDENTITY_TEMPORARY,
-                                initial_fields, mutable_fields)
+                                PRESENCE_ABSENT, PRESENCE_MENTIONED,
+                                PRESENCE_PRESENT, initial_fields,
+                                mutable_fields)
+from dungeon.details import parse_character_updates, parse_detail_queries  # noqa: E402
 
 
 def make_key(**overrides):
@@ -143,9 +150,10 @@ check("关系描述裁剪到上限", len(_li.relation) <= 61, len(_li.relation))
 check("重复特征不重复追加",
       _ledger.apply_updates([{"handle": "李队长", "traits": ["第六"]}])
       == 0 and len(_li.traits) == MAX_TRAITS, _li.traits)
-check("未知角色与群像的更新被忽略",
-      _ledger.apply_updates([{"handle": "查无此人", "traits": ["x"]},
-                             {"handle": "王店主", "traits": ["x"]}]) == 0
+check("未知称呼登记成临时角色、群像更新仍被忽略",
+      _ledger.apply_updates([{"handle": "查无此人", "traits": ["x"]}]) == 1
+      and _ledger.resolve("查无此人").status == IDENTITY_TEMPORARY
+      and _ledger.apply_updates([{"handle": "王店主", "traits": ["x"]}]) == 0
       and _wang.mutable == {})
 
 # ---------------- 6. 简报只渲染传入的在场成员 ----------------
@@ -173,6 +181,125 @@ check("简报超长时降级并截断",
       _big_brief.startswith("【人物简报（当前状态）】")
       and len(_big_brief) <= BRIEF_CHARS + 20
       and "很长的身份描述" not in _big_brief, len(_big_brief))
+
+# ---------------- 8. 在场观测（确定性通道） ----------------
+_obs = CharacterLedger([make_key()])
+_timid = _obs.observe_speaker("胆怯的声音", step=5, chapter="第二幕")
+check("未知说话人登记成临时角色、记为被提起",
+      _timid is not None and _timid.status == IDENTITY_TEMPORARY
+      and _timid.presence == PRESENCE_MENTIONED
+      and _timid.first_seen_step == 5, _timid.presence if _timid else None)
+check("连续两段出现升级为在场",
+      _obs.observe_speaker("胆怯的声音", step=6, chapter="第二幕").presence
+      == PRESENCE_PRESENT)
+check("再次登记同一个称呼不新建角色",
+      _obs.observe_speaker("胆怯的声音", step=7, chapter="第二幕") is _timid
+      and len(list(_obs)) == 2)
+check("正文点名的已知角色记为被提起",
+      _obs.note_mentions("李队长望着废墟出神", step=7, chapter="第二幕") == 1
+      and _obs.resolve("李队长").presence == PRESENCE_MENTIONED)
+check("点名不认识的称呼不新建角色",
+      _obs.note_mentions("路人甲匆匆跑过", step=7, chapter="第二幕") == 0
+      and _obs.resolve("路人甲") is None
+      and len(list(_obs)) == 2)
+check("章节声明直接标为在场",
+      _obs.mark_declared(["李队长"], step=8, chapter="第二幕") == 1
+      and _obs.resolve("李队长").presence == PRESENCE_PRESENT)
+check("两段没出现转「最近离开」",
+      _obs.decay(10) >= 1
+      and _obs.resolve("李队长").presence == PRESENCE_ABSENT
+      and _obs.resolve("李队长").last_seen_step == 8)
+check("迟到的观测不回退状态",
+      _obs.observe_speaker("胆怯的声音", step=3, chapter="第二幕") is _timid
+      and _timid.last_seen_step == 7)
+
+# ---------------- 9. 揭示与合并 ----------------
+_anchor = CharacterLedger([make_key()])
+check("有正文锚点：临时称呼揭示为真名、旧称呼进 aka",
+      _anchor.apply_updates(
+          [{"handle": "胆怯的声音", "true_name": "王店主"}],
+          text="胆怯的声音抬起头：「其实我就是王店主。」") == 1
+      and _anchor.resolve("王店主").status == IDENTITY_REVEALED
+      and _anchor.resolve("胆怯的声音") is _anchor.resolve("王店主"))
+_pending = CharacterLedger([make_key()])
+_p = _pending.add_emergent("胆怯的声音")
+_pending.apply_updates([{"handle": "胆怯的声音", "true_name": "王店主"}],
+                       text="她听见柜台后传来响动。")
+check("无正文锚点：只登记待确认，不自动揭示",
+      _p.status == IDENTITY_TEMPORARY and len(_pending.pending_merges) == 1
+      and _pending.pending_merges[0]["true_name"] == "王店主")
+_two = CharacterLedger([make_key(), make_key(id="zhao", name="赵司机")])
+_two.mark_temporary("zhao", "面罩男")
+_two.apply_updates([{"handle": "面罩男", "true_name": "李队长"}],
+                   text="面罩男摘下面具，他就是李队长。")
+check("两个设定成员永不自动合并，只记待确认",
+      _two.resolve("zhao") is not None
+      and len(_two.pending_merges) == 1
+      and _two.pending_merges[0]["source"] == "zhao")
+_merge = CharacterLedger([make_key()])
+_merge.add_emergent("胆怯的声音")
+_merge.observe_speaker("柜台后的男人", step=4, chapter="第二幕")
+check("合并：源并入目标，别名并集、状态升已揭示",
+      _merge.merge("柜台后的男人", "胆怯的声音") is True
+      and _merge.resolve("柜台后的男人") is _merge.resolve("胆怯的声音")
+      and _merge.resolve("胆怯的声音").status == IDENTITY_REVEALED
+      and "柜台后的男人" in _merge.resolve("胆怯的声音").aka)
+_reveal_merge = CharacterLedger([make_key()])
+_reveal_merge.add_emergent("胆怯的声音")
+check("揭示到已有角色的称呼时走合并",
+      _reveal_merge.apply_updates(
+          [{"handle": "胆怯的声音", "true_name": "李队长"}],
+          text="胆怯的声音报上身份：李队长。") == 1
+      and _reveal_merge.resolve("胆怯的声音") is _reveal_merge.resolve("李队长"))
+
+# ---------------- 10. 容量淘汰 ----------------
+_cap = CharacterLedger([], limit=3)
+for i in range(3):
+    _cap.add_emergent(f"路人{i}")
+_cap.observe_speaker("路人0", step=1, chapter="第一幕")
+_cap.observe_speaker("路人1", step=2, chapter="第一幕")
+_cap.observe_speaker("路人1", step=3, chapter="第一幕")
+_cap.observe_speaker("路人2", step=1, chapter="第一幕")
+_cap.add_emergent("路人3")
+check("容量满时淘汰最久未见的非在场 emergent",
+      _cap.resolve("路人0") is None and _cap.resolve("路人3") is not None)
+check("在场的 emergent 不被淘汰",
+      _cap.resolve("路人1") is not None
+      and _cap.resolve("路人1").presence == PRESENCE_PRESENT)
+
+# ---------------- 11. 运行视图两档 ----------------
+_roster = CharacterLedger([make_key(), make_extra()])
+_roster.mark_declared(["李队长"], step=11, chapter="第三幕")
+_roster.note_mentions("王店主清点着货架", step=9, chapter="第三幕")
+_roster.decay(12)
+_present, _left = _roster.roster_sections()
+check("运行视图分「在场 / 最近离开」两档并按最近出现排序",
+      [rc.id for rc in _present] == ["li"]
+      and [rc.id for rc in _left] == ["wang"])
+
+# ---------------- 12. 细节搭车解析 ----------------
+_raw = ('{"queries": ["她有多大"], "characters": ['
+        '{"handle": "胆怯的声音", "true_name": "", "pronoun": "她", '
+        '"traits": ["怕她", "躲在柜台后", "怕她", "' + "很" * 50 + '"], '
+        '"relation": "被救者"}, {"handle": "", "true_name": ""}]}')
+_updates = parse_character_updates(_raw)
+check("搭车解析：新格式抽出角色更新",
+      len(_updates) == 1 and _updates[0]["handle"] == "胆怯的声音"
+      and _updates[0]["pronoun"] == "她"
+      and _updates[0]["status"] == "temporary", _updates)
+check("搭车解析：特征去重并裁剪",
+      len(_updates[0]["traits"]) == 3
+      and len(set(_updates[0]["traits"])) == 3
+      and all(len(t) <= 41 for t in _updates[0]["traits"]),
+      _updates[0]["traits"])
+check("搭车解析：称呼全空的条目跳过",
+      all(u["handle"] or u["true_name"] for u in _updates))
+check("旧格式（只有 queries）解析为空列表",
+      parse_character_updates('{"queries": ["她有多大"]}') == [])
+check("坏 JSON 解析为空列表", parse_character_updates("不是JSON") == [])
+check("提问解析兼容新格式", parse_detail_queries(_raw) == ["她有多大"])
+check("提问解析保留非 JSON 行兜底",
+      parse_detail_queries("想问她多大\n想问外面情况") == ["想问她多大", "想问外面情况"])
 
 # ---------------- 结论 ----------------
 print()

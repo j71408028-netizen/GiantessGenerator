@@ -19,11 +19,21 @@ import re
 from dataclasses import dataclass, field
 
 from . import cast as cast_mod
+from . import process_log
 
 #: 可变字段：只属于重要角色。群像没有可变字段（见模块说明）。
 KEY_MUTABLE_FIELDS = (
     "status", "handle", "true_name", "aka", "traits", "relation",
 )
+
+#: 在场观测：与身份可变字段分开存，群像也能有「最近出现过」。
+PRESENCE_PRESENT = "present"
+PRESENCE_MENTIONED = "mentioned"
+PRESENCE_ABSENT = "absent"
+_PRESENCE_RANK = {PRESENCE_ABSENT: 0, PRESENCE_MENTIONED: 1, PRESENCE_PRESENT: 2}
+
+#: 待确认的合并（AI 给出真名但正文没有锚点）；不自动生效，等运行视图手动确认。
+MAX_PENDING_MERGES = 20
 
 #: 身份状态：未知（还没被观测到）/ 临时称呼 / 真名已揭示
 IDENTITY_UNKNOWN = "unknown"
@@ -65,6 +75,12 @@ def _clip_text(text, limit: int) -> str:
     return text if len(text) <= limit else text[:limit] + "…"
 
 
+def _contains(text: str, needle: str) -> bool:
+    """正文锚点检查：忽略首尾空白，按原样子串匹配。"""
+    needle = str(needle or "").strip()
+    return bool(needle) and needle in str(text or "")
+
+
 def _digest(text, limit: int = DIGEST_CHARS) -> str:
     """取一段描述的第一句作为简报的身份句；没有句号时截断。"""
     text = " ".join(str(text or "").split())
@@ -98,10 +114,45 @@ class RunCharacter:
     source: str
     initial: dict
     mutable: dict = field(default_factory=dict)
+    observed: dict = field(default_factory=dict)
 
     @property
     def name(self) -> str:
         return str(self.initial.get("name") or "")
+
+    @property
+    def pronoun(self) -> str:
+        return str(self.initial.get("pronoun") or "")
+
+    @property
+    def voice(self) -> str:
+        return str(self.initial.get("voice") or "")
+
+    @property
+    def presence(self) -> str:
+        return str(self.observed.get("presence") or PRESENCE_ABSENT)
+
+    @property
+    def last_seen_step(self) -> int:
+        try:
+            return int(self.observed.get("last_seen_step") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    @property
+    def last_seen_chapter(self) -> str:
+        return str(self.observed.get("last_seen_chapter") or "")
+
+    @property
+    def where(self) -> str:
+        return str(self.observed.get("where") or "")
+
+    @property
+    def first_seen_step(self) -> int:
+        try:
+            return int(self.observed.get("first_seen_step") or 0)
+        except (TypeError, ValueError):
+            return 0
 
     @property
     def status(self) -> str:
@@ -146,6 +197,8 @@ class CharacterLedger:
         self._characters: dict[str, RunCharacter] = {}
         self._order: list[str] = []
         self._limit = max(1, int(limit))
+        #: AI 声称的合并（正文里找不到锚点）：只登记，不生效。
+        self.pending_merges: list[dict] = []
         for member in members or ():
             self.add(member)
 
@@ -219,23 +272,158 @@ class CharacterLedger:
                 "relation": "",
             }
         rc = RunCharacter(id=character_id, role=role, source="authored",
-                          initial=normalized, mutable=mutable)
+                          initial=normalized, mutable=mutable,
+                          observed={})
         self._characters[character_id] = rc
         self._order.append(character_id)
         return rc
 
     def _evict_one(self) -> bool:
-        """重要角色容量满时只淘汰最早加入的 emergent；设定成员不淘汰。"""
-        for character_id in list(self._order):
-            rc = self._characters[character_id]
-            if rc.role == "key" and rc.source == "emergent":
-                self._order.remove(character_id)
-                del self._characters[character_id]
-                return True
-        return False
+        """重要角色容量满时先淘汰最久未见的 emergent；设定成员不淘汰。"""
+        candidates = [rc for rc in self
+                      if rc.role == "key" and rc.source == "emergent"
+                      and rc.presence != PRESENCE_PRESENT]
+        if not candidates:
+            return False
+        victim = min(candidates, key=lambda rc: (rc.last_seen_step, self._order.index(rc.id)))
+        self._order.remove(victim.id)
+        del self._characters[victim.id]
+        return True
+
+    def add_emergent(self, handle):
+        """登记一个 AI 现编的角色（临时称呼），返回记录或 ``None``。"""
+        name = cast_mod.clean_name(handle)
+        if not name:
+            return None
+        existing = self.resolve(name)
+        if existing is not None:
+            return existing
+        character_id = self._next_emergent_id()
+        if (self._key_count() >= self._limit and not self._evict_one()):
+            return None
+        normalized = cast_mod.normalize_member({
+            "id": character_id, "role": "key", "name": name})
+        rc = RunCharacter(
+            id=character_id, role="key", source="emergent", initial=normalized,
+            mutable={
+                "status": IDENTITY_TEMPORARY,
+                "handle": name,
+                "true_name": "",
+                "aka": [],
+                "traits": [],
+                "relation": "",
+            },
+            observed={})
+        self._characters[character_id] = rc
+        self._order.append(character_id)
+        return rc
+
+    def _next_emergent_id(self) -> str:
+        index = 1
+        while f"rc{index}" in self._characters:
+            index += 1
+        return f"rc{index}"
 
     def _key_count(self) -> int:
         return sum(1 for rc in self._characters.values() if rc.role == "key")
+
+    # ---------------- 在场观测 ----------------
+    def _touch(self, rc, *, step=None, chapter="", presence=PRESENCE_ABSENT,
+               force=False) -> None:
+        """更新观测状态；迟到的后台结果（step 更小）不回退。"""
+        observed = rc.observed
+        try:
+            current_step = int(step) if step is not None else None
+        except (TypeError, ValueError):
+            current_step = None
+        last = rc.last_seen_step
+        if current_step is not None and current_step < last:
+            return
+        if current_step is not None:
+            observed["last_seen_step"] = current_step
+            if not observed.get("first_seen_step"):
+                observed["first_seen_step"] = current_step
+        if chapter:
+            observed["last_seen_chapter"] = str(chapter)
+        old = rc.presence
+        if force or current_step is None or current_step != last:
+            observed["presence"] = presence
+        elif _PRESENCE_RANK.get(presence, 0) > _PRESENCE_RANK.get(old, 0):
+            # 同一段里先被点名、又开口说话：升级为在场，不降级
+            observed["presence"] = presence
+
+    def mark_declared(self, character_ids, *, step=None, chapter="") -> int:
+        """章节 ``cast`` 声明的在场者：直接标为 present。"""
+        changed = 0
+        for character_id in character_ids or ():
+            rc = self.resolve(character_id)
+            if rc is None:
+                continue
+            self._touch(rc, step=step, chapter=chapter,
+                        presence=PRESENCE_PRESENT, force=True)
+            changed += 1
+        return changed
+
+    def observe_speaker(self, handle, *, step=None, chapter=""):
+        """登记 ``@说话人@``：未知称呼建 emergent；连续两段出现升级为在场。"""
+        rc = self.resolve(handle)
+        if rc is None:
+            rc = self.add_emergent(handle)
+        if rc is None:
+            return None
+        last = rc.last_seen_step
+        consecutive = bool(last and step is not None and last >= int(step) - 1)
+        self._touch(rc, step=step, chapter=chapter,
+                    presence=PRESENCE_PRESENT if consecutive
+                    else PRESENCE_MENTIONED,
+                    force=consecutive)
+        return rc
+
+    def note_mentions(self, text, *, step=None, chapter="") -> int:
+        """正文里被点名的已知角色记为 mentioned；不新建角色。"""
+        body = str(text or "")
+        if not body:
+            return 0
+        changed = 0
+        for rc in list(self):
+            names = {rc.name, rc.handle, rc.true_name, *rc.aka}
+            names.update(rc.initial.get("aliases") or ())
+            if any(name and name in body for name in names):
+                before = rc.presence
+                self._touch(rc, step=step, chapter=chapter,
+                            presence=PRESENCE_MENTIONED)
+                if rc.presence != before:
+                    changed += 1
+        return changed
+
+    def decay(self, step) -> int:
+        """把两段以内没再出现的人标为 absent（保留 last_seen 供「最近离开」）。"""
+        try:
+            current = int(step)
+        except (TypeError, ValueError):
+            return 0
+        changed = 0
+        for rc in self:
+            if rc.last_seen_step and rc.last_seen_step < current - 1 \
+                    and rc.presence != PRESENCE_ABSENT:
+                rc.observed["presence"] = PRESENCE_ABSENT
+                changed += 1
+        return changed
+
+    # ---------------- 揭示与合并 ----------------
+    def _record_pending(self, rc, true_name, *, step=None, chapter="") -> None:
+        item = {
+            "source": rc.id,
+            "handle": rc.handle,
+            "true_name": cast_mod.clean_name(true_name),
+            "step": step,
+            "chapter": chapter,
+        }
+        if item in self.pending_merges:
+            return
+        self.pending_merges.append(item)
+        del self.pending_merges[:-MAX_PENDING_MERGES]
+        process_log.log(f"[Characters] 合并待确认：{rc.handle} → {item['true_name']}")
 
     def mark_temporary(self, character_id, handle) -> bool:
         """把重要角色切到临时称呼：渲染用 ``handle``，真名暂不出现。"""
@@ -266,25 +454,90 @@ class CharacterLedger:
         rc.mutable["status"] = IDENTITY_REVEALED
         return True
 
-    def apply_updates(self, updates) -> int:
-        """吸收 AI 抽取的角色更新；群像与未知名一律忽略。
+    def merge(self, source, target) -> bool:
+        """把源角色并入目标角色；两个设定成员永不自动合并。
 
-        群像只有初始字段，所以这里不会给 ``extra`` 建任何可变状态。
-        返回发生变化的角色数。
+        ``source`` / ``target`` 可以是 id、称呼或记录本身。合并只保留目标，
+        源的特征、别名与观测状态并入目标；返回是否真的合并。
+        """
+        src = source if isinstance(source, RunCharacter) else self.resolve(source)
+        dst = target if isinstance(target, RunCharacter) else self.resolve(target)
+        if src is None or dst is None or src.id == dst.id:
+            return False
+        if src.role != "key" or dst.role != "key":
+            return False
+        if src.source == "authored" and dst.source == "authored":
+            self._record_pending(src, dst.name)
+            return False
+        aliases = dst.mutable.setdefault("aka", [])
+        for alias in (src.handle, src.name, src.true_name, *src.aka):
+            name = cast_mod.clean_name(alias)
+            if name and name != dst.name and name not in aliases:
+                aliases.append(name)
+        del aliases[:-MAX_AKA]
+        traits = list(dst.mutable.get("traits") or ())
+        for trait in src.traits:
+            if trait not in traits:
+                traits.append(trait)
+        dst.mutable["traits"] = traits[-MAX_TRAITS:]
+        if src.last_seen_step > dst.last_seen_step:
+            dst.observed = dict(src.observed)
+        elif src.last_seen_step == dst.last_seen_step and \
+                _PRESENCE_RANK.get(src.presence, 0) > _PRESENCE_RANK.get(dst.presence, 0):
+            dst.observed["presence"] = src.presence
+        name = dst.true_name or dst.name
+        dst.mutable["true_name"] = name
+        dst.mutable["handle"] = name
+        dst.mutable["status"] = IDENTITY_REVEALED
+        self._order.remove(src.id)
+        del self._characters[src.id]
+        process_log.log(
+            f"[Characters] 合并：{src.handle or src.name} → {name}（{src.id} 并入 {dst.id}）")
+        return True
+
+    def _reveal_or_merge(self, rc, true_name, *, text="", step=None,
+                         chapter="") -> bool:
+        """真名揭示：有正文锚点才自动生效；撞上已有角色时走合并。"""
+        name = cast_mod.clean_name(true_name)
+        if not name:
+            return False
+        handle = rc.handle or rc.name
+        if text and not (_contains(text, handle) and _contains(text, name)):
+            self._record_pending(rc, name, step=step, chapter=chapter)
+            return False
+        target = self.resolve(name)
+        if target is not None and target.id != rc.id:
+            if self.merge(rc, target):
+                return True
+            self._record_pending(rc, name, step=step, chapter=chapter)
+            return False
+        return self.reveal(rc.id, name)
+
+    def apply_updates(self, updates, *, text="", step=None, chapter="") -> int:
+        """吸收 AI 抽取的角色更新，返回发生变化的角色数。
+
+        未知称呼首次出现时登记成临时角色；群像只有初始字段，不吸收特征与
+        身份状态。真名揭示要求正文里同时出现旧称呼与真名（``text`` 为空时
+        视为程序化调用，不做锚点检查）；找不到锚点的只进 ``pending_merges``。
         """
         changed = 0
         for item in updates or ():
             if not isinstance(item, dict):
                 continue
-            rc = self.resolve(item.get("handle") or item.get("name") or "")
+            handle = cast_mod.clean_name(item.get("handle") or item.get("name"))
+            rc = self.resolve(handle) if handle else None
+            if rc is None and handle:
+                rc = self.add_emergent(handle)
             if rc is None or rc.role != "key":
                 continue
             before = (rc.status, rc.handle, rc.true_name,
                       tuple(rc.traits), rc.relation)
 
             true_name = cast_mod.clean_name(item.get("true_name"))
+            revealed = False
             if true_name and rc.status != IDENTITY_REVEALED:
-                self.reveal(rc.id, true_name)
+                revealed = self._reveal_or_merge(rc, true_name, text=text,
+                                                 step=step, chapter=chapter)
 
             traits = item.get("traits")
             if isinstance(traits, (list, tuple)):
@@ -299,13 +552,39 @@ class CharacterLedger:
             if relation is not None:
                 rc.mutable["relation"] = _clip_text(relation, RELATION_CHARS)
 
+            pronoun = str(item.get("pronoun") or "").strip()
+            if pronoun in cast_mod.CAST_PRONOUNS and pronoun \
+                    and not rc.initial.get("pronoun"):
+                rc.initial["pronoun"] = pronoun
+
             after = (rc.status, rc.handle, rc.true_name,
                      tuple(rc.traits), rc.relation)
-            if after != before:
+            # 合并成功时源记录已并入目标，前后对比看不出来，单独计数
+            if revealed or after != before:
                 changed += 1
         return changed
 
     # ---------------- 渲染 ----------------
+    def observed_brief(self, exclude_ids=()) -> str:
+        """AI 现编、当前确实在场的角色简报；不进「本段在场」声明行。"""
+        excluded = set(exclude_ids or ())
+        rows = [rc for rc in self
+                if rc.id not in excluded and rc.role == "key"
+                and rc.source == "emergent"
+                and rc.presence == PRESENCE_PRESENT]
+        return self.render_brief(rows)
+
+    def roster_sections(self) -> tuple:
+        """运行视图用的两档：``(在场, 最近离开)``，各自按最近出现排序。"""
+        present = [rc for rc in self
+                   if rc.presence in (PRESENCE_PRESENT, PRESENCE_MENTIONED)]
+        left = [rc for rc in self
+                if rc.presence == PRESENCE_ABSENT and rc.last_seen_step > 0]
+        present.sort(key=lambda rc: (-_PRESENCE_RANK.get(rc.presence, 0),
+                                     -rc.last_seen_step))
+        left.sort(key=lambda rc: -rc.last_seen_step)
+        return present, left
+
     def render_brief(self, members) -> str:
         """在场角色的当前视图；不在场者不渲染（调用方负责筛选）。
 
@@ -376,8 +655,9 @@ class CharacterLedger:
 __all__ = [
     "KEY_MUTABLE_FIELDS",
     "IDENTITY_UNKNOWN", "IDENTITY_TEMPORARY", "IDENTITY_REVEALED",
+    "PRESENCE_PRESENT", "PRESENCE_MENTIONED", "PRESENCE_ABSENT",
     "MAX_CHARACTERS", "MAX_TRAITS", "TRAIT_CHARS", "MAX_AKA",
-    "RELATION_CHARS", "DIGEST_CHARS", "BRIEF_CHARS",
+    "RELATION_CHARS", "DIGEST_CHARS", "BRIEF_CHARS", "MAX_PENDING_MERGES",
     "initial_fields", "mutable_fields",
     "RunCharacter", "CharacterLedger",
 ]

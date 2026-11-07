@@ -288,6 +288,22 @@ DungeonPromptBuilder(_wrapped).build_user_prompt(_TEXT_TYPE)
 check("build_user_prompt 兼容旧调用方：构建即提交",
       "li" in (_wrapped.introduced_cast or set()))
 
+# ---------------- 9. 称呼稳定性规则 ----------------
+# 规则只挂在对话分支的说话人规则之后（solea / bulla 档才有 speaker_rule）
+_stab = make_session(cast_members=[_li],
+                     chapters=[{"name": "城里", "cast": ["李队长"]}])
+_stab.coupling_level = "solea"
+check("有角色时追加称呼稳定性规则",
+      "同一角色在不同段落使用同一个称呼标记"
+      in DungeonPromptBuilder(_stab).build_turn(DungeonTextType.DIALOG).text)
+_stab_empty = make_session()
+_stab_empty.coupling_level = "solea"
+check("空配置不注入称呼稳定性规则",
+      "同一角色在不同段落使用同一个称呼标记"
+      not in DungeonPromptBuilder(_stab_empty).build_turn(DungeonTextType.DIALOG).text)
+check("空配置不注入称呼稳定性规则",
+      "同一角色在不同段落使用同一个称呼标记" not in user_prompt(_legacy))
+
 # ---------------- 结论 ----------------
 print()
 print(f"共 {total} 项，失败 {len(failures)} 项")
