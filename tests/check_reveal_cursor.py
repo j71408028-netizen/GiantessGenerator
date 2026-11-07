@@ -14,7 +14,11 @@
    队列不减；② 未补满 → 补满到 100% 且**不切段**；③ 已补满 → 才切下一段，
    且每切一段推进一个单元（狂点不会掀翻队列）；
 4. **收尾登记**：游标走到 target 末尾时清空 ``self._reveal`` 并登记
-   ``_advance_due``（自动播放读它决定何时推进）。
+   ``_advance_due``（自动播放读它决定何时推进）；
+5. **真流式起手**：无游标时首个 chunk 即起游标（``_update_stream_units``），
+   起点完整说话人标记在流式尾部即解析；
+6. **定稿对齐**：``_reveal_align`` 把游标目标收缩到定稿首句（pos 越界截断、
+   未越界保留进度、别段游标不受影响）。
 
 宿主替身只实现游标路径真正触到的成员：``_frame``、``story_history``、
 ``_pending_units``、``_schedule_text_update``、``_update_text_display``、
@@ -46,6 +50,7 @@ def check(name, ok, extra=""):
 
 
 from dungeon.window.frame import FrameScheduler  # noqa: E402
+from dungeon.window.engine import DungeonStoryEngine  # noqa: E402
 from dungeon.window.ui import (  # noqa: E402
     DungeonWindowUI,
     _AUTOPLAY_DWELL,
@@ -185,6 +190,44 @@ check("真流式：已上屏是 target 前缀、且落后于 target",
       item2["text"] == full[:pos_stream] and pos_stream < len(full),
       f"pos={pos_stream} len={len(full)}")
 
+# ---------------- 2b. 真流式起手：无游标时首个 chunk 起游标 ----------------
+# 回归：真流式（无预生成）此前只 _reveal_extend，无游标时全程空转——
+# 生成期间整屏无字，定稿后才从零打第一句。
+h2b = _CursorHost()
+item2b = {"type_str": "", "text": "", "speaker": None, "highlight": False}
+h2b.story_history.append(item2b)
+
+# 首句足够长（56 字），推 1 秒时钟后游标仍在跑
+sentence1 = "她推开了门，" + "甲" * 50 + "。"
+chunks = ["她推开了门，" + "甲" * 10, sentence1, sentence1 + "人群骚动了起来。"]
+for partial in chunks:
+    DungeonStoryEngine._update_stream_units(h2b, item2b, partial)
+
+check("真流式起手：首个 chunk 即起游标",
+      h2b._reveal_active() and h2b._reveal["item"] is item2b,
+      f"reveal={h2b._reveal}")
+check("真流式起手：target 延长到首句全文",
+      h2b._reveal["target"] == sentence1, f"target={h2b._reveal['target']!r}")
+check("真流式起手：完整句排队待点击",
+      [u.text for u in h2b._pending_units] == ["人群骚动了起来。"],
+      f"pending={h2b._pending_units}")
+_tb2b = _advance_clock(h2b, 1.0)
+check("真流式起手 1 秒后仍按 30 字/秒出字",
+      abs(h2b._reveal["pos"] - int(_REVEAL_CHARS_PER_SECOND)) <= 1,
+      f"pos={h2b._reveal['pos']}")
+check("真流式起手：已上屏是 target 前缀",
+      item2b["text"] == sentence1[:h2b._reveal["pos"]],
+      f"text_len={len(item2b['text'])}")
+
+# 起点带说话人标记的首 chunk：尾部净化解析 speaker 并剥离标记
+h2c = _CursorHost()
+item2c = {"type_str": "", "text": "", "speaker": None, "highlight": False}
+h2c.story_history.append(item2c)
+DungeonStoryEngine._update_stream_units(h2c, item2c, "@李队长@“桥还没塌，")
+check("真流式起手：起点完整标记解析出说话人",
+      item2c["speaker"] == "李队长" and h2c._reveal["target"] == "“桥还没塌，",
+      f"speaker={item2c['speaker']} target={h2c._reveal['target']!r}")
+
 # ---------------- 3. 三态点击机 ----------------
 # ① 不足 _REVEAL_MIN_CHARS → 吞掉
 h3 = _CursorHost()
@@ -271,6 +314,40 @@ check("_reveal_snap(别的 item) 不生效（游标仍在）", h6._reveal is not
 h6._reveal_snap(a)   # 属于当前游标 → 补满
 check("_reveal_snap(当前 item) 补满并注销",
       a["text"] == "AAAAAAA" and h6._reveal is None)
+
+# ---------------- 5b. _reveal_align(item) 定稿对齐 ----------------
+# 回归：不合规 JSON 的原文兜底会把 target 养得远长于定稿首句，此前只延长
+# 不收缩，_reveal_snap 把整段未加工原文写回段落（分句结果被覆盖）。
+h7 = _CursorHost()
+a7 = {"type_str": "", "text": ""}
+h7.story_history.append(a7)
+h7._reveal_start(a7, "甲" * 60)
+_t7 = _advance_clock(h7, 1.0)    # 已打出约 30 字
+first = "首句。"
+h7._reveal_align(a7, first)      # 定稿首句远短于已打出的前缀
+check("对齐：target 收缩到定稿首句", h7._reveal is not None
+      and h7._reveal["target"] == first, f"target={h7._reveal}")
+check("对齐：pos 截断并写出定稿前缀",
+      h7._reveal is not None and h7._reveal["pos"] == len(first)
+      and a7["text"] == first, f"pos={h7._reveal['pos'] if h7._reveal else None}")
+_advance_clock(h7, 0.2, start=_t7)
+check("对齐：游标自然收尾注销", h7._reveal is None and a7["text"] == first)
+
+# pos 未超出新目标时保留进度，只换目标（定稿与流式分句的归一化差异）
+h8 = _CursorHost()
+a8 = {"type_str": "", "text": ""}
+h8.story_history.append(a8)
+h8._reveal_start(a8, "她推开了门，环顾四周")
+_advance_clock(h8, 0.2)
+pos_before = h8._reveal["pos"]
+h8._reveal_align(a8, "她推开了门，环顾四周。")
+check("对齐：pos 保留、target 换成定稿首句",
+      h8._reveal is not None and h8._reveal["target"] == "她推开了门，环顾四周。"
+      and h8._reveal["pos"] == pos_before,
+      f"pos={h8._reveal['pos'] if h8._reveal else None}")
+h8._reveal_align({"type_str": "", "text": ""}, "别的段落")
+check("对齐：别段游标不受影响",
+      h8._reveal is not None and h8._reveal["target"] == "她推开了门，环顾四周。")
 
 # ---------------- 6. 常量契约 ----------------
 check("_REVEAL_CHARS_PER_SECOND 为 30（设计值）", _REVEAL_CHARS_PER_SECOND == 30.0)

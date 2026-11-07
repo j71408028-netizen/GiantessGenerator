@@ -1696,6 +1696,23 @@ class DungeonWindowUI:
         if len(text) > len(state["target"]):
             state["target"] = text
 
+    def _reveal_align(self, item, text: str):
+        """定稿对齐：把游标目标改钉到定稿首句，pos 越过新目标时截断。
+
+        与 :meth:`_reveal_extend` 的「只延长」不同：流式分句与定稿切分之间
+        有标点归一化差异，且不合规 JSON 的原文兜底会把目标养得远长于首句——
+        定稿后目标必须收缩，超出部分由分句队列（``_pending_units``）接管。
+        """
+        state = getattr(self, "_reveal", None)
+        if state is None or state["item"] is not item:
+            return
+        if not text:
+            return
+        state["target"] = text
+        if state["pos"] > len(text):
+            state["pos"] = len(text)
+            state["item"]["text"] = text
+
     def _reveal_snap(self, item=None):
         """把当前段立即补满到 100%（点击加速 / 段落收尾）。
 

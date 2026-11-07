@@ -122,14 +122,12 @@ class DungeonStoryEngine:
                                 # 后续完成句排队待点击
                                 self._update_stream_units(current_item, partial_text)
                             else:
-                                # 正文还没从响应里抽出（JSON 前导等）：整块当作
-                                # 目标文本送进游标，不走直写（否则会绕过限速）
+                                # 正文还没从响应里抽出（JSON 前导 / 输出不合规）：
+                                # 整块送进分句器，首句进游标、其余排队——与正常
+                                # 流式同构，不把原文整段直写上屏
                                 cleaned_buf = full_response_buffer.replace("```json", "").replace("```", "").strip()
                                 if not cleaned_buf.startswith("{"):
-                                    if self._reveal_active():
-                                        self._reveal_extend(current_item, cleaned_buf)
-                                    else:
-                                        self._reveal_start(current_item, cleaned_buf)
+                                    self._update_stream_units(current_item, cleaned_buf)
 
                             self._schedule_text_update()
                         if full_response_buffer.strip():
@@ -156,10 +154,11 @@ class DungeonStoryEngine:
                 self._schedule_text_update()
                 # 首句进游标：预生成整段就绪 / 实时流式都走同一条限速上屏。
                 # 真流式下游标通常已在跑（_update_stream_units 已 start），
-                # 此处只做目标对齐（把游标目标钉到最终定稿的首句）。
+                # 此处把游标目标对齐到最终定稿的首句——流式分句与定稿切分之间
+                # 有归一化差异，且不合规 JSON 的原文兜底目标远长于首句，必须收缩。
                 if first_text:
                     if self._reveal_active():
-                        self._reveal_extend(current_item, first_text)
+                        self._reveal_align(current_item, first_text)
                     else:
                         self._reveal_start(current_item, first_text)
                 # 首句定稿：带说话人（Solea/Bulla 对话分支）就该念出来
@@ -575,9 +574,10 @@ class DungeonStoryEngine:
         显示单元携带说话人（``@说话人@``）与高亮（``==``）标记的解析结果
         （见 dungeon/splitter.py）。
 
-        **上屏速度与 chunk 到达解耦**：这里只更新游标目标（``_reveal_extend``），
-        实际出字由帧时钟按 30 字/秒推进，因此 AI 吐字再快也不会加速上屏。
-        分句器读的是 ``partial_text``（已收全文），不受限速影响、始终领先。
+        **上屏速度与 chunk 到达解耦**：这里只起游标（``_reveal_start``）或延长
+        游标目标（``_reveal_extend``），实际出字由帧时钟按 30 字/秒推进，因此
+        AI 吐字再快也不会加速上屏。分句器读的是 ``partial_text``（已收全文），
+        不受限速影响、始终领先。
         """
         units, tail = split_stream_units(partial_text)
         head = units[0] if units else tail
@@ -588,7 +588,12 @@ class DungeonStoryEngine:
         # current_item["text"] 仍是落盘/回放用的净文本（见 _finish_step），
         # 游标收尾后会由 _reveal_snap 对齐到全文。
         if head.text:
-            self._reveal_extend(current_item, head.text)
+            # 真流式的首个 chunk 起游标（JSON 前导分支没起、定稿又远未到）；
+            # 已有游标则只延长目标
+            if self._reveal_active():
+                self._reveal_extend(current_item, head.text)
+            else:
+                self._reveal_start(current_item, head.text)
 
     def _apply_prompted_unlocks(self, text: str, parts=None):
         """把 AI 针对被注意到部位返回的段落写入该部位解锁信息（写入规则与报告正文一致）。
