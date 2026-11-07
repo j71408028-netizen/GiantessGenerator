@@ -246,6 +246,18 @@ class CharacterLedger:
         rc = self.resolve(member)
         return rc.display_name if rc is not None else cast_mod.clean_name(member)
 
+    def voice_info(self, name):
+        """语音解析用的三元组 ``(显式音色, 代词, 稳定哈希键)``；查无此人 ``None``。
+
+        哈希键用登记时的 ``voice_key``（设定成员是真名，临时角色是第一个称呼）：
+        临时称呼换成真名不换嗓子，同一角色的不同别名也稳定。
+        """
+        rc = self.resolve(name)
+        if rc is None:
+            return None
+        key = rc.observed.get("voice_key") or rc.true_name or rc.handle or rc.name
+        return (rc.voice, rc.pronoun, key)
+
     # ---------------- 写入 ----------------
     def add(self, member):
         """把一个设定成员加入账本；重复 id 返回已有记录。"""
@@ -263,17 +275,30 @@ class CharacterLedger:
 
         mutable = {}
         if role == "key":
-            mutable = {
-                "status": IDENTITY_REVEALED,
-                "handle": normalized["name"],
-                "true_name": normalized["name"],
-                "aka": [],
-                "traits": [],
-                "relation": "",
-            }
+            intro_as = (normalized.get("intro_as")
+                        if cast_mod.role_supports(normalized, "intro_as") else "")
+            if intro_as:
+                # 作者写了临时称呼：开局就是「temporary」，真名等剧情揭示
+                mutable = {
+                    "status": IDENTITY_TEMPORARY,
+                    "handle": intro_as,
+                    "true_name": "",
+                    "aka": [],
+                    "traits": [],
+                    "relation": "",
+                }
+            else:
+                mutable = {
+                    "status": IDENTITY_REVEALED,
+                    "handle": normalized["name"],
+                    "true_name": normalized["name"],
+                    "aka": [],
+                    "traits": [],
+                    "relation": "",
+                }
         rc = RunCharacter(id=character_id, role=role, source="authored",
                           initial=normalized, mutable=mutable,
-                          observed={})
+                          observed={"voice_key": normalized["name"]})
         self._characters[character_id] = rc
         self._order.append(character_id)
         return rc
@@ -313,7 +338,7 @@ class CharacterLedger:
                 "traits": [],
                 "relation": "",
             },
-            observed={})
+            observed={"voice_key": name})
         self._characters[character_id] = rc
         self._order.append(character_id)
         return rc
@@ -481,7 +506,11 @@ class CharacterLedger:
                 traits.append(trait)
         dst.mutable["traits"] = traits[-MAX_TRAITS:]
         if src.last_seen_step > dst.last_seen_step:
+            voice_key = dst.observed.get("voice_key")
             dst.observed = dict(src.observed)
+            # 语音稳定键跟着存续的目标走，不随观测状态一起换
+            if voice_key:
+                dst.observed["voice_key"] = voice_key
         elif src.last_seen_step == dst.last_seen_step and \
                 _PRESENCE_RANK.get(src.presence, 0) > _PRESENCE_RANK.get(dst.presence, 0):
             dst.observed["presence"] = src.presence

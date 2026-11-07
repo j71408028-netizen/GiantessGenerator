@@ -14,7 +14,9 @@
 8. 在场观测：``@说话人@`` 登记、连续两段升级在场、点名、章节声明、衰减；
 9. 揭示与合并：正文锚点才自动揭示，无锚点进待确认；设定成员永不自动合并；
 10. 容量淘汰：优先淘汰最久未见的非在场 emergent；
-11. 细节搭车解析：``parse_character_updates`` 新格式 / 旧格式 / 坏 JSON。
+11. 细节搭车解析：``parse_character_updates`` 新格式 / 旧格式 / 坏 JSON；
+12. ``intro_as``：seed 即临时称呼、显示名与解析、语音稳定键；
+13. 摘要搭车：``StorySummarizer`` 抽出角色更新、旧响应兼容。
 """
 
 import os
@@ -49,6 +51,7 @@ from dungeon.characters import (BRIEF_CHARS, KEY_MUTABLE_FIELDS,  # noqa: E402
                                 PRESENCE_PRESENT, initial_fields,
                                 mutable_fields)
 from dungeon.details import parse_character_updates, parse_detail_queries  # noqa: E402
+from dungeon.summary import StorySummarizer  # noqa: E402
 
 
 def make_key(**overrides):
@@ -300,6 +303,61 @@ check("坏 JSON 解析为空列表", parse_character_updates("不是JSON") == []
 check("提问解析兼容新格式", parse_detail_queries(_raw) == ["她有多大"])
 check("提问解析保留非 JSON 行兜底",
       parse_detail_queries("想问她多大\n想问外面情况") == ["想问她多大", "想问外面情况"])
+
+# ---------------- 13. intro_as 与语音解析 ----------------
+_mystery = cast.normalize_member({
+    "id": "grocer", "role": "key", "name": "王店主", "intro_as": "柜台后的男人",
+    "pronoun": "他", "background": "南街杂货店的店主。"})
+_tmp = CharacterLedger([make_key(), _mystery])
+_grocer = _tmp.get("grocer")
+check("写 intro_as 的成员开局是临时称呼",
+      _grocer.status == IDENTITY_TEMPORARY
+      and _grocer.handle == "柜台后的男人"
+      and _grocer.true_name == "" and _grocer.name == "王店主")
+check("临时称呼与真名都解析到同一角色",
+      _tmp.resolve("柜台后的男人") is _grocer
+      and _tmp.resolve("王店主") is _grocer)
+check("临时称呼的显示名是 intro_as",
+      _tmp.display_name("grocer") == "柜台后的男人")
+check("语音稳定键在揭示前就是真名（临时称呼不换嗓子）",
+      _tmp.voice_info("柜台后的男人") == ("", "他", "王店主"))
+check("揭示后显示名切回真名、旧称呼进 aka",
+      _tmp.reveal("grocer", "王店主") is True
+      and _grocer.handle == "王店主"
+      and "柜台后的男人" in _grocer.aka)
+check("揭示后语音稳定键不变",
+      _tmp.voice_info("王店主") == ("", "他", "王店主"))
+check("显式音色原样带出",
+      _tmp.voice_info("李队长") == ("voice-li", "他", "李队长"))
+check("查无此人返回 None", _tmp.voice_info("查无此人") is None)
+_shy = CharacterLedger([]).add_emergent("胆怯的声音")
+check("emergent 的语音稳定键是第一个称呼",
+      _shy is not None and _shy.observed.get("voice_key") == "胆怯的声音")
+
+# ---------------- 14. 摘要搭车 ----------------
+class _SummaryClient:
+    def generate(self, messages, temperature=0.3):
+        return ('{"summary": "概括", "facts": ["一条事实"], "character_updates": '
+                '[{"handle": "胆怯的声音", "true_name": "王店主", '
+                '"traits": ["怕她"]}]}')
+
+_summ = StorySummarizer(block_size=2)
+_summ.record("dialog", "胆怯的声音说：我就是王店主。", "第二幕")
+_summ.record("dialog", "她点了点头。", "第二幕")
+_summ.maybe_compress(2, ai_client=_SummaryClient())
+_batch = _summ.drain_character_updates()
+check("摘要搭车抽出角色更新并带正文锚点",
+      len(_batch) == 1 and "王店主" in _batch[0][0]
+      and _batch[0][1][0]["true_name"] == "王店主", _batch)
+check("取走后清空", _summ.drain_character_updates() == [])
+_summ_ledger = CharacterLedger([make_key()])
+_changed = sum(_summ_ledger.apply_updates(u, text=a) for a, u in _batch)
+check("摘要搭车的更新走锚点揭示",
+      _changed == 1
+      and _summ_ledger.resolve("胆怯的声音") is _summ_ledger.resolve("王店主"))
+check("旧摘要响应没有 character_updates 时行为不变",
+      StorySummarizer._parse_summary_json('{"summary": "s", "facts": ["f"]}')
+      == ("s", ["f"], []))
 
 # ---------------- 结论 ----------------
 print()

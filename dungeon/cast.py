@@ -25,7 +25,7 @@ CAST_PRONOUNS = ("", "他", "她")
 #: 各档可用的描述字段（``id`` / ``role`` / ``name`` 两档都有，不列）。
 #: 渲染与编辑器共用这张表决定字段的去留。
 ROLE_FIELDS = {
-    "key": ("aliases", "pronoun", "background", "call_her", "voice"),
+    "key": ("intro_as", "aliases", "pronoun", "background", "call_her", "voice"),
     "extra": ("pronoun", "purpose", "speech", "voice"),
 }
 
@@ -78,6 +78,7 @@ def normalize_member(raw, index: int = 0) -> dict:
     member["aliases"] = _clean_list(member.get("aliases"))
     pronoun = str(member.get("pronoun") or "").strip()
     member["pronoun"] = pronoun if pronoun in CAST_PRONOUNS else ""
+    member["intro_as"] = clean_name(member.get("intro_as"))
     for key in ("background", "purpose", "speech", "call_her", "voice"):
         member[key] = str(member.get(key) or "").strip()
     return member
@@ -99,7 +100,7 @@ def member_names(member) -> tuple:
 
 
 def find_member(members, key):
-    """按 id / 称呼 / 别称查成员；查不到返回 ``None``。"""
+    """按 id / 称呼 / 别称 / 临时称呼查成员；查不到返回 ``None``。"""
     target = clean_name(key)
     if not target:
         return None
@@ -108,18 +109,34 @@ def find_member(members, key):
             return member
         if target in (member.get("aliases") or ()):
             return member
+        if (role_supports(member, "intro_as")
+                and target == clean_name(member.get("intro_as"))):
+            return member
     return None
 
 
+def display_name(member) -> str:
+    """成员的对外显示称呼：写了临时称呼的重要角色在揭示前用它，真名先不出现。"""
+    if role_supports(member, "intro_as") and member.get("intro_as"):
+        return member["intro_as"]
+    return member.get("name", "")
+
+
 def _meta_text(member) -> str:
-    """括号里的结构化线索：代词；重要角色另有别称与「称她为」。"""
+    """括号里的结构化线索：代词；重要角色另有别称与「称她为」。
+
+    带临时称呼的角色先用 ``intro_as`` 对外，别称往往暗示真名，先不列出。
+    """
     bits = []
     if member.get("pronoun"):
         bits.append(member["pronoun"])
     if role_supports(member, "aliases"):
-        aliases = [a for a in (member.get("aliases") or ()) if a != member.get("name")]
-        if aliases:
-            bits.append("也称「" + "」「".join(aliases) + "」")
+        temporary = role_supports(member, "intro_as") and member.get("intro_as")
+        if not temporary:
+            aliases = [a for a in (member.get("aliases") or ())
+                       if a != member.get("name")]
+            if aliases:
+                bits.append("也称「" + "」「".join(aliases) + "」")
         if member.get("call_her"):
             bits.append(f"称她为「{member['call_her']}」")
     return "（" + "；".join(bits) + "）" if bits else ""
@@ -128,7 +145,8 @@ def _meta_text(member) -> str:
 def intro_line(member) -> str:
     """一个成员的首次出场设定行；没有可渲染内容时返回空串（交给 AI 定）。
 
-    重要角色渲染 ``background``，群像渲染 ``purpose`` 与 ``speech``。
+    重要角色渲染 ``background``，群像渲染 ``purpose`` 与 ``speech``；
+    写了临时称呼的用临时称呼出场，真名等剧情揭示后再出现。
     """
     body_field = "background" if role_supports(member, "background") else "purpose"
     body = str(member.get(body_field) or "").strip()
@@ -136,11 +154,13 @@ def intro_line(member) -> str:
               if role_supports(member, "speech") else "")
     if not body and not speech:
         return ""
-    line = f"{member.get('name', '')}{_meta_text(member)}"
+    line = f"{display_name(member)}{_meta_text(member)}"
     if body:
         line += f"：{body}"
     if speech:
         line += f"｜说话：{speech}"
+    if role_supports(member, "intro_as") and member.get("intro_as"):
+        line += "｜以上是临时对外称呼，真名等剧情揭示后再出现"
     return line
 
 
@@ -158,7 +178,7 @@ def render_first_seen(members) -> str:
         if line:
             lines.append(line)
         else:
-            blanks.append(member["name"])
+            blanks.append(display_name(member))
 
     out = []
     if lines:
@@ -179,6 +199,6 @@ def render_first_seen(members) -> str:
 __all__ = [
     "CAST_ROLES", "DEFAULT_CAST_ROLE", "CAST_PRONOUNS", "ROLE_FIELDS",
     "MAX_KEY_MEMBERS", "clean_name", "role_supports", "normalize_member",
-    "normalize_cast", "member_names", "find_member", "intro_line",
-    "render_first_seen",
+    "normalize_cast", "member_names", "find_member", "display_name",
+    "intro_line", "render_first_seen",
 ]

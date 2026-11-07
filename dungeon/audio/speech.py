@@ -81,6 +81,34 @@ RECOMMENDED_VOICES = (
 #: 语速写法：``+0%`` / ``-20%`` / ``+15%``
 _RATE_RE = re.compile(r"^[+-]?\d{1,3}%$")
 
+#: 音色性别表（配角按代词过滤音色池用）。只收录推荐列表里的音色；
+#: 认不出的 voice id 不进任何子集，只会在全池回退时被选中。
+VOICE_GENDERS = {
+    "zh-CN-XiaoxiaoNeural": "female",
+    "zh-CN-XiaoyiNeural": "female",
+    "zh-CN-YunjianNeural": "male",
+    "zh-CN-YunyangNeural": "male",
+    "zh-CN-YunxiNeural": "male",
+    "zh-CN-YunxiaNeural": "male",
+    "zh-CN-liaoning-XiaobeiNeural": "female",
+    "zh-CN-shaanxi-XiaoniNeural": "female",
+    "zh-TW-HsiaoChenNeural": "female",
+    "zh-TW-YunJheNeural": "male",
+    "zh-HK-HiuGaaiNeural": "female",
+    "zh-HK-WanLungNeural": "male",
+}
+
+
+def pool_for(pool, gender) -> tuple:
+    """按代词过滤音色池：``他`` → 男声、``她`` → 女声，其余不过滤。
+
+    子集为空时回退全池（作者自填的音色可能都不在性别表里）。
+    """
+    if gender not in ("他", "她"):
+        return tuple(pool)
+    want = "male" if gender == "他" else "female"
+    return tuple(v for v in pool if VOICE_GENDERS.get(v) == want) or tuple(pool)
+
 
 def edge_tts_available() -> bool:
     """当前环境装没装 edge-tts（编辑器提示与自检用）。"""
@@ -144,6 +172,11 @@ class VoiceCaster:
 
     ``her_names`` / ``protagonist_names`` 都是**集合语义**的可迭代对象
     （她可能同时有名字与昵称；主角称呼也可能有多个写法）。
+
+    ``resolve_character`` 是可选的账本解析回调（运行期角色账本，见
+    ``dungeon/characters.py``）：``name -> (显式音色, 代词, 稳定哈希键) | None``。
+    命中时优先用显式音色；没填就按代词过滤音色池，再对**稳定哈希键**做
+    ``crc32``——键用真名（揭示前用当前称呼），临时称呼换成真名不换嗓子。
     """
 
     ROLE_HER = "her"
@@ -153,13 +186,15 @@ class VoiceCaster:
     def __init__(self, her_names=(), protagonist_names=(),
                  voice_her=DEFAULT_VOICE_HER,
                  voice_protagonist=DEFAULT_VOICE_PROTAGONIST,
-                 other_voices=DEFAULT_OTHER_VOICES):
+                 other_voices=DEFAULT_OTHER_VOICES,
+                 resolve_character=None):
         self._her = {_clean_name(n) for n in her_names or () if _clean_name(n)}
         self._protagonist = {_clean_name(n) for n in protagonist_names or ()
                              if _clean_name(n)}
         self.voice_her = voice_her or DEFAULT_VOICE_HER
         self.voice_protagonist = voice_protagonist or DEFAULT_VOICE_PROTAGONIST
         self.other_voices = tuple(other_voices) or DEFAULT_OTHER_VOICES
+        self._resolve_character = resolve_character
 
     def role_of(self, speaker) -> str:
         name = _clean_name(speaker)
@@ -169,12 +204,33 @@ class VoiceCaster:
             return self.ROLE_PROTAGONIST
         return self.ROLE_OTHER
 
+    def _character_voice(self, speaker) -> str:
+        """账本命中的音色；没命中或回调异常返回空串。"""
+        if self._resolve_character is None:
+            return ""
+        name = _clean_name(speaker)
+        try:
+            info = self._resolve_character(name)
+        except Exception:
+            return ""
+        if not info:
+            return ""
+        voice, pronoun, key = info
+        if str(voice or "").strip():
+            return str(voice).strip()
+        pool = pool_for(self.other_voices, pronoun)
+        stable = str(key or name or "").strip()
+        return pool[zlib.crc32(stable.encode("utf-8")) % len(pool)]
+
     def voice_for(self, speaker) -> str:
         role = self.role_of(speaker)
         if role == self.ROLE_HER:
             return self.voice_her
         if role == self.ROLE_PROTAGONIST:
             return self.voice_protagonist
+        from_ledger = self._character_voice(speaker)
+        if from_ledger:
+            return from_ledger
         # 同一个配角固定一把嗓子：crc32 而不是 hash()（后者对字符串随机化，
         # 重启进程就会全体换嗓子）
         pool = self.other_voices

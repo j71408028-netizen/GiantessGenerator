@@ -105,6 +105,39 @@ check("同一个配角每次都是同一把嗓子",
 check("不同配角的嗓子分得开",
       len({_caster.voice_for(n) for n in ("军官", "居民", "队长")}) > 1)
 
+# 账本解析（运行期角色账本，见 dungeon/characters.py）：别名归并、代词分池
+_LEDGER_POOL = ("zh-CN-YunjianNeural", "zh-CN-XiaoxiaoNeural")
+_LEDGER = {"军官": ("V_OFF", "", "李队长"),        # 显式音色
+           "少女": ("", "她", "邻家少女"),          # 女 → 过滤出女声
+           "蒙面人": ("", "他", "蒙面人"),          # 男 → 过滤出男声
+           }
+_rcaster = speech_mod.VoiceCaster(
+    her_names=("莉莉",), protagonist_names=("主角",),
+    voice_her="V_HER", voice_protagonist="V_PRO",
+    other_voices=_LEDGER_POOL, resolve_character=lambda n: _LEDGER.get(n))
+check("账本命中：显式音色优先", _rcaster.voice_for("军官") == "V_OFF")
+check("账本命中：她按代词过滤出女声",
+      _rcaster.voice_for("少女") == "zh-CN-XiaoxiaoNeural")
+check("账本命中：他按代词过滤出男声",
+      _rcaster.voice_for("蒙面人") == "zh-CN-YunjianNeural")
+check("账本未命中回落全池", _rcaster.voice_for("路人") in _LEDGER_POOL)
+check("哈希键用稳定键而不是当前称呼",
+      speech_mod.VoiceCaster(
+          other_voices=_LEDGER_POOL,
+          resolve_character=lambda n: ("", "他", "李队长")).voice_for("蒙面人")
+      == speech_mod.VoiceCaster(
+          other_voices=_LEDGER_POOL,
+          resolve_character=lambda n: ("", "他", "李队长")).voice_for("李队长"))
+check("代词为空不过滤音色池",
+      speech_mod.VoiceCaster(
+          other_voices=_LEDGER_POOL,
+          resolve_character=lambda n: ("", "", "某人")).voice_for("某人")
+      in _LEDGER_POOL)
+check("回调异常不影响选声",
+      speech_mod.VoiceCaster(
+          other_voices=_LEDGER_POOL,
+          resolve_character=lambda n: 1 // 0).voice_for("任何人") in _LEDGER_POOL)
+
 _real_backends = audio_mod.set_backends([_FakeTrack])
 _notes = []
 try:

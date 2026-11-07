@@ -634,6 +634,20 @@ class DungeonStoryEngine:
         summarizer.maybe_compress(self.dungeon_state.total_steps,
                                   chapter_name=getattr(self, "current_chapter", "") or "",
                                   ai_client=getattr(self, "ai_client", None))
+        self._apply_summary_character_updates(summarizer)
+
+    def _apply_summary_character_updates(self, summarizer):
+        """把摘要压缩搭车抽取的角色更新喂给运行期账本（主线程执行）。"""
+        ledger = getattr(self, "characters", None)
+        if not isinstance(ledger, CharacterLedger) or self._closing:
+            return
+        step = int(getattr(self.dungeon_state, "total_steps", 0) or 0)
+        chapter = str(getattr(self, "current_chapter", "") or "")
+        for anchor, updates in summarizer.drain_character_updates():
+            changed = ledger.apply_updates(updates, text=anchor, step=step,
+                                           chapter=chapter)
+            if changed:
+                process_log.log(f"[Characters] 摘要搭车吸收 {changed} 个角色更新")
 
     def _check_chapter_overflow(self):
         """章节段落数超限：普通章节跳转到 overflow_target，结束章节终止副本。"""

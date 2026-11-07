@@ -515,6 +515,7 @@ class CharacterPage(ctk.CTkFrame):
         state["name"] = ctk.StringVar(value=member.get("name", ""))
         state["aliases"] = ctk.StringVar(
             value="、".join(member.get("aliases") or ()))
+        state["intro_as"] = ctk.StringVar(value=member.get("intro_as", ""))
         state["pronoun"] = ctk.StringVar(
             value=member.get("pronoun") or PRONOUN_UNSET_LABEL)
         state["call_her"] = ctk.StringVar(value=member.get("call_her", ""))
@@ -564,7 +565,7 @@ class CharacterPage(ctk.CTkFrame):
             rail, "删除", lambda s=state: self._delete_cast_member(s),
             danger=True).pack(side='bottom', fill='x')
 
-        # ---- 别称 / 称她为（只属于重要角色） ----
+        # ---- 别称 / 临时称呼 / 称她为（只属于重要角色） ----
         alias_group = ctk.CTkFrame(body, fg_color="transparent")
         state["alias_group"] = alias_group
         ctk.CTkLabel(alias_group, text="别称", font=ui_fonts.ui_font(_F_BODY),
@@ -572,6 +573,13 @@ class CharacterPage(ctk.CTkFrame):
         ctk.CTkEntry(alias_group, textvariable=state["aliases"], width=92, height=28,
                      font=ui_fonts.ui_font(_F_BODY), text_color=SC_TEXT, fg_color=SC_BG,
                      border_color=SC_BORDER_STRONG).pack(
+                         side='left', fill='x', expand=True, padx=(6, 10))
+        ctk.CTkLabel(alias_group, text="临时称呼", font=ui_fonts.ui_font(_F_BODY),
+                     text_color=SC_TITLE).pack(side='left')
+        ctk.CTkEntry(alias_group, textvariable=state["intro_as"], width=92, height=28,
+                     font=ui_fonts.ui_font(_F_BODY), text_color=SC_TEXT, fg_color=SC_BG,
+                     border_color=SC_BORDER_STRONG,
+                     placeholder_text="揭示前对外用这个称呼").pack(
                          side='left', fill='x', expand=True, padx=(6, 10))
         ctk.CTkLabel(alias_group, text="称她为", font=ui_fonts.ui_font(_F_BODY),
                      text_color=SC_TITLE).pack(side='left')
@@ -617,8 +625,8 @@ class CharacterPage(ctk.CTkFrame):
             width=28, color=SC_LINK).pack(side='left')
 
         for var in (state["role"], state["name"], state["aliases"],
-                    state["pronoun"], state["call_her"], state["voice"],
-                    state["purpose"], state["speech"]):
+                    state["intro_as"], state["pronoun"], state["call_her"],
+                    state["voice"], state["purpose"], state["speech"]):
             var.trace_add("write", lambda *_a: self._schedule_save())
 
         self._cast_cards.append(state)
@@ -718,6 +726,7 @@ class CharacterPage(ctk.CTkFrame):
                 member["id"] = name
             member["aliases"] = [a for a in _ALIAS_SEPARATORS.split(
                 state["aliases"].get().strip()) if a]
+            member["intro_as"] = state["intro_as"].get().strip()
             member["pronoun"] = PRONOUN_VALUES.get(
                 state["pronoun"].get(), "")
             member["call_her"] = state["call_her"].get().strip()

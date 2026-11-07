@@ -13,7 +13,9 @@
 6. 归一化（别称串 / id 缺省 / 非法 role / 章节 cast 的 @ 与分隔符）；
 7. 校验器：重名撞车、非法代词、章节 cast 指向不存在的成员；
 8. 构建 / 提交分离：``build_turn`` 不写会话状态，``commit_turn`` 才生效，
-   canonical 历史只留章节与叙事指令。
+   canonical 历史只留章节与叙事指令；
+9. 称呼稳定性规则只在有角色时注入；
+10. ``intro_as``：按临时称呼出场且不泄漏真名，撞车校验。
 """
 
 import os
@@ -303,6 +305,43 @@ check("空配置不注入称呼稳定性规则",
       not in DungeonPromptBuilder(_stab_empty).build_turn(DungeonTextType.DIALOG).text)
 check("空配置不注入称呼稳定性规则",
       "同一角色在不同段落使用同一个称呼标记" not in user_prompt(_legacy))
+
+# ---------------- 10. intro_as：临时称呼出场 ----------------
+_mystery = cast.normalize_member({
+    "id": "grocer", "role": "key", "name": "王店主", "intro_as": "柜台后的男人",
+    "pronoun": "他", "background": "南街杂货店的店主。", "call_her": "姑娘"})
+_mystery_session = make_session(cast_members=[_mystery],
+                                chapters=[{"name": "城里", "cast": ["王店主"]}])
+_mfirst = user_prompt(_mystery_session)
+check("临时称呼成员按 intro_as 出场，不泄漏真名",
+      "【本段在场】柜台后的男人" in _mfirst
+      and "柜台后的男人（他；称她为「姑娘」）：南街杂货店的店主" in _mfirst
+      and "真名等剧情揭示后再出现" in _mfirst
+      and "王店主" not in _mfirst, _mfirst[:500])
+_msecond = user_prompt(_mystery_session)
+check("临时称呼的简报也不泄漏真名",
+      "王店主" not in _msecond and "柜台后的男人" in _msecond, _msecond[:400])
+check("章节 cast 也能按临时称呼声明在场",
+      "【本段在场】柜台后的男人" in user_prompt(make_session(
+          cast_members=[_mystery],
+          chapters=[{"name": "城里", "cast": ["柜台后的男人"]}])))
+
+_diag_intro = validate_scenario_config({
+    "chapters": [{"name": "城里", "start": True}],
+    "protagonist_title": "救援队长",
+    "cast": [
+        {"name": "杂货店主", "intro_as": "救援队长"},
+        {"name": "李队长", "aliases": ["李队"]},
+        {"name": "赵司机", "intro_as": "李队"},
+    ],
+})
+_intro_messages = " | ".join(d.message for d in _diag_intro)
+check("校验：临时称呼与主角称呼撞车 → error",
+      any(d.level == "error" and "救援队长" in d.message for d in _diag_intro),
+      _intro_messages)
+check("校验：临时称呼与别称撞车 → error",
+      any(d.level == "error" and "李队" in d.message for d in _diag_intro),
+      _intro_messages)
 
 # ---------------- 结论 ----------------
 print()

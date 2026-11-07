@@ -724,6 +724,7 @@ class DungeonWindowBase:
         # 网络代理：语音与 AI 共用，副本子进程里按本进程读到的 settings 再设一次
         # （主进程设的带不过来，见 core/netproxy.py）。
         set_speech_proxy((self.settings or {}).get("net_proxy"))
+        ledger = getattr(self, "characters", None)
         caster = VoiceCaster(
             her_names=(self.name, self.nick),
             # 注意逗号：单元素元组写成 ``(x)`` 会得到字符串，遍历时按字符拆开
@@ -731,6 +732,9 @@ class DungeonWindowBase:
             voice_her=cfg["voice_her"],
             voice_protagonist=cfg["voice_protagonist"],
             other_voices=cfg["voice_other"],
+            # 配角音色走运行期账本：别名/临时称呼/真名解析到同一把嗓子
+            resolve_character=(ledger.voice_info
+                               if isinstance(ledger, CharacterLedger) else None),
         )
         self._speech.configure(caster=caster, rate=cfg["rate"],
                                level=cfg["level"], enabled=cfg["enabled"],

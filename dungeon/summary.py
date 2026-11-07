@@ -33,6 +33,7 @@ MAX_KEY_EVENTS = 12      # 常驻提示词的确定性关键事件上限
 MAX_FACTS = 12           # 常驻提示词的关键事实（事实卡）上限
 KEY_EVENT_CHARS = 60
 FACT_CHARS = 60
+MAX_PENDING_UPDATES = 4  # 未取走的搭车角色更新批数上限
 
 
 def _clip(text: str, limit: int = MAX_SUMMARY_CHARS) -> str:
@@ -53,6 +54,8 @@ class StorySummarizer:
         self.facts: list[str] = []
         # 确定性关键事件（章节进出、选项选择、阈值跨越），代码路径直接登记
         self.key_events: list[str] = []
+        # 搭车抽取的角色更新：[(块内正文, [更新...]), ...]，窗口层取走喂账本
+        self.pending_character_updates: list[tuple[str, list]] = []
         # 尚未压缩的缓冲：[(text_type_value, text, chapter_name), ...]
         self._buffer: list[tuple[str, str, str]] = []
 
@@ -112,16 +115,22 @@ class StorySummarizer:
             return
         chunk = self._buffer if allow_partial else self._buffer[:self.block_size]
         self._buffer = [] if allow_partial else self._buffer[len(chunk):]
-        summary, facts = self._summarize_chunk(chunk, ai_client)
+        summary, facts, updates = self._summarize_chunk(chunk, ai_client)
         label = chapter_name or (chunk[0][2] if chunk else "")
         self.summaries.append((label, summary))
         self.merge_facts(facts)
+        if updates:
+            # 搭车抽取的角色更新：连同块内正文一起存（正文是合并锚点），
+            # 由窗口层取走喂给角色账本；这里不解析、不判断
+            anchor = "\n".join(t for _type, t, _ch in chunk if t)
+            self.pending_character_updates.append((anchor, updates))
+            del self.pending_character_updates[:-MAX_PENDING_UPDATES]
 
     def _summarize_chunk(self, chunk: list, ai_client=None) -> tuple:
-        """压缩一个块，返回 (概要, 关键事实列表)。"""
+        """压缩一个块，返回 (概要, 关键事实列表, 角色更新列表)。"""
         texts = [t for _type, t, _ch in chunk if t]
         if not texts:
-            return "", []
+            return "", [], []
         if ai_client is not None:
             try:
                 joined = "\n".join(texts)
@@ -132,16 +141,26 @@ class StorySummarizer:
                         f"请概括以下 {len(texts)} 段剧情：\n{joined}"},
                 ]
                 raw = ai_client.generate(messages, temperature=0.3)
-                summary, facts = self._parse_summary_json(raw)
+                summary, facts, updates = self._parse_summary_json(raw)
                 if summary:
-                    return summary, facts
+                    return summary, facts, updates
             except Exception as e:
                 process_log.log(f"[Summary] AI 压缩失败，改用内部算法: {e}")
-        return self._fallback_summary(texts), []
+        return self._fallback_summary(texts), [], []
+
+    def drain_character_updates(self) -> list:
+        """取走搭车抽取的角色更新 ``[(块内正文, [更新...]), ...]`` 并清空。"""
+        pending = self.pending_character_updates
+        self.pending_character_updates = []
+        return pending
 
     @staticmethod
     def _parse_summary_json(raw) -> tuple:
-        """解析压缩调用返回的 {summary, facts}；解析失败时整体当概要。"""
+        """解析压缩调用返回的 {summary, facts, character_updates}。
+
+        旧响应没有 ``character_updates`` 时返回空列表，行为不变；
+        解析失败时整体当概要。
+        """
         raw = str(raw or "").strip()
         if raw.startswith("```"):
             raw = raw.strip("`").lstrip("json").strip()
@@ -151,11 +170,14 @@ class StorySummarizer:
                 data, _ = json.JSONDecoder().raw_decode(raw[start:])
                 summary = str(data.get("summary") or "").strip()
                 facts = data.get("facts")
+                updates = data.get("character_updates")
                 if summary:
-                    return _clip(summary), facts if isinstance(facts, list) else []
+                    return (_clip(summary),
+                            facts if isinstance(facts, list) else [],
+                            updates if isinstance(updates, list) else [])
             except json.JSONDecodeError:
                 pass
-        return (_clip(raw) if raw else ""), []
+        return (_clip(raw) if raw else ""), [], []
 
     @staticmethod
     def _fallback_summary(texts: Iterable[str]) -> str:

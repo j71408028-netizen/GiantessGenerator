@@ -303,7 +303,9 @@ def _validate_top_level(config: dict, add) -> None:
         add("error", "triggers", "触发器列表必须是数组")
     _validate_voice(config.get("voice"), config.get("coupling_level"), add)
     _validate_protagonist_background(config.get("protagonist_background"), add)
-    _validate_cast(config.get("cast"), add)
+    _validate_cast(config.get("cast"),
+                   protagonist_title=str(config.get("protagonist_title") or ""),
+                   add=add)
 
 
 #: 描述性字段的建议长度：每段都会随提示词发送，超长会挤占预算
@@ -325,8 +327,8 @@ def _validate_protagonist_background(raw, add) -> None:
             "（它随系统提示词每段发送）")
 
 
-def _validate_cast(raw, add) -> None:
-    """配角表：称呼 / id 唯一、枚举合法、描述长度。"""
+def _validate_cast(raw, add, protagonist_title="") -> None:
+    """配角表：称呼 / id 唯一、枚举合法、描述长度、临时称呼不撞车。"""
     if raw is None:
         return
     if not isinstance(raw, list):
@@ -370,6 +372,21 @@ def _validate_cast(raw, add) -> None:
                     "说话人标记与音色会串台，必须改掉")
             else:
                 name_owner[alias] = member["id"]
+        if (cast_mod.role_supports(member, "intro_as")
+                and member.get("intro_as")):
+            intro_as = member["intro_as"]
+            if intro_as == protagonist_title:
+                add("error", path,
+                    f"临时称呼「{intro_as}」与主角称呼相同："
+                    "说话人标记与音色会串台，必须改掉")
+            else:
+                owner = name_owner.get(intro_as)
+                if owner is not None and owner != member["id"]:
+                    add("error", path,
+                        f"临时称呼「{intro_as}」已被另一个成员的称呼使用："
+                        "说话人标记与音色会串台，必须改掉")
+                else:
+                    name_owner[intro_as] = member["id"]
         if len(member["background"]) > _MAX_BACKGROUND:
             add("warning", path + ".background",
                 f"身份背景 {len(member['background'])} 字，超过建议上限 {_MAX_BACKGROUND}")
