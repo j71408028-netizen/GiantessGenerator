@@ -72,18 +72,15 @@ _DESTRUCTION_BUCKETS = [
     (3.5, "少女所过之处皆成废墟，毁灭已经成为她的本能与乐趣。"),
 ]
 
-_SENSITIVITY_BUCKETS = [
+# 策略值 = 敏感值 × (1 - 归一行动点数) + 重力 × 归一个性强度；
+# 展示按行动点取 50（与 Personality.strategy_value() 缺省口径一致，
+# 即生成角色时实际生效的策略值）。
+_STRATEGY_BUCKETS = [
     (-3.0, "她对人类的情感可能是保护欲望，但不排除一种格外危险的占有表达。"),
     (-0.5, "她面对怎样的身下环境与人类请求都无动于衷，几乎不会为此改变计划。"),
     (0.5, "忽略完全不对等的交流，可以把她视作一个有正常好奇心与羞耻心的女孩。"),
     (1.5, "人类的拒绝会让患得患失的她强烈退缩，同时却经常有着一不小心有玩过头的模样。"),
-]
-
-_GRAVITY_BUCKETS = [
-    (-3.0, "她的破坏冲动收敛而克制，面对景观时更易收手，任由文明保持完整。"),
-    (-0.5, "地标的风貌几乎不会撩动她的破坏欲，行动始终有自己的分寸。"),
-    (0.5, "她的破坏与否与眼前的景观无关，全凭当时的心绪起伏。"),
-    (1.5, "越是壮观独特的地标，越能点燃她碾碎一切的冲动。"),
+    (3.0, "旅程中最平凡的受挫也能使她一动不动，却反让被引诱的后果显得更深不可测。"),
 ]
 
 _STRENGTH_BUCKETS = [
@@ -132,12 +129,22 @@ def _init_step_phrase(noun: str, init: float, step: float, levels) -> str:
         return base
 
 
+def _strategy_display_value(values: dict) -> float:
+    """展示用策略值：行动点取 50，与 Personality.strategy_value() 缺省口径一致。"""
+    return Personality(
+        name="", init_intrusion=0.0, step_intrusion=0.0,
+        init_destruction=0.0, step_destruction=0.0,
+        sensitivity=values["sensitivity"], gravity=values["gravity"],
+        skip_base_prob=values["skip_base_prob"],
+    ).strategy_value()
+
+
 def _personality_summary(values: dict,
                          base_item: Optional[Personality] = None) -> list:
     """生成性格形容行：预设性格首行为其简介，其后按当前参数分述四大维度。
 
     介入度 / 破坏性由初始值 + 步长共同形容；
-    敏感（特殊事件反应）与个性强度（习惯与爱好的分量）各自按当前值形容。
+    策略值（行动点取 50）与个性强度（习惯与爱好的分量）各自按当前值形容。
     """
     lines = []
     if base_item is not None and base_item.description:
@@ -146,8 +153,7 @@ def _personality_summary(values: dict,
                                       values['step_intrusion'], _INTRUSION_BUCKETS)}")
     lines.append(f"{_init_step_phrase('破坏', values['init_destruction'],
                                       values['step_destruction'], _DESTRUCTION_BUCKETS)}")
-    lines.append(f"{_pick_level(values['sensitivity'], _SENSITIVITY_BUCKETS)}")
-    lines.append(f"{_pick_level(values['gravity'], _GRAVITY_BUCKETS)}")
+    lines.append(f"{_pick_level(_strategy_display_value(values), _STRATEGY_BUCKETS)}")
     lines.append(f"{_pick_level(values['skip_base_prob'], _STRENGTH_BUCKETS)}")
     return lines
 
@@ -178,7 +184,8 @@ class PersonalityCustomDialog(BaseDialog):
     下拉框可把滑块设到对应表条目并更新状态标签，但不锁定滑块；
     手动调节任一滑块后状态标签变为“自定义”。
     底部“性格形容”区在选中预设性格时首行显示其简介，
-    其后的行分别按当前参数形容介入度、破坏性、敏感、个性强度四大维度。
+    其后的行分别按当前参数形容介入度、破坏性、策略值、个性强度四大维度；
+    敏感值 / 重力滑块本身不单独配文案，其叙事由策略值行统一承载。
     初始介入度/破坏性为 0 表示随机演化（相应步长无意义，会被禁用并高亮标注）。
     结果约定：result = ("ok", label, obj) 表示确定；
              ("clear", None, None) 表示消除（回到随机）；
@@ -283,7 +290,7 @@ class PersonalityCustomDialog(BaseDialog):
         summary_frame = ctk.CTkFrame(self, fg_color="transparent")
         summary_frame.grid(row=2, column=0, sticky='ew', padx=14, pady=0)
         self._summary_lines = []
-        for _i in range(6):
+        for _i in range(5):
             lbl = ctk.CTkLabel(summary_frame, text="", anchor='w', justify="left",
                                font=self.UI_FONT, wraplength=470, text_color=PARAMS_DLG_TEXT)
             lbl.pack(fill='x', pady=0)
