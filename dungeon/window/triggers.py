@@ -22,7 +22,7 @@ from dungeon.overrides import (active_override, describe as describe_overrides,
 from dungeon.models import DungeonState, DungeonTextType
 from dungeon.response import canonical_history_entry
 from dungeon.rules import TriggerRules
-from dungeon.splitter import scan_highlight_markers
+from dungeon.splitter import split_full_text, strip_display_markers
 from dungeon.window.fx import parse_fx_params
 from dungeon.window.minigame import BACKEND_PY, resolve_mini_game
 
@@ -709,27 +709,35 @@ class TriggerHandler:
         in_ending = self._in_terminating_chapter()
         if in_ending:
             text_type = DungeonTextType.BACKGROUND
-        # 插入段文本可以直接写高亮标记（==...==），与旧版触发器的「高亮」字段
-        # 取并集；标记只作用于显示层，对话历史与回放存净文本
-        inserted_text, highlight_mask = scan_highlight_markers(item["text"])
-        highlight = bool(item.get("highlight")) or any(highlight_mask)
+        # 插入段文本可以直接写显示层标记（@说话人@ / ==...==），与旧版触发器的
+        # 「高亮」字段取并集。与 AI / 固定文本段落同构：分句器解析标记并把正文
+        # 切成显示段落，首句立即上屏、其余排队等点击；标记只作用于显示层，
+        # 对话历史与回放存净文本
+        units = split_full_text(item["text"])
+        clean_text = strip_display_markers(item["text"])
+        if bool(item.get("highlight")):
+            units = [u._replace(highlight=True) for u in units]
+        first = units[0] if units else None
 
         # 插入段同样走限速上屏：先空文本上屏，再由游标逐字揭开
         anim_item = {
             "type_str": self._display_type_prefix(text_type),
-            "text": "",
-            "highlight": highlight,
-            "speaker": None,
+            "text": first.text if first is not None else "",
+            "highlight": first.highlight if first is not None else False,
+            "speaker": first.speaker if first is not None else None,
         }
         self.story_history.append(anim_item)
         self._update_text_display()
-        self._reveal_start(anim_item, inserted_text)
+        if anim_item["text"]:
+            self._reveal_start(anim_item, anim_item["text"])
+        self._pending_units = list(units[1:])
+        self._speak_item(anim_item)
 
         # 与一般段落一样进入对话历史，后续 AI 生成时可见。
         # 用规范 JSON 形状（dungeon.response.canonical_history_entry）：
         # 纯文本的 assistant 回合会让模型模仿，引发格式漂移
         self.messages.append({"role": "assistant", "content": canonical_history_entry(
-            inserted_text, 0, {})})
+            clean_text, 0, {})})
         window = self._message_window_size()
         if len(self.messages) > window + 1:
             self.messages = [self.messages[0]] + self.messages[-window:]
@@ -744,12 +752,14 @@ class TriggerHandler:
             step_override=0.0 if in_ending else None,
         )
         self.step_num = self.dungeon_state.total_steps
+        # 插入文本里的说话人 / 点名同样登记进运行期账本（decay 按步幂等）
+        self._observe_characters(units, clean_text, self.step_num)
 
         step_info = {
             "step": self.step_num,
             "type": text_type.value,
-            "text": inserted_text,
-            "highlight": highlight,
+            "text": clean_text,
+            "highlight": any(u.highlight for u in units),
             "intrusion_before": before_state.intrusion,
             "destruction_before": before_state.destruction,
             "custom_before": before_state.custom_attrs.copy(),
@@ -759,6 +769,6 @@ class TriggerHandler:
         if in_ending:
             step_info["ending_chapter"] = True
 
-        self._finish_step(text_type, inserted_text, step_info)
+        self._finish_step(text_type, clean_text, step_info)
         # 插入段消费后下一次点击必然生成：立即补射预生成
         self._maybe_pregen_next()
