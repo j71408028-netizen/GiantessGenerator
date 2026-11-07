@@ -4,6 +4,7 @@ import datetime
 import os
 
 from dungeon import process_log
+from dungeon.characters import CharacterLedger
 from dungeon.window.host import (DIALOG_ASK, DIALOG_INFO, DIALOG_WARNING,
                                  HostPort)
 from paths import data_dir
@@ -45,6 +46,20 @@ class DungeonPersistence:
             "auto_save_replay", False))
 
     # ------------------ 重要结局索引记录 ------------------
+    def _revealed_characters(self) -> list:
+        """结局回顾用的已揭示角色快照（账本缺失 / 空时为空列表）。"""
+        ledger = getattr(self, "characters", None)
+        if not isinstance(ledger, CharacterLedger):
+            return []
+        return ledger.revealed_snapshot()
+
+    def _characters_snapshot_record(self):
+        """回放文件头部的账本快照记录；账本为空时 ``None``（不写这条）。"""
+        ledger = getattr(self, "characters", None)
+        if not isinstance(ledger, CharacterLedger) or not len(ledger):
+            return None
+        return {"kind": "characters", "snapshot": ledger.snapshot()}
+
     def _record_ending_achievement(self):
         """把本次重要结局（配置了图标）的索引写入档案。
 
@@ -53,7 +68,8 @@ class DungeonPersistence:
         - 回放模式 / 无图标结局：不记录。
         索引字段（与结局图标一一对应，便于后续以图标展示/悬停/点击查看）：
         scenario_id、trigger_index（结局触发器在 triggers 列表中的下标）、name、
-        icon_path（相对副本目录）、ending_text、replay_path、achieved_at。
+        icon_path（相对副本目录）、ending_text、replay_path、achieved_at、
+        characters（结局时已揭示角色的运行期快照，供回顾页展示，不回写方案）。
         """
         if self.is_replay:
             return
@@ -71,6 +87,8 @@ class DungeonPersistence:
             "ending_text": self.ending_text or "",
             "replay_path": "",
             "achieved_at": now_str,
+            # 本局结束时已揭示的角色快照（运行期状态，不回写方案配置）
+            "characters": self._revealed_characters(),
         }
         mode = getattr(self, "mode", "explore")
         if mode == "challenge":
@@ -255,8 +273,13 @@ class DungeonPersistence:
         filename = f"{char.name}_回放_{timestamp}{marker}.replay.json"
         path = os.path.join(replay_dir, filename)
         try:
-            # 原子写：半截回放文件不会被读到（后缀仍为 .replay.json，回放加载照旧）
-            write_json_atomic(path, list(self.replay_data), backup=False)
+            # 原子写：半截回放文件不会被读到（后缀仍为 .replay.json，回放加载照旧）。
+            # 头部带一条角色账本快照，回放时整本还原（只读），人物档案与实际一致
+            payload = list(self.replay_data)
+            snapshot = self._characters_snapshot_record()
+            if snapshot is not None:
+                payload.insert(0, snapshot)
+            write_json_atomic(path, payload, backup=False)
         except Exception as e:
             process_log.log(f"[Replay] 回放保存失败: {e}")
             return ""
@@ -290,7 +313,11 @@ class DungeonPersistence:
         filename = f"{scenario_key}_回放_{timestamp}{marker}.replay.json"
         path = os.path.join(replay_dir, filename)
         try:
-            write_json_atomic(path, list(self.replay_data), backup=False)
+            payload = list(self.replay_data)
+            snapshot = self._characters_snapshot_record()
+            if snapshot is not None:
+                payload.insert(0, snapshot)
+            write_json_atomic(path, payload, backup=False)
         except Exception as e:
             process_log.log(f"[Replay] 用户回放保存失败: {e}")
             return ""

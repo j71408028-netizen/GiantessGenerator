@@ -758,6 +758,19 @@ class DungeonWindowBase:
             )
         self.dungeon_logic = None
         self.current_text_type = None
+        # 人物表与角色账本：seed 后用回放头部的快照整本还原（只读视图）——
+        # 人物档案、语音解析看到的角色状态与原局一致；旧回放没有快照，
+        # 保持 seed 出来的设定成员
+        self.cast = normalize_cast((self.scenario_config or {}).get("cast"))
+        self.characters = CharacterLedger(self.cast)
+        for record in replay_data:
+            if isinstance(record, dict) and record.get("kind") == "characters":
+                self.characters.restore(record.get("snapshot"))
+                break
+        # 快照记录不参与回放步进
+        self.loaded_replay = [e for e in replay_data
+                              if not (isinstance(e, dict)
+                                      and e.get("kind") == "characters")]
         # 回放模式同样维护剧情压缩器（不调用 AI，仅走内部算法压缩）
         self.story_summary = StorySummarizer()
         # 回放也照方案配置朗读（音色可能只有默认值——回放数据里没有主角称呼）

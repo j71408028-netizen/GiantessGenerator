@@ -164,7 +164,7 @@ _TOOLBAR_ACTIONS = (
 _ENTRY_PANEL_W = 380
 _ENTRY_PANEL_H = 270
 _ENTRY_ENDING_PANEL_W = 320
-_ENTRY_ENDING_PANEL_H = 200
+_ENTRY_ENDING_PANEL_H = 224
 _ENTRY_ENDING_ICON = 96
 _ENTRY_PANEL_MARGIN = 20
 _ENTRY_PANEL_PAD = 12
@@ -1208,6 +1208,17 @@ class DungeonWindowUI:
         imgui.text_wrapped(meta)
         imgui.pop_style_color()
         imgui.pop_text_wrap_pos()
+        # 本局揭示的角色快照（结局时记录的运行期状态，见 persistence）
+        names = "、".join(
+            str(c.get("name") or "").strip()
+            for c in (item.get("characters") or [])[:8]
+            if isinstance(c, dict) and str(c.get("name") or "").strip())
+        if names:
+            imgui.push_text_wrap_pos(imgui.get_cursor_pos_x() + inner_w)
+            imgui.push_style_color(imgui.Col_.text, iu.u32(*_ENTRY_ENDING_TIME))
+            imgui.text_wrapped(f"揭示的角色：{names}")
+            imgui.pop_style_color()
+            imgui.pop_text_wrap_pos()
         imgui.spacing()
         imgui.push_style_color(imgui.Col_.text, iu.u32(*_ENTRY_ENDING_FOOT))
         imgui.text_wrapped("点击「开始副本」进入新的冒险")

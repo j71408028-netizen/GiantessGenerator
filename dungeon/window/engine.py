@@ -249,7 +249,7 @@ class DungeonStoryEngine:
         连续两段出现升级为「在场」。只在回合成功后调用，构建提示词不写账本。
         """
         ledger = getattr(self, "characters", None)
-        if not isinstance(ledger, CharacterLedger):
+        if not isinstance(ledger, CharacterLedger) or self.is_replay:
             return
         chapter = str(getattr(self, "current_chapter", "") or "")
         ledger.decay(step)
@@ -639,7 +639,8 @@ class DungeonStoryEngine:
     def _apply_summary_character_updates(self, summarizer):
         """把摘要压缩搭车抽取的角色更新喂给运行期账本（主线程执行）。"""
         ledger = getattr(self, "characters", None)
-        if not isinstance(ledger, CharacterLedger) or self._closing:
+        if not isinstance(ledger, CharacterLedger) or self._closing \
+                or self.is_replay:
             return
         step = int(getattr(self.dungeon_state, "total_steps", 0) or 0)
         chapter = str(getattr(self, "current_chapter", "") or "")
@@ -766,6 +767,10 @@ class DungeonStoryEngine:
             self._request_close()
             return
         entry = self.loaded_replay[self.current_replay_index]
+        if entry.get("kind") == "characters":
+            # 账本快照：已在 _init_replay 里还原，步进时跳过
+            self.current_replay_index += 1
+            return
         if entry.get("kind") == "trigger":
             self._replay_trigger(entry)
             self.current_replay_index += 1

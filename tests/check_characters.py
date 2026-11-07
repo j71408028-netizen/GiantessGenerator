@@ -16,7 +16,8 @@
 10. 容量淘汰：优先淘汰最久未见的非在场 emergent；
 11. 细节搭车解析：``parse_character_updates`` 新格式 / 旧格式 / 坏 JSON；
 12. ``intro_as``：seed 即临时称呼、显示名与解析、语音稳定键；
-13. 摘要搭车：``StorySummarizer`` 抽出角色更新、旧响应兼容。
+13. 摘要搭车：``StorySummarizer`` 抽出角色更新、旧响应兼容；
+14. 合并审计（origin 手动/自动）、账本快照还原、结局回顾快照。
 """
 
 import os
@@ -358,6 +359,50 @@ check("摘要搭车的更新走锚点揭示",
 check("旧摘要响应没有 character_updates 时行为不变",
       StorySummarizer._parse_summary_json('{"summary": "s", "facts": ["f"]}')
       == ("s", ["f"], []))
+
+# ---------------- 15. 合并审计与快照还原（P3） ----------------
+_audit = CharacterLedger([make_key()])
+_audit.add_emergent("胆怯的声音")
+check("手动合并记进审计日志",
+      _audit.merge("胆怯的声音", "李队长", origin="manual", step=6,
+                   chapter="第三幕") is True
+      and len(_audit.merge_log) == 1
+      and _audit.merge_log[0]["origin"] == "manual"
+      and _audit.merge_log[0]["target_name"] == "李队长"
+      and _audit.merge_log[0]["step"] == 6)
+_auto = CharacterLedger([make_key()])
+_auto.add_emergent("胆怯的声音")
+_auto.apply_updates([{"handle": "胆怯的声音", "true_name": "李队长"}],
+                    text="胆怯的声音就是李队长。")
+check("自动合并记 origin=auto",
+      len(_auto.merge_log) == 1 and _auto.merge_log[0]["origin"] == "auto")
+
+_src = CharacterLedger([make_key(), make_extra()])
+_src.add_emergent("胆怯的声音")
+_src.mark_declared(["李队长"], step=5, chapter="第二幕")
+_data = _src.snapshot()
+_dst = CharacterLedger([])
+check("快照还原角色数一致", _dst.restore(_data) == len(list(_src)))
+check("快照还原观测与身份状态一致",
+      _dst.resolve("李队长").presence == PRESENCE_PRESENT
+      and _dst.resolve("李队长").last_seen_step == 5
+      and _dst.resolve("胆怯的声音").status == IDENTITY_TEMPORARY)
+check("还原后语音稳定键与群像记录保留",
+      _dst.voice_info("李队长")[2] == "李队长"
+      and _dst.resolve("王店主").role == "extra")
+check("空快照不动现有账本",
+      _dst.restore({}) == 0 and _dst.resolve("李队长") is not None)
+check("旧回放没有快照时账本保持 seed",
+      CharacterLedger([make_key()]).restore(None) == 0)
+
+_snap = CharacterLedger([make_key(), make_extra()])
+_snap.add_emergent("胆怯的声音")
+check("结局快照只含已揭示的重要角色",
+      [r["name"] for r in _snap.revealed_snapshot()] == ["李队长"]
+      and _snap.revealed_snapshot()[0]["aliases"] == ["李队", "队长"])
+_snap.reveal("胆怯的声音", "王店主")
+check("揭示后的 emergent 进结局快照",
+      [r["name"] for r in _snap.revealed_snapshot()] == ["李队长", "王店主"])
 
 # ---------------- 结论 ----------------
 print()

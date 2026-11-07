@@ -524,7 +524,7 @@ class OverlayHandler:
                     self._character_merge_target = selected
                 imgui.same_line()
                 if imgui.button(f"确认合并##char_merge_btn_{rc.id}"):
-                    if ledger.merge(rc.id, target.id):
+                    if ledger.merge(rc.id, target.id, origin="manual"):
                         self._notify(f"已合并到「{target.display_name}」")
                         self._character_merge_target = {
                             k: v for k, v in selected.items() if k != rc.id}

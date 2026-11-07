@@ -182,6 +182,8 @@ class DungeonLaunchStages:
                 "achieved_at": str(rec.get("achieved_at", ""))[:16].replace("T", " "),
                 "ending_text": rec.get("ending_text", ""),
                 "scenario_id": scenario_id_of(rec),
+                "characters": (rec.get("characters")
+                               if isinstance(rec.get("characters"), list) else []),
             })
 
     # ------------------ 入口阶段 UI：状态与纹理预载（P3） ------------------

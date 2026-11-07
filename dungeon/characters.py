@@ -35,6 +35,9 @@ _PRESENCE_RANK = {PRESENCE_ABSENT: 0, PRESENCE_MENTIONED: 1, PRESENCE_PRESENT: 2
 #: 待确认的合并（AI 给出真名但正文没有锚点）；不自动生效，等运行视图手动确认。
 MAX_PENDING_MERGES = 20
 
+#: 合并审计日志上限：每次合并一条（手动 / 自动），超出丢弃最旧
+MAX_MERGE_LOG = 50
+
 #: 身份状态：未知（还没被观测到）/ 临时称呼 / 真名已揭示
 IDENTITY_UNKNOWN = "unknown"
 IDENTITY_TEMPORARY = "temporary"
@@ -199,6 +202,8 @@ class CharacterLedger:
         self._limit = max(1, int(limit))
         #: AI 声称的合并（正文里找不到锚点）：只登记，不生效。
         self.pending_merges: list[dict] = []
+        #: 合并审计：每次生效的合并一条（origin 区分手动 / 自动）
+        self.merge_log: list[dict] = []
         for member in members or ():
             self.add(member)
 
@@ -479,11 +484,13 @@ class CharacterLedger:
         rc.mutable["status"] = IDENTITY_REVEALED
         return True
 
-    def merge(self, source, target) -> bool:
+    def merge(self, source, target, *, origin="auto", step=None,
+              chapter="") -> bool:
         """把源角色并入目标角色；两个设定成员永不自动合并。
 
         ``source`` / ``target`` 可以是 id、称呼或记录本身。合并只保留目标，
-        源的特征、别名与观测状态并入目标；返回是否真的合并。
+        源的特征、别名与观测状态并入目标；每次生效都记进 ``merge_log``
+        （``origin="manual"`` 是玩家在运行视图手动纠正的合并）。返回是否真的合并。
         """
         src = source if isinstance(source, RunCharacter) else self.resolve(source)
         dst = target if isinstance(target, RunCharacter) else self.resolve(target)
@@ -520,8 +527,16 @@ class CharacterLedger:
         dst.mutable["status"] = IDENTITY_REVEALED
         self._order.remove(src.id)
         del self._characters[src.id]
+        self.merge_log.append({
+            "origin": "manual" if origin == "manual" else "auto",
+            "source": src.id, "source_name": src.handle or src.name,
+            "target": dst.id, "target_name": name,
+            "step": step, "chapter": str(chapter or ""),
+        })
+        del self.merge_log[:-MAX_MERGE_LOG]
+        tag = "手动合并" if origin == "manual" else "合并"
         process_log.log(
-            f"[Characters] 合并：{src.handle or src.name} → {name}（{src.id} 并入 {dst.id}）")
+            f"[Characters] {tag}：{src.handle or src.name} → {name}（{src.id} 并入 {dst.id}）")
         return True
 
     def _reveal_or_merge(self, rc, true_name, *, text="", step=None,
@@ -536,7 +551,7 @@ class CharacterLedger:
             return False
         target = self.resolve(name)
         if target is not None and target.id != rc.id:
-            if self.merge(rc, target):
+            if self.merge(rc, target, step=step, chapter=chapter):
                 return True
             self._record_pending(rc, name, step=step, chapter=chapter)
             return False
@@ -592,6 +607,80 @@ class CharacterLedger:
             if revealed or after != before:
                 changed += 1
         return changed
+
+    # ---------------- 快照与还原（回放 / 结局回顾用） ----------------
+    def snapshot(self) -> dict:
+        """整本账本的序列化快照：含待确认合并与合并审计，随回放落盘。"""
+        return {
+            "characters": [{
+                "id": rc.id, "role": rc.role, "source": rc.source,
+                "initial": dict(rc.initial), "mutable": dict(rc.mutable),
+                "observed": dict(rc.observed),
+            } for rc in self],
+            "pending_merges": [dict(item) for item in self.pending_merges],
+            "merge_log": [dict(item) for item in self.merge_log],
+        }
+
+    def restore(self, data) -> int:
+        """用快照重建账本（回放的只读视图）；返回恢复的角色数。
+
+        只接受带 id 的完整条目；快照为空 / 没有可用条目时保持现状不动
+        （旧回放没有快照，账本保持 seed 出来的设定成员）。恢复后调用方不得
+        再写入——回放路径的写入入口由 ``is_replay`` 拦下。
+        """
+        if not isinstance(data, dict):
+            return 0
+        items = [item for item in (data.get("characters") or ())
+                 if isinstance(item, dict) and str(item.get("id") or "")]
+        if not items:
+            return 0
+        self._characters.clear()
+        self._order.clear()
+        self.pending_merges = []
+        self.merge_log = []
+        for item in items:
+            character_id = str(item["id"])
+            self._characters[character_id] = RunCharacter(
+                id=character_id,
+                role="extra" if item.get("role") == "extra" else "key",
+                source="emergent" if item.get("source") == "emergent"
+                else "authored",
+                initial=dict(item.get("initial") or {}),
+                mutable=dict(item.get("mutable") or {}),
+                observed=dict(item.get("observed") or {}),
+            )
+            self._order.append(character_id)
+        for item in data.get("pending_merges") or ():
+            if isinstance(item, dict):
+                self.pending_merges.append(dict(item))
+        for item in data.get("merge_log") or ():
+            if isinstance(item, dict):
+                self.merge_log.append(dict(item))
+        return len(items)
+
+    def revealed_snapshot(self) -> list:
+        """结局回顾用的已揭示重要角色快照；临时称呼与群像不进。
+
+        别称合并运行期 ``aka`` 与设定的 ``aliases``（真名本身不列）。
+        """
+        rows = []
+        for rc in self:
+            if rc.role != "key" or rc.status != IDENTITY_REVEALED:
+                continue
+            name = rc.true_name or rc.name
+            aliases = []
+            for alias in (rc.aka, rc.initial.get("aliases") or ()):
+                for raw in alias:
+                    text = cast_mod.clean_name(raw)
+                    if text and text != name and text not in aliases:
+                        aliases.append(text)
+            rows.append({
+                "name": name,
+                "aliases": aliases[:MAX_AKA],
+                "traits": rc.traits,
+                "relation": rc.relation,
+            })
+        return rows
 
     # ---------------- 渲染 ----------------
     def observed_brief(self, exclude_ids=()) -> str:
@@ -687,6 +776,7 @@ __all__ = [
     "PRESENCE_PRESENT", "PRESENCE_MENTIONED", "PRESENCE_ABSENT",
     "MAX_CHARACTERS", "MAX_TRAITS", "TRAIT_CHARS", "MAX_AKA",
     "RELATION_CHARS", "DIGEST_CHARS", "BRIEF_CHARS", "MAX_PENDING_MERGES",
+    "MAX_MERGE_LOG",
     "initial_fields", "mutable_fields",
     "RunCharacter", "CharacterLedger",
 ]
