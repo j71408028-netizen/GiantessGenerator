@@ -179,8 +179,12 @@ class SettingsPanel(ctk.CTkScrollableFrame):
                 # 内容不足视口高度：把 canvas 窗口项撑到视口高度，左右栏向下填满
                 self._parent_canvas.itemconfigure(self._create_window_id, height=view_height)
             else:
-                # 内容超出一屏：恢复自然高度，允许滚动
-                self._parent_canvas.itemconfigure(self._create_window_id, height=0)
+                # 内容超出一屏：窗口项高度显式取内容自然高度（含上下 pady），
+                # 允许滚动。内框 pack_propagate(False) 之后 height=0 会回退到
+                # 内框的固定请求尺寸（1px 净空），整页被裁成空白
+                self._parent_canvas.itemconfigure(
+                    self._create_window_id,
+                    height=content_height + 12)  # content 的 pack pady=(4, 8)
         except Exception:
             pass
 
