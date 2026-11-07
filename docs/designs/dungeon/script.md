@@ -1,8 +1,11 @@
 # 副本数据模型索引：章节与触发器
 
-> **定位**：方案配置（`data/packs/scenarios/<id>/config.json`）里玩法结构的**字段索引**。
-> 分层与运行时数据流见 [架构说明](architecture.md)，窗口侧见 [窗口文档](window.md)。
+> **定位**：方案配置（`data/packs/scenarios/<id>/config.json`）里**章节与触发器**的
+> 字段索引——script 只是这两者的非正式统称。分层与运行时数据流见 Dungeon
+> 架构说明（`docs/Dungeon/architecture.md`），窗口侧见 Dungeon 窗口文档。
 > 字段声明的单一真相源是 `dungeon/schema.py`（`CHAPTER_FIELDS` / `TRIGGER_FIELDS` / `SCENARIO_FIELDS`）。
+> 方案级配置里不属于章节 / 触发器的内容（对话语音、角色设定、进入准入）各有
+> 自己的机制文档，本篇只留指针（§10–§12），不再展开。
 
 ## 目录
 
@@ -17,10 +20,10 @@
 | §7 | 章节效果短暂覆盖 |
 | §8 | 编辑器文件索引 |
 | §9 | 校验、迁移与持久化 |
-| §10 | 对话语音（方案级 `voice`） |
-| §11 | 角色设定（主角 + 人物表 `cast`） |
-| §12 | 进入准入（方案级） |
-| §13 | 场景地标清单（方案级） |
+| §10 | 指针 → [对话语音](voice.md) |
+| §11 | 指针 → [角色设定](characters.md) |
+| §12 | 指针 → [进入准入](admission.md) |
+| §13 | 场景地标清单（章节级，细则在 [副本内地点](scene.md)） |
 
 ---
 
@@ -33,7 +36,7 @@
 
 旧版把条件与动作塞在同一个无层级的触发器里，动作有六种；现在背景切换与性格敏感化由
 **章节属性**承担，动作类型拆成「单步行为」与「章节跳转」两类。
-（演进过程与旧动作退场清单见 [副本模型与命名演进](history/model_evolution.md)，不据此改代码。）
+（演进过程与旧动作退场清单见 Dungeon 历史档案 `history/model_evolution.md`，不据此改代码。）
 
 ## 2. 章节字段索引
 
@@ -182,7 +185,7 @@ MCI 的坑：`play <alias> repeat` 只有 mpegvideo（mp3 等）认，waveaudio�
   音色，响度会被这条规则拉回目标。作者也可以在档里显式写 `loudness_db` 覆盖声明值
   （夹取到 `LOUDNESS_RANGE`）。
 
-**两级引擎（互不叠加，按本机能力择优）**，实测数字见 [架构说明](architecture.md) §4.3：
+**两级引擎（互不叠加，按本机能力择优）**，实测数字见 Dungeon 架构说明 §4.3：
 
 | 引擎 | 依赖 | 能做什么 | 什么时候用 |
 |---|---|---|---|
@@ -469,7 +472,7 @@ AI 生成**（`normalize_fixed_text` 把缺路径的配置归一成空 dict，�
 | `ui/scenario/character_page.py` | **角色页**：人物卡片（她 / 主角 / 环境 / 其他角色）+ **主角身份背景**与**人物表卡片列表**（重要角色 / 群像的增删排序、定位切换、按定位换一套字段：重要角色是别称 / 称她为 / 身份背景，群像是代词 / 作用 / 说话方式，两档都有音色）+ 方案级语音条（总开关、语速、档位、预听）；主角与人物表、音色都防抖自动保存；页内「演化量」视图是同一批演化量的平铺表（可再按归属过滤），由 `evolution_attributes.py` 提供 |
 | `ui/scenario/evolution_attributes.py` | 演化量视图：按归属筛选的列表（名称 / 归属 / 类型 / 展示状态 / 初始值 / 倍率 / 偏移率）、自定义属性与内置属性的编辑对话框；过滤只影响显示，保存永远写回完整列表 |
 | `ui/scenario/component_mgr.py` | 显示组件卡片化管理（开关与参数改动自动保存）                                                                                                                                                          |
-| `ui/scenario/graph_view.py` | **关系图对话框**（「检查动态」按钮）：章节总览 / 触发器依赖（泳道）/ 清单三个视图 + 图层开关 + 诊断联动；只读，不写盘。模型与规则见 [关系图与图校验](scenario_graph.md)                                                                          |
+| `ui/scenario/graph_view.py` | **关系图对话框**（「检查动态」按钮）：章节总览 / 触发器依赖（泳道）/ 清单三个视图 + 图层开关 + 诊断联动；只读，不写盘。模型与规则见 Dungeon 关系图文档 `scenario_graph.md`                                                                          |
 
 配色与调序：
 
@@ -487,7 +490,7 @@ AI 生成**（`normalize_fixed_text` 把缺路径的配置归一成空 dict，�
 
 | 诊断级别 | 覆盖示例 |
 |---|---|
-| `error` | 悬空 goto / overflow_target、无起始章节、空选项列表、固定文本文件缺失 / 读不动 / 没有可用段落（需传 `scenario_dir`）、人物表的称呼 / 别称撞车或 `id` 重复（会让说话人与音色串台）、配角缺少称呼 |
+| `error` | 悬空 goto / overflow_target、无起始章节、空选项列表、固定文本文件缺失 / 读不动 / 没有可用段落（需传 `scenario_dir`）、人物表的称呼 / 别称撞车或 `id` 重复（会让说话人与音色串台）、临时称呼与成员称呼 / 主角称呼撞车、配角缺少称呼 |
 | `warning` | 多起始章节、结束章节内的 option / goto、废弃动作与旧版字段、条件键 / 比较符 / 度量非法、演化量的展示状态 / 归属取值非法、转移矩阵行缺失与权重越界、背景图 / 结局图标缺失（需传 `scenario_dir`）、固定文本的指令行未识别记号 / 方向越界 / 指向未定义属性 / 半写（缺类型或缺方向）、`max_paragraphs` 小于逻辑段落数、固定文本章节内放 `insert`、人物表的 `role` / `pronoun` 取值非法、章节 `cast` 指向表里不存在的成员、描述字段超长 |
 | `info` | 无结局路径（`ending_policy: "open"` 时不再提示）、旧版顶层字段、未知顶层键、`voice` 未知子键、Velum 等级配了对话语音（不生效）、固定文本播完本章无去向、重要角色超过 6 个 |
 
@@ -520,10 +523,10 @@ AI 生成**（`normalize_fixed_text` 把缺路径的配置归一成空 dict，�
 
 **同位置动作竞争**（`ACTION_POSITIONS` 同位 + 同作用域）**不进校验器**：要不要报
 取决于两个条件会不会撞车，而严格判断需要求解器。编辑器关系图按位分组呈现，
-详见 [副本关系图与图校验](scenario_graph.md) §3.2、§4.3。
+详见 Dungeon 关系图文档 `scenario_graph.md` §3.2、§4.3。
 
 它们产出同一套 `Diagnostic`，走同一份 `format_diagnostics`，接入点不变；口径与判据见
-[副本关系图与图校验](scenario_graph.md) §3。
+Dungeon 关系图文档 `scenario_graph.md` §3。
 
 ### 9.2 迁移与兼容
 
@@ -560,231 +563,22 @@ AI 生成**（`normalize_fixed_text` 把缺路径的配置归一成空 dict，�
 
 ---
 
-## 10. 对话语音（方案级 `voice`，`schema.VOICE_FIELDS`）
+## 10. 对话语音（方案级 `voice`）
 
-这两节的配置在编辑器里位于**「角色」页**（见 §8 的 `character_page.py`）：音色按角色
-分栏（她的音色 / 主角音色 / 其他角色音色池），总开关与语速、档位、预听在页首的语音条；
-改动即自动保存。
-
-Solea / Bulla 耦合等级的对话分支会给每句台词标 `@说话人@`（见 window.md
-「说话人标记」）。**只有带说话人的台词会念出来**，叙述段落保持安静。
-
-| 字段 | 类型 | 默认 | 说明 |
-|---|---|---|---|
-| `enabled` | bool | `true` | 本方案是否朗读；此外还要过玩家侧的**语音总线**（设置 →「音量」→ 语音，拧到 0 即静音） |
-| `voice_her` | str | `zh-CN-XiaoxiaoNeural` | 她的音色（按本局角色名 / 昵称认） |
-| `voice_protagonist` | str | `zh-CN-YunxiNeural` | 主角音色（按方案 `protagonist_title`，留空按「主角」认） |
-| `voice_other` | list | 三把备用嗓 | 其余角色的音色池，**按名字稳定映射**：同一个配角每局都是同一把嗓子 |
-| `rate` | str | `+0%` | 语速（`+10%` / `-20%`；非法写法回退常速） |
-| `level` | int | `3` | 音量**档位** 0-4（`0` 静音 / `1` 很轻 / `2` 轻 / `3` 中 / `4` 响；越界夹到 `MAX_VOICE_LEVEL`）。旧版 0-100 `volume` 仍能读入，折算后只写 `level`。语音是混音 0 dB 参考，同档位下比音乐高 6 dB（`audio/buses.BUS_ANCHOR_DB`） |
-
-合成走 **edge-tts**（微软神经网络语音，**需要联网**，`pip install edge-tts`），
-是**可选依赖**：没装或网络失败只在日志里留一条，不出声不该拖垮一局副本——与
-背景音乐的降级策略一致。播放复用 `dungeon/audio` 的后端（MCI → pygame →
-静音占位）。
-
-> **合成端点会自己找路，失败也要说清原因。** 2026-10 微软把朗读合成从旧主机
-> `speech.platform.bing.com` 迁到 `api.msedgeservices.com`，**全球分批铺开**
-> （先是欧洲，10-12 起北美也中招），铺到哪旧主机就在哪回 **HTTP 403**——所以这
-> 与「是不是国区」无关，也不是代码问题：`edge-tts` 已是最新（7.2.8），时钟与服务端
-> 一致，`Sec-MS-GEC-Version` 换 143/146/150/155/160/170 都照样 403。上游修法见
-> edge-tts **PR #491**（7.2.8 尚未并入）：**新主机沿用同一个旧令牌，只是改挂
-> `Ocp-Apim-Subscription-Key`**。本模块在本地补齐了这一步：
->
-> - **端点回退** `speech._endpoint_candidates()`：装的那版若仍指向旧主机，就先生成
->   新主机候选、再挂旧主机作回退（新主机成 403 就自动落回旧主机）；**已装版本哪天
->   修好了（不再指向旧主机）就不插手**，不去覆盖人家的正确值。成功过的端点记在
->   `_working_wss_url`，下次优先复用。改写 `edge_tts` 模块级 `WSS_URL` 是有状态的，
->   所以「换端点 → 合成」整段由 `_endpoint_lock` 串行化。
-> - **失败原因**记在 `speech.last_synth_error()`，按类分：403 / 401 / 超时 / 时钟
->   （`SkewAdjustmentError`）/ SOCKS / 代理连不上 / 地址非法。副本的一次性告警与
->   编辑器**预听**都复用它，不再笼统报「网络不可达 / 音色名有误」。
-> - **代理**由 `speech.set_proxy()` / `resolve_proxy()` 决定——它其实委托给
->   **`core/netproxy`**（语音合成与 AI 文本生成**共用同一份**，设置页就一个
->   「网络代理」框）。优先级：`settings["net_proxy"]` ＞ 语音专用环境变量
->   `DUNGEON_TTS_PROXY` / `EDGE_TTS_PROXY` ＞ 通用环境变量 `DUNGEON_NET_PROXY` /
->   `HTTPS_PROXY` / `HTTP_PROXY` ＞ 直连。三个容易踩的点：**① 必须显式传给
->   `edge_tts.Communicate(proxy=...)`**——aiohttp 的 `trust_env` 只对 `http(s)://`
->   生效，对 `wss://` **不认环境变量**，光挂环境变量代理，WebSocket 握手仍会走直连；
->   ② 没配代理时不传这个关键字（免得老版本 `TypeError`）；③ 代理地址先过
->   `normalize_proxy()`——缺 scheme 补 `http://`（否则 aiohttp 抛 `InvalidURL`），
->   **SOCKS 直接拒绝**（不装 `aiohttp-socks` 走不了，请填代理软件的 HTTP/mixed 端口）。
->   装配点三处：`app/shell.py`（启动 / 切界面）、`window/base.py::_configure_voice`
->   （**副本跑在独立子进程里，主进程设的代理带不过来，必须在子进程再设一次**）、
->   设置页保存后立即生效。
-
-线程模型同样沿用 `audio.py`：唯一一条后台线程串行处理「合成 → 播放」，
-`speak()` 只入队就返回，**新台词打断旧台词**（翻页时不该念上一页的），
-超长台词（`MAX_SPEECH_CHARS`，300 字）跳过，会话收尾收工并清掉临时音频。
-
-| 接线 | 位置 |
-|---|---|
-| 装配音色（按方案配置） | `window/base.py::_configure_voice`（`_init_session` / `_init_replay` 各调一次） |
-| 合成端点 | `speech._endpoint_candidates()`：新主机 `api.msedgeservices.com` 优先、旧主机回退（edge-tts PR #491 未并入时本地补齐） |
-| 合成代理 | `settings["net_proxy"]` → `core/netproxy`（**语音与 AI 共用**）→ `app/shell.py` 与 `window/base.py` 各设一次（子进程独立）；失败原因见 `speech.last_synth_error()` |
-| 触发朗读 | `window/ui.py::_speak_item`（显示单元定稿时，叙述句无 `speaker` 直接返回） |
-
-> **玩家侧还有一层**：设置页的四条总线滑条（副本独占设置
-> `audio_levels`，存 `data/user/dungeon_settings.json`；总音量 / 音乐 / 语音 /
-> 音效）在方案档位之外再乘一次，装进混音层见
-> `dungeon/audio/buses.py::set_bus_levels`（副本窗口开局时按副本设置装配）。
-> 于是「她说什么」的响度 = **方案档位 × 总线电平 × 总控电平**。
->
-> **「不想听语音」就是语音电平拧到 0**——原先独立总开关 `settings["dungeon_voice_enabled"]` 已撤掉。
-> 这一档是**真静音**：`speech.SpeechDirector._silent()` 在档位 × 语音电平 × 总控
-> 归零时直接返回，**连合成都不做**（不联网、不占工作线程、离线也不会刷告警），
-> 所以「调到 0」等价于旧的「关掉开关」。旧设置文件里残留的键在
-> `persistence/settings_repo.py::load` 迁移：关过的折算成语音电平 0，然后删键。
-
-### 10.1 章节级物理效果（`voice_fx`）
-
-音色是**谁在说话**（方案级 `voice`）；效果是**她在这个空间里说话会是什么声音**
-（章节级 `voice_fx`，她 / 其他人两档）——字段、预设与两级引擎见 §2.4。接线：
-
-| 环节 | 位置 |
-|---|---|
-| 换章时切效果（没配 = 清空） | `window/triggers.py::_apply_chapter_voice_fx`；配置挂在 `window/base.py::current_voice_fx` |
-| 回放复现 | `kind: "chapter"` 记录带 `voice_fx`，`goto` 触发器记录带 `chapter_voice_fx` |
-| 按说话人分档 | `speech.py::_speak_job`（`VoiceCaster.role_of` 是她 → `her` 档，否则 `others`） |
-| 施加效果 | `speech.py::_play` → `voice_fx.render_wav`（离线渲染）/ `voice_fx.PlaybackFx`（分拍 + 音量包络）/ 原声 |
-| 响度对齐 | `voice_fx.loudness_target`（预设声明的 dB）× `_match_loudness`（渲染链末尾按实测 RMS 对齐，再让 `_limit` 守峰值）；播放侧按 `playback_trim` 衰减 |
-| 能力与降级 | `voice_fx.has_effect` / `decoder_name` / `playback_plan`；不可用时 `SpeechDirector._warn_fx_unavailable` 每个预设只提示一次 |
-| 编辑器**预听** | `dungeon/audio/preview.py::VoicePreview`（零 UI 依赖，与副本同一套合成 + 效果）；章节对话框两档各一个「预听」按钮 + 只读「响度 ±dB」标签；方案编辑器的音色行另有「预听 / 其它音色」试听音色与档位 |
-
-> 效果从属于朗读：方案关掉时 `enabled=False`、或玩家把语音电平拧到 0（见 §10），
-> 都是一句都不念，效果自然也不生效。
+方案级音色配置、合成底座（edge-tts 端点 / 代理 / 失败原因）、玩家侧音量总线与
+章节级物理效果的接线见[副本对话语音](voice.md)；
+章节 `voice_fx` 的字段与预设见 §2.4。
 
 ## 11. 角色设定（方案级：主角 + 人物表）
 
-三个层次分三处存，**不合并成一个角色对象**——它们的生命周期不同：
-
-| 角色 | 存在哪 | 说明 |
-|---|---|---|
-| 她 | 本局角色档案 | 名字 / 性格 / 身高 / 部位；跨方案复用 |
-| 主角 | `protagonist_title` + `protagonist_background` | 唯一、视角固定，不进人物表 |
-| 配角 | `cast[]` | `key` 有完整身份背景，`extra` 只有三条线索 |
-
-**所有描述都是故事开始时的样子**，不是状态：谁死了、谁反目了不改这里，那是
-`StorySummarizer` 的 facts。这是本节的中心约束，下面每条规则都是它的推论。
-
-### 11.1 主角
-
-| 字段 | 类型 | 默认 | 说明 |
-|---|---|---|---|
-| `protagonist_title` | str | `""` | 称呼（说话人标记用），留空回退「主角」 |
-| `protagonist_background` | text | `""` | 身份背景：他是谁、为什么在这儿、想要什么、怎么看她 |
-
-`protagonist_background` 非空时，系统提示词的设定区（`initial_prompt` 之前）多一块：
-
-```
-【主角】指挥官
-故事开始时：外地调来的救援调度员，任务是把东岸居民撤完；既指望她开路，又怕她失控。
-（以上是起点不是现状，不必每段重述。）
-```
-
-它随系统提示词每段都在：主角是视角人物，「他是谁」与她的性格描述同级；每段变化的是
-处境，走摘要 facts。也正因为它每段都在，文案必须点明是起点，否则 AI 会把它当成
-每段都要维持的现状。
-
-### 11.2 人物表（`cast[]`，`dungeon/cast.py`）
-
-| 字段 | 类型 | 默认 | 哪档用 | 说明 |
-|---|---|---|---|---|
-| `id` | str | 同 `name` | 两档 | 标识；章节 `cast` 与别称解析都用它 |
-| `role` | enum | `key` | — | `key` 重要角色（有完整背景）/ `extra` 群像 |
-| `name` | str | — | 两档 | 称呼（必填） |
-| `pronoun` | enum | `""` | 两档 | `他` / `她` / 空；参与渲染与音色分池，空 = 不猜 |
-| `voice` | str | `""` | 两档 | 显式音色；空 = 按 `pronoun` 落到音色池 |
-| `background` | text | `""` | `key` | 完整描述 |
-| `aliases` | list | `[]` | `key` | 别称：让 `@李队@` 与 `@李队长@` 归到同一人、同一把嗓子 |
-| `call_her` | str | `""` | `key` | 他怎么称呼她 |
-| `purpose` | str | `""` | `extra` | 作用：为什么要有这个角色 |
-| `speech` | str | `""` | `extra` | 说话方式 |
-
-两档**各只有一条「他是谁」的线索**，这是字段表按定位分家的理由：
-
-- 重要角色只要 `background`。背景写清了，「说话是什么样」自然从人设里长出来；
-  再给一栏 `speech`，作者会把同一件事写两遍，而 AI 拿到两份措辞不同的描述。
-- 群像没有 `background`，才需要 `purpose`（他为什么在这个故事里）与 `speech`
-  （他听起来什么样）两条线索。
-- `aliases` / `call_her` 只属于重要角色：它们是喂给说话人解析与称呼渲染的**结构化线索**，
-  而群像活得短、名字就是唯一标识，不值得再维护一套称呼。
-
-`role_supports()`（`dungeon/cast.py`）是这条归属的代码落点，渲染与角色页都问它。
-
-存储分两层：上表是**初始字段**（作者写、跨局不变）；本局内的身份状态、当前称呼、
-特征与关系属于**可变字段**，只由重要角色持有（`dungeon/characters.py` 的
-`CharacterLedger`）。群像只有初始字段，不积累可变状态；它的作用与说话方式
-每段按初始字段重新渲染，不另存副本。
-
-### 11.3 注入规则
-
-| 内容 | 位置 | 频率 |
-|---|---|---|
-| 主角设定 | 系统提示词设定区 | 每段（基底） |
-| 本章在场行 | 用户提示词「当前地点」之后 | 章节 `cast` 非空时每段 |
-| 配角设定块 | 同在用户提示词，紧跟在场行 | **首次出场一次**（`introduced_cast`） |
-| 人物简报 | 首次出场块之后 | 已出场的在场成员**每段** |
-
-章节用 `cast` 声明谁在场，写 id / 称呼 / 别称都认（`@` 会被剥掉）：
-
-```json
-{ "name": "第三幕", "cast": ["李队长", "王店主"] }
-```
-
-首次出场时，填了线索的成员渲染成设定行；三条线索全空的成员给一条「由 AI 定」的指令：
-
-```
-【本段首次出场】赵司机
-你需要在这一段让上述角色自然出场，并确定三件事：他们为什么在这个故事里、
-各自的代词、各自的说话方式。确定之后保持前后一致。
-（以上是起点不是现状，不必每段重述。）
-```
-
-AI 定的线索**不回写配置**：方案跨局复用，写回会让下一局顶着上一局的设定开场。
-需要跨段保留的身份状态由本局的 `CharacterLedger` 持有，后续接入抽取时也只在
-运行期生效。后续 AI 需要细节时走既有通道（`_detail_queries` →
-`search_replay_details`），从过往正文检索，不新造状态。
-
-首次出场之后，已出场的在场成员改走 `CharacterLedger.render_brief()`：重要角色
-给身份首句 + 称她为 + 可变状态（特征 / 关系），群像给作用 + 说话方式。完整设定块
-会随 `messages` 窗口滑出，简报负责让「他是谁」不随窗口一起消失；简报只包含本章
-`cast` 声明的在场者，不会把整张人物表每段重发。
-
-`introduced_cast` 是会话内集合。`build_turn` 只计算本段首次出场的成员，不写集合；
-回合成功后 `commit_turn` 才登记。预生成失败直接丢弃产物，不需要快照还原。
-写进 `messages` 的用户回合只保留章节 / 地点与叙事指令（`canonical_user_entry`），
-在场行与简报由下一轮提示词重新渲染，不留在历史里变成过期现状。
-
-### 11.4 兼容
-
-`cast` 与 `protagonist_background` 都缺省为空，两者皆空时系统与用户提示词**逐字不变**
-（`tests/check_cast.py` 的第一组断言）。章节没写 `cast` 时不补键，旧方案读一轮磁盘
-内容不变。
-
----
+主角两字段、人物表 `cast[]` 各字段（含 `intro_as`）、章节 `cast` 在场声明、
+注入规则与运行期账本的说明见[副本角色系统](characters.md)。
+本篇只保留演化量的 `owner` 归属（§5.1，条件键视角）。
 
 ## 12. 进入准入（方案级）
 
-方案可以在顶层声明进入条件，判定逻辑在 `dungeon/admission.py`（纯逻辑，窗口、
-挂件与挑战模式共用）：
-
-| 字段 | 类型 | 默认 | 说明 |
-|---|---|---|---|
-| `entry_address` | str | `""` | 入口地址：方案入口在主世界中的锚点（完整地址文本，格式见 `core/address_model.py`）；留空 = 不限制地址 |
-| `entry_address_max_distance_m` | float | `None` | 角色地址与入口锚点的最大距离（米）；留空 = 不限，`0` = 必须同址。角色位置只精确到某级时按距离区间上界保守判定 |
-| `entry_height_min_m` | float | `None` | 允许的最小身高（米）；留空 = 不限 |
-| `entry_height_max_m` | float | `None` | 允许的最大身高（米）；留空 = 不限 |
-
-判定口径：
-
-- **地址**：角色 `position` 为空或无法解析时自动跳过（“角色没有地址”）；有地址
-  时两者必须同一维度，距离超过上限即拒绝。入口地址写坏时按未配置处理
-  （校验器报 warning），避免一个笔误把所有角色拦下。
-- **身高**：角色身高落在 `[下限, 上限]` 之外即拒绝；挑战模式没有角色时用挑战
-  包里的角色身高。
-- **时机**：探索模式在窗口入口选好方案后、扣除 `entry_action_cost` **之前**
-  检查；挂件与挑战模式在启动子进程之前检查。被拦下不会消耗行动点。
+入口地址 / 距离 / 身高区间的字段与判定口径见
+[副本进入准入](admission.md)。
 
 ---
 
@@ -792,7 +586,7 @@ AI 定的线索**不回写配置**：方案跨局复用，写回会让下一局�
 
 独特地标内联在章节 `scene_landmarks` 里，常见地标按章节 `common_private_name`
 过滤私有名：字段形状、候选池规则与校验口径见
-[副本内地点与参照物](../designs/dungeon_scene.md)。
+[副本内地点与参照物](scene.md)。
 
 - 两者都缺省为空：什么都没配的章节没有候选池，不产生换算句，也不回落全量；
 - 地标条目默认 `dimension=vertical`，`horizontal` 时 `horizontal_type` 默认
@@ -809,4 +603,4 @@ AI 定的线索**不回写配置**：方案跨局复用，写回会让下一局�
 
 | 档案 | 内容 |
 |---|---|
-| [副本模型与命名演进](history/model_evolution.md) | 章节 / 触发器模型拆分、动作类型退场（`background` / `sensitivity` / `ending`）、命名与目录迁移 |
+| Dungeon 历史档案 `history/model_evolution.md` | 章节 / 触发器模型拆分、动作类型退场（`background` / `sensitivity` / `ending`）、命名与目录迁移 |

@@ -1,7 +1,7 @@
 # 副本关系图与图校验
 
 > **定位**：章节与触发器之间到底存在哪些关系、这套方案能不能从起始章节走通、编辑器里
-> 怎么一眼看清。字段定义见 [数据模型](script.md)，校验器的其它规则见 [数据模型 §9](script.md)。
+> 怎么一眼看清。字段定义见 [数据模型](../designs/dungeon/script.md)，校验器的其它规则见 [数据模型 §9](../designs/dungeon/script.md)。
 > 图的**分析**在 `dungeon/scenario_graph.py` / `dungeon/graph_lint.py`（领域层、纯数据），
 > **呈现**在 `ui/scenario/graph_view.py`（编辑器）。
 
@@ -218,7 +218,7 @@ GUI 侧没有独立的守卫脚本：画布只做呈现，逻辑全在领域层�
 
 ## 相关
 
-- 字段与动作的权威定义：[数据模型](script.md)（`dungeon/schema.py` 是单一真相源）。
-- 触发器判定顺序、同位置至多生效一个：[数据模型 §6.1](script.md)。
-- 编辑器其它文件：[数据模型 §8](script.md)。
+- 字段与动作的权威定义：[数据模型](../designs/dungeon/script.md)（`dungeon/schema.py` 是单一真相源）。
+- 触发器判定顺序、同位置至多生效一个：[数据模型 §6.1](../designs/dungeon/script.md)。
+- 编辑器其它文件：[数据模型 §8](../designs/dungeon/script.md)。
 - 分层与守卫：[架构说明](../dev/architecture.md) §1、`tests/check_import_graph.py`。

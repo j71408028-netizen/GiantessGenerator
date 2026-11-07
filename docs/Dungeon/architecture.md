@@ -1,7 +1,7 @@
 # 副本架构说明（`dungeon/`）
 
 > **定位**：`dungeon/` 的分层、模块地图、一次步进的数据流、收尾与自检脚本的**总索引**。
-> 数据是配置结构看 [数据模型](script.md)，窗口细节看 [窗口文档](window.md)，
+> 数据是配置结构看 [数据模型](../designs/dungeon/script.md)，窗口细节看 [窗口文档](window.md)，
 > 术语看 [术语表](domain_terms.md)。全系列入口见 [副本文档索引](README.md)。
 
 适用范围：当前 `dungeon/` 的实现现状。
@@ -90,16 +90,18 @@
 | `chapters.py` | 章节模型与归一化 | `normalize_chapter(s)`、`normalize_chapters`、`normalize_bgm`、`find_chapter`、`is_terminating_chapter`、`overflow_jump_target`、`chapter_step_override`、`sensitivity_amount`、`matches_scope` |
 | `audio/buses.py` | 音频音量**总线单一真相源**（总控 → 音乐 / 语音 / 音效） | `BUSES` / `BUS_LABELS`、`STEPS` / `STEP_LABELS` / `STEP_DB` / `BUS_ANCHOR_DB`（档位与分层的 dB 单一真相源）、`step_options` / `step_choices`（编辑器档位候选）、`clamp_step` / `step_from_level`（0-4 档位与旧 0-100 迁移）、`levels_from_settings` / `set_bus_levels` / `effective_bus_level`（玩家侧实时电平，缺省 `DEFAULT_BUS_LEVELS`）、`bus_default` / `clamp_level` / `resolve_gain`（档位×总线×总控）、`to_ratio` / `to_db` / `db_gain` |
 | `audio.py` | 音频播放底座（纯领域，不碰 UI 框架） | `BgmPlayer.play/stop/shutdown/wait_idle`、`open_track`、`backend_name`、`set_backends`（MCI → pygame → 静音降级） |
-| `speech.py` | Solea/Bulla 对话的合成语音（纯领域） | `VoiceCaster.voice_for`（她 / 主角 / 配角按名字稳定映射）、`SpeechDirector.speak/stop/set_effect/shutdown`、`synthesize`（合成**一句就返回路径**的入口，供编辑器预听）、`set_proxy` / `resolve_proxy` / `normalize_proxy`（**委托** `core/netproxy`：语音与 AI 共用一份代理）、`_endpoint_candidates` / `synthesis_endpoints`（合成端点：新主机 `api.msedgeservices.com` 优先、旧主机回退，edge-tts PR #491 未并入时本地补齐）、`last_synth_error`（失败原因，日志与预听复用）、`normalize_voice`、`normalize_rate`、`RECOMMENDED_VOICES`、`edge_tts_available` |
+| `speech.py` | Solea/Bulla 对话的合成语音（纯领域） | `VoiceCaster.voice_for`（她 / 主角 / 配角按名字稳定映射；配角可经 `resolve_character` 回调走角色账本：显式音色 → 代词分池 → 稳定哈希键 `crc32`）、`SpeechDirector.speak/stop/set_effect/shutdown`、`synthesize`（合成**一句就返回路径**的入口，供编辑器预听）、`set_proxy` / `resolve_proxy` / `normalize_proxy`（**委托** `core/netproxy`：语音与 AI 共用一份代理）、`_endpoint_candidates` / `synthesis_endpoints`（合成端点：新主机 `api.msedgeservices.com` 优先、旧主机回退，edge-tts PR #491 未并入时本地补齐）、`last_synth_error`（失败原因，日志与预听复用）、`normalize_voice`、`normalize_rate`、`RECOMMENDED_VOICES`、`edge_tts_available` |
 | `voice_fx.py` | 章节对话语音的**物理**声学效果（她 / 其他人两档）；响度为**声明式设计量** | `PRESETS`（预设单一真相源，含 `Preset.loudness_db`）、`normalize_voice_fx`、`resolved_params`、`loudness_target` / `loudness_hint` / `playback_trim`（响度目标与其换算）、`LOUDNESS_SPREAD_DB`（摆幅窗口，9 dB＝1.5 档）、`_match_loudness`（渲染末尾按 RMS 对齐，峰值护栏优先）、`playback_plan`（零依赖近似）、`render_wav`（可选解码器 + numpy）、`PlaybackFx`（分拍轨 + 音量包络） |
 | `preview.py` | 编辑器里的语音**预听**（纯领域，零 UI 依赖） | `VoicePreview.play(voice, slot, rate, level, effect, text, on_done)`（合成一次、按当前效果放一次；`on_done` 在工作线程回调，Tk 调用方自行 `after` 回主线程）、`stop` / `wait_idle` / `shutdown`（关编辑器时收尾）、`SAMPLE_TEXT` |
 | `actions.py` | 动作类型单一注册表 | `NEW_ACTIONS`（insert/option/effect/goto/none）、`ENDING_ACTION`（只读兼容）、`ACTION_LABELS`、`VISUAL_FILTERS` |
-| `coupling.py` | 耦合等级与对应提示词 | `coupling_prompts`、`section_instruction`、`normalize_coupling_level` |
+| `coupling.py` | 耦合等级与对应提示词 | `coupling_prompts`、`section_instruction`、`normalize_coupling_level`、`SPEAKER_MARKER_RULE`（临时称呼 / 真名的说话人规则） |
+| `cast.py` | 人物表归一化与字段归属 | `normalize_cast` / `normalize_member`、`role_supports`（字段按 `key`/`extra` 分家的单一落点）、`render_first_seen`，见 [角色系统](../designs/dungeon/characters.md) §2 |
+| `characters.py` | 运行期角色账本 `CharacterLedger`：设定与状态分层，本局可写、不回写配置 | `RunCharacter`（initial / mutable / observed 三层）、`apply_updates`（吸收 AI 搭车抽取，揭示需正文锚点）、`mark_declared` / `observe_speaker` / `note_mentions` / `decay`（在场观测）、`render_brief` / `observed_brief`（只读投影）、`snapshot` / `restore`（回放）、`revealed_snapshot`（结局回顾），见 [角色系统](../designs/dungeon/characters.md) |
 | `prompts.py` | 系统与玩家提示词构建 | `DungeonPromptBuilder.build_system_prompt`、`build_turn`（纯构建）/ `commit_turn`（成功提交）、`build_user_prompt`（兼容旧调用方，构建后立即提交） |
 | `response.py` | AI 响应解析容错 | `extract_stream_text`、`parse_final_json` |
 | `splitter.py` | 内置确定性分句 | `split_stream_units`（流式：首句上屏，余句排队）、`split_full_text`（终局定格） |
-| `summary.py` | 剧情压缩与常驻记忆 | `StorySummarizer`（按块 / 按章节压缩 + 最近 N 段原文 + 关键事件 + 事实卡） |
-| `details.py` | 细节探究 | `build_detail_query_prompt`、`parse_detail_queries`、`search_replay_details` |
+| `summary.py` | 剧情压缩与常驻记忆 | `StorySummarizer`（按块 / 按章节压缩 + 最近 N 段原文 + 关键事件 + 事实卡；响应可搭车 `character_updates`，`drain_character_updates` 交给账本） |
+| `details.py` | 细节探究 | `build_detail_query_prompt`、`parse_detail_queries`、`parse_character_updates`（细节响应搭车抽取角色状态，见 [角色系统](../designs/dungeon/characters.md) §4）、`search_replay_details` |
 | `schema.py` | 方案配置字段**单一真相源** | `SCENARIO_FIELDS` / `CHAPTER_FIELDS` / `TRIGGER_FIELDS` / `FieldSpec` / `empty_scenario_config()` |
 | `validate.py` | 结构化诊断（error / warning / info） | `validate_scenario_config(config, scenario_dir=...)`、`has_errors`、`format_diagnostics` |
 | `terms.py` | 术语与持久化契约常量 | `SCENARIO_ID_KEY`、`DEFAULT_SCENARIO_ID`、旧键迁移与兼容读取 |
@@ -264,7 +266,7 @@ _finish_step()
 至多生效一次；被接纳即清空 `间隔计数`。`effect`（章节效果短暂覆盖）排在 goto 之后，
 覆盖才落在新章节里（先于 goto 会被换章清除）。未知动作与旧版动作（`background` /
 `sensitivity` / `ending`）走通用跳过路径，`ending` 仅回放兼容。字段与参数详见
-[数据模型](script.md) §4–§6.1。
+[数据模型](../designs/dungeon/script.md) §4–§6.1。
 
 ### 5.2 结束路径
 

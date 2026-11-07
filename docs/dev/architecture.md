@@ -349,7 +349,7 @@ status / tags / schema`。它随时可以删掉重建，内容与磁盘一致时
 （如 `dungeon/audio.py`）→ `window/` 接线（生命周期 + 进入章节时应用）→ `validate.py` 诊断 →
 编辑器 UI（导入 + 编辑区 + 列表列）→ **GUI 冒烟 / 人工核对**。离线守卫只到
 `validate` 与音频链行为（`check_scenario_schema.py` / `check_audio_chain.py`）；
-编辑器接线漏了不会离线报错，但会静默失效。详见 `docs/Dungeon/script.md`。
+编辑器接线漏了不会离线报错，但会静默失效。详见 `docs/designs/dungeon/script.md`。
 
 ---
 

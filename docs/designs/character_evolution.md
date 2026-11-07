@@ -3,7 +3,7 @@
 本文档汇总角色演化模型的完整设计：参与的量、每类行为的演化公式（与当前
 代码一致）、以及模拟验证已确认的动态特性。各机制的代码入口见
 [行为包开发指南](behaviors/dev-guide.md) 的行为钩子分组；副本侧的章节与触发器
-见 [../Dungeon/script.md](../Dungeon/script.md)。
+见 [dungeon/script.md](dungeon/script.md)。
 
 ## 1. 参与的量
 

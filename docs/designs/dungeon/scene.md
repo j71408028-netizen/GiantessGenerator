@@ -4,9 +4,9 @@
 > 尺寸换算句的参照物从哪来？读者：改副本提示词 / 结算 / 编辑器的人，以及写方案的
 > 作者。
 
-相关：[报告生成](report_selection.md)（主世界怎么用位置与地标）、
-[地址匹配](address-system/matching.md)（`relate` 的空间关系与私有名）、
-[数据模型](../Dungeon/script.md)（章节与方案的字段索引）。
+相关：[报告生成](../report_selection.md)（主世界怎么用位置与地标）、
+[地址匹配](../address-system/matching.md)（`relate` 的空间关系与私有名）、
+[数据模型](script.md)（章节与触发器的字段索引）。
 
 ## §1 地址是声明，不是推断
 
@@ -185,7 +185,7 @@
 | 字段为空 / 解析失败 | 位置不变（**默认**，绝大多数结局） |
 
 传送只有"结束章节"这一个入口：旧版 `ending` 触发器动作已退场（运行时跳过，见
-`docs/Dungeon/script.md` §3.2），所以 `action_data` 里没有 `exit_address` 这条路径，
+`docs/designs/dungeon/script.md` §3.2），所以 `action_data` 里没有 `exit_address` 这条路径，
 校验器也只检查章节字段。
 
 允许跨维度：传送本来就是跨空间的事，不加"必须与入口同址"的限制。

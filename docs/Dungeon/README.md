@@ -23,7 +23,10 @@
 | 文档                            | 回答什么问题 | 主要读者 |
 |-------------------------------|---|---|
 | [架构说明](architecture.md)       | `dungeon/` 怎么分层、一次步进怎么流、收尾与自检脚本在哪 | 了解全局 / 动领域层 |
-| [数据模型：章节与触发器](script.md)      | 方案配置能写哪些字段、条件键与动作有哪些 | 写方案 / 改编辑器 / 改校验器 |
+| [数据模型：章节与触发器](../designs/dungeon/script.md)（功能说明在 designs/dungeon/） | 方案配置能写哪些字段、条件键与动作有哪些 | 写方案 / 改编辑器 / 改校验器 |
+| [角色系统](../designs/dungeon/characters.md)（机制在 designs/dungeon/） | 运行期角色账本、在场观测、揭示合并、提示词投影与语音解析怎么工作 | 动角色系统 / 改人物简报 / 改语音 |
+| [对话语音](../designs/dungeon/voice.md)（机制在 designs/dungeon/） | 方案级音色配置、合成底座（端点 / 代理 / 失败原因）、音量总线与 `voice_fx` 接线 | 配语音 / 排查不出声 |
+| [进入准入](../designs/dungeon/admission.md)（机制在 designs/dungeon/） | 入口地址、距离与身高区间的判定口径与检查时机 | 改准入 / 改挂件与挑战模式入口 |
 | [副本关系图与图校验](scenario_graph.md)  | 章节与触发器之间的四类关系怎么建模、图校验报什么、编辑器里怎么看 | 写方案 / 改校验器 / 改编辑器 |
 | [窗口逻辑与开发事项](window.md)        | imgui-bundle 会话窗口的生命周期、帧时钟、约束与坑 | 动 `dungeon/window/` |
 | [宿主边界与可移植性](window_host.md)   | window 层与宿主（Tk）的边界在哪、换 UI 框架能做到哪一步 | 评估可移植性 / 换宿主 |
@@ -35,11 +38,14 @@
 
 | 我要改… | 先看 | 然后跑 |
 |---|---|---|
-| 方案配置字段 / 默认值 | `dungeon/schema.py`（单一真相源）+ [数据模型](script.md) §2、§4 | `check_scenario_schema.py` |
-| 校验规则（error / warning / info） | [数据模型](script.md) §9 | `check_scenario_schema.py`、`scripts/scenario_validate.py` |
+| 方案配置字段 / 默认值 | `dungeon/schema.py`（单一真相源）+ [数据模型](../designs/dungeon/script.md) §2、§4 | `check_scenario_schema.py` |
+| 人物表字段（`cast[]` / `intro_as`）/ 校验 / 注入位置 | [角色系统](../designs/dungeon/characters.md) §2、[数据模型](../designs/dungeon/script.md) §9 | `check_cast.py` |
+| 角色账本（身份状态机 / 在场观测 / 揭示合并 / 人物简报） | [角色系统](../designs/dungeon/characters.md) | `check_characters.py`、`check_cast.py` |
+| 配角语音分角色（显式音色 / 代词分池 / 稳定哈希键） | [角色系统](../designs/dungeon/characters.md) §5 | `check_audio_chain.py`、`check_characters.py` |
+| 校验规则（error / warning / info） | [数据模型](../designs/dungeon/script.md) §9 | `check_scenario_schema.py`、`scripts/scenario_validate.py` |
 | 章节 / 触发器之间的依赖与可达性（图校验五条规则） | [关系图与图校验](scenario_graph.md) §3 | `check_scenario_graph.py` |
 | 关系图界面（章节总览 / 触发器依赖 / 清单） | [关系图与图校验](scenario_graph.md) §4 | `run_checks.py --smoke` |
-| 章节 / 触发器运行时行为 | [数据模型](script.md) §3、§5–§6 | `dungeon_autopilot.py` |
+| 章节 / 触发器运行时行为 | [数据模型](../designs/dungeon/script.md) §3、§5–§6 | `dungeon_autopilot.py` |
 | 演化、转移矩阵、段落步长 | [架构](architecture.md) §4 | `check_scenario_schema.py`（演化链路守卫） |
 | 窗口（Session）生命周期 / 关闭 / 收尾 | [窗口](window.md) §2、§3 | `dungeon_autopilot.py`、`check_dungeon_finalize.py` |
 | 帧时钟 / 线程 / 跨线程 UI 更新 | [窗口](window.md) §4 | `dungeon_autopilot.py` |
@@ -51,6 +57,8 @@
 | 入口页 / 会话生命周期与一局的边界 | [术语表](domain_terms.md) §1、[架构](architecture.md) §6、[窗口](window.md) §2 | `check_dungeon_finalize.py` |
 | 写盘方式（配置 / 回放 / 报告） | [架构](architecture.md) §8、[窗口](window.md) §5-C10 | `check_dungeon_finalize.py` |
 | 副本独占设置（音量 / 段落字体 / 记忆窗口 / 自动回放 / 帧率 / 组件代管区停靠侧） | [架构](architecture.md) §8、`dungeon/settings.py` | `check_dungeon_settings.py` |
+| 方案对话语音（音色字段 / 合成失败排查 / `voice_fx` 接线） | [对话语音](../designs/dungeon/voice.md) | `check_audio_chain.py` |
+| 进入准入（入口地址 / 距离 / 身高） | [进入准入](../designs/dungeon/admission.md) | `check_scenario_admission.py` |
 | 自动驾驶脚本 / 自检场景 | [调试自动化](window_automation.md) | `dungeon_autopilot.py` |
 | 查「为什么是这样」/ 改造经过 / 历史实测 | [历史档案](history/README.md)（只读、仅供溯源） | — |
 
@@ -65,7 +73,9 @@
 | `dungeon/graph_lint.py` | 领域层 | 图校验五条规则，产出 `(level, path, message)`；由 `validate.py` 包成诊断 |
 | `dungeon/settings.py` | 领域层 | 副本独占设置的键名与缺省（单一真相源，供 `persistence` 与 `window` 共用） |
 | `dungeon/admission.py` | 领域层 | 进入准入：入口地址（主世界锚点）距离与身高区间（窗口、挂件、挑战模式共用） |
-| `dungeon/scene.py` | 领域层 | 章节地点与参照物：按章节地址组装尺寸换算候选池（清单 ∪ 地址相配的全局地标）、当前地点的展示取值、结局传送地址判定，见 [副本内地点](../designs/dungeon_scene.md) |
+| `dungeon/scene.py` | 领域层 | 章节地点与参照物：按章节地址组装尺寸换算候选池（清单 ∪ 地址相配的全局地标）、当前地点的展示取值、结局传送地址判定，见 [副本内地点](../designs/dungeon/scene.md) |
+| `dungeon/cast.py` | 领域层 | 人物表归一化与字段归属：`normalize_cast` / `role_supports` / `render_first_seen`，见 [角色系统](../designs/dungeon/characters.md) §2 |
+| `dungeon/characters.py` | 领域层 | 运行期角色账本 `CharacterLedger`：身份状态机、在场观测、揭示与合并、人物简报投影，见 [角色系统](../designs/dungeon/characters.md) |
 | `dungeon/window/component_pack/` | 组件包 | 官方显示组件（文本栏三选一 / 属性条 / 过程日志），常驻 Python 包，惰性导入 |
 | `dungeon/window/host.py` | 端口 | `HostPort`：window 层向宿主索取能力的唯一出口 |
 | `ui/hosting/tk_host.py` | 宿主适配 | `TkHost`——window 层之外唯一的 Tk 细节所在地 |
@@ -88,6 +98,8 @@
 | `check_dungeon_scene.py` | 章节地点与参照物：候选池四种组合、地址过滤粒度与私有名、坏地址不回落、提示词取同一池子、父进程解析完整地址进载荷、当前地点展示、结局传送写回位置 | `python tests/check_dungeon_scene.py` |
 | `check_audio_chain.py` | 方案音频端到端链：说话人分音色 / 队列 / 两档效果 / 三条引擎路径 / 降级 / BGM 缺坏文件收尾（假合成器 + 替身后端，不出声不联网） | `python tests/check_audio_chain.py` |
 | `check_splitter.py` | 内置分句器：断点切分、流式幂等、`@说话人@` 标记解析与落盘净化 | `python tests/check_splitter.py` |
+| `check_characters.py` | 运行期角色账本：seed（空 / 旧 / `intro_as`）、身份状态机、揭示与合并（锚点 / pending / authored 不合并）、容量淘汰、人物简报（不在场不渲染、超长降级）、在场观测、快照还原 | `python tests/check_characters.py` |
+| `check_cast.py` | 人物表与提示词：空配置零差异、字段归属（`role_supports`）、首次出场 / 简报注入、`build_turn` 纯构建与 `commit_turn` 提交分离、`canonical_user_entry` 历史净化、`intro_as` 撞车校验 | `python tests/check_cast.py` |
 | `check_component_pack.py` | 显示组件包：加载链（常驻包来源 / 必需 id）、文本家族与 schema 一致、组件契约与服务面（替身 ctx 只实现服务面 + AST 扫 `ctx._x` 越界）、元数据 `label`/`description`、`param_specs` 结构与 `min/max` 夹取、tag 前缀冲突、组件包不 `print` 且类都登记进 `REGISTRY`、外部包覆盖、无 GUI 替身 ctx 的 `build/layout/refresh/destroy` 冒烟与帧任务成对清理 | `python tests/check_component_pack.py` |
 | `check_dungeon_finalize.py` | 原子写 / `.bak` / 损坏回退 + `_finalize` 完成与未完成两条路径 | `python tests/check_dungeon_finalize.py` |
 | `check_dungeon_settings.py` | 副本独占设置：缺省取自 `dungeon/settings.py`、读写与合并、越界夹取、旧值迁移（幂等）与 `save` 清洗、会话侧接线 | `python tests/check_dungeon_settings.py` |
@@ -121,7 +133,7 @@
 | [imgui_migration.md](history/imgui_migration.md) | Dear PyGui → imgui-bundle 的整体迁移（P0–P8）、逐阶段验收与守卫改写 | [窗口](window.md)、[宿主边界](window_host.md)、[架构说明](architecture.md) |
 | [host_refactor.md](history/host_refactor.md) | L0–L5 宿主改造全过程、改造前形状、验收记录 | [宿主边界](window_host.md)、[窗口](window.md) |
 | [exit_hang_investigation.md](history/exit_hang_investigation.md) | 进程退出挂死的复现矩阵、修正结论、重启复测 | [窗口 §5-C2 / §6](window.md)、[自检 §4](window_automation.md) |
-| [model_evolution.md](history/model_evolution.md) | 章节/触发器模型拆分、动作退场、scenario/dungeon 命名与目录迁移 | [数据模型](script.md)、[术语表](domain_terms.md) |
+| [model_evolution.md](history/model_evolution.md) | 章节/触发器模型拆分、动作退场、scenario/dungeon 命名与目录迁移 | [数据模型](../designs/dungeon/script.md)、[术语表](domain_terms.md) |
 | [lingchat_evaluation.md](history/lingchat_evaluation.md) | 同人作品参考价值评估与「不采纳」清单 | [架构说明](architecture.md) |
 
 完整索引与约定见 [history/README.md](history/README.md)。
@@ -136,7 +148,7 @@
 
 1. [术语表](domain_terms.md) —— 先分清方案、一局与会话，否则读代码会混。
 2. [架构说明](architecture.md) §1–§4 —— 分层、模块地图、一次步进。
-3. [数据模型](script.md) —— 要写方案或改编辑器时看。
+3. [数据模型](../designs/dungeon/script.md)（designs/dungeon/）—— 要写方案或改编辑器时看。
 4. [窗口](window.md) —— 只有动 `dungeon/window/` 时才需要，但 §5 约束清单建议先扫一遍。
 
 `history/` 不需要读；只在要追究「为什么是这样」时按 §5 的对照表去查对应档案。
