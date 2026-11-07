@@ -68,6 +68,17 @@ check("标记：换行断点后接对话",
                 DisplayUnit(speaker="居民", text="“她来了！快跑！”")],
       str(units))
 
+# 末段无句末断点（落在尾部）时，起点的完整标记同样要解析出说话人
+units = split_full_text("远处传来呼喊。\n@居民@今天她一直没有说话")
+check("标记：末段无断点也解析说话人",
+      units == [DisplayUnit(speaker=None, text="远处传来呼喊。"),
+                DisplayUnit(speaker="居民", text="今天她一直没有说话")],
+      str(units))
+
+units, tail = split_stream_units("远处传来呼喊。\n@居民@今天")
+check("流式：尾部起点完整标记解析说话人",
+      tail.speaker == "居民" and tail.text == "今天", str(tail))
+
 # ---------------- 3. 引号闭合断点 ----------------
 units = split_full_text("@李队长@“任务完成了，我们走吧。”随后的欢呼持续了很久。")
 check("标记：单段对话不被拆成两截",

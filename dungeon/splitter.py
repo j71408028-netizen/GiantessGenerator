@@ -77,20 +77,21 @@ def _split_leading_marker(text: str) -> tuple:
     return None, text
 
 
-def _suppress_incomplete_marker(text: str) -> str:
-    """流式尾部的显示净化：起点是未闭合的半截标记时暂不显示，避免闪现。
+def _resolve_stream_tail(text: str) -> tuple:
+    """流式尾部的显示净化：返回 ``(speaker|None, 显示文本)``。
 
-    整体重算幂等：标记一旦闭合（仍在长度上限内）就会被解析并剥离。
+    起点的完整标记解析出说话人并剥离；起点是未闭合的半截标记时暂不显示，
+    避免闪现。整体重算幂等：标记一旦闭合（仍在长度上限内）就会被解析并剥离。
     """
     if not text.startswith("@"):
-        return text
+        return None, text
     match = _SPEAKER_MARKER_RE.match(text)
     if match:
-        return text[match.end():]
+        return match.group(1), text[match.end():]
     # 长度上限 12 + 前后两个 @：超过仍无闭合即视为普通正文
     if len(text) <= 13:
-        return ""
-    return text
+        return None, ""
+    return None, text
 
 
 def strip_speaker_markers(text: str) -> str:
@@ -143,9 +144,9 @@ def strip_display_markers(text: str) -> str:
 def split_stream_units(text: str):
     """把（部分）正文切成 ``(完整单元列表, 未完结尾部)``。
 
-    单元与结尾部都是 :class:`DisplayUnit`；结尾部的 ``speaker`` 恒为 ``None``
-    （起点的半截标记按显示提示被抑制）。纯函数：对同一文本重复调用结果一致，
-    流式过程中每收到新数据整体重算。
+    单元与结尾部都是 :class:`DisplayUnit`；结尾部是未完结句，``speaker`` 取自
+    起点的完整标记（半截标记按显示提示被抑制）。纯函数：对同一文本重复调用
+    结果一致，流式过程中每收到新数据整体重算。
     """
     units = []
     clean_text, mask = scan_highlight_markers(text)
@@ -220,8 +221,8 @@ def split_stream_units(text: str):
                 continue
         i += 1
 
-    tail_text = _suppress_incomplete_marker(text[seg_start:].strip())
-    tail = DisplayUnit(speaker=None, text=tail_text,
+    tail_speaker, tail_text = _resolve_stream_tail(text[seg_start:].strip())
+    tail = DisplayUnit(speaker=tail_speaker, text=tail_text,
                        highlight=bool(tail_text) and highlighted(seg_start, n))
     return units, tail
 
@@ -236,9 +237,8 @@ def split_full_text(text: str) -> list:
         return []
     units, tail = split_stream_units(text)
     if tail.text:
-        speaker, display = _split_leading_marker(tail.text)
         units.append(DisplayUnit(
-            speaker=speaker,
-            text=_normalize_unit_end(display) or display,
+            speaker=tail.speaker,
+            text=_normalize_unit_end(tail.text) or tail.text,
             highlight=tail.highlight))
     return [u for u in units if u.text]
